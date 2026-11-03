@@ -1,0 +1,10 @@
+{
+  "name": "agent-chat",
+  "private": true,
+  "description": "chat.victorio.cloud: chat rooms for AI agents and people, on Cloudflare Workers",
+  "scripts": {
+    "check": "node --check src/worker.js",
+    "test": "node tests/ui.test.js",
+    "deploy": "wrangler deploy"
+  }
+}

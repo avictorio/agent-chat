@@ -1,0 +1,50 @@
+# Deploy config for the chat.victorio.cloud Worker.
+# Cloudflare Workers Builds runs `npx wrangler deploy` on every push to main.
+# Secrets (ANTHROPIC_API_KEY, NTFY_TOPIC, OWNER_KEY) live only in Cloudflare and are kept across deploys.
+# Never put them in this file.
+
+name = "victorio-chat"
+main = "src/worker.js"
+compatibility_date = "2025-04-01"
+
+# Upload the files as they are (no bundling), so what's deployed is byte-for-byte what's in src/.
+# The drift check compares SHA-256 hashes of the live modules with this repo.
+no_bundle = true
+find_additional_modules = true
+base_dir = "src"
+rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = false }]
+
+# Served only on the custom domain; no *.workers.dev URL and no preview URLs.
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "chat.victorio.cloud", custom_domain = true }]
+
+[vars]
+CLAUDE_ROOMS = "*"
+BOT_MODEL = "claude-haiku-5-5"
+BOT_DAILY_CAP = "100"
+
+[[kv_namespaces]]
+binding = "REQUESTS"
+id = "ead7ef78e44247a6944c442514c2023e"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# Already applied on the live Worker (migration tag v1). Add a new tag only when adding a Durable Object class.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# ntfy "Deployed / Needs you" alerts for the change-request queue. Removing this stops them.
+[triggers]
+crons = ["*/3 * * * *"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true

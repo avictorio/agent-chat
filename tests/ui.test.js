@@ -1,0 +1,483 @@
+const { chromium } = require('playwright');
+const fs = require('fs');
+const HTML = fs.readFileSync(__dirname + '/../src/chat.html', 'utf8');
+const OUT = __dirname + '/shots/';
+fs.mkdirSync(OUT, { recursive: true });
+const now = Date.now(), H = 3600e3, D = 86400e3;
+function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function fresh(opts) {
+  opts = opts || {};
+  return {
+    deny: opts.deny || 0, noYou: !!opts.noYou,
+    msgs: [
+      { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
+      { id: 2, ts: now - D - 2 * H + 60e3, from: 'Henry', text: 'Second thought: Huaca first, then Barranco.' },
+      { id: 3, ts: now - 50 * 60e3, from: 'Ada', text: 'Agreed. Details here: https://example.com/lima-plan, and the constitution is up.', reactions: { '👍': ['Henry', 'Anthony'], '❤️': ['claude'], '🦄': ['Ada'] } },
+      { id: 4, ts: now - 40 * 60e3, from: 'claude', text: 'Nice. Mention me if you want anything changed on the site.' },
+      { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
+      ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
+      ...(opts.markdown ? [
+        { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
+        { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
+        { id: 9, ts: now - 30e3, from: 'Anthony', kind: 'human', text: 'Second line from me, **bold**.' },
+      ] : []),
+    ],
+    con: { version: 2, ts: now - 3 * H, editor: 'Ada', text: 'Purpose: a shared room where Henry, Hank, Ada and SHA help Anthony plan.\n\nNorms:\n- Be concise and credit ideas.\n- Settle things on the board, not only in chat.' },
+    hist: [ { version: 1, ts: now - 2 * D, editor: 'Henry', text: 'First draft.' } ],
+    dc: [
+      { id: 1, ts: now - D, added_by: 'Henry', title: 'Huaca Pucllana first on the birthday day', note: 'Then dinner in Barranco.', signers: ['Henry', 'Ada'], updated: now },
+      { id: 2, ts: now - 3 * H, added_by: 'Ada', title: 'Digests rotate alphabetically', note: null, signers: [], updated: now },
+    ],
+    q: [
+      { id: 1, ts: now - 5 * H, added_by: 'Henry', text: 'Who books the dinner reservation?', status: 'open', claimed_by: null },
+      { id: 2, ts: now - 2 * H, added_by: 'SHA', text: 'Do we need a backup plan if it rains in Lima?', status: 'claimed', claimed_by: 'Hank' },
+    ],
+    qr: [ { id: 3, ts: now - 2 * D, added_by: 'Ada', text: 'Do we need invites?', status: 'resolved', resolved_by: 'Anthony', resolution: 'Yes, the room is now invite-only.' } ],
+    sk: [
+      { id: 1, ts: now, added_by: 'Ada', title: "Jen's birthday in Lima", date: ymd(9), note: 'Pick a gift by the 8th', done: null },
+      { id: 2, ts: now, added_by: 'Henry', title: 'Confirm hotel', date: ymd(1), note: null, done: null },
+      { id: 3, ts: now, added_by: 'SHA', title: 'Write constitution v3', date: null, note: null, done: null },
+    ],
+    skd: [ { id: 4, ts: now - 2 * D, added_by: 'Ada', title: 'Lock the room', date: ymd(-1), done: now - D, done_by: 'Anthony' } ],
+    dg: [ { id: 1, ts: now - 6 * H, day: ymd(0), author: 'Ada', text: 'Agreed on invite-only access. Open: digest cadence and dinner booking.' } ],
+    mb: { invite_only: true, members: [
+      { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null },
+      { name: 'Henry', kind: 'agent', avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null },
+      { name: 'Ada', kind: 'agent', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 40 * 60e3, revoked: null },
+      { name: 'Hank', kind: 'agent', invited_by: 'Henry', status: 'unused', invited: now - 2 * D, joined: null, last_seen: null, revoked: null },
+      { name: 'Old bot', kind: 'agent', status: 'revoked', invited: now - 5 * D, joined: now - 4 * D, last_seen: now - 4 * D, revoked: now - 3 * D },
+    ] },
+    nid: 100,
+    av: { henry: { buf: require('fs').readFileSync(__dirname + '/fixtures/henry.gif'), type: 'image/gif' } },
+  };
+}
+function roomState(S) {
+  return { v: 1, constitution_version: S.con.version,
+    open_questions: S.q.map(x => ({ id: x.id, text: x.text, added_by: x.added_by, claimed_by: x.claimed_by })),
+    decisions_awaiting_signatures: S.dc.filter(d => d.signers.length < 3).map(d => ({ id: d.id, title: d.title, signed_by: d.signers, missing: ['Anthony', 'Henry', 'Ada'].filter(n => d.signers.indexOf(n) < 0) })),
+    stakes_due: S.sk.filter(s => s.date && s.date <= ymd(7)).map(s => ({ id: s.id, title: s.title, date: s.date, days_away: 1 })),
+    memory: { latest_digest_day: ymd(0), latest_digest_by: 'Ada', digests_today: S.dg.length, awaiting_digest_from: 'Henry', digest_due_at: now + 10 * H } };
+}
+async function setup(page, S, calls) {
+  await page.route('https://chat.victorio.cloud/**', async (route) => {
+    const req = route.request(); const u = new URL(req.url()); const p = u.pathname; const m = req.method();
+    let body = {}; try { body = req.postData() ? JSON.parse(req.postData()) : {}; } catch (e) {}
+    calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
+    const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
+    S.av = S.av || {};
+    let am;
+    if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
+    if (p.endsWith('/avatar')) {
+      calls && calls.push(m + ' ' + p + ' ' + (req.headers()['content-type'] || '') + ' ' + ((req.postDataBuffer() || []).length));
+      const me = S.mb.members.find(x => x.name === 'Anthony');
+      if (m === 'DELETE') { delete S.av.anthony; me.avatar = null; return J({ ok: 1 }); }
+      const buf = req.postDataBuffer(); const type = req.headers()['content-type'];
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(type)) return J({ error: 'Avatars must be PNG, JPEG, WebP or GIF' }, 415);
+      S.av.anthony = { buf, type }; me.avatar = 'https://chat.victorio.cloud/api/rooms/demo/avatars/Anthony?v=' + Date.now(); return J({ ok: 1 });
+    }
+    if (p === '/emoji.json') return route.fulfill({ status: 200, contentType: 'application/json', body: require('fs').readFileSync(__dirname + '/fixtures/emoji-compact.json') });
+    if (p.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
+    if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
+    if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
+    if ((am = p.match(/\/messages\/(\d+)\/reactions$/))) {
+      const msg = S.msgs.find(x => x.id == am[1]); if (!msg) return J({ error: 'No message' }, 404);
+      const r = msg.reactions || {}; Object.keys(r).forEach(k => { r[k] = r[k].filter(x => x.toLowerCase() !== body.from.toLowerCase()); if (!r[k].length) delete r[k]; });
+      if (body.reaction) (r[body.reaction] = r[body.reaction] || []).push(body.from);
+      msg.reactions = r; return J({ room: 'demo', id: msg.id, reactions: r });
+    }
+    if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: Date.now(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
+    if (p.endsWith('/messages')) return J({ room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: S.noYou ? undefined : 'Anthony', room_state: roomState(S) });
+    if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: Date.now(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
+    if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });
+    let mm;
+    if (p.endsWith('/decisions') && m === 'POST') { S.dc.push({ id: ++S.nid, ts: Date.now(), added_by: body.from, title: body.title, note: body.note || null, signers: [] }); return J({ ok: 1 }, 201); }
+    if (p.endsWith('/decisions')) return J({ decisions: S.dc });
+    if ((mm = p.match(/decisions\/(\d+)$/))) { const d = S.dc.find(x => x.id == mm[1]); if (m === 'DELETE') { S.dc = S.dc.filter(x => x !== d); return J({ ok: 1 }); } if (body.action === 'sign') d.signers.push(body.from); if (body.action === 'unsign') d.signers = d.signers.filter(s => s !== body.from); if (body.action === 'edit') { d.title = body.title; d.note = body.note; } return J({ decision: d }); }
+    if (p.endsWith('/questions') && m === 'POST') { S.q.push({ id: ++S.nid, ts: Date.now(), added_by: body.from, text: body.text, status: 'open', claimed_by: null }); return J({ ok: 1 }, 201); }
+    if (p.endsWith('/questions')) return J({ questions: S.q, resolved: S.qr });
+    if ((mm = p.match(/questions\/(\d+)$/))) { let q = S.q.concat(S.qr).find(x => x.id == mm[1]); if (m === 'DELETE') { S.q = S.q.filter(x => x !== q); S.qr = S.qr.filter(x => x !== q); return J({ ok: 1 }); }
+      if (body.action === 'claim') { q.status = 'claimed'; q.claimed_by = body.from; } if (body.action === 'unclaim') { q.status = 'open'; q.claimed_by = null; }
+      if (body.action === 'resolve') { q.status = 'resolved'; q.resolved_by = body.from; q.resolution = body.note; S.q = S.q.filter(x => x !== q); S.qr.unshift(q); }
+      if (body.action === 'edit') q.text = body.text; return J({ question: q }); }
+    if (p.endsWith('/stakes') && m === 'POST') { S.sk.push({ id: ++S.nid, ts: Date.now(), added_by: body.from, title: body.title, date: body.date || null, note: body.note || null }); return J({ ok: 1 }, 201); }
+    if (p.endsWith('/stakes')) return J({ stakes: S.sk, done: S.skd });
+    if ((mm = p.match(/stakes\/(\d+)$/))) { const s = S.sk.concat(S.skd).find(x => x.id == mm[1]); if (body.action === 'done') { s.done = Date.now(); s.done_by = body.from; S.sk = S.sk.filter(x => x !== s); S.skd.unshift(s); } return J({ stake: s }); }
+    if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
+    if (p.includes('/digests')) return J({ digests: S.dg });
+    if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); return J({ room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }, 201); }
+    if (p.endsWith('/members')) return J(S.mb);
+    return route.fulfill({ status: 404, body: 'nf' });
+  });
+}
+async function run(name, o, fn) {
+  const b = await chromium.launch({ args: o.args || [] });
+  const ctx = await b.newContext({ colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch });
+  const page = await ctx.newPage();
+  const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  const S = fresh(o.state); const calls = [];
+  await setup(page, S, calls);
+  if (o.init) await page.addInitScript(o.init);
+  await page.goto('https://chat.victorio.cloud/r/demo' + (o.hash || ''));
+  await page.waitForTimeout(500);
+  const r = await fn(page, S, calls);
+  await b.close();
+  console.log(name, errs.length ? 'ERRORS: ' + JSON.stringify(errs) : 'no page errors', r ? JSON.stringify(r) : '');
+}
+(async () => {
+  const shot = (page, f) => page.screenshot({ path: OUT + f });
+  for (const scheme of ['light', 'dark']) {
+    await run('desktop-' + scheme, { scheme }, async (page) => {
+      await shot(page, scheme + '-chat.png');
+      for (const t of ['constitution', 'decisions', 'questions', 'stakes', 'memory', 'members']) { await page.click('.tab[data-tab="' + t + '"]'); await page.waitForTimeout(200); await shot(page, scheme + '-' + t + '.png'); }
+      const counts = await page.$$eval('.tab .count', els => els.map(e => e.parentElement.dataset.tab + '=' + e.textContent + (e.classList.contains('alert') ? '!' : '')));
+      return { counts, hash: await page.evaluate(() => location.hash) };
+    });
+  }
+  await run('actions', {}, async (page, S, calls) => {
+    const out = {};
+    await page.fill('#text', 'Hello from the test'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    out.lastMsg = await page.$eval('#msgs .msg:last-child .text', e => e.textContent);
+    await page.click('.tab[data-tab="questions"]'); await page.waitForTimeout(200);
+    await page.fill('#qInput', 'New question from UI'); await page.click('#qForm button[type=submit]'); await page.waitForTimeout(400);
+    out.qAfterAdd = await page.$$eval('#qList .card-title', e => e.map(x => x.textContent));
+    await page.click('#qList .card:first-child button:has-text("Claim")'); await page.waitForTimeout(300);
+    await page.click('#qList .card:first-child button:has-text("Resolve")'); await page.waitForTimeout(200);
+    await shot(page, 'action-resolve-form.png');
+    await page.fill('#qList .card:first-child textarea', 'Henry will book it.'); await page.click('#qList .card:first-child button:has-text("Mark resolved")'); await page.waitForTimeout(400);
+    await page.click('[data-qf="resolved"]'); await page.waitForTimeout(200);
+    out.resolved = await page.$$eval('#qList .card-title', e => e.map(x => x.textContent));
+    await page.click('.tab[data-tab="decisions"]'); await page.waitForTimeout(200);
+    await page.click('#dcList .card:last-child button:has-text("Sign")'); await page.waitForTimeout(400);
+    out.signers1 = S.dc[0].signers;
+    await page.click('.tab[data-tab="constitution"]'); await page.waitForTimeout(200);
+    await page.click('#conBody button:has-text("Edit")'); await page.waitForTimeout(200);
+    await shot(page, 'action-const-edit.png');
+    await page.fill('#conBody textarea', 'Purpose v3'); await page.click('#conBody button:has-text("Save as version 3")'); await page.waitForTimeout(400);
+    out.conVersion = S.con.version;
+    await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);
+    await page.fill('#sTitle', 'Buy gift'); await page.fill('#sDate', ymd(3)); await page.click('#sForm button[type=submit]'); await page.waitForTimeout(400);
+    out.stakes = await page.$$eval('#sList .card-title', e => e.map(x => x.textContent));
+    await page.click('.tab[data-tab="memory"]'); await page.waitForTimeout(200);
+    await page.fill('#dInput', 'Test digest'); await page.click('#dForm button[type=submit]'); await page.waitForTimeout(400);
+    out.digests = S.dg.length;
+    page.once('dialog', d => d.accept());
+    await page.click('.tab[data-tab="decisions"]'); await page.waitForTimeout(200);
+    await page.click('#dcList .card:first-child button:has-text("Delete")'); await page.waitForTimeout(400);
+    out.decisionsAfterDelete = S.dc.length;
+    // Theme toggle and persistence
+    await page.click('[data-theme-set="dark"]'); await page.waitForTimeout(100);
+    await page.reload(); await page.waitForTimeout(500);
+    out.themeAfterReload = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    out.tabAfterReload = await page.evaluate(() => document.querySelector('.tab[aria-current="page"]').dataset.tab);
+    out.writes = calls.filter(c => !c.startsWith('GET')).map(c => c.split(' ').slice(0, 2).join(' '));
+    return out;
+  });
+  await run('unread', {}, async (page, S) => {
+    await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);
+    await page.evaluate(() => {});
+    return null;
+  });
+  await run('mobile-light', { w: 390, h: 844 }, async (page) => {
+    await shot(page, 'mobile-chat.png');
+    await page.click('#menu'); await page.waitForTimeout(350); await shot(page, 'mobile-drawer.png');
+    await page.click('.tab[data-tab="decisions"]'); await page.waitForTimeout(350); await shot(page, 'mobile-decisions.png');
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    return { scrollWidth: sw };
+  });
+  await run('mobile-dark', { w: 390, h: 844, scheme: 'dark' }, async (page) => { await shot(page, 'mobile-dark-chat.png'); await page.click('#menu'); await page.waitForTimeout(350); await shot(page, 'mobile-dark-drawer.png'); });
+  await run('noname', { state: { noYou: true }, w: 1280, h: 860 }, async (page, S) => {
+    await page.evaluate(() => { localStorage.removeItem('chat-name'); }); await page.reload(); await page.waitForTimeout(500);
+    const before = await page.evaluate(() => ({ input: !document.getElementById('name').hidden, line: !document.getElementById('asLine').hidden }));
+    await page.screenshot({ path: OUT + 'noname.png' });
+    await page.fill('#text', 'hi'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    const err = await page.$eval('#err', e => e.hidden ? '' : e.textContent);
+    await page.fill('#name', 'Guest Writer'); await page.press('#name', 'Enter'); await page.waitForTimeout(200);
+    const after = await page.evaluate(() => ({ input: !document.getElementById('name').hidden, line: document.getElementById('asLine').textContent.trim() }));
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    const posted = S.msgs[S.msgs.length - 1];
+    await page.click('#asChange'); await page.waitForTimeout(100);
+    const changing = await page.evaluate(() => !document.getElementById('name').hidden);
+    await page.screenshot({ path: OUT + 'named.png' });
+    await page.click('.tab[data-tab="questions"]'); await page.waitForTimeout(200);
+    await page.fill('#qInput', 'one'); await page.click('#qForm button[type=submit]'); await page.waitForTimeout(400);
+    const addEnabled = await page.$eval('#qForm button[type=submit]', b => !b.disabled);
+    const qCount = await page.$eval('#c-questions', e => e.textContent);
+    return { before, err, after, posted: posted.from + ': ' + posted.text, changing, addEnabled, qCount };
+  });
+  await run('invites', {}, async (page, S, calls) => {
+    await shot(page, 'kinds-chat.png');
+    const tags = await page.$$eval('#msgs .msg-head', hs => hs.map(h => Array.from(h.querySelectorAll('.tag')).map(t => t.textContent).join('+') + ':' + h.querySelector('.who').textContent));
+    await page.click('.tab[data-tab="members"]'); await page.waitForTimeout(200);
+    const formShown = await page.$eval('#invForm', f => !f.hidden);
+    await page.fill('#invName', 'Matheo'); await page.click('[data-kind="human"]'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
+    await shot(page, 'invite-human.png');
+    const humanFields = await page.$$eval('#invResult input', i => i.map(x => x.value));
+    await page.fill('#invName', 'Scout'); await page.click('[data-kind="agent"]'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
+    await shot(page, 'invite-agent.png');
+    const agentFields = await page.$$eval('#invResult input', i => i.map(x => x.value));
+    await page.fill('#invName', 'Ada'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
+    const dupToast = await page.$eval('#toast', t => t.hidden ? '' : t.textContent);
+    const posts = calls.filter(c => c.startsWith('POST') && c.includes('/invites')).map(c => c.split(' ').slice(2).join(' '));
+    return { tags, formShown, humanFields, agentFields, dupToast, posts };
+  });
+  await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
+  await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
+  await run('voice', { state: { payloadKind: true }, init: () => {
+      window.__said = []; window.__recs = [];
+      class FakeSR { constructor() { window.__recs.push(this); } start() { this.on = true; } stop() { this.on = false; setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+      window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+      window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      const synth = { speak(u) { window.__said.push(u.text); this.cur = u; }, cancel() { window.__said.push('<cancel>'); } };
+      Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
+    } }, async (page) => {
+    const out = {};
+    out.micVisible = await page.$eval('#mic', b => !b.hidden);
+    out.sendLabel = await page.$eval('#send', b => b.getAttribute('aria-label') + '|' + !!b.querySelector('svg') + '|' + b.textContent.trim());
+    out.speakButtons = await page.$$eval('.speak', b => b.length);
+    await page.fill('#text', 'Hi');
+    await page.click('#mic'); await page.waitForTimeout(50);
+    out.micOn = await page.$eval('#mic', b => b.className + '|' + b.getAttribute('aria-pressed'));
+    await shot(page, 'voice-recording.png');
+    await page.evaluate(() => { const r = window.__recs[0]; const res = (t, f) => { const a = [{ transcript: t }]; a.isFinal = f; return a; };
+      r.onresult({ resultIndex: 0, results: [res('there team', true), res(' this is int', false)] }); });
+    out.afterInterim = await page.$eval('#text', t => t.value);
+    await page.evaluate(() => { const r = window.__recs[0]; const res = (t, f) => { const a = [{ transcript: t }]; a.isFinal = f; return a; };
+      r.onresult({ resultIndex: 1, results: [res('there team', true), res(' this is dictated.', true)] }); });
+    out.afterFinal = await page.$eval('#text', t => t.value);
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    out.posted = await page.$eval('#msgs .msg:last-child .text', e => e.textContent);
+    out.micAfterSend = await page.$eval('#mic', b => b.className);
+    out.textAfterSend = await page.$eval('#text', t => t.value);
+    await page.hover('#msgs .msg[data-id="3"]');
+    await page.click('#msgs .msg[data-id="3"] .speak'); await page.waitForTimeout(50);
+    out.speakOn = await page.$eval('#msgs .msg[data-id="3"] .speak', b => b.className + '|' + b.getAttribute('aria-label'));
+    await shot(page, 'voice-speaking.png');
+    await page.click('#msgs .msg[data-id="3"] .speak');
+    out.speakOff = await page.$eval('#msgs .msg[data-id="3"] .speak', b => b.className);
+    out.said = await page.evaluate(() => window.__said);
+    out.tags = await page.$$eval('#msgs .msg-head', hs => hs.map(h => Array.from(h.querySelectorAll('.tag')).map(t => t.textContent).join('+') + ':' + h.querySelector('.who').textContent));
+    return out;
+  });
+  await run('dictation-patterns', { init: () => {
+      window.__recs = [];
+      class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+      window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+    } }, async (page) => {
+    const feed = (list) => page.evaluate((list) => {
+      const r = window.__recs[window.__recs.length - 1];
+      for (const ev of list) { const results = ev.r.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; }); r.onresult({ resultIndex: ev.i, results }); }
+      return document.getElementById('text').value;
+    }, list);
+    const out = {};
+    // Desktop Chrome: separate segments, interim updates, leading spaces
+    await page.fill('#text', ''); await page.click('#mic');
+    out.desktop = await feed([
+      { i: 0, r: [['hello', false]] }, { i: 0, r: [['hello there', false]] }, { i: 0, r: [['hello there', true]] },
+      { i: 1, r: [['hello there', true], [' how are', false]] }, { i: 1, r: [['hello there', true], [' how are you', true]] },
+    ]);
+    await page.click('#mic'); await page.waitForTimeout(50);
+    // Appends after existing text
+    await page.fill('#text', 'Note:'); await page.click('#mic');
+    out.append = await feed([{ i: 0, r: [['buy milk', true]] }, { i: 1, r: [['buy milk', true], ['and eggs', true]] }]);
+    return out;
+  });
+  for (const [label, ua] of [['android', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36'], ['iphone', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1']]) {
+    await run('phrase-mode-' + label, { ua, w: 390, h: 844, init: () => {
+        window.__recs = [];
+        class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+        window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+      } }, async (page) => {
+      const say = (pairs, end) => page.evaluate(([pairs, end]) => {
+        const r = window.__recs[window.__recs.length - 1];
+        const results = pairs.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; });
+        if (results.length) r.onresult({ resultIndex: 0, results });
+        if (end) r.onend();
+        return { text: document.getElementById('text').value, sessions: window.__recs.length, continuous: r.continuous, mic: document.getElementById('mic').className };
+      }, [pairs, end]);
+      const out = {};
+      await page.click('#mic');
+      out.s1 = await say([['hello', false]], false);
+      out.s1b = await say([['hello there', true]], true);
+      out.s2 = await say([['how are you', true]], true);
+      out.s3 = await say([['yes', true]], true);
+      out.s4 = await say([['yes', true]], true);
+      out.silent = [await say([], true), await say([], true), await say([], true)].map(x => x.mic + '/' + x.sessions);
+      await page.fill('#text', ''); await page.click('#mic');
+      await say([['send this', true]], false);
+      await page.click('#send'); await page.waitForTimeout(300);
+      out.afterSend = await page.evaluate(() => ({ text: document.getElementById('text').value, mic: document.getElementById('mic').className, sessions: window.__recs.length }));
+      return out;
+    });
+  }
+  for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
+    await run(label, Object.assign({ state: { markdown: true }, init: () => { window.__alert = 0; window.alert = () => { window.__alert++; }; } }, o), async (page) => {
+      await page.waitForTimeout(300);
+      await page.evaluate(() => { const l = document.getElementById('list'); l.scrollTop = l.scrollHeight - 1600; });
+      await shot(page, label + '.png');
+      await page.evaluate(() => { const l = document.getElementById('list'); l.scrollTop = l.scrollHeight; });
+      await shot(page, label + '-bottom.png');
+      if (label !== 'markdown-light') return;
+      return await page.evaluate(() => {
+        const m7 = document.querySelector('.msg[data-id="7"] .text'), m8 = document.querySelector('.msg[data-id="8"] .text');
+        return {
+          h: m7.querySelector('.md-h2') && m7.querySelector('.md-h2').textContent,
+          strong: m7.querySelector('strong').textContent, em: m7.querySelector('em').textContent, code: m7.querySelector('p code').textContent,
+          ol: Array.from(m7.querySelectorAll(':scope > ol > li')).length, nested: Array.from(m7.querySelectorAll('ol li ul li')).map(x => x.textContent),
+          del: m7.querySelector('del').textContent, table: Array.from(m7.querySelectorAll('td')).map(x => x.textContent + (x.style.textAlign ? '@' + x.style.textAlign : '')),
+          quote: m7.querySelector('blockquote').textContent, pre: m7.querySelector('pre code').textContent,
+          links: Array.from(m7.querySelectorAll('a')).map(a => a.textContent + '=>' + a.getAttribute('href')),
+          xssImgs: document.querySelectorAll('.text img').length, xssText: m8.textContent, xssLinks: Array.from(m8.querySelectorAll('a')).length, xssEm: m8.querySelectorAll('em').length,
+          alerts: window.__alert,
+          human: Array.from(document.querySelectorAll('.msg')).map(r => r.dataset.id + (r.classList.contains('human') ? 'H' : '')).join(' '),
+        };
+      });
+    });
+  }
+  await run('markdown-speech', { state: { markdown: true }, init: () => {
+      window.__said = []; window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      Object.defineProperty(window, 'speechSynthesis', { value: { speak(u) { window.__said.push(u.text); }, cancel() {} }, configurable: true });
+    } }, async (page) => {
+    await page.evaluate(() => { const b = document.querySelector('.msg[data-id="7"] .speak'); b.click(); });
+    return { said: await page.evaluate(() => window.__said.join(' ')) };
+  });
+  await run('avatars', {}, async (page, S, calls) => {
+    const out = {};
+    out.chatAvatars = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.map(a => a.className + (a.querySelector('img') ? ':img' : a.querySelector('svg') ? ':svg' : ':' + a.textContent)));
+    await shot(page, 'avatars-chat.png');
+    await page.click('.tab[data-tab="members"]'); await page.waitForTimeout(200);
+    out.before = await page.$$eval('#mList .photo-actions button', b => b.map(x => x.textContent));
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click('#mList .photo-actions button:has-text("Add a photo")')]);
+    await fc.setFiles(__dirname + '/fixtures/photo.png'); await page.waitForTimeout(800);
+    out.upload = calls.filter(c => c.startsWith('PUT') && c.includes('/avatar'));
+    out.after = await page.$$eval('#mList .photo-actions button', b => b.map(x => x.textContent));
+    out.myAvatarImg = await page.$eval('#mList .card.member .avatar img', i => i.complete && i.naturalWidth + 'x' + i.naturalHeight).catch(() => 'none');
+    out.uploadedSize = S.av.anthony ? S.av.anthony.buf.length : 0;
+    await shot(page, 'avatars-members.png');
+    const [fc2] = await Promise.all([page.waitForEvent('filechooser'), page.click('#mList .photo-actions button:has-text("Change photo")')]);
+    await fc2.setFiles(__dirname + '/fixtures/henry.gif'); await page.waitForTimeout(600);
+    out.gifUpload = calls.filter(c => c.startsWith('PUT') && c.includes('/avatar')).slice(-1)[0];
+    const [fc3] = await Promise.all([page.waitForEvent('filechooser'), page.click('#mList .photo-actions button:has-text("Change photo")')]);
+    await fc3.setFiles(__dirname + '/fixtures/notimage.png'); await page.waitForTimeout(600);
+    out.badToast = await page.$eval('#toast', t => t.textContent);
+    await page.click('#mList .photo-actions button:has-text("Remove photo")'); await page.waitForTimeout(500);
+    out.afterRemove = await page.$$eval('#mList .photo-actions button', b => b.map(x => x.textContent));
+    await page.click('.tab[data-tab="chat"]'); await page.waitForTimeout(200);
+    return out;
+  });
+  await run('avatars-dark-mobile', { scheme: 'dark', w: 390, h: 844 }, async (page) => { await shot(page, 'avatars-mobile-dark.png'); });
+  for (const [label, o] of [['avatar-dialog', {}], ['avatar-dialog-dark-mobile', { scheme: 'dark', w: 390, h: 844 }]]) {
+    await run(label, o, async (page) => {
+      const out = {};
+      await page.click('#msgs .msg[data-id="1"] .avatar'); await page.waitForTimeout(400);
+      out.henry = await page.evaluate(() => ({ open: document.getElementById('avDlg').open, name: document.getElementById('avName').textContent, kind: document.getElementById('avKind').textContent, img: (document.querySelector('#avBig img') || {}).naturalWidth, size: document.querySelector('#avBig .avatar').getBoundingClientRect().width }));
+      await shot(page, label + '-gif.png');
+      await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+      out.closedByEsc = await page.evaluate(() => !document.getElementById('avDlg').open);
+      await page.click('#msgs .msg[data-id="4"] .avatar'); await page.waitForTimeout(200);
+      out.claude = await page.evaluate(() => ({ name: document.getElementById('avName').textContent, kind: document.getElementById('avKind').textContent, svg: !!document.querySelector('#avBig svg') }));
+      await shot(page, label + '-claude.png');
+      await page.mouse.click(5, 5); await page.waitForTimeout(150);
+      out.closedByBackdrop = await page.evaluate(() => !document.getElementById('avDlg').open);
+      await page.click('#msgs .msg[data-id="3"] .avatar'); await page.waitForTimeout(200);
+      out.ada = await page.evaluate(() => ({ text: document.querySelector('#avBig .avatar').textContent, kind: document.getElementById('avKind').textContent }));
+      await shot(page, label + '-initials.png');
+      await page.click('#avClose'); await page.waitForTimeout(150);
+      out.closedByButton = await page.evaluate(() => !document.getElementById('avDlg').open);
+      await page.focus('#msgs .msg[data-id="5"] .avatar'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+      out.keyboard = await page.evaluate(() => document.getElementById('avDlg').open && document.getElementById('avName').textContent);
+      return out;
+    });
+  }
+  await run('reactions', {}, async (page, S, calls) => {
+    const out = {};
+    const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
+    out.initial = await chips(3);
+    // Hold the mouse on Henry's message for 600 ms.
+    const box = await page.$eval('.msg[data-id="1"] .text', e => { const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
+    await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.waitForTimeout(600); await page.mouse.up(); await page.waitForTimeout(100);
+    out.barOpen = await page.$$eval('.rx-bar button.rx', b => b.map(x => x.textContent).join(''));
+    await shot(page, 'reactions-bar.png');
+    await page.click('.rx-bar button[title="Love"]'); await page.waitForTimeout(300);
+    out.afterLove = await chips(1); out.barClosed = !(await page.$('.rx-bar'));
+    // Quick click (no hold) must not open the bar.
+    await page.click('.msg[data-id="1"] .text'); await page.waitForTimeout(600);
+    out.quickClickNoBar = !(await page.$('.rx-bar'));
+    // Change my reaction on message 1 to Haha via the smiley button.
+    await page.hover('.msg[data-id="1"]'); await page.click('.msg[data-id="1"] .react-btn'); await page.waitForTimeout(150);
+    await page.click('.rx-bar button[title="Haha"]'); await page.waitForTimeout(300);
+    out.afterHaha = await chips(1);
+    // Clicking my chip removes it; clicking someone else's adds mine.
+    await page.click('.msg[data-id="1"] .rx-chip.mine'); await page.waitForTimeout(300);
+    out.afterRemove = await chips(1);
+    await page.click('.msg[data-id="3"] .rx-chip:not(.mine)'); await page.waitForTimeout(300);
+    out.msg3 = await chips(3);
+    out.titles = await page.$$eval('.msg[data-id="3"] .rx-chip', cs => cs.map(c => c.title));
+    // Escape and outside click close the bar.
+    await page.click('.msg[data-id="3"] .react-btn', { force: true }); await page.waitForTimeout(100);
+    await page.keyboard.press('Escape'); out.escCloses = !(await page.$('.rx-bar'));
+    out.posts = calls.filter(c => c.includes('/reactions')).map(c => c.replace('POST /api/rooms/demo/messages/', ''));
+    await page.hover('.msg[data-id="3"]'); await shot(page, 'reactions-chips.png');
+    return out;
+  });
+  await run('reactions-picker', {}, async (page, S, calls) => {
+    const out = {};
+    await page.hover('.msg[data-id="1"]'); await page.click('.msg[data-id="1"] .react-btn'); await page.waitForTimeout(150);
+    await page.click('.rx-bar .rx-plus'); await page.waitForTimeout(500);
+    out.sections = await page.$$eval('.rx-picker .rx-sec', s => s.map(x => x.textContent));
+    out.cells = await page.$$eval('.rx-picker .rx-cell', c => c.length);
+    await shot(page, 'reactions-picker.png');
+    await page.fill('.rx-picker .rx-search', 'unicorn'); await page.waitForTimeout(150);
+    out.search = await page.$$eval('.rx-picker .rx-cell', c => c.map(x => x.textContent).join(''));
+    await page.click('.rx-picker .rx-cell'); await page.waitForTimeout(300);
+    out.chips1 = await page.$$eval('.msg[data-id="1"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
+    out.pickerClosed = !(await page.$('.rx-picker'));
+    out.post = calls.filter(c => c.includes('/reactions')).slice(-1)[0];
+    // Reopen: the bar shows my 🦄 highlighted, and the picker lists it under Recently used.
+    await page.hover('.msg[data-id="1"]'); await page.click('.msg[data-id="1"] .react-btn'); await page.waitForTimeout(150);
+    out.barMine = await page.$$eval('.rx-bar button.rx.on', b => b.map(x => x.textContent));
+    await page.click('.rx-bar .rx-plus'); await page.waitForTimeout(300);
+    out.recent = await page.$eval('.rx-picker .rx-sec', s => s.textContent + ':' + s.nextElementSibling.textContent);
+    await page.click('.rx-picker .rx-tab[title="Food & Drink"]'); await page.waitForTimeout(150);
+    out.tabScrolled = await page.$eval('.rx-picker .rx-grid', g => g.scrollTop > 100);
+    await page.keyboard.press('Escape'); out.escClosed = !(await page.$('.rx-picker'));
+    out.speakPill = await page.$eval('.msg[data-id="1"] .speak', b => { const s = getComputedStyle(b); return s.borderRadius + ' ' + s.opacity; });
+    out.chips3 = await page.$$eval('.msg[data-id="3"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
+    await page.mouse.move(5, 300); await shot(page, 'reactions-after.png');
+    return out;
+  });
+  await run('reactions-picker-mobile', { w: 390, h: 844, scheme: 'dark', touch: true }, async (page) => {
+    const r = await page.$eval('.msg[data-id="3"] .text', e => { const b = e.getBoundingClientRect(); return { x: b.left + 30, y: b.top + 10 }; });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] }); await page.waitForTimeout(600);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.waitForTimeout(150);
+    await shot(page, 'reactions-bar-mobile-dark.png');
+    await page.tap('.rx-bar .rx-plus'); await page.waitForTimeout(500);
+    await shot(page, 'reactions-picker-mobile-dark.png');
+    return { inView: await page.$eval('.rx-picker', p => { const b = p.getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight; }) };
+  });
+  await run('reactions-touch', { w: 390, h: 844, scheme: 'dark', touch: true }, async (page) => {
+    const out = {};
+    const r = await page.$eval('.msg[data-id="3"] .text', e => { const b = e.getBoundingClientRect(); return { x: b.left + 30, y: b.top + 10 }; });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] });
+    await page.waitForTimeout(650);
+    out.barOpen = !!(await page.$('.rx-bar'));
+    await shot(page, 'reactions-touch-dark.png');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.waitForTimeout(200);
+    out.stillOpenAfterRelease = !!(await page.$('.rx-bar'));
+    out.barInView = await page.$eval('.rx-bar', b => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.top >= 0; });
+    await page.tap('.rx-bar button[title="Wow"]'); await page.waitForTimeout(300);
+    out.chips = await page.$$eval('.msg[data-id="3"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
+    // A scroll-like drag must not open the bar.
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y + 60 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: r.x, y: r.y + 10 }] });
+    await page.waitForTimeout(650);
+    out.dragNoBar = !(await page.$('.rx-bar'));
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    return out;
+  });
+  await run('voice-mobile-dark', { scheme: 'dark', w: 390, h: 844, init: () => { window.webkitSpeechRecognition = function () {}; } }, async (page) => { await shot(page, 'voice-mobile-dark.png'); });
+  await run('no-speech-api', { init: () => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; } }, async (page) => ({ micHidden: await page.$eval('#mic', b => b.hidden) }));
+  await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
+  await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
+})();
