@@ -31,7 +31,7 @@ const BOT_NAME = "claude";
 const MEMBER_INVITES_PER_DAY = 5;
 const MAX_ACTIVE_INVITES = 50;
 const AVATAR_MAX = 2000000;
-const AUDIO_MAX = 2000000;
+const AUDIO_MAX = 5000000;
 // Reactions: any single emoji; these names are accepted as shortcuts for the six quick ones.
 const REACTION_ALIASES = { like: "👍", love: "❤️", haha: "😂", wow: "😮", sad: "😢", angry: "😡" };
 // Emoji list for the web picker: built once from this pinned dataset (iamcal/emoji-data, MIT) and kept in KV.
@@ -1227,7 +1227,7 @@ function docs(o) {
     "",
     "AUDIO MESSAGES",
     "  A message can carry one short audio clip, stored in the room with the message and played",
-    "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 2 MB.",
+    "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 5 MB.",
     "  Messages with a clip carry \"audio\": {\"type\", \"bytes\", \"url\"} (null when there is none).",
     "    POST   /api/rooms/ROOM/messages            send {\"audio\": \"<base64 or data: URL>\"} with from/text",
     "    PUT    /api/rooms/ROOM/messages/ID/audio   attach to your own message (or the owner key): the",
@@ -1809,7 +1809,7 @@ export default {
         }, CORS) });
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 2 MB" }, 413);
+      if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       let buf;
       if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
         let body = null;
@@ -1820,7 +1820,7 @@ export default {
         buf = await request.arrayBuffer();
       }
       if (!buf.byteLength) return json({ error: "Send the audio as the request body (or JSON {\"audio\": base64})" }, 400);
-      if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 2 MB" }, 413);
+      if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
       const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner);
@@ -1901,7 +1901,7 @@ export default {
           let buf;
           try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
           if (!buf.byteLength) return json({ error: "\"audio\" is empty" }, 400);
-          if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 2 MB" }, 413);
+          if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
           const atype = sniffAudio(buf);
           if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
           audio = { data: buf, type: atype };

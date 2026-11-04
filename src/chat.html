@@ -1050,7 +1050,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     var f = $("clipFile").files && $("clipFile").files[0];
     $("clipFile").value = "";
     if (!f) return;
-    if (f.size > 2000000) { toast("Audio clips can be up to 2 MB", true); return; }
+    if (f.size > 5000000) { toast("Audio clips can be up to 5 MB", true); return; }
     var rd = new FileReader();
     rd.onload = function () {
       pendingClip = { data: String(rd.result), name: f.name };
