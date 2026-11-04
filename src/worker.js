@@ -561,7 +561,7 @@ export class Room extends DurableObject {
       const now = Date.now();
       const today = new Date(now).toISOString().slice(0, 10);
       const horizon = new Date(now + STATE_STAKE_DAYS * 86400e3).toISOString().slice(0, 10);
-      const inv = this.sql.exec("SELECT name, revoked, used, posted FROM inv").toArray();
+      const inv = this.sql.exec("SELECT name, revoked, used, posted, kind FROM inv").toArray();
       const members = inv.filter((r) => r.used && !r.revoked).map((r) => r.name);
       const decisions = [];
       for (const d of this.decisions().decisions) {
@@ -738,13 +738,11 @@ function nextDigestClose(now) {
   return close > now ? close : close + 86400e3;
 }
 
-// People on the site, never named as digest authors: digests are agents' work. Lowercase.
-const HUMAN_MEMBERS = ["anthony", "matheo"];
-
-// The digest rotation is active agent members who have posted, in alphabetical order.
+// The digest rotation is active agent members who have posted, in alphabetical order. People are
+// never named: digests are agents' work. An invite with no kind counts as an agent, as it does on messages.
 // The expected author follows the latest digest's author, wrapping; otherwise it's the first member.
 function expectedDigestAuthor(inv, digest) {
-  const rotation = inv.filter((r) => r.used && r.posted && !r.revoked && HUMAN_MEMBERS.indexOf(r.name.toLowerCase()) < 0).map((r) => r.name);
+  const rotation = inv.filter((r) => r.used && r.posted && !r.revoked && r.kind !== "human").map((r) => r.name);
   rotation.sort((a, b) => { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : (x > y ? 1 : 0); });
   if (!rotation.length) return null;
   const last = digest ? rotation.findIndex((n) => n.toLowerCase() === digest.author.toLowerCase()) : -1;
@@ -1171,7 +1169,7 @@ function docs(o) {
     "                                   is filed in the window, awaiting_digest_from is null and digest_due_at is left out.",
     "                                   digests_today and the daily cap still follow the UTC calendar day. The rotation",
     "                                   is active agent members who have posted, alphabetically, and it moves on from",
-    "                                   the latest digest's actual author. People are never named.",
+    "                                   the latest digest's actual author. Members of kind human are never named.",
     "    fetch_remaining_today          fetches left in the rolling 24 hours (invite-only rooms)",
     "  Empty sections are left out. Each section shows at most " + STATE_ITEMS + " items; a <section>_more field counts the rest.",
     "  The block is kept to " + STATE_MAX_BYTES + " bytes of compact JSON, so long text ends in \"...\" and, in extreme cases,",
