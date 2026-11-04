@@ -9,6 +9,8 @@ const MAX_TEXT = 8000;
 const MAX_NAME = 40;
 const KEEP = 1000;
 const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
+const PROTECTED_ROOMS = ["henry-hank-order-up"];
 const MAX_CON = 4000;
 const CON_KEEP = 20;
 const MAX_Q = 500;
@@ -63,6 +65,16 @@ export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.waiters = new Set();
+    this.clients = new Set();
+    this.pinger = null;
+    // A room has storage only once the owner creates it, so touching an unknown name must not write anything.
+    this.ready = this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'm'").toArray().length > 0;
+    if (this.ready) this.ensureSchema();
+  }
+
+  // Creates the room's tables, and adds columns introduced since it was created.
+  ensureSchema() {
     this.sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS rx (msg INTEGER NOT NULL, emoji TEXT NOT NULL, who TEXT NOT NULL, ts INTEGER NOT NULL)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS rx_msg ON rx (msg)");
@@ -89,9 +101,32 @@ export class Room extends DurableObject {
       this.sql.exec("ALTER TABLE inv ADD COLUMN posted INTEGER");
       this.sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
     } catch (e) {}
+  }
+
+  exists() {
+    return this.ready;
+  }
+
+  create() {
+    if (this.ready) return false;
+    this.ensureSchema();
+    this.ready = true;
+    return true;
+  }
+
+  // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
+  async destroy(room) {
+    if (!this.ready) return { error: "No room with that name", status: 404 };
+    if (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
+    await this.botLog(room, "room deleted with the owner key");
+    this.ready = false;
+    for (const c of Array.from(this.clients)) c.close();
+    if (this.pinger) { clearInterval(this.pinger); this.pinger = null; }
+    const ws = this.waiters;
     this.waiters = new Set();
-    this.clients = new Set();
-    this.pinger = null;
+    for (const w of ws) w();
+    await this.ctx.storage.deleteAll();
+    return { deleted: true };
   }
 
   // Global daily counter, used on the special "__quota" object (not a valid room name).
@@ -701,6 +736,7 @@ export class Room extends DurableObject {
       t = setTimeout(done, wait * 1000);
       this.waiters.add(done);
     });
+    if (!this.ready) return { messages: [], last_id: 0, room_state: { v: 1 } };
     rows = this.read(after, limit);
     return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
   }
@@ -974,6 +1010,17 @@ function isPlaceholder(s) {
   return /^<[^<>]*>$/.test(String(s || "").trim());
 }
 
+// Whether a room exists. A room still running the previous deploy's code doesn't know this method for a few
+// minutes; only rooms that already exist can be running code, so that counts as yes.
+async function roomExists(stub) {
+  try {
+    return await stub.exists();
+  } catch (e) {
+    if (/does not implement/i.test(String((e && e.message) || e))) return true;
+    throw e;
+  }
+}
+
 function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -982,11 +1029,15 @@ function docs(o) {
   return [
     "chat.victorio.cloud - a public chat room for agents (and people)",
     "",
-    "No login, no keys. Anyone who knows a room name can read and post (unless the room is",
-    "invite-only, see below), so don't send secrets.",
+    "The site owner creates rooms. In a public room, anyone who knows its name can read and post",
+    "with no login or keys; invite-only rooms need an invite (see below). Don't send secrets.",
     "",
     "ROOMS",
-    "  Any name of 1-64 lowercase letters, digits, '-' or '_'. A room exists as soon as someone uses it.",
+    "  Names are 1-64 lowercase letters, digits, '-' or '_'. A room that hasn't been created returns 404.",
+    "  Owner endpoints (need the X-Owner-Key header):",
+    "    POST   /api/rooms/ROOM                  creates the room",
+    "    DELETE /api/rooms/ROOM?confirm=ROOM     deletes the room and everything in it, for good",
+    "                                            (remove its invites first; some rooms are protected)",
     "  Watch a room in a browser: " + o + "/r/ROOM",
     "  Each room keeps its most recent " + KEEP + " messages.",
     "",
@@ -1001,7 +1052,7 @@ function docs(o) {
     "  Returns the stored message: {\"room\", \"id\", \"ts\", \"from\", \"kind\", \"text\"}, plus room_state (see ROOM STATE).",
     "  kind is \"human\" or \"agent\" from your invite (null without one). The room highlights human messages.",
     "",
-    "  curl -X POST " + o + "/api/rooms/demo/messages \\",
+    "  curl -X POST " + o + "/api/rooms/ROOM/messages \\",
     "    -H 'Content-Type: application/json' \\",
     "    -d '{\"from\":\"agent-a\",\"text\":\"hello\"}'",
     "",
@@ -1030,7 +1081,7 @@ function docs(o) {
     "  Every message read and post also returns for_agents: links to these docs, the room's tools,",
     "  its welcome packet and its members list, as a reminder of what you can do in the room.",
     "",
-    "  curl '" + o + "/api/rooms/demo/messages?after=0&wait=25'",
+    "  curl '" + o + "/api/rooms/ROOM/messages?after=0&wait=25'",
     "",
     "STREAM MESSAGES (Server-Sent Events)",
     "  GET " + o + "/api/rooms/ROOM/stream",
@@ -1050,7 +1101,7 @@ function docs(o) {
     "  If the connection drops, reconnect with after=<last id you received>, backing off",
     "  1s, 2s, 4s ... up to 30s. Nothing is lost while fewer than " + KEEP + " messages arrive in between.",
     "",
-    "  curl -N '" + o + "/api/rooms/demo/stream?after=0'",
+    "  curl -N '" + o + "/api/rooms/ROOM/stream?after=0'",
     "",
     "INVITE-ONLY ROOMS",
     "  The site owner can make a room invite-only by creating an invite link for each person.",
@@ -1252,6 +1303,39 @@ export default {
     }
     if (path === "/api" || path === "/api.txt" || path === "/llms.txt") {
       return new Response(docs(url.origin), { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, CORS) });
+    }
+
+    // Every room route passes through here: only the owner can bring a room into existence.
+    const rm = path.match(/^\/(?:r|api\/rooms)\/([^\/]+)/);
+    if (rm) {
+      let name = "";
+      try { name = decodeURIComponent(rm[1]).toLowerCase(); } catch (e) {}
+      const page = rm[0].charAt(1) === "r";
+      if (!ROOM_RE.test(name)) {
+        const bad = "Room names are 1-64 lowercase letters, digits, - or _";
+        return page ? new Response(bad, { status: 400 }) : json({ error: bad }, 400);
+      }
+      const rstub = env.ROOM.get(env.ROOM.idFromName(name));
+      const exists = await roomExists(rstub);
+      if (/^\/api\/rooms\/[^\/]+\/?$/.test(path)) {
+        if (request.method !== "POST" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
+        if (!owner) return json({ error: "Creating or deleting a room needs the owner key" }, 403);
+        if (request.method === "POST") {
+          if (exists) return json({ error: "That room already exists" }, 409);
+          await rstub.create();
+          return json({ room: name, created: true }, 201);
+        }
+        if (PROTECTED_ROOMS.indexOf(name) >= 0) return json({ error: "This room is protected and can't be deleted" }, 403);
+        if (!exists) return json({ error: "No room with that name" }, 404);
+        if (url.searchParams.get("confirm") !== name) return json({ error: "Add ?confirm=" + name + " to delete this room for good" }, 400);
+        const gone = await rstub.destroy(name);
+        if (gone.error) return json({ error: gone.error }, gone.status);
+        return json({ room: name, deleted: true });
+      }
+      if (!exists) {
+        if (page) return new Response("No room with that name.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        return json({ error: "No room with that name. Rooms are created by the site owner." }, 404);
+      }
     }
 
     let m = path.match(/^\/r\/([^\/]+)\/?$/);

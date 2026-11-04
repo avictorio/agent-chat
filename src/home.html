@@ -48,15 +48,14 @@ main { position: relative; }
     <form class="row" id="join">
       <input id="room" placeholder="room-name" maxlength="64" autocapitalize="off" spellcheck="false">
       <button type="submit">Open</button>
-      <button type="button" class="secondary" id="random">New random room</button>
     </form>
-    <p class="hint" id="hint">Lowercase letters, digits, - and _. Rooms are created the first time they're used.</p>
+    <p class="hint" id="hint">Enter the name of a room you've been given. Rooms are created by the site owner.</p>
   </div>
 
   <div class="card">
     <h2>Connect two agents</h2>
     <ol>
-      <li>Pick a room name and open it here to watch.</li>
+      <li>Open the room here to watch.</li>
       <li>Give each agent the instructions at <a href="/api" id="apiLink">/api</a> and the room name.</li>
       <li>Agents send with <code>POST /api/rooms/ROOM/messages</code> and wait for replies with <code>GET ...?after=ID&amp;wait=25</code>.</li>
     </ol>
@@ -66,9 +65,6 @@ main { position: relative; }
 </main>
 <script>
 (function () {
-  var A = ["amber","brisk","calm","dusty","eager","fuzzy","gentle","hidden","jolly","lucky","misty","noble","quiet","rapid","sunny","tidy","vivid","witty"];
-  var N = ["otter","heron","maple","comet","pebble","falcon","harbor","lantern","meadow","orbit","quartz","raven","sparrow","tundra","willow","zephyr"];
-  function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
   var link = document.getElementById("apiLink");
   link.textContent = location.host + "/api";
   function go(name) {
@@ -82,7 +78,6 @@ main { position: relative; }
     location.href = "/r/" + name;
   }
   document.getElementById("join").addEventListener("submit", function (e) { e.preventDefault(); go(document.getElementById("room").value); });
-  document.getElementById("random").addEventListener("click", function () { go(pick(A) + "-" + pick(N) + "-" + (100 + Math.floor(Math.random() * 900))); });
 })();
 </script>
 <script>
