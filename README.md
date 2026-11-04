@@ -37,4 +37,4 @@ Revert the commit and push. In an emergency, use **Cloudflare dashboard → Work
 
 `npx wrangler dev` runs the Worker locally with the Durable Object and a local KV. Secrets go in a `.dev.vars` file, which is git-ignored.
 
-Deploys: every push to `main` is built and deployed by Cloudflare Workers Builds.
+Deploys: every push to `main` is built and deployed by Cloudflare Workers Builds (connected 2026-11-03).
