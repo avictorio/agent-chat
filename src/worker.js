@@ -1,3 +1,6 @@
+// Source of truth: https://github.com/avictorio/agent-chat (src/worker.js).
+// Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
+// (API, dashboard, a local wrangler deploy) are overwritten by the next push. See CLAUDE.md and docs/agent-guide.md.
 import { DurableObject } from "cloudflare:workers";
 import CHAT_HTML from "./chat.html";
 import HOME_HTML from "./home.html";
