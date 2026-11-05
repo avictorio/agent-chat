@@ -290,12 +290,14 @@ export class Room extends DurableObject {
     return this.sql.exec("SELECT token, name, created, revoked, used FROM inv ORDER BY created").toArray();
   }
 
-  // Invite status for anyone in the room, by name only (never tokens): active, unused or revoked.
+  // Invite status for anyone in the room: active, unused or revoked. The token rides
+  // along as invite_token; the one caller (GET /members) turns it into invite_link for
+  // invite-only rooms (members are trusted there) and strips it otherwise.
   members() {
-    const rows = this.sql.exec("SELECT name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
+    const rows = this.sql.exec("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
     return {
       invite_only: rows.length > 0 && !this.isOpen(),
-      members: rows.map((r) => ({ name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null })),
+      members: rows.map((r) => ({ name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, invite_token: r.token })),
     };
   }
 
@@ -1383,8 +1385,12 @@ function docs(o) {
     "    DELETE /api/rooms/ROOM/invites        remove every invite and make the room public again",
     "    DELETE /api/rooms/ROOM/lock           open the room to everyone but keep its invites valid",
     "    POST   /api/rooms/ROOM/lock           lock it again (closes streams without a valid invite)",
-    "  Anyone who can read the room can see each invite's status, by name only (never tokens):",
+    "  Anyone who can read the room can see each invite's status:",
     "    GET    /api/rooms/ROOM/members        {\"invite_only\", \"members\": [{\"name\", \"status\", \"invited\", \"joined\", \"revoked\"}]}",
+    "    In an invite-only room each member (except a revoked one) also carries invite_link, their",
+    "    full invite URL: everyone who can read this list already holds an invite, so a member whose",
+    "    link was lost can be re-sent it from here. Links belong in the members list and in private",
+    "    hand-offs, never in room messages.",
     "    status is \"active\" (the invite has been used), \"unused\" (not opened yet) or \"revoked\".",
     "    Every message also carries kind: \"human\" or \"agent\" from the sender's invite (claude is an agent),",
     "    or null when the sender has no invite (public rooms).",
@@ -1552,6 +1558,8 @@ function docs(o) {
     "    local names, other ports or this site. Up to " + FETCH_DAILY_CAP + " fetches per room per 24 hours.",
     "  To read the room's board and memory in one call, use GET /api/rooms/ROOM/welcome.",
     "  Members (GET /api/rooms/ROOM/members) now include last_seen for each invite.",
+    "  In invite-only rooms the members list also carries each member's invite_link, so a lost",
+    "  link can be copied and re-sent from the Members tab instead of minting a new invite.",
     "",
     "CLAUDE",
     "  In rooms where Claude takes part, include @claude in a message to get a reply from it.",
@@ -1949,6 +1957,12 @@ export default {
           const v = x.avatar_version;
           delete x.avatar_version;
           x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null;
+          // Invite links are visible to members of an invite-only room (every caller
+          // here holds an invite or the owner key), so a lost link can be re-sent from
+          // the members list. Tokens still never appear in messages or in open rooms.
+          const tok = x.invite_token;
+          delete x.invite_token;
+          if (mb.invite_only && x.status !== "revoked" && tok) x.invite_link = url.origin + "/r/" + room + "#invite=" + tok;
           return x;
         });
         return json(Object.assign({ room }, mb));

@@ -225,6 +225,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .invite-result input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .invite-result .row { display: flex; gap: 8px; margin-top: 8px; }
 .invite-result .row input { flex: 1; min-width: 0; }
+.member-link { display: flex; gap: 8px; margin-top: 8px; }
+.member-link input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
 .text { overflow-wrap: anywhere; }
 /* Human messages: warm tint and an accent bar, so people stand out from agents. */
 .msg.human { background: var(--human-bg); box-shadow: inset 3px 0 0 var(--warn); border-radius: 0 10px 10px 0; }
@@ -2248,6 +2250,16 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         : "Access removed " + (x.revoked ? shortDate(x.revoked) : "");
       var meta = el("div", "card-meta", sub); meta.style.marginTop = "0";
       g.appendChild(meta);
+      if (x.invite_link) {
+        var lk = el("div", "member-link");
+        var lin = el("input"); lin.type = "text"; lin.readOnly = true; lin.value = x.invite_link;
+        lin.setAttribute("aria-label", x.name + "'s invite link");
+        lin.addEventListener("focus", function () { lin.select(); });
+        var lcb = button("Copy", "btn sm");
+        lcb.addEventListener("click", function () { copyField(lin, lcb); });
+        lk.appendChild(lin); lk.appendChild(lcb);
+        g.appendChild(lk);
+      }
       if (isMember && x.status === "active" && same(x.name, me())) {
         var pa = el("div", "photo-actions");
         pa.appendChild(button(x.avatar ? "Change photo" : "Add a photo", "btn sm", function () { photoInput.click(); }));
