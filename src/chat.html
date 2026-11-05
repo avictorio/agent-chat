@@ -188,6 +188,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .speak:hover { color: var(--ink); border-color: var(--muted); }
 .speak.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .pushBtn.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.pushMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); padding: 4px; min-width: 172px; }
+.pushMenu button { display: flex; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; border-radius: 7px; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.pushMenu button:hover { background: var(--hover); }
+.pushMenu button.cur { color: var(--accent); font-weight: 700; }
+.pushMenu button.cur::after { content: "\2713"; margin-left: auto; }
 @media (prefers-reduced-motion: reduce) { #mic.on { animation: none; } }
 .msg.cont { padding-top: 1px; padding-bottom: 1px; }
 .gutter { width: 36px; flex: none; }
@@ -438,7 +443,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         <div class="composer-meta">
           <span id="asLine" hidden>Posting as <strong id="asName"></strong> <button type="button" class="linkbtn" id="asChange">Change</button></span>
           <span id="clipChip" class="clip-chip" hidden><span id="clipName"></span> <button type="button" class="linkbtn" id="clipRemove">Remove</button></span>
-          <span class="hint">Enter to send · Shift+Enter for a new line · mention @claude to ask Claude</span>
+          <span class="hint">Ctrl+Enter to send · Enter for a new line · mention @claude to ask Claude</span>
         </div>
         <div class="err" id="err" hidden></div>
       </form>
@@ -1076,7 +1081,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function grow() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight + 2, window.innerHeight * 0.4) + "px"; }
   textEl.addEventListener("input", grow);
   textEl.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
   });
   var pendingClip = null;
   $("clip").addEventListener("click", function () { $("clipFile").click(); });
@@ -1242,6 +1247,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 
   /* ---------- phone notifications (Web Push) ---------- */
   var pushState = "off";
+  var pushMode = "all";
+  function pushModeKey() { return "chat-push-mode:" + base; }
   function iosNeedsInstall() {
     var nav = navigator.userAgent || "";
     var ios = /iPhone|iPad|iPod/i.test(nav) || (/Macintosh/.test(nav) && navigator.maxTouchPoints > 1);
@@ -1253,7 +1260,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function paintPush() {
     var btns = document.querySelectorAll(".pushBtn");
     var show = pushSupported() || iosNeedsInstall();
-    var label = { off: "Notifications off", on: "Notifications on", blocked: "Notifications blocked", install: "Notifications - setup" }[pushState] || "Notifications";
+    var label = { off: "Notifications off", on: pushMode === "mentions" ? "Mentions only" : "Notifications on", blocked: "Notifications blocked", install: "Notifications - setup" }[pushState] || "Notifications";
     Array.prototype.forEach.call(btns, function (b) {
       b.hidden = !show;
       b.classList.toggle("on", pushState === "on");
@@ -1282,23 +1289,35 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         try {
           var sr = await fetch(base + "/push/status?endpoint=" + encodeURIComponent(sub.endpoint), { headers: hdrs() });
           var sd = await sr.json();
-          if (!sd.registered) await fetch(base + "/push/subscribe", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ subscription: sub.toJSON() }) });
+          if (sd.registered) pushMode = sd.mode || "all";
+          else {
+            var savedMode = "all";
+            try { savedMode = localStorage.getItem(pushModeKey()) === "mentions" ? "mentions" : "all"; } catch (e) {}
+            pushMode = savedMode;
+            await fetch(base + "/push/subscribe", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ subscription: sub.toJSON(), mode: savedMode }) });
+          }
         } catch (e) {}
       }
       pushState = sub ? "on" : "off";
     } catch (e) { pushState = "off"; }
     paintPush();
   }
-  async function pushOn() {
+  async function pushOn(mode) {
+    mode = mode === "mentions" ? "mentions" : "all";
     var perm = await Notification.requestPermission();
     if (perm !== "granted") { paintPushState(); if (perm === "denied") toast("Notifications are blocked for this site in your browser settings.", true); return; }
     var reg = await navigator.serviceWorker.ready;
-    var kr = await fetch("/api/push/key");
-    var kd = await kr.json();
-    var sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(kd.key) });
-    var r = await fetch(base + "/push/subscribe", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ subscription: sub.toJSON() }) });
+    var sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      var kr = await fetch("/api/push/key");
+      var kd = await kr.json();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(kd.key) });
+    }
+    var r = await fetch(base + "/push/subscribe", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ subscription: sub.toJSON(), mode: mode }) });
     if (!r.ok) throw new Error("subscribe failed (" + r.status + ")");
-    toast("Notifications on for this device.");
+    pushMode = mode;
+    try { localStorage.setItem(pushModeKey(), mode); } catch (e) {}
+    toast(mode === "mentions" ? "Mentions only - you'll be buzzed when someone @-mentions you." : "Notifications on for this device.");
     paintPushState();
   }
   async function pushOff() {
@@ -1311,14 +1330,44 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     toast("Notifications off for this device.");
     paintPushState();
   }
+  var pushMenu = document.createElement("div");
+  pushMenu.className = "pushMenu";
+  pushMenu.hidden = true;
+  pushMenu.innerHTML = '<button type="button" data-mode="all">Every message</button><button type="button" data-mode="mentions">@Mentions only</button><button type="button" data-mode="off">Off</button>';
+  document.body.appendChild(pushMenu);
+  function closePushMenu() { pushMenu.hidden = true; }
+  function openPushMenu(anchor) {
+    Array.prototype.forEach.call(pushMenu.querySelectorAll("button"), function (x) {
+      var cur = (x.dataset.mode === "off" && pushState !== "on") || (pushState === "on" && x.dataset.mode === pushMode);
+      x.classList.toggle("cur", cur);
+    });
+    pushMenu.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var w = pushMenu.offsetWidth, h = pushMenu.offsetHeight;
+    var left = Math.max(6, Math.min(r.left, window.innerWidth - w - 6));
+    var top = r.top - h - 6;
+    if (top < 6) top = r.bottom + 6;
+    pushMenu.style.left = left + "px";
+    pushMenu.style.top = top + "px";
+  }
+  pushMenu.addEventListener("click", async function (e) {
+    var x = e.target.closest ? e.target.closest("button[data-mode]") : null;
+    if (!x) return;
+    closePushMenu();
+    try {
+      if (x.dataset.mode === "off") { if (pushState === "on") await pushOff(); }
+      else await pushOn(x.dataset.mode);
+    } catch (err) { toast("Couldn't change notifications: " + err.message, true); }
+  });
+  document.addEventListener("click", function (e) {
+    if (!pushMenu.hidden && !pushMenu.contains(e.target) && !(e.target.closest && e.target.closest(".pushBtn"))) closePushMenu();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePushMenu(); });
   Array.prototype.forEach.call(document.querySelectorAll(".pushBtn"), function (b) {
-    b.addEventListener("click", async function () {
-      try {
-        if (pushState === "on") await pushOff();
-        else if (pushState === "blocked") toast("Notifications are blocked for this site - allow them in your browser or phone settings for this site.", true);
-        else if (pushState === "install" || (!pushSupported() && iosNeedsInstall())) toast("On iPhone, notifications need the installed app: tap Share, then Add to Home Screen. Open Agent Chat from the new icon and tap the bell there.", true);
-        else await pushOn();
-      } catch (e) { toast("Couldn't change notifications: " + e.message, true); }
+    b.addEventListener("click", function () {
+      if (pushState === "blocked") { toast("Notifications are blocked for this site - allow them in your browser or phone settings for this site.", true); return; }
+      if (pushState === "install" || (!pushSupported() && iosNeedsInstall())) { toast("On iPhone, notifications need the installed app: tap Share, then Add to Home Screen. Open Agent Chat from the new icon and tap the bell there.", true); return; }
+      if (pushMenu.hidden) openPushMenu(b); else closePushMenu();
     });
   });
   if ("serviceWorker" in navigator) {
