@@ -241,11 +241,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 #name { width: 150px; flex: none; }
 #name[readonly] { color: var(--muted); }
 .compose-box {
-  flex: 1; display: flex; align-items: flex-end; gap: 8px; border: 1px solid var(--line); border-radius: 12px;
-  background: var(--bg); padding: 4px 4px 4px 12px; min-width: 0;
+  flex: 1; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--bg); padding: 6px 8px 6px 12px; min-width: 0;
 }
+.compose-tools { display: flex; align-items: center; gap: 6px; }
+.tools-spacer { flex: 1; }
+.attach-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 0 4px; }
+.attach-row[hidden] { display: none; }
+.img-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: none; }
+.msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; }
 .compose-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-#text { flex: 1; border: 0; background: transparent; resize: none; padding: 6px 0; max-height: 40vh; box-shadow: none; min-width: 0; }
+#text { width: 100%; border: 0; background: transparent; resize: none; padding: 4px 0 2px; min-height: 46px; max-height: 40vh; box-shadow: none; min-width: 0; }
 .composer-meta { max-width: 880px; margin: 6px auto 0; font-size: 12px; color: var(--muted); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
 .composer-meta strong { color: var(--ink); font-weight: 600; }
 .hint { margin-left: auto; }
@@ -403,12 +409,20 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         <div class="composer-inner">
           <input id="name" placeholder="Your name" maxlength="40" aria-label="Your name">
           <div class="compose-box">
-            <textarea id="text" rows="1" placeholder="Write a message" maxlength="8000" aria-label="Message"></textarea>
-            <button id="clip" class="btn quiet icon-btn" type="button" aria-label="Attach an audio clip" title="Attach an audio clip"><svg class="i" viewBox="0 0 24 24"><path d="M9 18V6l10-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="15" r="2.5"/></svg></button>
-            <input id="clipFile" type="file" accept="audio/*" hidden>
-            <button id="rec" class="btn quiet icon-btn" type="button" aria-label="Record a voice message" title="Record a voice message" hidden><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></button>
-            <button id="mic" class="btn quiet icon-btn" type="button" aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" hidden><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
-            <button id="send" class="btn primary icon-btn" type="submit" aria-label="Send" title="Send"><svg class="i" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></svg></button>
+            <div class="attach-row" id="attachRow" hidden>
+              <span id="imgChip" class="clip-chip"><img id="imgThumb" class="img-thumb" alt=""><span id="imgName"></span> <button type="button" class="linkbtn" id="imgRemove">Remove</button></span>
+            </div>
+            <textarea id="text" rows="2" placeholder="Write a message" maxlength="8000" aria-label="Message"></textarea>
+            <div class="compose-tools">
+              <button id="imgBtn" class="btn quiet icon-btn" type="button" aria-label="Attach an image" title="Attach an image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-9.5 9.5"/></svg></button>
+              <input id="imgFile" type="file" accept="image/*" hidden>
+              <button id="clip" class="btn quiet icon-btn" type="button" aria-label="Attach an audio clip" title="Attach an audio clip"><svg class="i" viewBox="0 0 24 24"><path d="M9 18V6l10-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="15" r="2.5"/></svg></button>
+              <input id="clipFile" type="file" accept="audio/*" hidden>
+              <button id="rec" class="btn quiet icon-btn" type="button" aria-label="Record a voice message" title="Record a voice message" hidden><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></button>
+              <button id="mic" class="btn quiet icon-btn" type="button" aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" hidden><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+              <span class="tools-spacer"></span>
+              <button id="send" class="btn primary icon-btn" type="submit" aria-label="Send" title="Send"><svg class="i" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></svg></button>
+            </div>
           </div>
         </div>
         <div class="composer-meta">
@@ -936,6 +950,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     }
     var tx = el("div", "text"); tx.appendChild(md(m.text));
     body.appendChild(tx);
+    if (m.image && m.image.url) {
+      var iurl = m.image.url + (invite ? (m.image.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
+      var ia = el("a"); ia.href = iurl; ia.target = "_blank"; ia.rel = "noopener";
+      var im = el("img", "msg-img"); im.src = iurl; im.alt = "Attached image"; im.loading = "lazy";
+      ia.appendChild(im); body.appendChild(ia);
+    }
     if (m.audio && m.audio.url) {
       var au = el("audio"); au.controls = true; au.preload = "none";
       au.src = m.audio.url + (invite ? (m.audio.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
@@ -1065,6 +1085,26 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     rd.readAsDataURL(f);
   });
   $("clipRemove").addEventListener("click", function () { if (recorder) { recFinish(true); return; } pendingClip = null; $("clipChip").hidden = true; });
+  var pendingImage = null;
+  function paintImgChip() {
+    $("attachRow").hidden = !pendingImage;
+    if (pendingImage) { $("imgThumb").src = pendingImage.data; $("imgName").textContent = pendingImage.name; }
+  }
+  $("imgBtn").addEventListener("click", function () { $("imgFile").click(); });
+  $("imgFile").addEventListener("change", function () {
+    var f = $("imgFile").files && $("imgFile").files[0];
+    $("imgFile").value = "";
+    if (!f) return;
+    if (f.size > 5000000) { toast("Images can be up to 5 MB", true); return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      pendingImage = { data: String(rd.result), name: f.name + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB) - attaches to your next message" };
+      paintImgChip();
+    };
+    rd.onerror = function () { toast("Couldn't read that file", true); };
+    rd.readAsDataURL(f);
+  });
+  $("imgRemove").addEventListener("click", function () { pendingImage = null; paintImgChip(); });
   var recStream = null, recChunks = [], recMime = "", recTimer = null, recStarted = 0, recorder = null;
   var recRecog = null, recHeard = "", recRestarts = 0, recSRDead = true;
   var recBtn = $("rec");
@@ -1163,8 +1203,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     stopDictation(true);
     var from = me(), text = textEl.value;
     if (!from) { syncName(); nameEl.focus(); $("err").textContent = "Add your name first, so people know who's talking."; $("err").hidden = false; return; }
-    if (!text.trim() && !pendingClip) return;
-    if (!text.trim()) text = "🎙️ Audio message";
+    if (!text.trim() && !pendingClip && !pendingImage) return;
+    if (!text.trim()) text = pendingClip ? "🎙️ Audio message" : "🖼️ Image";
     store("chat-name", from);
     if (changingName) { changingName = false; syncName(); }
     $("send").disabled = true; $("err").hidden = true;
@@ -1172,12 +1212,14 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var payload = { from: from, text: text };
       if (pendingClip) payload.audio = pendingClip.data;
       if (pendingClip && pendingClip.transcript) payload.transcript = pendingClip.transcript;
+      if (pendingImage) payload.image = pendingImage.data;
       var r = await fetch(api, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify(payload) });
       if (await denial(r)) return;
       var d = await r.json();
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       textEl.value = ""; grow();
       if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
+      if (pendingImage) { pendingImage = null; paintImgChip(); }
       if (d.room_state) applyState(d.room_state);
       add(d);
       list.scrollTop = list.scrollHeight;

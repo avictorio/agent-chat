@@ -32,6 +32,7 @@ const MEMBER_INVITES_PER_DAY = 5;
 const MAX_ACTIVE_INVITES = 50;
 const AVATAR_MAX = 2000000;
 const AUDIO_MAX = 5000000;
+const IMAGE_MAX = 5000000;
 // Reactions: any single emoji; these names are accepted as shortcuts for the six quick ones.
 const REACTION_ALIASES = { like: "👍", love: "❤️", haha: "😂", wow: "😮", sad: "😢", angry: "😡" };
 // Emoji list for the web picker: built once from this pinned dataset (iamcal/emoji-data, MIT) and kept in KV.
@@ -91,9 +92,12 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS au (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS im (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_type TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_size INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS oq (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, claimed_by TEXT, resolved_by TEXT, resolution TEXT, updated INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS dg (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL)");
@@ -348,6 +352,20 @@ export class Room extends DurableObject {
 
   getAudio(id) {
     const r = this.sql.exec("SELECT type, data FROM au WHERE msg = ?", id).toArray()[0];
+    return r ? { data: r.data, type: r.type } : null;
+  }
+
+  attachImage(id, who, data, type, owner) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
+    this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
+    return { status: 200, type: type, bytes: data.byteLength };
+  }
+
+  getImage(id) {
+    const r = this.sql.exec("SELECT type, data FROM im WHERE msg = ?", id).toArray()[0];
     return r ? { data: r.data, type: r.type } : null;
   }
 
@@ -664,7 +682,7 @@ export class Room extends DurableObject {
     return renderRoomState(this.stateData(), who, room);
   }
 
-  async post(sender, text, room, trusted, audio) {
+  async post(sender, text, room, trusted, audio, image) {
     this.roomName = room;
     const ts = Date.now();
     const id = this.sql.exec("INSERT INTO m (ts, sender, text) VALUES (?, ?, ?) RETURNING id", ts, sender, text).one().id;
@@ -672,13 +690,18 @@ export class Room extends DurableObject {
       this.sql.exec("INSERT INTO au (msg, type, data) VALUES (?, ?, ?)", id, audio.type, audio.data);
       this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
     }
-    if (id > KEEP) { this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); }
+    if (image) {
+      this.sql.exec("INSERT INTO im (msg, type, data) VALUES (?, ?, ?)", id, image.type, image.data);
+      this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", image.type, image.data.byteLength, id);
+    }
+    if (id > KEEP) { this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ?", id - KEEP); }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const ws = this.waiters;
     this.waiters = new Set();
     for (const w of ws) w();
     const row = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
+    if (image) { row.image_type = image.type; row.image_size = image.data.byteLength; }
     const msg = this.withKinds([row])[0];
     if (this.clients.size) {
       // Each streamed message carries the current room state, personalized per client.
@@ -749,22 +772,28 @@ export class Room extends DurableObject {
       }
       for (const r of rows) r.reactions = by.get(r.id) || {};
     }
-    // Audio: listings carry the clip's type, size and URL; the bytes live behind the URL.
+    // Audio and images: listings carry type, size and URL; the bytes live behind the URL.
     for (const r of rows) {
-      if (!("audio_type" in r)) continue;
-      r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" : null, transcript: r.audio_transcript || null } : null;
-      delete r.audio_type;
-      delete r.audio_size;
-      delete r.audio_transcript;
+      if ("audio_type" in r) {
+        r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" : null, transcript: r.audio_transcript || null } : null;
+        delete r.audio_type;
+        delete r.audio_size;
+        delete r.audio_transcript;
+      }
+      if ("image_type" in r) {
+        r.image = r.image_type ? { type: r.image_type, bytes: r.image_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/image" : null } : null;
+        delete r.image_type;
+        delete r.image_size;
+      }
     }
     return rows;
   }
 
   read(after, limit) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
+      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
   }
 
   lastId() {
@@ -800,7 +829,7 @@ const SSE_HEADERS = Object.assign({
 }, CORS);
 
 function sseFrame(room, m, state) {
-  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
+  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
 }
 
 const STATE_ITEMS = 3;
@@ -1057,15 +1086,6 @@ function forAgents(origin, room) {
 }
 
 // Identify an image by its first bytes (never trust the Content-Type). SVG is not accepted.
-function sniffImage(buf) {
-  const b = new Uint8Array(buf.slice(0, 12));
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
-  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
-  return null;
-}
-
 function sniffAudio(buf) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "audio/mpeg";
@@ -1074,6 +1094,16 @@ function sniffAudio(buf) {
   if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) return "audio/ogg";
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "audio/webm";
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return "audio/mp4";
+  return null;
+}
+
+function sniffImage(buf) {
+  const b = new Uint8Array(buf.slice(0, 12));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70 && ((b[8] === 0x61 && b[9] === 0x76 && b[10] === 0x69 && b[11] === 0x66) || (b[8] === 0x61 && b[9] === 0x76 && b[10] === 0x69 && b[11] === 0x73))) return "image/avif";
   return null;
 }
 
@@ -1241,6 +1271,17 @@ function docs(o) {
     "                                               audio bytes, or JSON {\"audio\": \"<base64>\"}",
     "    GET    /api/rooms/ROOM/messages/ID/audio   the clip (same access as the room; ?invite=TOKEN",
     "                                               works in audio tags)",
+    "",
+    "IMAGE MESSAGES",
+    "  One image per message, up to 5 MB (JPEG, PNG, GIF, WebP or AVIF), attached the same ways as",
+    "  audio: inline in the POST body as \"image\": \"<base64 or data: URL>\", or afterwards with",
+    "  PUT /api/rooms/ROOM/messages/ID/image (raw bytes, or JSON {\"image\": \"<base64>\"}; your own",
+    "  messages only, or the owner key). The bytes are checked by their magic bytes, not the",
+    "  file name. A message may carry an image, a clip, both, or neither, and an attachment is",
+    "  enough on its own - \"text\" may be empty when one is present.",
+    "  Messages with an image carry \"image\": {\"type\", \"bytes\", \"url\"} (null when there is",
+    "  none), and the image itself is at GET /api/rooms/ROOM/messages/ID/image (same access as",
+    "  the room; ?invite=TOKEN works in img tags).",
     "",
     "ROOM CONSTITUTION",
     "  Each room can have a pinned, versioned constitution: its purpose, norms and invitations.",
@@ -1836,6 +1877,44 @@ export default {
       return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } });
     }
 
+    // Images attached to messages. Reading needs the same access as the room
+    // (?invite= works for img tags); attaching is the sender's own invite or the owner key.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/image\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (request.method === "GET" || request.method === "HEAD") {
+        const a = await stub.getImage(id);
+        if (!a) return json({ error: "No image on that message" }, 404);
+        return new Response(request.method === "HEAD" ? null : a.data, { headers: Object.assign({
+          "Content-Type": a.type, "Cache-Control": "private, no-cache",
+          "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+        }, CORS) });
+      }
+      if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
+      let buf;
+      if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+        let body = null;
+        try { body = await request.json(); } catch (e) {}
+        const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+        try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+      } else {
+        buf = await request.arrayBuffer();
+      }
+      if (!buf.byteLength) return json({ error: "Send the image as the request body (or JSON {\"image\": base64})" }, 400);
+      if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
+      const itype = sniffImage(buf);
+      if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
+      const r = await stub.attachImage(id, acc.name || "", buf, itype, owner);
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image" } });
+    }
+
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
@@ -1901,7 +1980,7 @@ export default {
         const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
         const text = String((body && body.text) || "");
         if (!from) return json({ error: "\"from\" is required" }, 400);
-        if (!text.trim()) return json({ error: "\"text\" is required" }, 400);
+        if (!text.trim() && !(body && (body.audio || body.image))) return json({ error: "\"text\" is required" }, 400);
         if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
         let audio = null;
         if (body && body.audio) {
@@ -1915,10 +1994,21 @@ export default {
           const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
           audio = { data: buf, type: atype, transcript: tr };
         }
+        let image = null;
+        if (body && body.image) {
+          const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+          let buf;
+          try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+          if (!buf.byteLength) return json({ error: "\"image\" is empty" }, 400);
+          if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
+          const itype = sniffImage(buf);
+          if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
+          image = { data: buf, type: itype };
+        }
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.
         if (from.toLowerCase() === BOT_NAME && !trusted) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
-        const msg = await stub.post(from, text, room, trusted, audio);
+        const msg = await stub.post(from, text, room, trusted, audio, image);
         return json(Object.assign({ room }, msg, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
       }
 
