@@ -93,6 +93,7 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS au (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS oq (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, claimed_by TEXT, resolved_by TEXT, resolution TEXT, updated INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS dg (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL)");
@@ -335,12 +336,13 @@ export class Room extends DurableObject {
   }
 
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
-  attachAudio(id, who, data, type, owner) {
+  attachAudio(id, who, data, type, owner, transcript) {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
     this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
-    this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
+    if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
+    else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   }
 
@@ -668,7 +670,7 @@ export class Room extends DurableObject {
     const id = this.sql.exec("INSERT INTO m (ts, sender, text) VALUES (?, ?, ?) RETURNING id", ts, sender, text).one().id;
     if (audio) {
       this.sql.exec("INSERT INTO au (msg, type, data) VALUES (?, ?, ?)", id, audio.type, audio.data);
-      this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", audio.type, audio.data.byteLength, id);
+      this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
     }
     if (id > KEEP) { this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
@@ -676,7 +678,7 @@ export class Room extends DurableObject {
     this.waiters = new Set();
     for (const w of ws) w();
     const row = { id, ts, from: sender, text };
-    if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; }
+    if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
     const msg = this.withKinds([row])[0];
     if (this.clients.size) {
       // Each streamed message carries the current room state, personalized per client.
@@ -750,18 +752,19 @@ export class Room extends DurableObject {
     // Audio: listings carry the clip's type, size and URL; the bytes live behind the URL.
     for (const r of rows) {
       if (!("audio_type" in r)) continue;
-      r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" : null } : null;
+      r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" : null, transcript: r.audio_transcript || null } : null;
       delete r.audio_type;
       delete r.audio_size;
+      delete r.audio_transcript;
     }
     return rows;
   }
 
   read(after, limit) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
+      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
   }
 
   lastId() {
@@ -1228,7 +1231,11 @@ function docs(o) {
     "AUDIO MESSAGES",
     "  A message can carry one short audio clip, stored in the room with the message and played",
     "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 5 MB.",
-    "  Messages with a clip carry \"audio\": {\"type\", \"bytes\", \"url\"} (null when there is none).",
+    "  Messages with a clip carry \"audio\": {\"type\", \"bytes\", \"url\", \"transcript\"} (null when",
+    "  there is none). The transcript is the clip's words, supplied by the sender: recordings made",
+    "  in the web room fill it automatically where the browser supports speech recognition, and",
+    "  API posters should send \"transcript\" with the audio - a clip whose words travel with it",
+    "  reaches agents that would otherwise have to fetch and transcribe it themselves.",
     "    POST   /api/rooms/ROOM/messages            send {\"audio\": \"<base64 or data: URL>\"} with from/text",
     "    PUT    /api/rooms/ROOM/messages/ID/audio   attach to your own message (or the owner key): the",
     "                                               audio bytes, or JSON {\"audio\": \"<base64>\"}",
@@ -1810,12 +1817,13 @@ export default {
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
-      let buf;
+      let buf, putTranscript;
       if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
         let body = null;
         try { body = await request.json(); } catch (e) {}
         const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
         try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+        if (body && body.transcript !== undefined) putTranscript = body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
       } else {
         buf = await request.arrayBuffer();
       }
@@ -1823,7 +1831,7 @@ export default {
       if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
-      const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner);
+      const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } });
     }
@@ -1904,7 +1912,8 @@ export default {
           if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
           const atype = sniffAudio(buf);
           if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
-          audio = { data: buf, type: atype };
+          const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
+          audio = { data: buf, type: atype, transcript: tr };
         }
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.

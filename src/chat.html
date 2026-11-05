@@ -1066,6 +1066,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   });
   $("clipRemove").addEventListener("click", function () { if (recorder) { recFinish(true); return; } pendingClip = null; $("clipChip").hidden = true; });
   var recStream = null, recChunks = [], recMime = "", recTimer = null, recStarted = 0, recorder = null;
+  var recRecog = null, recHeard = "", recRestarts = 0, recSRDead = true;
   var recBtn = $("rec");
   function recSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
   if (recSupported()) recBtn.hidden = false;
@@ -1076,8 +1077,41 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     recBtn.classList.remove("recording"); recBtn.title = "Record a voice message"; recorder = null;
     if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); recStream = null; }
   }
+  // Live words for the recording: a speech-recognition session runs alongside the recorder,
+  // collecting final results only. Best-effort - where recognition is unavailable or blocked,
+  // the clip simply carries no transcript. Restarts while recording (phrase-mode browsers end
+  // sessions at pauses), with a tail check so a restarted session repeating the last phrase
+  // doesn't double it.
+  function recSRStart() {
+    if (!SR || recRecog || recSRDead) return;
+    try {
+      var r = new SR();
+      r.lang = navigator.language || "en-US"; r.continuous = !PHRASE_MODE; r.interimResults = false;
+      r.onresult = function (e) {
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          if (!e.results[i].isFinal) continue;
+          var t = (e.results[i][0].transcript || "").replace(/\s+/g, " ").trim();
+          if (!t) continue;
+          if (recHeard && recHeard.slice(-t.length) === t) continue;
+          recHeard = (recHeard ? recHeard + " " : "") + t;
+        }
+      };
+      r.onerror = function (e) { if (e.error === "not-allowed" || e.error === "service-not-allowed") recSRDead = true; };
+      r.onend = function () {
+        if (recRecog === r) recRecog = null;
+        if (recorder && !recSRDead && recRestarts < 10) { recRestarts++; recSRStart(); }
+      };
+      r.start();
+      recRecog = r;
+    } catch (err) {}
+  }
+  function recSRStop() {
+    recSRDead = true;
+    if (recRecog) { var r = recRecog; recRecog = null; try { r.stop(); } catch (e) {} }
+  }
   function recFinish(discard) {
     if (!recorder) return;
+    recSRStop();
     var keep = !discard;
     recorder.onstop = function () {
       var blob = new Blob(recChunks, { type: recMime || "audio/webm" });
@@ -1088,7 +1122,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var rd = new FileReader();
       rd.onload = function () {
         var ext = blob.type.indexOf("mp4") >= 0 ? "m4a" : (blob.type.indexOf("ogg") >= 0 ? "ogg" : "webm");
-        pendingClip = { data: String(rd.result), name: "voice-message." + ext };
+        var heard = recHeard.replace(/\s+/g, " ").trim();
+        pendingClip = { data: String(rd.result), name: "voice-message." + ext, transcript: heard || null };
+        if (heard && !textEl.value.trim()) { textEl.value = heard; grow(); }
         $("clipName").textContent = "🎙 Voice message (" + secs + ", " + Math.max(1, Math.round(blob.size / 1024)) + " KB) - attaches to your next message";
         $("clipChip").hidden = false;
       };
@@ -1100,6 +1136,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   recBtn.addEventListener("click", async function () {
     if (recorder) { recFinish(false); return; }
     if (pendingClip) { toast("A clip is already attached - remove it first, or send it", true); return; }
+    stopDictation(true);
     try { recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch (err) { toast("Microphone isn't available: " + err.message, true); return; }
     recChunks = []; recMime = "";
@@ -1115,6 +1152,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     recorder.ondataavailable = function (e) { if (e.data && e.data.size) recChunks.push(e.data); };
     recorder.start(250);
     recStarted = Date.now();
+    recHeard = ""; recRestarts = 0; recSRDead = false; recSRStart();
     recBtn.classList.add("recording"); recBtn.title = "Stop recording";
     $("clipName").textContent = "● Recording… 0:00 - tap the record button again to stop";
     $("clipChip").hidden = false;
@@ -1133,6 +1171,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     try {
       var payload = { from: from, text: text };
       if (pendingClip) payload.audio = pendingClip.data;
+      if (pendingClip && pendingClip.transcript) payload.transcript = pendingClip.transcript;
       var r = await fetch(api, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify(payload) });
       if (await denial(r)) return;
       var d = await r.json();
