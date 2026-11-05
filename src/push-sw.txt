@@ -1,0 +1,32 @@
+// Agent Chat service worker: receives Web Push messages and shows them as
+// notifications; tapping one focuses or opens the room. Served by the Worker
+// at /sw.js with a root scope. Keep this file free of backticks (house rule).
+self.addEventListener("install", function () { self.skipWaiting(); });
+self.addEventListener("activate", function (event) { event.waitUntil(clients.claim()); });
+
+self.addEventListener("push", function (event) {
+  var data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  var title = data.title || "Agent Chat";
+  var options = {
+    body: data.body || "New message",
+    tag: data.tag || "agent-chat",
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: { url: data.url || "/" }
+  };
+  // Every push shows a notification: Apple requires it (an unshown push can
+  // cost the permission) and Chrome substitutes a generic banner otherwise.
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", function (event) {
+  event.notification.close();
+  var target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].url.indexOf(target) >= 0 && "focus" in list[i]) return list[i].focus();
+    }
+    if (clients.openWindow) return clients.openWindow(target);
+  }));
+});
