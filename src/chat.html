@@ -1023,6 +1023,22 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     for (var i = 0; i < arr.length; i++) msgsEl.appendChild(msgNode(arr[i], arr[i - 1]));
   }
   function atBottom() { return list.scrollHeight - list.scrollTop - list.clientHeight < 80; }
+  var settleRO = null, settleTimer = 0;
+  function endSettle() {
+    if (settleRO) { settleRO.disconnect(); settleRO = null; }
+    if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
+  }
+  function beginSettle(ms) {
+    endSettle();
+    if (!window.ResizeObserver) return;
+    var until = Date.now() + (ms || 5000);
+    settleRO = new ResizeObserver(function () {
+      if (Date.now() > until) { endSettle(); return; }
+      list.scrollTop = list.scrollHeight;
+    });
+    settleRO.observe(msgsEl);
+    settleTimer = setTimeout(endSettle, (ms || 5000) + 100);
+  }
   function add(m) {
     if (!m || seen[m.id]) return;
     seen[m.id] = 1;
@@ -1041,6 +1057,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     else if (current === "chat") $("jump").hidden = false;
   }
   list.addEventListener("scroll", function () { if (atBottom()) $("jump").hidden = true; });
+  list.addEventListener("wheel", endSettle, { passive: true });
+  list.addEventListener("touchmove", endSettle, { passive: true });
   $("jump").addEventListener("click", function () { list.scrollTop = list.scrollHeight; $("jump").hidden = true; });
 
   var streamUrl = base + "/stream";
@@ -1090,6 +1108,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         last = d.last_id;
         if (!arr.length) renderAll();
         list.scrollTop = list.scrollHeight;
+        beginSettle();
       } catch (e) {
         status("reconnecting");
         await sleep(3000);
