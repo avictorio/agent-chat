@@ -187,6 +187,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .speak svg { width: 15px; height: 15px; }
 .speak:hover { color: var(--ink); border-color: var(--muted); }
 .speak.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.pushBtn.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { #mic.on { animation: none; } }
 .msg.cont { padding-top: 1px; padding-bottom: 1px; }
 .gutter { width: 36px; flex: none; }
@@ -1271,8 +1272,19 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (!pushSupported()) { pushState = iosNeedsInstall() ? "install" : "off"; paintPush(); return; }
     if (Notification.permission === "denied") { pushState = "blocked"; paintPush(); return; }
     try {
-      var reg = await navigator.serviceWorker.getRegistration("/");
+      var reg = await navigator.serviceWorker.ready;
       var sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        // The bell may only say "on" when pushes will actually arrive: check the
+        // room still holds this subscription, and quietly re-register if it lost
+        // it (storage reset, pruned endpoint) - the subscription itself is the
+        // permission, so no new prompt is needed.
+        try {
+          var sr = await fetch(base + "/push/status?endpoint=" + encodeURIComponent(sub.endpoint), { headers: hdrs() });
+          var sd = await sr.json();
+          if (!sd.registered) await fetch(base + "/push/subscribe", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ subscription: sub.toJSON() }) });
+        } catch (e) {}
+      }
       pushState = sub ? "on" : "off";
     } catch (e) { pushState = "off"; }
     paintPush();
@@ -1312,6 +1324,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(function () {});
     paintPushState();
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) paintPushState(); });
   } else if (iosNeedsInstall()) { pushState = "install"; paintPush(); }
 
   /* ---------- reactions ---------- */
