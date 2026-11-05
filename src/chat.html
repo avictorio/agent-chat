@@ -193,6 +193,18 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .pushMenu button:hover { background: var(--hover); }
 .pushMenu button.cur { color: var(--accent); font-weight: 700; }
 .pushMenu button.cur::after { content: "\2713"; margin-left: auto; }
+.mention { color: var(--accent); font-weight: 600; }
+.textWrap { position: relative; }
+.hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.hlInner { padding: 4px 0 2px; font-size: 14px; line-height: 1.3; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink); }
+.hlInner .mn { color: var(--accent); font-weight: 600; }
+#text { position: relative; color: transparent; caret-color: var(--ink); }
+#text::placeholder { color: var(--muted); opacity: 1; }
+#text::selection { background: var(--accent-soft); }
+.mentionMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); padding: 4px; min-width: 190px; max-width: 260px; }
+.mentionMenu button { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; background: none; border: none; padding: 7px 10px; border-radius: 7px; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.mentionMenu button.cur { background: var(--accent-soft); }
+.mentionMenu .mmKind { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { #mic.on { animation: none; } }
 .msg.cont { padding-top: 1px; padding-bottom: 1px; }
 .gutter { width: 36px; flex: none; }
@@ -427,7 +439,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
             <div class="attach-row" id="attachRow" hidden>
               <span id="imgChip" class="clip-chip"><img id="imgThumb" class="img-thumb" alt=""><span id="imgName"></span> <button type="button" class="linkbtn" id="imgRemove">Remove</button></span>
             </div>
-            <textarea id="text" rows="2" placeholder="Write a message" maxlength="8000" aria-label="Message"></textarea>
+            <div class="textWrap"><div class="hl" aria-hidden="true"><div class="hlInner" id="hlInner"></div></div><textarea id="text" rows="2" placeholder="Write a message" maxlength="8000" aria-label="Message"></textarea></div>
             <div class="compose-tools">
               <button id="imgBtn" class="btn quiet icon-btn" type="button" aria-label="Attach an image" title="Attach an image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-9.5 9.5"/></svg></button>
               <input id="imgFile" type="file" accept="image/*" hidden>
@@ -683,6 +695,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   }
   function parseDay(s) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
   function daysAway(s) { var d = parseDay(s); return d ? Math.round((d.getTime() - startOfDay(new Date())) / DAY) : null; }
+  var memberNames = ["claude"];
+  var memberSet = { claude: true };
+  var memberKinds = { claude: "agent" };
   function linkify(node, text) {
     var re = /https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g, last = 0, m;
     while ((m = re.exec(text))) {
@@ -695,11 +710,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   }
   /* Markdown: a safe subset rendered into DOM nodes (text is never parsed as HTML). */
   function safeUrl(u) { return /^(https?:\/\/|mailto:)/i.test(u) ? u : null; }
-  var INLINE = /\\([\\`*_{}\[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])/g;
+  var INLINE = /\\([\\`*_{}\[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]{1,40})/g;
   function inline(parent, s) {
     var re = new RegExp(INLINE.source, "g"), last = 0, m;
     while ((m = re.exec(s))) {
-      var start = m.index + (m[10] !== undefined ? m[10].length : 0);
+      var start = m.index + (m[10] !== undefined ? m[10].length : (m[12] !== undefined ? m[12].length : 0));
       if (start > last) parent.appendChild(document.createTextNode(s.slice(last, start)));
       if (m[1] !== undefined) parent.appendChild(document.createTextNode(m[1]));
       else if (m[2] !== undefined) parent.appendChild(el("code", "", m[2]));
@@ -711,6 +726,10 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       else if (m[5] !== undefined) { var a2 = el("a", "", m[5]); a2.href = m[5]; a2.target = "_blank"; a2.rel = "noopener noreferrer"; parent.appendChild(a2); }
       else if (m[6] !== undefined || m[7] !== undefined) { var b = el("strong"); inline(b, m[6] !== undefined ? m[6] : m[7]); parent.appendChild(b); }
       else if (m[8] !== undefined) { var d = el("del"); inline(d, m[8]); parent.appendChild(d); }
+      else if (m[13] !== undefined) {
+        if (memberSet[m[13].toLowerCase()]) parent.appendChild(el("span", "mention", "@" + m[13]));
+        else parent.appendChild(document.createTextNode("@" + m[13]));
+      }
       else { var em = el("em"); inline(em, m[9] !== undefined ? m[9] : m[11]); parent.appendChild(em); }
       last = re.lastIndex;
     }
@@ -1078,7 +1097,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     loadAll();
   }
 
-  function grow() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight + 2, window.innerHeight * 0.4) + "px"; }
+  function grow() { textEl.style.height = "auto"; textEl.style.height = Math.min(textEl.scrollHeight + 2, window.innerHeight * 0.4) + "px"; syncHL(); }
   textEl.addEventListener("input", grow);
   textEl.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
@@ -1375,6 +1394,123 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     paintPushState();
     document.addEventListener("visibilitychange", function () { if (!document.hidden) paintPushState(); });
   } else if (iosNeedsInstall()) { pushState = "install"; paintPush(); }
+
+  /* ---------- mentions: highlight + autocomplete ---------- */
+  // The textarea's own text is transparent; a mirrored backdrop behind it paints
+  // the same words with member @mentions in accent, so what you type is what the
+  // room (and push) will treat as a mention.
+  var hlInner = $("hlInner");
+  function escHTML(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function mentionRegex() {
+    var alts = memberNames.slice().sort(function (a, b) { return b.length - a.length; }).map(function (n) { return n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); });
+    return new RegExp("(^|[^A-Za-z0-9_])@(" + alts.join("|") + ")(?![A-Za-z0-9_])", "gi");
+  }
+  function syncHL() {
+    if (!hlInner) return;
+    var text = textEl.value;
+    var re = mentionRegex(), out = "", last = 0, m;
+    while ((m = re.exec(text))) {
+      out += escHTML(text.slice(last, m.index)) + escHTML(m[1]) + '<span class="mn">@' + escHTML(m[2]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    out += escHTML(text.slice(last));
+    if (text.endsWith("\n")) out += " ";
+    hlInner.innerHTML = out;
+    hlInner.style.transform = "translateY(" + (-textEl.scrollTop) + "px)";
+  }
+  textEl.addEventListener("scroll", syncHL);
+  window.addEventListener("resize", syncHL);
+
+  var mentionMenu = document.createElement("div");
+  mentionMenu.className = "mentionMenu";
+  mentionMenu.hidden = true;
+  document.body.appendChild(mentionMenu);
+  var mmItems = [], mmIndex = 0, mmStart = -1;
+  function mmClose() { mentionMenu.hidden = true; mmItems = []; }
+  function mmCandidates(q) {
+    q = (q || "").toLowerCase();
+    var starts = [], incl = [];
+    memberNames.forEach(function (n) {
+      var ln = n.toLowerCase();
+      if (!q || ln.indexOf(q) === 0) starts.push(n);
+      else if (ln.indexOf(q) >= 0) incl.push(n);
+    });
+    return starts.concat(incl).slice(0, 6);
+  }
+  function mmRender() {
+    mentionMenu.innerHTML = "";
+    mmItems.forEach(function (n, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = i === mmIndex ? "cur" : "";
+      var nm = document.createElement("span"); nm.textContent = "@" + n; b.appendChild(nm);
+      var kd = document.createElement("span"); kd.className = "mmKind"; kd.textContent = memberKinds[n.toLowerCase()] || ""; b.appendChild(kd);
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); mmPick(i); });
+      mentionMenu.appendChild(b);
+    });
+    var r = textEl.getBoundingClientRect();
+    mentionMenu.hidden = false;
+    mentionMenu.style.left = Math.max(6, Math.min(r.left + 4, window.innerWidth - 200)) + "px";
+    mentionMenu.style.bottom = (window.innerHeight - r.top + 6) + "px";
+  }
+  function mmUpdate() {
+    if (document.activeElement !== textEl) { mmClose(); return; }
+    var pos = textEl.selectionStart || 0;
+    var before = textEl.value.slice(0, pos);
+    var m = /(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]*)$/.exec(before);
+    if (!m) { mmClose(); return; }
+    var c = mmCandidates(m[2]);
+    if (!c.length) { mmClose(); return; }
+    mmItems = c; mmIndex = 0; mmStart = pos - m[2].length - 1;
+    mmRender();
+  }
+  function mmPick(i) {
+    var n = mmItems[i];
+    if (!n) return;
+    var pos = textEl.selectionStart || 0;
+    var v = textEl.value;
+    textEl.value = v.slice(0, mmStart) + "@" + n + " " + v.slice(pos);
+    var np = mmStart + n.length + 2;
+    textEl.setSelectionRange(np, np);
+    mmClose();
+    grow();
+    textEl.focus();
+  }
+  textEl.addEventListener("input", mmUpdate);
+  textEl.addEventListener("click", mmUpdate);
+  textEl.addEventListener("blur", function () { setTimeout(mmClose, 150); });
+  textEl.addEventListener("keydown", function (e) {
+    if (mentionMenu.hidden || !mmItems.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault(); e.stopPropagation();
+      mmIndex = (mmIndex + (e.key === "ArrowDown" ? 1 : mmItems.length - 1)) % mmItems.length;
+      mmRender();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault(); e.stopPropagation();
+      mmPick(mmIndex);
+    } else if (e.key === "Escape") {
+      e.preventDefault(); e.stopPropagation();
+      mmClose();
+    }
+  }, true);
+
+  async function loadMemberNames() {
+    try {
+      var d = await call("/members");
+      var names = [], set = {}, kinds = {};
+      (d.members || []).forEach(function (x) {
+        if (x.status === "revoked") return;
+        names.push(x.name);
+        set[x.name.toLowerCase()] = true;
+        kinds[x.name.toLowerCase()] = x.kind;
+      });
+      if (!set.claude) { names.push("claude"); set.claude = true; kinds.claude = "agent"; }
+      names.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+      memberNames = names; memberSet = set; memberKinds = kinds;
+      syncHL();
+    } catch (e) {}
+  }
+  loadMemberNames();
 
   /* ---------- reactions ---------- */
   // Facebook-style: one reaction per person per message, any emoji. Hold a message (or use the smiley) to choose;
