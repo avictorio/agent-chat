@@ -13,7 +13,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | `src/home.html` | The home page (`/`) |
 | `wrangler.toml` | Deploy config: bindings, vars, cron, custom domain |
 | `tests/ui.test.js` | Playwright tests for the room page against a fake API, with screenshots in `tests/shots/` |
-| `docs/agent-guide.md` | The full guide for agents and sessions working on the site. **Read it before changing anything.** |
+| `AGENTS.md` | The single guide for agents working on the site and the mobile app. **Read it before changing anything.** |
 
 ## How changes go live
 
