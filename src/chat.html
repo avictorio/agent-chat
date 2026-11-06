@@ -1190,11 +1190,68 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     rd.onerror = function () { toast("Couldn't read that file", true); };
     rd.readAsDataURL(f);
   });
-  async function uploadBigVideo(id, file) {
+
+  async function fileFingerprint(file) {
+    try {
+      var head = await file.slice(0, 65536).arrayBuffer();
+      var tail = await file.slice(Math.max(0, file.size - 65536)).arrayBuffer();
+      var buf = new Uint8Array(head.byteLength + tail.byteLength);
+      buf.set(new Uint8Array(head), 0);
+      buf.set(new Uint8Array(tail), head.byteLength);
+      var digest = await crypto.subtle.digest("SHA-256", buf);
+      var hex = Array.from(new Uint8Array(digest)).map(function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+      return hex + "-" + file.size;
+    } catch (e) { return null; }
+  }
+
+  async function sendBigVideo(from, text, file) {
+    var fp = await fileFingerprint(file);
+    var draftKey = "chat-draft:" + room + ":" + (fp || file.name);
+    var id = null;
+    try {
+      var saved = JSON.parse(localStorage.getItem(draftKey) || "null");
+      if (saved && saved.id) {
+        var chk = await fetch(api + "/" + saved.id + "/video/status", { headers: hdrs() });
+        if (chk.ok) { var cj = await chk.json(); if (cj.uploading) id = saved.id; }
+      }
+    } catch (e) {}
+    if (!id && fp) {
+      try {
+        var rr = await fetch(base + "/video/resume", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ size: file.size, fingerprint: fp }) });
+        if (rr.ok) { var rj = await rr.json(); if (rj.found) id = rj.id; }
+      } catch (e) {}
+    }
+    if (!id) {
+      var pr = await fetch(api, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ from: from, text: text, draft: true }) });
+      if (await denial(pr)) throw new Error("Posting was denied");
+      var pd = await pr.json();
+      if (!pr.ok) throw new Error(pd.error || ("HTTP " + pr.status));
+      id = pd.id;
+      try { localStorage.setItem(draftKey, JSON.stringify({ id: id })); } catch (e) {}
+    }
+    await uploadBigVideo(id, file, fp);
+    var fr = await fetch(api + "/" + id + "/publish", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ text: text }) });
+    if (await denial(fr)) throw new Error("Publishing was denied");
+    if (fr.ok) {
+      var fj = await fr.json();
+      try { localStorage.removeItem(draftKey); } catch (e) {}
+      return fj;
+    }
+    // A room still running the previous deploy's code has drafts neither in its post
+    // path nor a publish method: the message went live the old way at create time.
+    // Verify it is there with its video and show it; anything else is a real failure.
+    var lr = await fetch(api + "?after=" + (id - 1) + "&limit=1", { cache: "no-store", headers: hdrs() });
+    var ld = await lr.json().catch(function () { return {}; });
+    var got = (ld.messages || []).filter(function (x) { return x.id === id; })[0];
+    if (got && got.video) { try { localStorage.removeItem(draftKey); } catch (e) {} return got; }
+    throw new Error("Publish failed");
+  }
+
+  async function uploadBigVideo(id, file, fp) {
     var wake = null;
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request("screen"); } catch (e) {}
     try {
-      var sr = await fetch(api + "/" + id + "/video/start", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ type: file.type || "video/mp4", size: file.size }) });
+      var sr = await fetch(api + "/" + id + "/video/start", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ type: file.type || "video/mp4", size: file.size, fingerprint: fp || undefined }) });
       if (await denial(sr)) throw new Error("Upload was denied");
       var sd = await sr.json();
       if (!sr.ok) throw new Error(sd.error || ("HTTP " + sr.status));
@@ -1350,6 +1407,26 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     $("send").disabled = true; $("err").hidden = true;
     try {
       var payload = { from: from, text: text };
+      // A big video goes up first, under a draft: the message does not officially
+      // post until the upload completes and the draft is published. If the upload
+      // dies (tab frozen, app switched, network drop), nothing half-posts, and
+      // re-attaching the same file resumes from the parts the server already has.
+      if (pendingVideo && pendingVideo.big) {
+        var bigFile = pendingVideo.file, bigText = text, bigFrom = from;
+        textEl.value = ""; grow();
+        if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
+        if (pendingImage) { pendingImage = null; paintImgChip(); }
+        try {
+          var live = await sendBigVideo(bigFrom, bigText, bigFile);
+          pendingVideo = null; paintVidChip();
+          add(live);
+          if (live.room_state) applyState(live.room_state);
+          list.scrollTop = list.scrollHeight;
+        } catch (uerr) {
+          toast("Video upload interrupted: " + uerr.message + " - re-attach the same file to resume", true);
+        }
+        return;
+      }
       if (pendingClip) payload.audio = pendingClip.data;
       if (pendingClip && pendingClip.transcript) payload.transcript = pendingClip.transcript;
       if (pendingImage) payload.image = pendingImage.data;
@@ -1358,29 +1435,6 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (await denial(r)) return;
       var d = await r.json();
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
-      if (pendingVideo && pendingVideo.big) {
-        var bigFile = pendingVideo.file;
-        textEl.value = ""; grow();
-        if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
-        if (pendingImage) { pendingImage = null; paintImgChip(); }
-        try {
-          await uploadBigVideo(d.id, bigFile);
-          pendingVideo = null; paintVidChip();
-          var got = null;
-          try {
-            var lr = await fetch(api + "?after=" + (d.id - 1) + "&limit=1", { cache: "no-store", headers: hdrs() });
-            var ld = await lr.json();
-            got = (ld.messages || []).filter(function (x) { return x.id === d.id; })[0] || null;
-          } catch (e) {}
-          add(got || d);
-        } catch (uerr) {
-          pendingVideo = null; paintVidChip();
-          add(d);
-          toast("Video upload failed: " + uerr.message, true);
-        }
-        if (d.room_state) applyState(d.room_state);
-        return;
-      }
       textEl.value = ""; grow();
       if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
       if (pendingImage) { pendingImage = null; paintImgChip(); }

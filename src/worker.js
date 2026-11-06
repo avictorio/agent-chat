@@ -107,6 +107,8 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
@@ -188,7 +190,7 @@ export class Room extends DurableObject {
     if (!(await quota.take(parseInt(env.BOT_DAILY_CAP, 10) || 100))) { await this.botLog(room, "skipped: daily cap reached"); return; }
     this.sql.exec("INSERT INTO b (ts) VALUES (?)", Date.now());
 
-    const hist = this.sql.exec('SELECT id, sender AS "from", text FROM m WHERE id <= ? ORDER BY id DESC LIMIT 30', msg.id).toArray().reverse();
+    const hist = this.sql.exec('SELECT id, sender AS "from", text FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 30', msg.id).toArray().reverse();
     let transcript = hist.map((h) => "[" + h.id + "] " + h.from + ": " + h.text).join("\n\n");
     if (transcript.length > 40000) transcript = transcript.slice(-40000);
     const messages = [{
@@ -436,20 +438,44 @@ export class Room extends DurableObject {
   // ---- Chunked video upload: multipart straight into R2, for files past the
   // single-request size limit. The client sends VIDEO_PART-sized pieces; the upload
   // state (upload id, received parts) lives in the md row until finish or abort.
-  async beginVideoUpload(id, who, type, size, owner, room) {
+  async sweepDrafts() {
+    const cutoff = Date.now() - 86400000;
+    const stale = this.sql.exec("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ?", cutoff).toArray();
+    for (const d of stale) {
+      if (this.env && this.env.MEDIA) {
+        for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray()) {
+          if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {} }
+          if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
+        }
+      }
+      this.sql.exec("DELETE FROM mdp WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM md WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM au WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM im WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
+    }
+  }
+
+  async beginVideoUpload(id, who, type, size, owner, room, fp) {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 1 GB" };
+    await this.sweepDrafts();
     const key = this.mediaKey(room, id, "video");
-    const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    const prev = this.sql.exec("SELECT r2key, upload_id, size, fp FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
+    if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp)) {
+      // Same upload already in progress (a retry after an interruption): keep the
+      // parts the server already holds instead of restarting from zero.
+      return { status: 200, part_size: VIDEO_PART, parts: Math.ceil(size / VIDEO_PART), resumed: true };
+    }
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts) VALUES (?, 'video', ?, ?, ?, ?, '[]')", id, type, key, size, up.uploadId);
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp) VALUES (?, 'video', ?, ?, ?, ?, '[]', ?)", id, type, key, size, up.uploadId, fp || null);
     return { status: 200, part_size: VIDEO_PART, parts: Math.ceil(size / VIDEO_PART) };
   }
 
@@ -508,6 +534,17 @@ export class Room extends DurableObject {
     if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
     if (row && row.upload_id) { this.sql.exec("DELETE FROM mdp WHERE msg = ?", id); this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id); }
     return { status: 200 };
+  }
+
+  findResumableUpload(who, size, fp, owner) {
+    if (!fp || !size) return { status: 200, found: false };
+    const rows = this.sql.exec("SELECT md.msg AS msg, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.kind = 'video' AND md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0", size, fp).toArray();
+    for (const r of rows) {
+      if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
+      const st = this.videoUploadStatus(r.msg);
+      return { status: 200, found: true, id: r.msg, received: st.received };
+    }
+    return { status: 200, found: false };
   }
 
   videoUploadStatus(id) {
@@ -897,7 +934,7 @@ export class Room extends DurableObject {
       const digestClose = nextDigestClose(now);
       const digestsInWindow = this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
       const lockedNow = inv.length > 0 && !this.isOpen();
-      const recent = lockedNow ? this.sql.exec("SELECT id, sender, text FROM m ORDER BY id DESC LIMIT 20").toArray() : [];
+      const recent = lockedNow ? this.sql.exec("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray() : [];
       const fetched = lockedNow ? this.sql.exec("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase()) : [];
       return {
         locked: inv.length > 0 && !this.isOpen(),
@@ -927,10 +964,10 @@ export class Room extends DurableObject {
     return renderRoomState(this.stateData(), who, room);
   }
 
-  async post(sender, text, room, trusted, audio, image, video) {
+  async post(sender, text, room, trusted, audio, image, video, draft) {
     this.roomName = room;
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text) VALUES (?, ?, ?) RETURNING id", ts, sender, text).one().id;
+    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft) VALUES (?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null).one().id;
     if (audio) {
       await this.putMedia(id, "audio", audio.data, audio.type, room);
       this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
@@ -949,14 +986,22 @@ export class Room extends DurableObject {
       if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
     }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
-    const ws = this.waiters;
-    this.waiters = new Set();
-    for (const w of ws) w();
     const row = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
     if (image) { row.image_type = image.type; row.image_size = image.data.byteLength; }
     if (video) { row.video_type = video.type; row.video_size = video.data.byteLength; }
     const msg = this.withKinds([row])[0];
+    // A draft is stored but not announced: no stream frame, no push, no bot. It goes
+    // live only when publishMessage runs - that is what lets a long media upload
+    // finish before the message officially posts.
+    if (!draft) this.announce(msg, room, trusted);
+    return msg;
+  }
+
+  announce(msg, room, trusted) {
+    const ws = this.waiters;
+    this.waiters = new Set();
+    for (const w of ws) w();
     if (this.clients.size) {
       // Each streamed message carries the current room state, personalized per client.
       const data = this.stateData();
@@ -969,7 +1014,21 @@ export class Room extends DurableObject {
     }
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.botLog(room, "push error: " + String((e && e.message) || e))));
     this.maybeBot(msg, room, trusted);
-    return msg;
+  }
+
+  async publishMessage(id, who, owner, room, text) {
+    const r = this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
+    if (!r.draft) return { status: 409, error: "That message is already live" };
+    if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
+    this.sql.exec("UPDATE m SET draft = NULL WHERE id = ?", id);
+    const f = this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray()[0];
+    const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size };
+    const msg = this.withKinds([row])[0];
+    this.roomName = room;
+    this.announce(msg, room, owner);
+    return { status: 200, msg: msg };
   }
 
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
@@ -1051,9 +1110,9 @@ export class Room extends DurableObject {
 
   read(after, limit) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
+      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM m WHERE id > ? AND (draft IS NULL OR draft = 0) ORDER BY id LIMIT ?', after, limit).toArray());
   }
 
   lastId() {
@@ -1713,6 +1772,11 @@ function docs(o) {
     "  (or /abort). Parts may arrive in any order and can be retried. The finished video is",
     "  size- and magic-byte-checked before it is indexed. Messages with a video carry",
     "  \"video\": {\"type\", \"bytes\", \"url\"}; GET on the url honours Range.",
+    "  For a long upload, post the message with \"draft\": true first: a draft is invisible",
+    "  (no stream, no push) until POST /messages/ID/publish, so the message officially posts",
+    "  only once its media is complete. Interrupted uploads resume: include a \"fingerprint\"",
+    "  in the start body, then POST /video/resume {\"size\", \"fingerprint\"} returns your",
+    "  in-progress draft and the parts already received.",
     "",
     "PHONE NOTIFICATIONS (WEB PUSH)",
     "  Members can get a phone notification for new messages via Web Push. Serve",
@@ -2480,9 +2544,9 @@ export default {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (action === "start") {
         const body = await readBody(request);
-        const r = await stub.beginVideoUpload(id, acc.name || "", String((body && body.type) || ""), +((body && body.size) || 0), owner, room);
+        const r = await stub.beginVideoUpload(id, acc.name || "", String((body && body.type) || ""), +((body && body.size) || 0), owner, room, body && body.fingerprint ? String(body.fingerprint) : null);
         if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, part_size: r.part_size, parts: r.parts });
+        return json({ room: room, id: id, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed });
       }
       if (action === "finish") {
         const r = await stub.finishVideoUpload(id, acc.name || "", owner);
@@ -2492,6 +2556,38 @@ export default {
       const r = await stub.abortVideoUpload(id, acc.name || "", owner);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json({ room: room, id: id, aborted: true });
+    }
+
+    // Publish a draft message (created with {"draft": true}, e.g. while its video
+    // uploaded): only now does it stream, push and reach the bot.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/publish\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      const body = await readBody(request);
+      const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? String(body.text) : undefined);
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
+    }
+
+    // Find one of your draft uploads that can resume: same file size + fingerprint
+    // as an interrupted attempt. Returns the draft message id and received parts.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/video\/resume\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      const body = await readBody(request);
+      const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner);
+      return json({ room: room, found: !!r.found, id: r.id || null, received: r.received || [] });
     }
 
     // Owner-only media migration: backfill legacy in-DB blobs to R2, then purge them
@@ -2575,7 +2671,9 @@ export default {
         if (!from) return json({ error: "\"from\" is required" }, 400);
         if (!text.trim() && !(body && (body.audio || body.image || body.video))) return json({ error: "\"text\" is required" }, 400);
         if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
-        let audio = null;
+        const draftWanted = !!(body && body.draft);
+      if (draftWanted && (body.audio || body.image || body.video)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
+      let audio = null;
         if (body && body.audio) {
           const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
           let buf;
@@ -2612,8 +2710,8 @@ export default {
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.
         if (from.toLowerCase() === BOT_NAME && !trusted) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
-        const msg = await stub.post(from, text, room, trusted, audio, image, video);
-        return json(Object.assign({ room }, msg, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
+        const msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted);
+        return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
       }
 
       return json({ error: "Method not allowed" }, 405);
