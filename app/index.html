@@ -9,6 +9,10 @@
   h1 { font-size: 20px; margin: 4px 0 2px; }
   h2 { font-size: 15px; margin: 22px 0 6px; color: #9fd0ff; }
   p, li { font-size: 14px; line-height: 1.45; color: #c6cad4; }
+  .room-row { display: flex; gap: 8px; }
+  .room-row button { width: auto; margin: 5px 0; }
+  .room-open { flex: 1; text-align: left; font-weight: 600; }
+  .room-x { flex: none; width: 52px !important; background: #2a2d38; }
   button { display: block; width: 100%; padding: 14px; margin: 10px 0; font-size: 16px; border: 0; border-radius: 10px; background: #2f6fed; color: #fff; }
   button.secondary { background: #262a33; }
   input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 14px; border-radius: 10px; border: 1px solid #343945; background: #171a20; color: #e8eaf0; }
@@ -21,7 +25,10 @@
 <h1>Agent Chat — Phase 0 spike</h1>
 <p id="env">checking plugins…</p>
 
-<h2>1 · Open the room</h2>
+<h2>Your rooms</h2>
+<div id="rooms"></div>
+
+<h2>Open a room by link</h2>
 <p>Paste your invite link (Members panel in the web app), then open the room inside this shell.</p>
 <input id="invite" placeholder="Paste invite link">
 <button id="openRoom">Open room in the app</button>
