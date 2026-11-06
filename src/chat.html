@@ -161,6 +161,14 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .rx-bar .rx-plus { font-size: 0; color: var(--muted); background: var(--hover); width: 34px; height: 34px; margin: 0 2px; display: grid; place-items: center; }
 .rx-bar .rx-plus svg { width: 18px; height: 18px; }
 .rx-bar .rx-plus:hover, .rx-bar .rx-plus:focus-visible { color: var(--ink); transform: none; }
+.rx-who {
+  position: fixed; z-index: 71; min-width: 148px; max-width: min(280px, calc(100vw - 16px)); padding: 10px 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); animation: rxpop 0.14s ease-out;
+}
+.rx-who-head { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.rx-who-head .e { font-size: 19px; }
+.rx-who-name { font-size: 14px; padding: 2px 0; }
+.rx-who-name.me { color: var(--accent); font-weight: 600; }
 .rx-picker {
   position: fixed; z-index: 71; width: min(352px, calc(100vw - 16px)); height: min(380px, calc(100vh - 32px)); display: flex; flex-direction: column;
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.25); animation: rxpop 0.14s ease-out; overflow: hidden;
@@ -1745,7 +1753,26 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       c.appendChild(el("span", "e", k)); c.appendChild(el("span", "", String(who.length)));
       c.title = rxLabel(k) + ": " + who.join(", ");
       c.setAttribute("aria-label", rxLabel(k) + " from " + who.join(", ") + (mine === k ? ". Click to remove yours." : ". Click to react the same way."));
+      c.dataset.emoji = k;
       c.addEventListener("click", function (e) { e.stopPropagation(); react(m.id, k); });
+      // Hold a chip to see who reacted; the click that follows the hold is swallowed
+      // by the same document-level guard the message hold uses, so it won't toggle.
+      var chipTimer = null, chipStart = null;
+      c.addEventListener("pointerdown", function (e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        chipStart = { x: e.clientX, y: e.clientY };
+        clearTimeout(chipTimer);
+        chipTimer = setTimeout(function () {
+          chipTimer = null;
+          if (!c.isConnected) return;
+          swallowClick = true;
+          try { window.getSelection().removeAllRanges(); } catch (err) {}
+          if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) {} }
+          openWho(m.id, k, c);
+        }, 450);
+      });
+      c.addEventListener("pointermove", function (e) { if (chipTimer && chipStart && Math.abs(e.clientX - chipStart.x) + Math.abs(e.clientY - chipStart.y) > 10) { clearTimeout(chipTimer); chipTimer = null; } });
+      ["pointerup", "pointercancel", "pointerleave"].forEach(function (t) { c.addEventListener(t, function () { clearTimeout(chipTimer); chipTimer = null; }); });
       box.appendChild(c);
     });
   }
@@ -1781,10 +1808,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function recents() { try { var a = JSON.parse(store(RECENT_KEY) || "[]"); return Array.isArray(a) ? a.slice(0, 24) : []; } catch (e) { return []; } }
   function addRecent(e) { var a = recents().filter(function (x) { return x !== e; }); a.unshift(e); store(RECENT_KEY, JSON.stringify(a.slice(0, 24))); }
 
-  var rxBar = null, rxRow = null, rxPicker = null, emojiData = null;
+  var rxBar = null, rxRow = null, rxPicker = null, rxWho = null, emojiData = null;
   function closeReactions() {
     if (rxBar) { rxBar.remove(); rxBar = null; }
     if (rxPicker) { rxPicker.remove(); rxPicker = null; }
+    if (rxWho) { rxWho.remove(); rxWho = null; }
     if (rxRow) { rxRow.classList.remove("rx-target"); rxRow = null; }
   }
   function place(pop, row) {
@@ -1793,6 +1821,29 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     var top = rr.top - bh - 6; if (top < 8) top = Math.min(rr.bottom + 6, window.innerHeight - bh - 8);
     var left = Math.max(8, Math.min(rr.left + 40, window.innerWidth - bw - 8));
     pop.style.top = Math.max(8, top) + "px"; pop.style.left = left + "px";
+  }
+  // Who reacted with one emoji: hold a reaction chip (or right-click it).
+  function openWho(id, key, chip) {
+    closeReactions();
+    var m = byId(id); if (!m) return;
+    var who = ((m.reactions || {})[key] || []).slice();
+    if (!who.length) return;
+    var row = chip ? chip.closest(".msg") : null;
+    var pop = el("div", "rx-who"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Who reacted");
+    var head = el("div", "rx-who-head");
+    var label = rxLabel(key);
+    head.appendChild(el("span", "e", key));
+    head.appendChild(el("span", "", (label !== key ? label + " · " : "") + who.length));
+    pop.appendChild(head);
+    var n = me();
+    who.forEach(function (w) {
+      var mine = n && same(w, n);
+      pop.appendChild(el("div", "rx-who-name" + (mine ? " me" : ""), mine ? "You" : w));
+    });
+    document.body.appendChild(pop);
+    rxWho = pop;
+    if (row) { rxRow = row; row.classList.add("rx-target"); }
+    place(pop, row || chip);
   }
   function openReactions(id, row) {
     closeReactions();
@@ -1911,15 +1962,24 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (swallowClick) setTimeout(function () { swallowClick = false; }, 120);
     });
   });
-  msgsEl.addEventListener("contextmenu", function (e) { if (rxBar || holdTimer) e.preventDefault(); });
-  function inPopover(t) { return (rxBar && rxBar.contains(t)) || (rxPicker && rxPicker.contains(t)); }
+  msgsEl.addEventListener("contextmenu", function (e) {
+    var chip = e.target.closest ? e.target.closest(".rx-chip") : null;
+    if (chip) {
+      e.preventDefault();
+      var row = chip.closest(".msg");
+      if (row) openWho(+row.dataset.id, chip.dataset.emoji, chip);
+      return;
+    }
+    if (rxBar || holdTimer) e.preventDefault();
+  });
+  function inPopover(t) { return (rxBar && rxBar.contains(t)) || (rxPicker && rxPicker.contains(t)) || (rxWho && rxWho.contains(t)); }
   document.addEventListener("click", function (e) {
     if (swallowClick) { swallowClick = false; if (!inPopover(e.target)) { e.preventDefault(); e.stopPropagation(); return; } }
-    if ((rxBar || rxPicker) && !inPopover(e.target)) closeReactions();
+    if ((rxBar || rxPicker || rxWho) && !inPopover(e.target)) closeReactions();
   }, true);
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && (rxBar || rxPicker)) closeReactions(); });
-  list.addEventListener("scroll", function () { if (rxBar) closeReactions(); });
-  window.addEventListener("resize", function () { if (rxBar) closeReactions(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && (rxBar || rxPicker || rxWho)) closeReactions(); });
+  list.addEventListener("scroll", function () { if (rxBar || rxWho) closeReactions(); });
+  window.addEventListener("resize", function () { if (rxBar || rxWho) closeReactions(); });
 
   /* ---------- voice: dictation and read-aloud ---------- */
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
