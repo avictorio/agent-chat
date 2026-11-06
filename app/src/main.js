@@ -29,9 +29,16 @@ document.getElementById("clearLog").onclick = () => { logs = []; try { localStor
 // One entry point (owner plan, Nov 6): the site home IS the app's home.
 // This bundled page only forwards there, and stays behind as the
 // Phase 0 diagnostics bench when the owner taps to stay.
-let stayDiag = false;
+let stayDiag = /(^#|&)diag\b/.test(location.hash);
 const goHome = () => { if (!stayDiag) location.replace("https://chat.victorio.cloud/"); };
-const diagTimer = setTimeout(goHome, 400);
+const diagTimer = setTimeout(goHome, 900);
+if (stayDiag) {
+  clearTimeout(diagTimer);
+  document.getElementById("splash").hidden = true;
+  document.getElementById("diag").hidden = false;
+}
+const backBtn = document.getElementById("backHome");
+if (backBtn) backBtn.onclick = () => location.replace("https://chat.victorio.cloud/");
 // The native splash covers the cold start; hand over to the styled
 // loading view as soon as it has painted, then forward.
 requestAnimationFrame(() => setTimeout(() => { SplashScreen.hide().catch(() => {}); }, 30));
