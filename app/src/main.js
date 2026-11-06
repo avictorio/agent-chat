@@ -54,6 +54,7 @@ if (stayBtn) stayBtn.onclick = () => {
 Uploader.addListener("events", (ev) => {
   log("event " + JSON.stringify(ev).slice(0, 320));
   if (ev.name === "completed") onUploadDone();
+  if (ev.name === "failed") log("FIT TEST RESULT: FAIL — the upload itself failed: " + ((ev.payload && ev.payload.error) || "unknown error") + ". No verdict on backgrounding from this run.");
 });
 
 // The verdict comes from the server, not the upload events: publish the
@@ -92,9 +93,9 @@ async function runFitTest() {
   const msg = await mr.json();
   if (!msg.id) { log("draft failed: " + JSON.stringify(msg).slice(0, 200)); return; }
   localStorage.setItem("spike-msg", String(msg.id));
-  log("draft id " + msg.id + " — building a 300 MB test video on the phone (large enough that the upload is still running when you lock the phone)…");
-  localStorage.setItem("spike-size", String(300000000));
-  const SIZE = 300000000, CHUNK = 1000000;
+  log("draft id " + msg.id + " — building a 90 MB test video on the phone (under the 100 MB per-request cap, still big enough to be running when you lock the phone)…");
+  localStorage.setItem("spike-size", String(90000000));
+  const SIZE = 90000000, CHUNK = 1000000;
   const head = new Uint8Array(CHUNK);
   head.set([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0]);
   for (let i = 16; i < CHUNK; i++) head[i] = i % 256;
