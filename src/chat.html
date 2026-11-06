@@ -1049,7 +1049,27 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     settleTimer = setTimeout(endSettle, (ms || 5000) + 100);
   }
   function add(m) {
-    if (!m || seen[m.id]) return;
+    if (!m) return;
+    if (seen[m.id]) {
+      // A richer copy of a message already on screen - e.g. the stream delivered
+      // its text the moment it posted, and the copy carrying its media arrived
+      // when the upload published: swap it in instead of dropping it, or the
+      // attachment only shows up after a refresh.
+      var i = arr.findIndex(function (x) { return x.id === m.id; });
+      if (i >= 0) {
+        var old = arr[i];
+        var richer = (m.video && !old.video) || (m.image && !old.image) || (m.audio && !old.audio) || (m.text || "") !== (old.text || "");
+        if (richer) {
+          arr[i] = m;
+          var node = msgsEl.querySelector('.msg[data-id="' + m.id + '"]');
+          if (node) {
+            var freshRow = msgNode(m, arr[i - 1] || null).querySelector(".msg");
+            if (freshRow) node.replaceWith(freshRow);
+          }
+        }
+      }
+      return;
+    }
     seen[m.id] = 1;
     var stick = atBottom();
     var prev = arr[arr.length - 1];
