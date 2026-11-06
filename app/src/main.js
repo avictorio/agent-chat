@@ -56,18 +56,26 @@ Uploader.addListener("events", (ev) => {
   if (ev.name === "completed") onUploadDone();
 });
 
+// The verdict comes from the server, not the upload events: publish the
+// draft and read the video record off the response. (The first version of
+// this check fetched a route that does not serve single messages, read
+// "undefined" off the error body, and reported nothing - while the upload
+// had in fact succeeded. Owner ran it twice; both uploads were intact.)
 async function onUploadDone() {
   const id = localStorage.getItem("spike-msg");
   if (!id) return;
   const base = SPIKE.api + "/rooms/" + SPIKE.room;
   const H = { "X-Invite-Token": SPIKE.token, "Content-Type": "application/json" };
   try {
-    const r = await fetch(base + "/messages/" + id, { headers: H });
-    const m = await r.json();
-    log("server check: message " + id + " video = " + JSON.stringify(m.video));
     const pr = await fetch(base + "/messages/" + id + "/publish", { method: "POST", headers: H, body: "{}" });
-    log("publish: HTTP " + pr.status + " — the test message is now visible in the throwaway room");
-  } catch (e) { log("server check failed: " + e); }
+    const m = await pr.json();
+    const expect = Number(localStorage.getItem("spike-size") || 0);
+    if (pr.status === 200 && m.video && (!expect || m.video.bytes === expect)) {
+      log("FIT TEST RESULT: PASS — the server holds the full video (" + m.video.bytes + " bytes, " + m.video.type + "), published as message " + id);
+    } else {
+      log("FIT TEST RESULT: FAIL — publish HTTP " + pr.status + ", server video = " + JSON.stringify(m.video || null) + ", expected " + expect + " bytes");
+    }
+  } catch (e) { log("FIT TEST RESULT: FAIL — server check error: " + e); }
 }
 
 function toB64(u8) {
@@ -84,8 +92,9 @@ async function runFitTest() {
   const msg = await mr.json();
   if (!msg.id) { log("draft failed: " + JSON.stringify(msg).slice(0, 200)); return; }
   localStorage.setItem("spike-msg", String(msg.id));
-  log("draft id " + msg.id + " — building a 30 MB test video on the phone…");
-  const SIZE = 30000000, CHUNK = 1000000;
+  log("draft id " + msg.id + " — building a 300 MB test video on the phone (large enough that the upload is still running when you lock the phone)…");
+  localStorage.setItem("spike-size", String(300000000));
+  const SIZE = 300000000, CHUNK = 1000000;
   const head = new Uint8Array(CHUNK);
   head.set([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109, 0, 0, 0, 0]);
   for (let i = 16; i < CHUNK; i++) head[i] = i % 256;

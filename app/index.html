@@ -40,7 +40,7 @@
 <p id="env">checking plugins…</p>
 
 <h2>Background-upload fit test</h2>
-<p>Builds a 30 MB test video on the phone, starts a native background upload to a throwaway room, and logs every event. <b>After tapping Run, switch apps or lock the phone for a minute</b>, then come back — the log should show the upload finishing while you were away. The log survives the app being closed.</p>
+<p>Builds a 300 MB test video on the phone (large enough that the upload is still running when you lock the phone), starts a native background upload to a throwaway room, and logs every event. <b>After tapping Run, switch apps or lock the phone</b>, then come back — the log ends with a plain verdict line: <b>FIT TEST RESULT: PASS</b> with the byte count the server verified, or FAIL with the reason. The log survives the app being closed.</p>
 <button id="runTest">Run the fit test</button>
 <button id="clearLog" class="secondary">Clear log</button>
 
