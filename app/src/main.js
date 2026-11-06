@@ -27,7 +27,7 @@ document.getElementById("clearLog").onclick = () => { logs = []; try { localStor
 
 document.getElementById("openRoom").onclick = () => {
   const v = document.getElementById("invite").value.trim();
-  const tm = v.match(/invite=([A-Za-z0-9]+)/);
+  const tm = v.match(/invite=([A-Za-z0-9_-]+)/);
   const rm = v.match(/\/r\/([a-z0-9\-_]+)/);
   const tok = tm ? tm[1] : v;
   const room = rm ? rm[1] : SPIKE.room;
