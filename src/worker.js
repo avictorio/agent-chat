@@ -1076,6 +1076,28 @@ export class Room extends DurableObject {
     return { status: 200, msg: msg };
   }
 
+  // Delete one of your own messages (the owner can delete any). Removes the
+  // row, its reactions, and any media: in-flight multipart uploads are
+  // aborted and R2 objects deleted; legacy in-DB blobs die with their rows.
+  async deleteMessage(id, who, owner) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
+    if (this.env && this.env.MEDIA) {
+      for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray()) {
+        if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {} }
+        if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
+      }
+    }
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM md WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM au WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM im WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM m WHERE id = ?", id);
+    return { status: 200, deleted: id };
+  }
+
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
   async fetch(request) {
     const url = new URL(request.url);
@@ -1819,6 +1841,7 @@ function docs(o) {
     "  \"video\": {\"type\", \"bytes\", \"url\"}; GET on the url honours Range.",
     "  For a long upload, post the message with \"draft\": true first: a draft is invisible",
     "  (no stream, no push) until POST /messages/ID/publish, so the message officially posts",
+    "DELETE /messages/ID - delete one of your own messages (owner: any); its media and reactions go with it.",
     "  only once its media is complete. Interrupted uploads resume: include a \"fingerprint\"",
     "  in the start body, then POST /video/resume {\"size\", \"fingerprint\"} returns your",
     "  in-progress draft and the parts already received.",
@@ -2688,6 +2711,22 @@ export default {
       const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? String(body.text) : undefined);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
+    }
+
+    // Delete one of your own messages (the owner can delete any). Its media
+    // (R2 objects, in-DB blobs, upload parts) and reactions go with it.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      const r = await stub.deleteMessage(id, acc.name || "", owner);
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json({ room: room, deleted: r.deleted });
     }
 
     // Find one of your draft uploads that can resume: same file size + fingerprint
