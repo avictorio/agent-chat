@@ -364,6 +364,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   .topbar .title span { color: var(--muted); font-weight: 400; }
   .side {
     position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; width: min(300px, 86vw);
+    padding-top: env(safe-area-inset-top);
     transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: 0 0 30px rgba(0, 0, 0, 0.25);
   }
   body.nav-open .side { transform: none; }
