@@ -275,6 +275,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .attach-row[hidden] { display: none; }
 .img-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: none; }
 .msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; }
+.msg-video { display: block; width: 100%; max-width: 440px; max-height: 440px; border-radius: 10px; margin-top: 6px; background: #000; }
 .compose-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 #text { width: 100%; border: 0; background: transparent; resize: none; padding: 4px 0 2px; min-height: 46px; max-height: 40vh; box-shadow: none; min-width: 0; }
 .composer-meta { max-width: 880px; margin: 6px auto 0; font-size: 12px; color: var(--muted); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
@@ -447,6 +448,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
               <input id="imgFile" type="file" accept="image/*" hidden>
               <button id="clip" class="btn quiet icon-btn" type="button" aria-label="Attach an audio clip" title="Attach an audio clip"><svg class="i" viewBox="0 0 24 24"><path d="M9 18V6l10-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="15" r="2.5"/></svg></button>
               <input id="clipFile" type="file" accept="audio/*" hidden>
+              <button id="vidBtn" class="btn quiet icon-btn" type="button" aria-label="Attach a video" title="Attach a video"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/></svg></button>
+              <input id="vidFile" type="file" accept="video/*" hidden>
               <button id="rec" class="btn quiet icon-btn" type="button" aria-label="Record a voice message" title="Record a voice message" hidden><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></button>
               <button id="mic" class="btn quiet icon-btn" type="button" aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" hidden><svg class="i" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
               <span class="tools-spacer"></span>
@@ -457,6 +460,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         <div class="composer-meta">
           <span id="asLine" hidden>Posting as <strong id="asName"></strong> <button type="button" class="linkbtn" id="asChange">Change</button></span>
           <span id="clipChip" class="clip-chip" hidden><span id="clipName"></span> <button type="button" class="linkbtn" id="clipRemove">Remove</button></span>
+          <span id="vidChip" class="clip-chip" hidden><span id="vidName"></span> <button type="button" class="linkbtn" id="vidRemove">Remove</button></span>
           <span class="hint">Ctrl+Enter to send · Enter for a new line · mention @claude to ask Claude</span>
         </div>
         <div class="err" id="err" hidden></div>
@@ -992,6 +996,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var im = el("img", "msg-img"); im.src = iurl; im.alt = "Attached image"; im.loading = "lazy";
       ia.appendChild(im); body.appendChild(ia);
     }
+    if (m.video && m.video.url) {
+      var vd = el("video", "msg-video"); vd.controls = true; vd.preload = "metadata";
+      vd.src = m.video.url + (invite ? (m.video.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
+      body.appendChild(vd);
+    }
     if (m.audio && m.audio.url) {
       var au = el("audio"); au.controls = true; au.preload = "none";
       au.src = m.audio.url + (invite ? (m.audio.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
@@ -1160,6 +1169,26 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     rd.readAsDataURL(f);
   });
   $("imgRemove").addEventListener("click", function () { pendingImage = null; paintImgChip(); });
+  var pendingVideo = null;
+  function paintVidChip() {
+    $("vidChip").hidden = !pendingVideo;
+    if (pendingVideo) $("vidName").textContent = pendingVideo.name;
+  }
+  $("vidBtn").addEventListener("click", function () { $("vidFile").click(); });
+  $("vidFile").addEventListener("change", function () {
+    var f = $("vidFile").files && $("vidFile").files[0];
+    $("vidFile").value = "";
+    if (!f) return;
+    if (f.size > 25000000) { toast("Videos can be up to 25 MB", true); return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      pendingVideo = { data: String(rd.result), name: "🎬 " + f.name + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB) - attaches to your next message" };
+      paintVidChip();
+    };
+    rd.onerror = function () { toast("Couldn't read that file", true); };
+    rd.readAsDataURL(f);
+  });
+  $("vidRemove").addEventListener("click", function () { pendingVideo = null; paintVidChip(); });
   var recStream = null, recChunks = [], recMime = "", recTimer = null, recStarted = 0, recorder = null;
   var recRecog = null, recHeard = "", recRestarts = 0, recSRDead = true;
   var recBtn = $("rec");
@@ -1258,8 +1287,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     stopDictation(true);
     var from = me(), text = textEl.value;
     if (!from) { syncName(); nameEl.focus(); $("err").textContent = "Add your name first, so people know who's talking."; $("err").hidden = false; return; }
-    if (!text.trim() && !pendingClip && !pendingImage) return;
-    if (!text.trim()) text = pendingClip ? "🎙️ Audio message" : "🖼️ Image";
+    if (!text.trim() && !pendingClip && !pendingImage && !pendingVideo) return;
+    if (!text.trim()) text = pendingClip ? "🎙️ Audio message" : (pendingVideo ? "🎬 Video message" : "🖼️ Image");
     store("chat-name", from);
     if (changingName) { changingName = false; syncName(); }
     $("send").disabled = true; $("err").hidden = true;
@@ -1268,6 +1297,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (pendingClip) payload.audio = pendingClip.data;
       if (pendingClip && pendingClip.transcript) payload.transcript = pendingClip.transcript;
       if (pendingImage) payload.image = pendingImage.data;
+      if (pendingVideo) payload.video = pendingVideo.data;
       var r = await fetch(api, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify(payload) });
       if (await denial(r)) return;
       var d = await r.json();
@@ -1275,6 +1305,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       textEl.value = ""; grow();
       if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
       if (pendingImage) { pendingImage = null; paintImgChip(); }
+      if (pendingVideo) { pendingVideo = null; paintVidChip(); }
       if (d.room_state) applyState(d.room_state);
       add(d);
       list.scrollTop = list.scrollHeight;

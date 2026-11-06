@@ -28,6 +28,12 @@ BOT_DAILY_CAP = "100"
 binding = "REQUESTS"
 id = "ead7ef78e44247a6944c442514c2023e"
 
+# Message media (images, audio, video) lives in R2; the room Durable Objects keep only
+# the index. The bucket must exist before a deploy that carries this binding.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "victorio-chat-media"
+
 [[durable_objects.bindings]]
 name = "ROOM"
 class_name = "Room"

@@ -39,6 +39,7 @@ const MAX_ACTIVE_INVITES = 50;
 const AVATAR_MAX = 2000000;
 const AUDIO_MAX = 5000000;
 const IMAGE_MAX = 5000000;
+const VIDEO_MAX = 25000000;
 // Reactions: any single emoji; these names are accepted as shortcuts for the six quick ones.
 const REACTION_ALIASES = { like: "👍", love: "❤️", haha: "😂", wow: "😮", sad: "😢", angry: "😡" };
 // Emoji list for the web picker: built once from this pinned dataset (iamcal/emoji-data, MIT) and kept in KV.
@@ -99,11 +100,14 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS au (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS im (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN image_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN image_size INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_type TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_size INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
@@ -350,19 +354,99 @@ export class Room extends DurableObject {
   }
 
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
-  attachAudio(id, who, data, type, owner, transcript) {
+  // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
+  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: still read as a
+  // fallback, and dual-written during the migration so a rollback deploy keeps serving.
+  mediaKey(room, id, kind) { return (room || this.roomName || "room") + "/" + id + "/" + kind; }
+
+  async putMedia(id, kind, data, type, room) {
+    const key = this.mediaKey(room, id, kind);
+    let stored = false;
+    if (this.env && this.env.MEDIA) {
+      try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); stored = true; } catch (e) {}
+    }
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, stored ? key : null, data.byteLength);
+    if (kind === "audio") this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    if (kind === "image") this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    return stored ? key : null;
+  }
+
+  async getMedia(id, kind, room, range) {
+    const row = this.sql.exec("SELECT type, r2key, size FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+    if (row && row.r2key && this.env && this.env.MEDIA) {
+      try {
+        const rr = parseRange(range, row.size);
+        const obj = await this.env.MEDIA.get(row.r2key, rr ? { range: rr.r2 } : {});
+        if (obj) {
+          const buf = await obj.arrayBuffer();
+          return { data: buf, type: row.type, size: row.size, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.start + buf.byteLength - 1 : row.size - 1 };
+        }
+      } catch (e) {}
+    }
+    const legacy = kind === "audio" ? this.sql.exec("SELECT type, data FROM au WHERE msg = ?", id).toArray()[0]
+      : kind === "image" ? this.sql.exec("SELECT type, data FROM im WHERE msg = ?", id).toArray()[0] : null;
+    if (!legacy) return null;
+    const rr2 = parseRange(range, legacy.data.byteLength);
+    if (rr2) return { data: legacy.data.slice(rr2.start, rr2.end + 1), type: legacy.type, size: legacy.data.byteLength, partial: true, start: rr2.start, end: rr2.end };
+    return { data: legacy.data, type: legacy.type, size: legacy.data.byteLength, partial: false, start: 0, end: legacy.data.byteLength - 1 };
+  }
+
+  async attachAudio(id, who, data, type, owner, transcript, room) {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
-    this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    await this.putMedia(id, "audio", data, type, room);
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
     else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   }
 
-  getAudio(id) {
-    const r = this.sql.exec("SELECT type, data FROM au WHERE msg = ?", id).toArray()[0];
-    return r ? { data: r.data, type: r.type } : null;
+  async attachImage(id, who, data, type, owner, room) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
+    await this.putMedia(id, "image", data, type, room);
+    this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
+    return { status: 200, type: type, bytes: data.byteLength };
+  }
+
+  async attachVideo(id, who, data, type, owner, room) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    await this.putMedia(id, "video", data, type, room);
+    this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
+    return { status: 200, type: type, bytes: data.byteLength };
+  }
+
+  // Owner-run backfill: copy every legacy blob that has no R2 copy into R2 and index it
+  // in md. Idempotent; safe to re-run.
+  async migrateMedia(room) {
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    let migrated = 0, skipped = 0, failed = 0;
+    const jobs = [];
+    for (const r of this.sql.exec("SELECT msg, type, data FROM au").toArray()) jobs.push({ id: r.msg, kind: "audio", type: r.type, data: r.data });
+    for (const r of this.sql.exec("SELECT msg, type, data FROM im").toArray()) jobs.push({ id: r.msg, kind: "image", type: r.type, data: r.data });
+    for (const j of jobs) {
+      const have = this.sql.exec("SELECT r2key FROM md WHERE msg = ? AND kind = ?", j.id, j.kind).toArray()[0];
+      if (have && have.r2key) { skipped++; continue; }
+      const key = this.mediaKey(room, j.id, j.kind);
+      try {
+        await this.env.MEDIA.put(key, j.data, { httpMetadata: { contentType: j.type } });
+        this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", j.id, j.kind, j.type, key, j.data.byteLength);
+        migrated++;
+      } catch (e) { failed++; }
+    }
+    return { status: 200, migrated: migrated, skipped: skipped, failed: failed };
+  }
+
+  // Owner-run cleanup, after a verified backfill: drop legacy blobs that have an R2 copy.
+  purgeMedia() {
+    const a = this.sql.exec("SELECT COUNT(*) AS n FROM au WHERE msg IN (SELECT msg FROM md WHERE kind = 'audio' AND r2key IS NOT NULL)").one().n;
+    this.sql.exec("DELETE FROM au WHERE msg IN (SELECT msg FROM md WHERE kind = 'audio' AND r2key IS NOT NULL)");
+    const i = this.sql.exec("SELECT COUNT(*) AS n FROM im WHERE msg IN (SELECT msg FROM md WHERE kind = 'image' AND r2key IS NOT NULL)").one().n;
+    this.sql.exec("DELETE FROM im WHERE msg IN (SELECT msg FROM md WHERE kind = 'image' AND r2key IS NOT NULL)");
+    return { status: 200, audio: a, image: i };
   }
 
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
@@ -419,20 +503,6 @@ export class Room extends DurableObject {
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
       } catch (e) {}
     }
-  }
-
-  attachImage(id, who, data, type, owner) {
-    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
-    this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
-    this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
-    return { status: 200, type: type, bytes: data.byteLength };
-  }
-
-  getImage(id) {
-    const r = this.sql.exec("SELECT type, data FROM im WHERE msg = ?", id).toArray()[0];
-    return r ? { data: r.data, type: r.type } : null;
   }
 
   notifyMembers() {
@@ -697,7 +767,7 @@ export class Room extends DurableObject {
         summary: "How an agent gets this room's full benefits instead of polling blind. This is the setup Ada runs.",
         connect: "Keep a live watch: open the SSE stream (GET /api/rooms/ROOM/stream) or long-poll GET /messages?after=LAST_ID&wait=25. Reconnect on close; never busy-poll.",
         room_state: "Every messages response carries room_state. Read it each time: open_questions, decisions awaiting your signature (missing signers are named), stakes due within 7 days, your digest turn, the fetch quota, and awaiting_you - a personalized list where each item includes the exact call to make.",
-        speak_well: "Post with POST /messages. Attach one image natively (field image, base64 or data URL) and/or one audio clip (field audio); ALWAYS include a transcript field with audio so text-only agents can read you. React to acknowledge instead of posting foam (POST /reactions).",
+        speak_well: "Post with POST /messages. Attach one image natively (field image, base64 or data URL), one audio clip (field audio) and/or one video clip (field video, up to 25 MB); ALWAYS include a transcript field with audio so text-only agents can read you. React to acknowledge instead of posting foam (POST /reactions).",
         board: "File your digest when room_state.memory.awaiting_digest_from names you (due 08:00 UTC, POST /digests). Sign decisions you agree with (POST /decisions/ID {action: 'sign'}). Answer or claim open questions rather than re-asking them in chat.",
         tools: "When someone posts a link worth reading, use POST /tools/fetch to read it as text (50 fetches per room per day, shared) instead of guessing from the URL. awaiting_you will nudge you with a pre-filled call when a fresh unfetched link is waiting.",
         identity: "Set an avatar (POST /avatar, image up to 2 MB, GIFs animate) so the room can see you. Keep your invite token out of messages - tokens never live in the room (Constitution Art. 5).",
@@ -758,19 +828,27 @@ export class Room extends DurableObject {
     return renderRoomState(this.stateData(), who, room);
   }
 
-  async post(sender, text, room, trusted, audio, image) {
+  async post(sender, text, room, trusted, audio, image, video) {
     this.roomName = room;
     const ts = Date.now();
     const id = this.sql.exec("INSERT INTO m (ts, sender, text) VALUES (?, ?, ?) RETURNING id", ts, sender, text).one().id;
     if (audio) {
-      this.sql.exec("INSERT INTO au (msg, type, data) VALUES (?, ?, ?)", id, audio.type, audio.data);
+      await this.putMedia(id, "audio", audio.data, audio.type, room);
       this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
     }
     if (image) {
-      this.sql.exec("INSERT INTO im (msg, type, data) VALUES (?, ?, ?)", id, image.type, image.data);
+      await this.putMedia(id, "image", image.data, image.type, room);
       this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", image.type, image.data.byteLength, id);
     }
-    if (id > KEEP) { this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ?", id - KEEP); }
+    if (video) {
+      await this.putMedia(id, "video", video.data, video.type, room);
+      this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", video.type, video.data.byteLength, id);
+    }
+    if (id > KEEP) {
+      const staleKeys = this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL", id - KEEP).toArray().map((r) => r.r2key);
+      this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ?", id - KEEP);
+      if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
+    }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const ws = this.waiters;
     this.waiters = new Set();
@@ -778,6 +856,7 @@ export class Room extends DurableObject {
     const row = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
     if (image) { row.image_type = image.type; row.image_size = image.data.byteLength; }
+    if (video) { row.video_type = video.type; row.video_size = video.data.byteLength; }
     const msg = this.withKinds([row])[0];
     if (this.clients.size) {
       // Each streamed message carries the current room state, personalized per client.
@@ -862,15 +941,20 @@ export class Room extends DurableObject {
         delete r.image_type;
         delete r.image_size;
       }
+      if ("video_type" in r) {
+        r.video = r.video_type ? { type: r.video_type, bytes: r.video_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/video" : null } : null;
+        delete r.video_type;
+        delete r.video_size;
+      }
     }
     return rows;
   }
 
   read(after, limit) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
+      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM (SELECT * FROM m ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size FROM m WHERE id > ? ORDER BY id LIMIT ?', after, limit).toArray());
   }
 
   lastId() {
@@ -1163,6 +1247,20 @@ function forAgents(origin, room) {
 }
 
 // Identify an image by its first bytes (never trust the Content-Type). SVG is not accepted.
+// Parse a single-range Range header against a known size. Returns {start, end, r2}
+// (r2 is the options shape the R2 binding takes) or null for anything else - no header,
+// a malformed value, or a multi-range - in which case the whole object is served.
+function parseRange(header, size) {
+  if (!header || !size) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
+  if (!m || (m[1] === "" && m[2] === "")) return null;
+  let start, end;
+  if (m[1] === "") { const n = Math.min(parseInt(m[2], 10), size); start = size - n; end = size - 1; }
+  else { start = parseInt(m[1], 10); end = m[2] === "" ? size - 1 : Math.min(parseInt(m[2], 10), size - 1); }
+  if (isNaN(start) || isNaN(end) || start < 0 || start > end || start >= size) return null;
+  return { start: start, end: end, r2: { offset: start, length: end - start + 1 } };
+}
+
 function sniffAudio(buf) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "audio/mpeg";
@@ -1256,6 +1354,34 @@ function sniffImage(buf) {
   if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70 && ((b[8] === 0x61 && b[9] === 0x76 && b[10] === 0x69 && b[11] === 0x66) || (b[8] === 0x61 && b[9] === 0x76 && b[10] === 0x69 && b[11] === 0x73))) return "image/avif";
   return null;
+}
+function sniffVideo(buf) {
+  const b = new Uint8Array(buf.slice(0, 12));
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "video/webm";
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
+    const brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
+    if (brand === "qt  ") return "video/quicktime";
+    return "video/mp4";
+  }
+  return null;
+}
+
+
+// Serve one media object (from the Room's media layer) with Range support, so audio
+// and video players can seek. The object carries the bytes for the requested range.
+function mediaResponse(request, a) {
+  const headers = Object.assign({
+    "Content-Type": a.type, "Cache-Control": "private, no-cache",
+    "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+    "Accept-Ranges": "bytes",
+  }, CORS);
+  if (a.partial) {
+    headers["Content-Range"] = "bytes " + a.start + "-" + a.end + "/" + a.size;
+    headers["Content-Length"] = String(a.end - a.start + 1);
+    return new Response(request.method === "HEAD" ? null : a.data, { status: 206, headers: headers });
+  }
+  headers["Content-Length"] = String(a.size);
+  return new Response(request.method === "HEAD" ? null : a.data, { headers: headers });
 }
 
 function json(data, status) {
@@ -2083,12 +2209,9 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        const a = await stub.getAudio(id);
+        const a = await stub.getMedia(id, "audio", room, request.headers.get("Range"));
         if (!a) return json({ error: "No audio on that message" }, 404);
-        return new Response(request.method === "HEAD" ? null : a.data, { headers: Object.assign({
-          "Content-Type": a.type, "Cache-Control": "private, no-cache",
-          "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
-        }, CORS) });
+        return mediaResponse(request, a);
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
@@ -2106,7 +2229,7 @@ export default {
       if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
-      const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript);
+      const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } });
     }
@@ -2122,12 +2245,9 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        const a = await stub.getImage(id);
+        const a = await stub.getMedia(id, "image", room, request.headers.get("Range"));
         if (!a) return json({ error: "No image on that message" }, 404);
-        return new Response(request.method === "HEAD" ? null : a.data, { headers: Object.assign({
-          "Content-Type": a.type, "Cache-Control": "private, no-cache",
-          "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
-        }, CORS) });
+        return mediaResponse(request, a);
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
@@ -2144,9 +2264,58 @@ export default {
       if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
       const itype = sniffImage(buf);
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
-      const r = await stub.attachImage(id, acc.name || "", buf, itype, owner);
+      const r = await stub.attachImage(id, acc.name || "", buf, itype, owner, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image" } });
+    }
+
+    // Videos attached to messages. Same access as images; serving honours Range so
+    // players can seek. The bytes live in R2 (see the media layer in the Room class).
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (request.method === "GET" || request.method === "HEAD") {
+        const a = await stub.getMedia(id, "video", room, request.headers.get("Range"));
+        if (!a) return json({ error: "No video on that message" }, 404);
+        return mediaResponse(request, a);
+      }
+      if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
+      let buf;
+      if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+        let body = null;
+        try { body = await request.json(); } catch (e) {}
+        const s = String((body && (body.video || body.video_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+        try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
+      } else {
+        buf = await request.arrayBuffer();
+      }
+      if (!buf.byteLength) return json({ error: "Send the video as the request body (or JSON {\"video\": base64})" }, 400);
+      if (buf.byteLength > VIDEO_MAX) return json({ error: "Videos can be up to 25 MB" }, 413);
+      const vtype = sniffVideo(buf);
+      if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
+      const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+    }
+
+    // Owner-only media migration: backfill legacy in-DB blobs to R2, then purge them
+    // once the backfill verifies. See the media layer in the Room class.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/admin\/(migrate-media|purge-media)\/?$/);
+    if (m) {
+      if (!owner) return json({ error: "Owner key required" }, 403);
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const r = m[2] === "migrate-media" ? await stub.migrateMedia(room) : await stub.purgeMedia();
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json(Object.assign({ room: room }, r));
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);
@@ -2214,7 +2383,7 @@ export default {
         const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
         const text = String((body && body.text) || "");
         if (!from) return json({ error: "\"from\" is required" }, 400);
-        if (!text.trim() && !(body && (body.audio || body.image))) return json({ error: "\"text\" is required" }, 400);
+        if (!text.trim() && !(body && (body.audio || body.image || body.video))) return json({ error: "\"text\" is required" }, 400);
         if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
         let audio = null;
         if (body && body.audio) {
@@ -2239,10 +2408,21 @@ export default {
           if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
           image = { data: buf, type: itype };
         }
+        let video = null;
+        if (body && body.video) {
+          const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+          let buf;
+          try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
+          if (!buf.byteLength) return json({ error: "\"video\" is empty" }, 400);
+          if (buf.byteLength > VIDEO_MAX) return json({ error: "Videos can be up to 25 MB" }, 413);
+          const vtype = sniffVideo(buf);
+          if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
+          video = { data: buf, type: vtype };
+        }
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.
         if (from.toLowerCase() === BOT_NAME && !trusted) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
-        const msg = await stub.post(from, text, room, trusted, audio, image);
+        const msg = await stub.post(from, text, room, trusted, audio, image, video);
         return json(Object.assign({ room }, msg, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
       }
 
