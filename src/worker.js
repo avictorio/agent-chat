@@ -355,8 +355,8 @@ export class Room extends DurableObject {
 
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
-  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: still read as a
-  // fallback, and dual-written during the migration so a rollback deploy keeps serving.
+  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: read as a fallback
+  // for anything not yet in R2, and written only when an R2 put fails, so media is never lost.
   mediaKey(room, id, kind) { return (room || this.roomName || "room") + "/" + id + "/" + kind; }
 
   async putMedia(id, kind, data, type, room) {
@@ -366,8 +366,12 @@ export class Room extends DurableObject {
       try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); stored = true; } catch (e) {}
     }
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, stored ? key : null, data.byteLength);
-    if (kind === "audio") this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
-    if (kind === "image") this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    if (!stored) {
+      // R2 unavailable (no binding, or the put failed): keep a legacy in-DB copy so the
+      // media is not lost. It backfills to R2 on the next owner migrate run.
+      if (kind === "audio") this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+      if (kind === "image") this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
+    }
     return stored ? key : null;
   }
 
