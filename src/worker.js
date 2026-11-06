@@ -106,6 +106,7 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
     try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
+    this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
@@ -446,6 +447,7 @@ export class Room extends DurableObject {
     const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts) VALUES (?, 'video', ?, ?, ?, ?, '[]')", id, type, key, size, up.uploadId);
     return { status: 200, part_size: VIDEO_PART, parts: Math.ceil(size / VIDEO_PART) };
@@ -460,9 +462,8 @@ export class Room extends DurableObject {
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
     const part = await up.uploadPart(n, data);
-    const parts = JSON.parse(row.parts || "[]").filter((p) => p.partNumber !== n);
-    parts.push({ partNumber: n, etag: part.etag });
-    this.sql.exec("UPDATE md SET parts = ? WHERE msg = ? AND kind = 'video'", JSON.stringify(parts), id);
+    // One row per part: concurrent part uploads cannot clobber each other's receipts.
+    this.sql.exec("INSERT OR REPLACE INTO mdp (msg, n, etag) VALUES (?, ?, ?)", id, n, part.etag);
     return { status: 200, number: n };
   }
 
@@ -473,7 +474,10 @@ export class Room extends DurableObject {
     const row = this.sql.exec("SELECT type, r2key, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    const parts = JSON.parse(row.parts || "[]").sort((a, b) => a.partNumber - b.partNumber);
+    const byNum = new Map();
+    try { for (const p of JSON.parse(row.parts || "[]")) byNum.set(p.partNumber, p.etag); } catch (e) {}
+    for (const p of this.sql.exec("SELECT n, etag FROM mdp WHERE msg = ?", id).toArray()) byNum.set(p.n, p.etag);
+    const parts = Array.from(byNum.entries()).map((e) => ({ partNumber: e[0], etag: e[1] })).sort((a, b) => a.partNumber - b.partNumber);
     const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
     try { await up.complete(parts); } catch (e) { return { status: 400, error: "Could not complete the upload: " + String((e && e.message) || e) }; }
     let head = null;
@@ -490,6 +494,7 @@ export class Room extends DurableObject {
       this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
       return { status: 400, error: "The uploaded bytes do not check out as that video; upload discarded" };
     }
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, row.size, id);
     return { status: 200, type: sniffed, bytes: row.size };
@@ -501,8 +506,16 @@ export class Room extends DurableObject {
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
-    if (row && row.upload_id) this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
+    if (row && row.upload_id) { this.sql.exec("DELETE FROM mdp WHERE msg = ?", id); this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id); }
     return { status: 200 };
+  }
+
+  videoUploadStatus(id) {
+    const row = this.sql.exec("SELECT type, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row) return { status: 200, uploading: false, received: [] };
+    const got = new Set(this.sql.exec("SELECT n FROM mdp WHERE msg = ?", id).toArray().map((r) => r.n));
+    try { for (const p of JSON.parse(row.parts || "[]")) got.add(p.partNumber); } catch (e) {}
+    return { status: 200, uploading: !!row.upload_id, size: row.size, type: row.type, received: Array.from(got).sort((a, b) => a - b) };
   }
 
   // Owner-run backfill: copy every legacy blob that has no R2 copy into R2 and index it
@@ -932,7 +945,7 @@ export class Room extends DurableObject {
     }
     if (id > KEEP) {
       const staleKeys = this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL", id - KEEP).toArray().map((r) => r.r2key);
-      this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ?", id - KEEP);
+      this.sql.exec("DELETE FROM m WHERE id <= ?", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ?", id - KEEP); this.sql.exec("DELETE FROM mdp WHERE msg <= ?", id - KEEP);
       if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
     }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
@@ -2438,7 +2451,7 @@ export default {
     // Chunked video upload (multipart into R2) for files past the single-request
     // limit: POST start, PUT each part (?n=1..), POST finish (or abort). Same access
     // as attaching. See the chunked upload methods in the Room class.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort|status)\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -2458,6 +2471,11 @@ export default {
         const r = await stub.videoPart(id, acc.name || "", owner, n, buf);
         if (r.status !== 200) return json({ error: r.error }, r.status);
         return json({ room: room, id: id, part: n });
+      }
+      if (action === "status") {
+        if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const r = await stub.videoUploadStatus(id);
+        return json({ room: room, id: id, uploading: r.uploading, size: r.size || null, type: r.type || null, received: r.received });
       }
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (action === "start") {
