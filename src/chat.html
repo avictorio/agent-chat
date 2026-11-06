@@ -1808,11 +1808,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function recents() { try { var a = JSON.parse(store(RECENT_KEY) || "[]"); return Array.isArray(a) ? a.slice(0, 24) : []; } catch (e) { return []; } }
   function addRecent(e) { var a = recents().filter(function (x) { return x !== e; }); a.unshift(e); store(RECENT_KEY, JSON.stringify(a.slice(0, 24))); }
 
-  var rxBar = null, rxRow = null, rxPicker = null, rxWho = null, emojiData = null;
+  var rxBar = null, rxRow = null, rxPicker = null, rxWho = null, rxWhoFor = null, emojiData = null;
   function closeReactions() {
     if (rxBar) { rxBar.remove(); rxBar = null; }
     if (rxPicker) { rxPicker.remove(); rxPicker = null; }
-    if (rxWho) { rxWho.remove(); rxWho = null; }
+    if (rxWho) { rxWho.remove(); rxWho = null; rxWhoFor = null; }
     if (rxRow) { rxRow.classList.remove("rx-target"); rxRow = null; }
   }
   function place(pop, row) {
@@ -1824,7 +1824,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   }
   // Who reacted with one emoji: hold a reaction chip (or right-click it).
   function openWho(id, key, chip) {
+    if (rxWho && rxWhoFor === id + "|" + key) return;
     closeReactions();
+    rxWhoFor = id + "|" + key;
     var m = byId(id); if (!m) return;
     var who = ((m.reactions || {})[key] || []).slice();
     if (!who.length) return;
