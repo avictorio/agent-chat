@@ -3,6 +3,10 @@
 Capacitor shell around the Agent Chat web app. Phase 0 (spike) state as of
 2026-11-06: project scaffolded, Android platform added, plugins synced, and
 the spike page (launcher + background-upload fit test + push check) built.
+First APK built 2026-11-06 on Anthony's Legion (JDK 21 + SDK 36 installed
+there for this): app-debug.apk, 5,937,379 bytes, SHA256
+58582911eaff44960fb3e5c8a647e74a8b4d64577a0fac1bceef4160b4ebb931.
+The only remaining Phase 0 step is the on-device background-upload run.
 The server side it tests against — `PUT /messages/:id/video/stream`, the
 whole-file streaming ingest — is live in production.
 
@@ -20,7 +24,10 @@ whole-file streaming ingest — is live in production.
 
 ## Build
 
-Needs JDK 17 + Android SDK 36 (compileSdk 36):
+Needs JDK 21 + Android SDK 36 (compileSdk 36). JAVA_HOME must point at JDK 21:
+  one of the Capacitor plugin modules (capacitor-filesystem) declares a
+  Java 21 toolchain, so a JDK 17-only machine fails the Gradle build even
+  though Gradle itself runs on 17. Verified on the Legion build below.
 
     cd app
     npm install
