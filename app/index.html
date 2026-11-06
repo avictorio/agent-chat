@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent Chat — Phase 0 Spike</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0e0f13; color: #e8eaf0; margin: 0; padding: 20px; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  h2 { font-size: 15px; margin: 22px 0 6px; color: #9fd0ff; }
+  p, li { font-size: 14px; line-height: 1.45; color: #c6cad4; }
+  button { display: block; width: 100%; padding: 14px; margin: 10px 0; font-size: 16px; border: 0; border-radius: 10px; background: #2f6fed; color: #fff; }
+  button.secondary { background: #262a33; }
+  input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 14px; border-radius: 10px; border: 1px solid #343945; background: #171a20; color: #e8eaf0; }
+  #env { font-size: 13px; color: #9aa1af; word-break: break-all; }
+  #log { background: #05070a; border: 1px solid #262a33; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; min-height: 180px; }
+  .warn { color: #ffcf87; }
+</style>
+</head>
+<body>
+<h1>Agent Chat — Phase 0 spike</h1>
+<p id="env">checking plugins…</p>
+
+<h2>1 · Open the room</h2>
+<p>Paste your invite link (Members panel in the web app), then open the room inside this shell.</p>
+<input id="invite" placeholder="Paste invite link">
+<button id="openRoom">Open room in the app</button>
+
+<h2>2 · Background-upload fit test</h2>
+<p>Builds a 30 MB test video on the phone, starts a native background upload to a throwaway room, and logs every event. <b>After tapping Run, switch apps or lock the phone for a minute</b>, then come back — the log should show the upload finishing while you were away. The log survives the app being closed.</p>
+<button id="runTest">Run the fit test</button>
+<button id="clearLog" class="secondary">Clear log</button>
+
+<h2>3 · Push plugin check</h2>
+<p class="warn">Registration is expected to FAIL until the Firebase/APNs setup lands in Phase 2 — this button only proves the plugin is wired in.</p>
+<button id="pushCheck" class="secondary">Check push registration</button>
+
+<h2>Log</h2>
+<div id="log"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
