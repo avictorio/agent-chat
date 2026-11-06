@@ -38,44 +38,6 @@ if (stayBtn) stayBtn.onclick = () => {
   stayBtn.hidden = true;
   log("diagnostics open; auto-forward cancelled");
 };
-}
-function forgetRoom(room) { saveRooms(loadRooms().filter((x) => x.room !== room)); renderRooms(); }
-function enterRoom(room, token) { location.href = "https://chat.victorio.cloud/r/" + room + "#invite=" + token; }
-function renderRooms() {
-  const box = document.getElementById("rooms");
-  if (!box) return;
-  const rs = loadRooms();
-  box.innerHTML = "";
-  if (!rs.length) {
-    box.innerHTML = '<p class="dim">No rooms yet on this device. Paste an invite link below and it will live here.</p>';
-    return;
-  }
-  rs.forEach((r) => {
-    const row = document.createElement("div"); row.className = "room-row";
-    const b = document.createElement("button"); b.className = "room-open"; b.textContent = r.room;
-    b.onclick = () => enterRoom(r.room, r.token);
-    const x = document.createElement("button"); x.className = "room-x"; x.textContent = "✕";
-    x.title = "Forget this room on this device";
-    x.onclick = () => forgetRoom(r.room);
-    row.appendChild(b); row.appendChild(x); box.appendChild(row);
-  });
-}
-document.getElementById("openRoom").onclick = () => {
-  const v = document.getElementById("invite").value.trim();
-  const tm = v.match(/invite=([A-Za-z0-9_-]+)/);
-  const rm = v.match(/\/r\/([a-z0-9\-_]+)/);
-  let tok = tm ? tm[1] : "";
-  const room = rm ? rm[1] : SPIKE.room;
-  if (!tok) {
-    const saved = loadRooms().find((x) => x.room === room);
-    if (saved) { enterRoom(saved.room, saved.token); return; }
-    if (/^[A-Za-z0-9_-]{8,}$/.test(v)) tok = v;
-  }
-  if (!tok) { log("open room: no invite token found in that text, and that room is not saved on this device"); return; }
-  upsertRoom(room, tok);
-  enterRoom(room, tok);
-};
-renderRooms();
 
 // Upload events are logged persistently - the evidence for the background test.
 Uploader.addListener("events", (ev) => {
