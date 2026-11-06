@@ -1215,7 +1215,7 @@ const SSE_HEADERS = Object.assign({
 }, CORS);
 
 function sseFrame(room, m, state) {
-  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
+  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
 }
 
 const STATE_ITEMS = 3;
