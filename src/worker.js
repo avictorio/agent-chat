@@ -43,6 +43,7 @@ const VIDEO_MAX = 25000000;
 const VIDEO_MAX_HARD = 5000000000;
 const VIDEO_PART = 10000000;
 const VIDEO_PART_BIG = 25000000;
+const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
 // Files up to 1 GB upload in 10 MB parts; larger ones in 25 MB parts, so a 5 GB
 // file needs 200 round trips instead of 500. The plan is pinned per upload in md.
 function videoPartSize(size) { return size > 1000000000 ? VIDEO_PART_BIG : VIDEO_PART; }
@@ -532,6 +533,42 @@ export class Room extends DurableObject {
     this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, row.size, id);
     return { status: 200, type: sniffed, bytes: row.size };
+  }
+
+  // Streaming ingest: the Worker receives one whole-file PUT (the native
+  // background-uploader path) and assembles R2 multipart parts as bytes arrive.
+  // streamBegin reserves the upload, streamComplete indexes it after the Worker's
+  // own size + signature verification, streamAbort discards it.
+  async streamBegin(id, who, type, size, owner, room) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
+    if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 5 GB" };
+    const key = this.mediaKey(room, id, "video");
+    const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size) VALUES (?, 'video', ?, ?, ?, ?, '[]', NULL, ?)", id, type, key, size, up.uploadId, STREAM_PART);
+    return { status: 200, key: key, uploadId: up.uploadId };
+  }
+
+  streamComplete(id, size, sniffed) {
+    const row = this.sql.exec("SELECT size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row) return { status: 404, error: "No upload in progress for that message" };
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
+    this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
+    return { status: 200, type: sniffed, bytes: size };
+  }
+
+  streamAbort(id) {
+    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
+    return { status: 200 };
   }
 
   async abortVideoUpload(id, who, owner) {
@@ -1785,6 +1822,8 @@ function docs(o) {
     "  only once its media is complete. Interrupted uploads resume: include a \"fingerprint\"",
     "  in the start body, then POST /video/resume {\"size\", \"fingerprint\"} returns your",
     "  in-progress draft and the parts already received.",
+    "  Or send the whole file in ONE request: PUT /messages/ID/video/stream with the raw",
+    "  file as the body (any size up to 5 GB) - the path native background uploaders use.",
     "",
     "PHONE NOTIFICATIONS (WEB PUSH)",
     "  Members can get a phone notification for new messages via Web Push. Serve",
@@ -2523,6 +2562,74 @@ export default {
     // Chunked video upload (multipart into R2) for files past the single-request
     // limit: POST start, PUT each part (?n=1..), POST finish (or abort). Same access
     // as attaching. See the chunked upload methods in the Room class.
+    // Whole-file streaming ingest: ONE PUT carrying the entire file (up to the
+    // cap) - the path a native background uploader uses. The Worker assembles
+    // R2 multipart parts as the bytes arrive; nothing holds the whole file.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/stream\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (!env.MEDIA) return json({ error: "The R2 binding (MEDIA) is not configured" }, 501);
+      if (!request.body) return json({ error: "Missing upload body" }, 400);
+      const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
+      const begun = await stub.streamBegin(id, acc.name || "", request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
+      if (begun.status !== 200) return json({ error: begun.error }, begun.status);
+      const key = begun.key, uploadId = begun.uploadId;
+      const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
+      const fail = async (status, error) => {
+        try { await up.abort(); } catch (e) {}
+        try { await env.MEDIA.delete(key); } catch (e) {}
+        await stub.streamAbort(id);
+        return json({ error: error }, status);
+      };
+      const parts = [];
+      let counted = 0, n = 0, bufs = [], buflen = 0;
+      const take = (amount) => {
+        const out = new Uint8Array(amount);
+        let off = 0;
+        while (off < amount) {
+          const head = bufs[0], need = amount - off;
+          if (head.byteLength <= need) { out.set(head, off); off += head.byteLength; bufs.shift(); }
+          else { out.set(head.subarray(0, need), off); bufs[0] = head.subarray(need); off += need; }
+        }
+        buflen -= amount;
+        return out;
+      };
+      const reader = request.body.getReader();
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          const value = chunk.value;
+          if (value && value.byteLength) {
+            counted += value.byteLength;
+            if (counted > VIDEO_MAX_HARD) return await fail(413, "Videos can be up to 5 GB");
+            bufs.push(value); buflen += value.byteLength;
+            while (buflen >= STREAM_PART) { const p = await up.uploadPart(++n, take(STREAM_PART)); parts.push({ partNumber: n, etag: p.etag }); }
+          }
+        }
+        if (buflen > 0) { const p = await up.uploadPart(++n, take(buflen)); parts.push({ partNumber: n, etag: p.etag }); }
+        if (!parts.length) return await fail(400, "Empty upload");
+        await up.complete(parts);
+      } catch (e) {
+        return await fail(502, "Upload stream failed: " + String((e && e.message) || e));
+      }
+      let head = null, sniffed = null;
+      try { head = await env.MEDIA.head(key); } catch (e) {}
+      if (head && head.size === counted) {
+        try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}
+      }
+      if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
+      const doneRes = await stub.streamComplete(id, counted, sniffed);
+      if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
+      return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+    }
+
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort|status)\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
