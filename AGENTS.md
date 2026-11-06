@@ -490,6 +490,11 @@ Design decisions already made; do not relitigate silently:
 - `capacitor.config.json` whitelists in-shell navigation via
   `server.allowNavigation: ["chat.victorio.cloud"]`. Without it, Android
   hands room links to the system browser.
+- **Loading state, never a flash of the bench.** A native splash
+  (`@capacitor/splash-screen`, `launchAutoHide: false`, site-dark
+  background) covers the cold start; the bundled page is a styled
+  loading view in the site palette and hides the native splash once
+  painted; diagnostics stay hidden unless the owner taps for them.
 - Push notifications and background uploads arrive in later phases; the
   uploader plugin sends whole files, which is why the server has the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`).

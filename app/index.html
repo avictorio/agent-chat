@@ -3,32 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Agent Chat — Phase 0 Spike</title>
+<title>Agent Chat</title>
 <style>
-  body { font-family: system-ui, sans-serif; background: #0e0f13; color: #e8eaf0; margin: 0; padding: calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom)); }
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; background: #141413; color: #ecebe6; margin: 0; padding: calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom)); }
+  @media (prefers-color-scheme: light) { body { background: #f6f5f1; color: #1d1c1a; } }
+  /* Loading state: the only thing visible while the shell forwards to the
+     site home. Matches the site palette so the handoff is seamless. */
+  #splash { min-height: calc(100dvh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; }
+  #splash .brand { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; }
+  #splash .open { margin: 0; font-size: 15px; opacity: 0.75; }
+  .spin { width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(127, 184, 164, 0.25); border-top-color: #7fb8a4; animation: sp 0.9s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  #stayDiag { background: none; border: 0; color: inherit; opacity: 0.55; font-size: 13px; text-decoration: underline; width: auto; padding: 10px; margin-top: 12px; cursor: pointer; }
   h1 { font-size: 20px; margin: 4px 0 2px; }
   h2 { font-size: 15px; margin: 22px 0 6px; color: #9fd0ff; }
   p, li { font-size: 14px; line-height: 1.45; color: #c6cad4; }
-  .room-row { display: flex; gap: 8px; }
-  .room-row button { width: auto; margin: 5px 0; }
-  .room-open { flex: 1; text-align: left; font-weight: 600; }
-  .room-x { flex: none; width: 52px !important; background: #2a2d38; }
   button { display: block; width: 100%; padding: 14px; margin: 10px 0; font-size: 16px; border: 0; border-radius: 10px; background: #2f6fed; color: #fff; }
   button.secondary { background: #262a33; }
-  input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 14px; border-radius: 10px; border: 1px solid #343945; background: #171a20; color: #e8eaf0; }
   #env { font-size: 13px; color: #9aa1af; word-break: break-all; }
   #log { background: #05070a; border: 1px solid #262a33; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; min-height: 180px; }
   .warn { color: #ffcf87; }
 </style>
 </head>
 <body>
+<div id="splash">
+  <div class="brand">Agent Chat</div>
+  <div class="spin" aria-hidden="true"></div>
+  <p class="open">Opening your rooms…</p>
+  <button id="stayDiag" type="button">Diagnostics</button>
+</div>
+
+<div id="diag" hidden>
 <h1>Agent Chat — Phase 0 spike</h1>
 <p id="env">checking plugins…</p>
 
-<p>Opening your rooms…</p>
-<button id="stayDiag" class="secondary">Stay here for Phase 0 diagnostics</button>
-
-<div id="diag" hidden>
 <h2>Background-upload fit test</h2>
 <p>Builds a 30 MB test video on the phone, starts a native background upload to a throwaway room, and logs every event. <b>After tapping Run, switch apps or lock the phone for a minute</b>, then come back — the log should show the upload finishing while you were away. The log survives the app being closed.</p>
 <button id="runTest">Run the fit test</button>
@@ -38,10 +47,9 @@
 <p class="warn">Registration is expected to FAIL until the Firebase/APNs setup lands in Phase 2 — this button only proves the plugin is wired in.</p>
 <button id="pushCheck" class="secondary">Check push registration</button>
 
-</div>
-
 <h2>Log</h2>
 <div id="log"></div>
+</div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

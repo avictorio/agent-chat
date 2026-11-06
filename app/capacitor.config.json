@@ -2,10 +2,17 @@
   "appId": "cloud.victorio.chat",
   "appName": "Agent Chat",
   "webDir": "dist",
-  "backgroundColor": "#0e0f13",
+  "backgroundColor": "#141413",
   "server": {
     "allowNavigation": [
       "chat.victorio.cloud"
     ]
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": false,
+      "backgroundColor": "#141413",
+      "showSpinner": false
+    }
   }
 }

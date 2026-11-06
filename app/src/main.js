@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Uploader } from "@capgo/capacitor-uploader";
 import { PushNotifications } from "@capacitor/push-notifications";
+import { SplashScreen } from "@capacitor/splash-screen";
 import { SPIKE } from "./spike-config.js";
 
 const logEl = document.getElementById("log");
@@ -30,12 +31,15 @@ document.getElementById("clearLog").onclick = () => { logs = []; try { localStor
 // Phase 0 diagnostics bench when the owner taps to stay.
 let stayDiag = false;
 const goHome = () => { if (!stayDiag) location.replace("https://chat.victorio.cloud/"); };
-const diagTimer = setTimeout(goHome, 900);
+const diagTimer = setTimeout(goHome, 400);
+// The native splash covers the cold start; hand over to the styled
+// loading view as soon as it has painted, then forward.
+requestAnimationFrame(() => setTimeout(() => { SplashScreen.hide().catch(() => {}); }, 30));
 const stayBtn = document.getElementById("stayDiag");
 if (stayBtn) stayBtn.onclick = () => {
   stayDiag = true; clearTimeout(diagTimer);
+  document.getElementById("splash").hidden = true;
   document.getElementById("diag").hidden = false;
-  stayBtn.hidden = true;
   log("diagnostics open; auto-forward cancelled");
 };
 
