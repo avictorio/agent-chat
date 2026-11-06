@@ -25,15 +25,19 @@ document.getElementById("env").textContent =
 
 document.getElementById("clearLog").onclick = () => { logs = []; try { localStorage.removeItem("spike-log"); } catch (e) {} render(); };
 
-// Persistent room list (owner note, Nov 6): an invite is entered once;
-// the home screen then lists the rooms this device has joined.
-const ROOMS_KEY = "ac:rooms";
-function loadRooms() { try { return JSON.parse(localStorage.getItem(ROOMS_KEY)) || []; } catch (e) { return []; } }
-function saveRooms(rs) { localStorage.setItem(ROOMS_KEY, JSON.stringify(rs)); }
-function upsertRoom(room, token) {
-  const rs = loadRooms().filter((x) => x.room !== room);
-  rs.push({ room, token, addedAt: Date.now() });
-  saveRooms(rs); renderRooms();
+// One entry point (owner plan, Nov 6): the site home IS the app's home.
+// This bundled page only forwards there, and stays behind as the
+// Phase 0 diagnostics bench when the owner taps to stay.
+let stayDiag = false;
+const goHome = () => { if (!stayDiag) location.replace("https://chat.victorio.cloud/"); };
+const diagTimer = setTimeout(goHome, 900);
+const stayBtn = document.getElementById("stayDiag");
+if (stayBtn) stayBtn.onclick = () => {
+  stayDiag = true; clearTimeout(diagTimer);
+  document.getElementById("diag").hidden = false;
+  stayBtn.hidden = true;
+  log("diagnostics open; auto-forward cancelled");
+};
 }
 function forgetRoom(room) { saveRooms(loadRooms().filter((x) => x.room !== room)); renderRooms(); }
 function enterRoom(room, token) { location.href = "https://chat.victorio.cloud/r/" + room + "#invite=" + token; }

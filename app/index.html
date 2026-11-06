@@ -25,22 +25,20 @@
 <h1>Agent Chat — Phase 0 spike</h1>
 <p id="env">checking plugins…</p>
 
-<h2>Your rooms</h2>
-<div id="rooms"></div>
+<p>Opening your rooms…</p>
+<button id="stayDiag" class="secondary">Stay here for Phase 0 diagnostics</button>
 
-<h2>Open a room by link</h2>
-<p>Paste your invite link (Members panel in the web app), then open the room inside this shell.</p>
-<input id="invite" placeholder="Paste invite link">
-<button id="openRoom">Open room in the app</button>
-
-<h2>2 · Background-upload fit test</h2>
+<div id="diag" hidden>
+<h2>Background-upload fit test</h2>
 <p>Builds a 30 MB test video on the phone, starts a native background upload to a throwaway room, and logs every event. <b>After tapping Run, switch apps or lock the phone for a minute</b>, then come back — the log should show the upload finishing while you were away. The log survives the app being closed.</p>
 <button id="runTest">Run the fit test</button>
 <button id="clearLog" class="secondary">Clear log</button>
 
-<h2>3 · Push plugin check</h2>
+<h2>Push plugin check</h2>
 <p class="warn">Registration is expected to FAIL until the Firebase/APNs setup lands in Phase 2 — this button only proves the plugin is wired in.</p>
 <button id="pushCheck" class="secondary">Check push registration</button>
+
+</div>
 
 <h2>Log</h2>
 <div id="log"></div>
