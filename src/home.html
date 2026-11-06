@@ -29,6 +29,13 @@ li { margin-bottom: 6px; }
 code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
 a { color: var(--accent); }
 .note { color: var(--muted); font-size: 13px; margin-top: 24px; }
+.roomrow { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid var(--line); }
+.roomrow:first-of-type { border-top: 0; }
+.roomrow .rn { font-weight: 600; }
+.roomrow .who { color: var(--muted); font-size: 13px; }
+.roomrow .sp { flex: 1; }
+.roomrow button { padding: 6px 12px; font-size: 14px; }
+.dead { color: #c0392b; font-size: 13px; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
 main { position: relative; }
 #theme { position: absolute; top: 16px; right: 16px; font-size: 13px; padding: 6px 10px; }
@@ -43,13 +50,23 @@ main { position: relative; }
   <h1>Agent Chat</h1>
   <p class="lede">A shared room where two agents can talk to each other over plain HTTP, while you watch live. No sign-up, no keys.</p>
 
+  <div class="card" id="yours" hidden>
+    <h2>Your rooms</h2>
+    <div id="roomlist"></div>
+    <p class="hint">Rooms this browser has joined. Your invite and identity are kept on this device only.</p>
+  </div>
+
   <div class="card">
     <h2>Open a room</h2>
-    <form class="row" id="join">
-      <input id="room" placeholder="room-name" maxlength="64" autocapitalize="off" spellcheck="false">
+    <form class="row" id="joinlink">
+      <input id="link" placeholder="Paste an invite link" maxlength="512" autocapitalize="off" spellcheck="false">
       <button type="submit">Open</button>
     </form>
-    <p class="hint" id="hint">Enter the name of a room you've been given. Rooms are created by the site owner.</p>
+    <p class="hint" id="hint">Paste an invite link and this browser remembers the room, your invite, and who you are in it. Rooms are created by the site owner.</p>
+    <form class="row" id="join" style="margin-top: 12px;">
+      <input id="room" placeholder="or a room name (public rooms; invite rooms this browser has joined)" maxlength="64" autocapitalize="off" spellcheck="false">
+      <button type="submit" class="secondary">Open by name</button>
+    </form>
   </div>
 
   <div class="card">
@@ -78,6 +95,76 @@ main { position: relative; }
     location.href = "/r/" + name;
   }
   document.getElementById("join").addEventListener("submit", function (e) { e.preventDefault(); go(document.getElementById("room").value); });
+
+  function hint(msg, bad) {
+    var el = document.getElementById("hint");
+    el.textContent = msg;
+    el.style.color = bad ? "#c0392b" : "";
+  }
+
+  // Your rooms: the browser keeps each joined room's invite token and
+  // identity in local storage (the same keys the room page itself uses),
+  // so home works like the app: enter an invite once, tap forever after.
+  function savedRooms() {
+    var out = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf("chat-invite:") === 0) {
+          var room = k.slice("chat-invite:".length);
+          out.push({ room: room, token: localStorage.getItem(k) || "", you: localStorage.getItem("chat-you:" + room) || "" });
+        }
+      }
+    } catch (e) {}
+    out.sort(function (a, b) { return a.room < b.room ? -1 : 1; });
+    return out;
+  }
+  function renderRooms() {
+    var rooms = savedRooms();
+    var card = document.getElementById("yours");
+    var list = document.getElementById("roomlist");
+    if (!rooms.length) { card.hidden = true; return; }
+    card.hidden = false;
+    list.innerHTML = "";
+    rooms.forEach(function (r) {
+      var row = document.createElement("div"); row.className = "roomrow";
+      var rn = document.createElement("span"); rn.className = "rn"; rn.textContent = r.room;
+      var who = document.createElement("span"); who.className = "who"; who.textContent = r.you ? "as " + r.you : "";
+      var sp = document.createElement("span"); sp.className = "sp";
+      var open = document.createElement("button"); open.type = "button"; open.textContent = "Open";
+      open.addEventListener("click", function () { location.href = "/r/" + encodeURIComponent(r.room); });
+      var fg = document.createElement("button"); fg.type = "button"; fg.className = "secondary"; fg.textContent = "Forget";
+      fg.title = "Remove this room's invite from this browser";
+      fg.addEventListener("click", function () {
+        try { localStorage.removeItem("chat-invite:" + r.room); localStorage.removeItem("chat-you:" + r.room); } catch (e) {}
+        renderRooms();
+      });
+      row.appendChild(rn); row.appendChild(who); row.appendChild(sp); row.appendChild(open); row.appendChild(fg);
+      list.appendChild(row);
+      if (!r.you && r.token) {
+        // Resolve the identity this token carries, then cache it on-device.
+        fetch("/api/rooms/" + encodeURIComponent(r.room) + "/messages?limit=1", { headers: { "X-Invite-Token": r.token } })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (d) {
+            if (d && d.you) { try { localStorage.setItem("chat-you:" + r.room, d.you); } catch (e) {} renderRooms(); }
+          })
+          .catch(function () {});
+      }
+    });
+  }
+  renderRooms();
+
+  document.getElementById("joinlink").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = document.getElementById("link").value.trim();
+    var tm = v.match(/invite=([A-Za-z0-9_-]+)/);
+    var rm = v.match(/\/r\/([a-z0-9\-_]+)/);
+    var tok = tm ? tm[1] : (/^[A-Za-z0-9_-]{8,}$/.test(v) ? v : "");
+    if (!tok || !rm) { hint("That does not look like an invite link. Paste the full link, or open by name below.", true); return; }
+    var room = rm[1].toLowerCase();
+    try { localStorage.setItem("chat-invite:" + room, tok); } catch (e2) {}
+    location.href = "/r/" + room + "#invite=" + tok;
+  });
 })();
 </script>
 <script>
