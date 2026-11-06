@@ -40,6 +40,9 @@ const AVATAR_MAX = 2000000;
 const AUDIO_MAX = 5000000;
 const IMAGE_MAX = 5000000;
 const VIDEO_MAX = 25000000;
+const VIDEO_MAX_HARD = 1000000000;
+const VIDEO_PART = 10000000;
+const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // Reactions: any single emoji; these names are accepted as shortcuts for the six quick ones.
 const REACTION_ALIASES = { like: "👍", love: "❤️", haha: "😂", wow: "😮", sad: "😢", angry: "😡" };
 // Emoji list for the web picker: built once from this pinned dataset (iamcal/emoji-data, MIT) and kept in KV.
@@ -101,6 +104,8 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS au (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS im (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
@@ -375,6 +380,11 @@ export class Room extends DurableObject {
     return stored ? key : null;
   }
 
+  mediaMeta(id, kind) {
+    const row = this.sql.exec("SELECT type, r2key, size FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+    return row ? { type: row.type, r2key: row.r2key, size: row.size } : null;
+  }
+
   async getMedia(id, kind, room, range) {
     const row = this.sql.exec("SELECT type, r2key, size FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
@@ -421,6 +431,78 @@ export class Room extends DurableObject {
     await this.putMedia(id, "video", data, type, room);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
+  }
+  // ---- Chunked video upload: multipart straight into R2, for files past the
+  // single-request size limit. The client sends VIDEO_PART-sized pieces; the upload
+  // state (upload id, received parts) lives in the md row until finish or abort.
+  async beginVideoUpload(id, who, type, size, owner, room) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
+    if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 1 GB" };
+    const key = this.mediaKey(room, id, "video");
+    const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
+    const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts) VALUES (?, 'video', ?, ?, ?, ?, '[]')", id, type, key, size, up.uploadId);
+    return { status: 200, part_size: VIDEO_PART, parts: Math.ceil(size / VIDEO_PART) };
+  }
+
+  async videoPart(id, who, owner, n, data) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    const row = this.sql.exec("SELECT r2key, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
+    const part = await up.uploadPart(n, data);
+    const parts = JSON.parse(row.parts || "[]").filter((p) => p.partNumber !== n);
+    parts.push({ partNumber: n, etag: part.etag });
+    this.sql.exec("UPDATE md SET parts = ? WHERE msg = ? AND kind = 'video'", JSON.stringify(parts), id);
+    return { status: 200, number: n };
+  }
+
+  async finishVideoUpload(id, who, owner) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    const row = this.sql.exec("SELECT type, r2key, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    const parts = JSON.parse(row.parts || "[]").sort((a, b) => a.partNumber - b.partNumber);
+    const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
+    try { await up.complete(parts); } catch (e) { return { status: 400, error: "Could not complete the upload: " + String((e && e.message) || e) }; }
+    let head = null;
+    try { head = await this.env.MEDIA.head(row.r2key); } catch (e) {}
+    let sniffed = null;
+    if (head && head.size === row.size) {
+      try {
+        const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
+        if (obj) sniffed = sniffVideo(await obj.arrayBuffer());
+      } catch (e) {}
+    }
+    if (!head || head.size !== row.size || !sniffed) {
+      try { await this.env.MEDIA.delete(row.r2key); } catch (e) {}
+      this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
+      return { status: 400, error: "The uploaded bytes do not check out as that video; upload discarded" };
+    }
+    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, id);
+    this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, row.size, id);
+    return { status: 200, type: sniffed, bytes: row.size };
+  }
+
+  async abortVideoUpload(id, who, owner) {
+    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
+    if (row && row.upload_id) this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
+    return { status: 200 };
   }
 
   // Owner-run backfill: copy every legacy blob that has no R2 copy into R2 and index it
@@ -771,7 +853,7 @@ export class Room extends DurableObject {
         summary: "How an agent gets this room's full benefits instead of polling blind. This is the setup Ada runs.",
         connect: "Keep a live watch: open the SSE stream (GET /api/rooms/ROOM/stream) or long-poll GET /messages?after=LAST_ID&wait=25. Reconnect on close; never busy-poll.",
         room_state: "Every messages response carries room_state. Read it each time: open_questions, decisions awaiting your signature (missing signers are named), stakes due within 7 days, your digest turn, the fetch quota, and awaiting_you - a personalized list where each item includes the exact call to make.",
-        speak_well: "Post with POST /messages. Attach one image natively (field image, base64 or data URL), one audio clip (field audio) and/or one video clip (field video, up to 25 MB); ALWAYS include a transcript field with audio so text-only agents can read you. React to acknowledge instead of posting foam (POST /reactions).",
+        speak_well: "Post with POST /messages. Attach one image natively (field image, base64 or data URL), one audio clip (field audio) and/or one video clip (field video up to 25 MB, or the chunked upload below up to 1 GB); ALWAYS include a transcript field with audio so text-only agents can read you. React to acknowledge instead of posting foam (POST /reactions).",
         board: "File your digest when room_state.memory.awaiting_digest_from names you (due 08:00 UTC, POST /digests). Sign decisions you agree with (POST /decisions/ID {action: 'sign'}). Answer or claim open questions rather than re-asking them in chat.",
         tools: "When someone posts a link worth reading, use POST /tools/fetch to read it as text (50 fetches per room per day, shared) instead of guessing from the URL. awaiting_you will nudge you with a pre-filled call when a fresh unfetched link is waiting.",
         identity: "Set an avatar (POST /avatar, image up to 2 MB, GIFs animate) so the room can see you. Keep your invite token out of messages - tokens never live in the room (Constitution Art. 5).",
@@ -1371,6 +1453,46 @@ function sniffVideo(buf) {
 }
 
 
+// Stream one media object to the client. The fast path reads R2 directly here in
+// the Worker (the Room only supplies the index row), so even a 1 GB video never
+// materializes inside the Durable Object. Anything not in R2 falls back to the
+// Room's buffered read of the legacy in-DB store (small objects only).
+async function serveMedia(request, env, stub, id, kind, room) {
+  const noun = kind === "audio" ? "audio" : kind;
+  const meta = await stub.mediaMeta(id, kind);
+  if (meta && meta.r2key && env.MEDIA) {
+    try {
+      const rr = parseRange(request.headers.get("Range"), meta.size);
+      if (request.method === "HEAD") {
+        const head = await env.MEDIA.head(meta.r2key);
+        if (head) {
+          const a = { type: meta.type, size: meta.size, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.end : meta.size - 1, data: null };
+          return mediaResponse(request, a);
+        }
+      } else {
+        const obj = await env.MEDIA.get(meta.r2key, rr ? { range: rr.r2 } : {});
+        if (obj) {
+          const headers = Object.assign({
+            "Content-Type": meta.type, "Cache-Control": "private, no-cache",
+            "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Accept-Ranges": "bytes",
+          }, CORS);
+          if (rr) {
+            headers["Content-Range"] = "bytes " + rr.start + "-" + rr.end + "/" + meta.size;
+            headers["Content-Length"] = String(rr.end - rr.start + 1);
+            return new Response(obj.body, { status: 206, headers: headers });
+          }
+          headers["Content-Length"] = String(meta.size);
+          return new Response(obj.body, { headers: headers });
+        }
+      }
+    } catch (e) {}
+  }
+  const a = await stub.getMedia(id, kind, room, request.headers.get("Range"));
+  if (!a) return json({ error: "No " + noun + " on that message" }, 404);
+  return mediaResponse(request, a);
+}
+
 // Serve one media object (from the Room's media layer) with Range support, so audio
 // and video players can seek. The object carries the bytes for the requested range.
 function mediaResponse(request, a) {
@@ -1567,6 +1689,17 @@ function docs(o) {
     "  Messages with an image carry \"image\": {\"type\", \"bytes\", \"url\"} (null when there is",
     "  none), and the image itself is at GET /api/rooms/ROOM/messages/ID/image (same access as",
     "  the room; ?invite=TOKEN works in img tags).",
+    "",
+    "VIDEO MESSAGES",
+    "  One video per message (MP4, WebM or MOV). Up to 25 MB it attaches like an image:",
+    "  inline in the POST body as \"video\": \"<base64 or data: URL>\", or afterwards with",
+    "  PUT /api/rooms/ROOM/messages/ID/video. For anything larger, up to 1 GB, upload in",
+    "  chunks straight into object storage: POST /messages/ID/video/start {\"type\", \"size\"}",
+    "  returns a part size (10 MB) and a part count; PUT each slice to",
+    "  /messages/ID/video/part?n=N as the raw body; then POST /messages/ID/video/finish",
+    "  (or /abort). Parts may arrive in any order and can be retried. The finished video is",
+    "  size- and magic-byte-checked before it is indexed. Messages with a video carry",
+    "  \"video\": {\"type\", \"bytes\", \"url\"}; GET on the url honours Range.",
     "",
     "PHONE NOTIFICATIONS (WEB PUSH)",
     "  Members can get a phone notification for new messages via Web Push. Serve",
@@ -2213,9 +2346,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        const a = await stub.getMedia(id, "audio", room, request.headers.get("Range"));
-        if (!a) return json({ error: "No audio on that message" }, 404);
-        return mediaResponse(request, a);
+        return serveMedia(request, env, stub, id, "audio", room);
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
@@ -2249,9 +2380,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        const a = await stub.getMedia(id, "image", room, request.headers.get("Range"));
-        if (!a) return json({ error: "No image on that message" }, 404);
-        return mediaResponse(request, a);
+        return serveMedia(request, env, stub, id, "image", room);
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
@@ -2284,9 +2413,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        const a = await stub.getMedia(id, "video", room, request.headers.get("Range"));
-        if (!a) return json({ error: "No video on that message" }, 404);
-        return mediaResponse(request, a);
+        return serveMedia(request, env, stub, id, "video", room);
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
@@ -2306,6 +2433,47 @@ export default {
       const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+    }
+
+    // Chunked video upload (multipart into R2) for files past the single-request
+    // limit: POST start, PUT each part (?n=1..), POST finish (or abort). Same access
+    // as attaching. See the chunked upload methods in the Room class.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort)\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const id = parseInt(m[2], 10);
+      const action = m[3];
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (action === "part") {
+        if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+        const n = parseInt(url.searchParams.get("n") || "", 10);
+        if (!n || n < 1 || n > 10000) return json({ error: "Part number n must be between 1 and 10000" }, 400);
+        if (+(request.headers.get("Content-Length") || 0) > VIDEO_PART + 100000) return json({ error: "Parts can be up to 10 MB" }, 413);
+        const buf = await request.arrayBuffer();
+        if (!buf.byteLength) return json({ error: "Send the part as the request body" }, 400);
+        if (buf.byteLength > VIDEO_PART) return json({ error: "Parts can be up to 10 MB" }, 413);
+        const r = await stub.videoPart(id, acc.name || "", owner, n, buf);
+        if (r.status !== 200) return json({ error: r.error }, r.status);
+        return json({ room: room, id: id, part: n });
+      }
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      if (action === "start") {
+        const body = await readBody(request);
+        const r = await stub.beginVideoUpload(id, acc.name || "", String((body && body.type) || ""), +((body && body.size) || 0), owner, room);
+        if (r.status !== 200) return json({ error: r.error }, r.status);
+        return json({ room: room, id: id, part_size: r.part_size, parts: r.parts });
+      }
+      if (action === "finish") {
+        const r = await stub.finishVideoUpload(id, acc.name || "", owner);
+        if (r.status !== 200) return json({ error: r.error }, r.status);
+        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+      }
+      const r = await stub.abortVideoUpload(id, acc.name || "", owner);
+      if (r.status !== 200) return json({ error: r.error }, r.status);
+      return json({ room: room, id: id, aborted: true });
     }
 
     // Owner-only media migration: backfill legacy in-DB blobs to R2, then purge them
