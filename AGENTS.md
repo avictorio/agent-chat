@@ -255,7 +255,20 @@ change behavior. In summary:
   documents. The composer's file button attaches `.html` / `.md` files
   the same way. Images use the same viewer: an attached image renders
   inline (no wrapping link) and tapping it opens it full screen in the
-  viewer, with the same back behavior. **Serving rule:** HTML artifacts
+  viewer, with the same back behavior.
+- **Build id, update banner, pull-to-refresh:** the Worker stamps each
+  served page's `<meta name="build">` with a short SHA-256 of the two
+  page sources (`currentBuildId()` / `page()` in worker.js) and
+  `GET /api/build` reports the running deployment's id. Both pages poll
+  it (on load, every 4 min, on focus/visibility, and on stream
+  reconnect in rooms); when it differs from the loaded page's stamp,
+  an accent banner offers **Refresh** (dismissal is per build, in
+  localStorage `ac:build-dismissed`, so a further deploy re-shows it).
+  Worker-only changes do not move the id — the client is not stale
+  then. Separately, a downward drag starting on the top bar reloads
+  the page (the installed app has no browser chrome): the `#pullHint`
+  pill tracks the drag, "Release to refresh" past ~72 px, and a real
+  drag swallows its trailing click. **Serving rule:** HTML artifacts
   are served with the artifact CSP in `mediaCsp()` — opaque origin
   (`sandbox allow-scripts`, echoed by the iframe's `sandbox="allow-scripts"`
   attribute, never `allow-same-origin`), inline scripts/styles and
@@ -690,6 +703,7 @@ should tap through.
 | Stale code deploy | Another session deployed in between | Pull `main` before you start, push through git only, and claim queue items with `owner_building` |
 | Rooms keep running old code briefly after a deploy | A room people are connected to can serve the previous version for a few minutes, so new Durable Object methods fail with "RPC receiver does not implement the method" | Expected; it clears on its own. Wait a few minutes before live-testing new room methods in a busy room |
 | Warm DO outlives the deploy | A new route 500'd (1101) for ~20 minutes, then cycled to the new generation. Worse, a *changed* method fails silently: after the 2026-11-07 artifact deploy, the busy room's `post()` ran the old generation for ~40 minutes and silently dropped the new `html`/`doc` fields — the post returned 201 with no error, and only the response's missing `html` field showed the attachment was gone | Probe a brand-new behavior against the live room and re-check; don't declare failure (or success) from the first probe. For changed methods, verify the new field is present in the response (or the listing), not just the status code, and re-post once the room cycles if it is missing |
+| Serve-time placeholder also lives in the page's own JS | The build-id stamp used a global replace of `__BUILD_ID__`; the pages' update check compares against that same literal, so stamping rewrote the comparison too and the check always bailed — silently, in production and in the test mock alike | Stamp only the exact meta attribute (`content="__BUILD_ID__"`), and spell the literal in two parts (`"__BUILD" + "_ID__"`) anywhere the served source itself must mention it. The test mock stamps the same targeted way, so the harness cannot mask this |
 | Patch matched 0 or 2 times | The code had changed since you last read it | Exact-match patches that must match exactly once; re-read the region and retry |
 | Backticks in site code | Breaks the tooling that embeds the code in JS template strings when uploading via the API | Keep the site code free of template literals (string concatenation is the house style) |
 | Token parsed as alphanumeric | Real invite tokens contain `-` and `_`; a `[A-Za-z0-9]+` parser silently chopped one and the room answered invite-only | Parse tokens as `[A-Za-z0-9_-]+` everywhere |

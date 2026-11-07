@@ -8,7 +8,7 @@ function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + 
 function fresh(opts) {
   opts = opts || {};
   return {
-    deny: opts.deny || 0, noYou: !!opts.noYou,
+    deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind,
     msgs: [
       { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
       { id: 2, ts: now - D - 2 * H + 60e3, from: 'Henry', text: 'Second thought: Huaca first, then Barranco.' },
@@ -77,7 +77,8 @@ async function setup(page, S, calls) {
       S.av.anthony = { buf, type }; me.avatar = 'https://chat.victorio.cloud/api/rooms/demo/avatars/Anthony?v=' + Date.now(); return J({ ok: 1 });
     }
     if (p === '/emoji.json') return route.fulfill({ status: 200, contentType: 'application/json', body: require('fs').readFileSync(__dirname + '/fixtures/emoji-compact.json') });
-    if (p.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
+    if (p.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML.replace('content="__BUILD_ID__"', 'content="uitestbuild1"') });
+    if (p === '/api/build') return J({ build: S.behind ? 'uitestbuild2' : 'uitestbuild1' });
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
@@ -201,6 +202,66 @@ async function run(name, o, fn) {
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };
+  });
+  // Update banner: the page is stamped uitestbuild1, /api/build reports
+  // uitestbuild2, so the banner shows; dismissal is per build and the
+  // Refresh button reloads the page.
+  await run('update-banner', { state: { behind: true } }, async (page) => {
+    const out = {};
+    out.meta = await page.$eval('meta[name="build"]', e => e.getAttribute('content'));
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await shot(page, 'update-banner.png');
+    await page.click('#updateDismiss');
+    await page.waitForFunction(() => document.getElementById('updateStrip').hidden, null, { timeout: 4000 });
+    await page.reload(); await page.waitForTimeout(900);
+    out.afterDismissReload = await page.$eval('#updateStrip', e => e.hidden);
+    await page.evaluate(() => localStorage.removeItem('ac:build-dismissed'));
+    await page.reload();
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await Promise.all([page.waitForNavigation({ timeout: 5000 }), page.click('#updateRefresh')]);
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    out.refreshReloaded = true;
+    if (out.meta !== 'uitestbuild1') throw new Error('page build meta wrong: ' + out.meta);
+    if (!out.afterDismissReload) throw new Error('dismissal did not persist across reload');
+    return out;
+  });
+  await run('update-banner-mobile', { state: { behind: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await shot(page, 'update-banner-mobile.png');
+    return { ok: true };
+  });
+  await run('update-banner-current', {}, async (page) => {
+    await page.waitForTimeout(900);
+    const hidden = await page.$eval('#updateStrip', e => e.hidden);
+    if (!hidden) throw new Error('banner must stay hidden when the build is current');
+    return { hidden };
+  });
+  // Pull-to-refresh: a downward drag from the top bar. A short drag only
+  // shows the hint; past the threshold, releasing reloads the page.
+  await run('pull-refresh-mobile', { w: 390, h: 844, touch: true }, async (page) => {
+    const out = {};
+    const drag = (dy) => page.evaluate((d) => {
+      const bar = document.querySelector('.topbar');
+      const mk = (t, y) => new PointerEvent(t, { clientY: y, bubbles: true, pointerId: 7, isPrimary: true });
+      bar.dispatchEvent(mk('pointerdown', 120));
+      bar.dispatchEvent(mk('pointermove', 120 + d));
+    }, dy);
+    const release = () => page.evaluate(() => {
+      document.querySelector('.topbar').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, isPrimary: true }));
+    });
+    await drag(30);
+    out.shortHint = await page.$eval('#pullHintText', e => e.textContent);
+    await release(); await page.waitForTimeout(350);
+    out.shortHidden = await page.$eval('#pullHint', e => e.hidden);
+    await drag(120);
+    out.fullHint = await page.$eval('#pullHintText', e => e.textContent);
+    await shot(page, 'pull-refresh-mobile.png');
+    await Promise.all([page.waitForNavigation({ timeout: 5000 }), release()]);
+    out.reloaded = true;
+    if (out.shortHint !== 'Pull to refresh') throw new Error('short drag hint wrong: ' + out.shortHint);
+    if (!out.shortHidden) throw new Error('hint must hide after a short drag');
+    if (out.fullHint !== 'Release to refresh') throw new Error('full drag hint wrong: ' + out.fullHint);
+    return out;
   });
   await run('actions', {}, async (page, S, calls) => {
     const out = {};
@@ -564,7 +625,8 @@ async function runHome() {
   await page.route('https://chat.victorio.cloud/**', async (route) => {
     const u = new URL(route.request().url()); const p = u.pathname;
     const J = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(o) });
-    if (p === '/' || p === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html', body: HOME });
+    if (p === '/' || p === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html', body: HOME.replace('content="__BUILD_ID__"', 'content="uitestbuild1"') });
+    if (p === '/api/build') return J({ build: 'uitestbuild2' });
     if (p.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
     if (p.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
     return route.fulfill({ status: 404, body: 'nf' });
@@ -587,11 +649,24 @@ async function runHome() {
   await page.waitForTimeout(200);
   await page.fill('#cRoom', 'My Room');
   out.preview = await page.$eval('#cRoomUrl', e => e.textContent);
+  await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 4000 });
+  out.updateBanner = true;
+  await page.screenshot({ path: OUT + 'home-update-banner.png' });
+  await page.evaluate(() => {
+    const bar = document.querySelector('.topbar');
+    const mk = (t, y) => new PointerEvent(t, { clientY: y, bubbles: true, pointerId: 7, isPrimary: true });
+    bar.dispatchEvent(mk('pointerdown', 40));
+    bar.dispatchEvent(mk('pointermove', 170));
+  });
+  out.pullHint = await page.$eval('#pullHintText', e => e.textContent);
+  await page.screenshot({ path: OUT + 'home-pull.png' });
+  await Promise.all([page.waitForNavigation({ timeout: 5000 }), page.evaluate(() => document.querySelector('.topbar').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, isPrimary: true })))]);
+  out.pullReloaded = true;
   } catch (e) { FAILURES++; console.log('FAIL ' + name + ': harness error: ' + e.message); }
   await b.close();
   const fatal = errs.filter(e => !e.startsWith('console:'));
   if (fatal.length) { FAILURES++; console.log('FAIL ' + name + ': ' + JSON.stringify(fatal)); }
-  if (out.rows !== 2 || out.forgetInsideLink || !out.forgetIsSibling || out.preview.indexOf('/r/my-room') < 0) {
+  if (out.rows !== 2 || out.forgetInsideLink || !out.forgetIsSibling || out.preview.indexOf('/r/my-room') < 0 || !out.updateBanner || out.pullHint !== 'Release to refresh' || !out.pullReloaded) {
     FAILURES++; console.log('FAIL ' + name + ': assertions: ' + JSON.stringify(out));
   }
   console.log(name, errs.length ? 'ERRORS: ' + JSON.stringify(errs) : 'no page errors', JSON.stringify(out));

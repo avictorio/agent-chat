@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="build" content="__BUILD_ID__">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -155,6 +156,13 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
 
 /* Install strip - same treatment as the room pages. */
 .install-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }
+.topbar { touch-action: none; }
+#pullHint { position: fixed; top: calc(6px + env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -64px); z-index: 110; background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 7px 14px; font-size: 13px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); transition: transform .18s ease; pointer-events: none; }
+#pullHint.dragging { transition: none; }
+.update-strip { background: var(--accent); color: var(--accent-ink); }
+.install-strip.update-strip .ib-text, .install-strip.update-strip .ib-text strong { color: var(--accent-ink); }
+.install-strip.update-strip .btn.quiet { color: var(--accent-ink); }
+.update-strip .btn.primary { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
 .install-strip[hidden] { display: none; }
 .install-strip img { width: 28px; height: 28px; border-radius: 7px; flex: none; }
 .install-strip .ib-text { flex: 1; min-width: 0; color: var(--muted); }
@@ -235,11 +243,19 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       <div class="title" id="topTitle">Your rooms</div>
     </header>
 
+    <div id="pullHint" hidden><span id="pullHintText">Pull to refresh</span></div>
+
     <div class="install-strip" id="installBar" hidden>
       <img src="/icons/icon-192.png" alt="" width="28" height="28">
       <span class="ib-text"><strong>Install Agent Chat</strong><span id="installSteps"> - one tap, no browser chrome</span></span>
       <button type="button" class="btn sm primary" id="installGo">Install</button>
       <button type="button" class="btn sm quiet" id="installHide" aria-label="Dismiss install banner">&#10005;</button>
+    </div>
+
+    <div class="install-strip update-strip" id="updateStrip" hidden>
+      <span class="ib-text"><strong>New version available</strong> - this page is behind the latest update</span>
+      <button type="button" class="btn sm primary" id="updateRefresh">Refresh</button>
+      <button type="button" class="btn sm quiet" id="updateDismiss" aria-label="Dismiss update banner">&#10005;</button>
     </div>
 
     <section class="view" id="view-rooms" aria-label="Your rooms">
@@ -591,6 +607,80 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       applyTheme(t);
     });
   });
+
+  /* Update banner: the server stamps each served page with a build id
+     (the build meta tag) and GET /api/build reports the running
+     deployment's id. When they differ this page is behind the latest
+     deploy - offer a refresh. Dismissal is per build. */
+  var myBuild = "";
+  var buildMeta = document.querySelector('meta[name="build"]');
+  if (buildMeta) myBuild = buildMeta.getAttribute("content") || "";
+  var latestBuild = "";
+  function checkBuild() {
+    // The placeholder is spelled in two parts so the literal never
+    // appears in this script: serve-time stamping must not rewrite it.
+    if (!myBuild || myBuild === "__BUILD" + "_ID__") return;
+    fetch("/api/build").then(function (r) { return r.json(); }).then(function (d) {
+      var strip = $("updateStrip");
+      if (!strip || !d || !d.build) return;
+      latestBuild = d.build;
+      if (d.build === myBuild) { strip.hidden = true; return; }
+      var dis = "";
+      try { dis = localStorage.getItem("ac:build-dismissed") || ""; } catch (e) {}
+      if (dis !== d.build) strip.hidden = false;
+    }).catch(function () {});
+  }
+  if ($("updateStrip")) {
+    $("updateRefresh").addEventListener("click", function () { location.reload(); });
+    $("updateDismiss").addEventListener("click", function () {
+      $("updateStrip").hidden = true;
+      if (latestBuild) { try { localStorage.setItem("ac:build-dismissed", latestBuild); } catch (e) {} }
+    });
+    checkBuild();
+    setInterval(checkBuild, 240000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) checkBuild(); });
+    window.addEventListener("focus", checkBuild);
+  }
+
+  /* Pull-to-refresh: the installed app has no browser chrome, so a
+     downward drag that starts on the top bar reloads the page. */
+  var pullHint = $("pullHint"), pullBar = document.querySelector(".topbar");
+  if (pullBar && pullHint) {
+    var pStart = null, pDy = 0, pDragged = false;
+    pullBar.addEventListener("pointerdown", function (e) {
+      pStart = e.clientY; pDy = 0; pDragged = false;
+      pullHint.classList.add("dragging");
+    });
+    pullBar.addEventListener("pointermove", function (e) {
+      if (pStart === null) return;
+      pDy = Math.max(0, e.clientY - pStart);
+      if (pDy > 6) {
+        pDragged = true;
+        pullHint.hidden = false;
+        pullHint.style.transform = "translate(-50%, " + Math.min(-64 + pDy * 0.9, 6) + "px)";
+        $("pullHintText").textContent = pDy >= 72 ? "Release to refresh" : "Pull to refresh";
+      }
+    });
+    var pullEnd = function () {
+      if (pStart === null) return;
+      var go = pDy >= 72;
+      pStart = null;
+      pullHint.classList.remove("dragging");
+      if (go) {
+        $("pullHintText").textContent = "Refreshing…";
+        pullHint.style.transform = "translate(-50%, 6px)";
+        setTimeout(function () { location.reload(); }, 250);
+      } else {
+        pullHint.style.transform = "";
+        if (pDragged) setTimeout(function () { pullHint.hidden = true; }, 180);
+        else pullHint.hidden = true;
+      }
+      pDy = 0;
+    };
+    pullBar.addEventListener("pointerup", pullEnd);
+    pullBar.addEventListener("pointercancel", pullEnd);
+    pullBar.addEventListener("click", function (e) { if (pDragged) { e.stopPropagation(); e.preventDefault(); pDragged = false; } }, true);
+  }
 
   show(location.hash.slice(1), true);
 })();

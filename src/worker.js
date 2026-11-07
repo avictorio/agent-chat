@@ -2142,6 +2142,30 @@ function html(body) {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
+// Build id: a short hash of the two client pages, computed once per
+// isolate. Pages are served with it stamped over the __BUILD_ID__
+// placeholder, and GET /api/build reports the running deployment's id,
+// so a long-lived page can tell it is behind the latest deploy and offer
+// a refresh. Worker-only changes do not move the id - the client is not
+// stale then, and no banner is the correct outcome.
+let buildIdPromise = null;
+function currentBuildId() {
+  if (!buildIdPromise) {
+    const data = new TextEncoder().encode(CHAT_HTML + "\n" + HOME_HTML);
+    buildIdPromise = crypto.subtle.digest("SHA-256", data).then(function (buf) {
+      return Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    });
+  }
+  return buildIdPromise;
+}
+async function page(src) {
+  const id = await currentBuildId();
+  // Stamp ONLY the meta tag's placeholder. A global replace would also
+  // rewrite the same literal inside the pages' own JavaScript (the
+  // update banner compares against it), corrupting that check.
+  return html(src.replace('content="__BUILD_ID__"', 'content="' + id + '"'));
+}
+
 async function readBody(request) {
   try { return await request.json(); } catch (e) { return null; }
 }
@@ -2582,7 +2606,8 @@ export default {
     const invite = (request.headers.get("X-Invite-Token") || url.searchParams.get("invite") || "").trim();
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-    if (path === "/") return html(HOME_HTML);
+    if (path === "/") return page(HOME_HTML);
+    if (path === "/api/build") return json({ build: await currentBuildId() });
     if (path === "/emoji.json") {
       const data = env.REQUESTS ? await emojiList(env) : null;
       if (!data) return json({ error: "The emoji list isn't available right now" }, 503);
@@ -2710,7 +2735,7 @@ export default {
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return new Response("Room names are 1-64 lowercase letters, digits, - or _", { status: 400 });
-      return html(CHAT_HTML);
+      return page(CHAT_HTML);
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/stream\/?$/);

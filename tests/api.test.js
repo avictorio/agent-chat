@@ -161,6 +161,18 @@ async function waitUp() {
     r = await req('GET', R2 + '/members', { owner: true });
     check('destroyed room 404s', r.status === 404, r.status);
 
+    // Build id: /api/build reports it, and both served pages carry the
+    // same id stamped over the placeholder (no literal left behind).
+    r = await req('GET', '/api/build');
+    const bid = r.json && r.json.build;
+    check('build id shape', /^[0-9a-f]{16}$/.test(bid || ''), JSON.stringify(r.json));
+    const homeTxt = await (await fetch(BASE + '/')).text();
+    const roomTxt = await (await fetch(BASE + '/r/apitest-main-' + SUF)).text();
+    const metaOf = (t) => { const mm = t.match(/<meta name="build" content="([^"]*)">/); return mm && mm[1]; };
+    check('home page stamped with the build id', metaOf(homeTxt) === bid, metaOf(homeTxt));
+    check('room page stamped with the build id', metaOf(roomTxt) === bid, metaOf(roomTxt));
+    check('no unstamped placeholder served', !homeTxt.includes('__BUILD_ID__') && !roomTxt.includes('__BUILD_ID__'));
+
     // Clean up room one.
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });
   } finally {
