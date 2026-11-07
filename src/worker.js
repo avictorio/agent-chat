@@ -1620,8 +1620,34 @@ function pemToDer(pem) {
   for (let i = 0; i < bin.length; i++) der[i] = bin.charCodeAt(i);
   return der;
 }
+// The service-account JSON arrives via a dashboard paste, and a
+// viewer along the way may turn the key's escaped line breaks into
+// literal ones - strict JSON rejects raw line breaks inside a
+// string. Parse strictly first; on failure, retry with raw line
+// breaks inside string values escaped. Anything else malformed
+// still fails, just without throwing.
+function parseServiceAccount(raw) {
+  try { return JSON.parse(raw || "null"); } catch (e) { }
+  try {
+    let out = "";
+    let inStr = false;
+    let esc = false;
+    const text = String(raw || "");
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === "\\" && inStr) { out += ch; esc = true; continue; }
+      if (ch === "\"") { inStr = !inStr; out += ch; continue; }
+      if (inStr && ch === "\n") { out += "\\n"; continue; }
+      if (inStr && ch === "\r") { out += "\\r"; continue; }
+      out += ch;
+    }
+    return JSON.parse(out);
+  } catch (e) { return null; }
+}
+
 async function fcmAccessToken(env) {
-  const sa = JSON.parse(env.FCM_SA || "null");
+  const sa = parseServiceAccount(env.FCM_SA);
   if (!sa || !sa.client_email || !sa.private_key || !sa.project_id) return null;
   const now = Math.floor(Date.now() / 1000);
   if (fcmCache.email === sa.client_email && fcmCache.token && fcmCache.exp > now + 60) return { sa: sa, token: fcmCache.token };
