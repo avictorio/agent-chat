@@ -1685,7 +1685,20 @@ async function sendFcmDebug(env, token, note) {
   let tokRes = null;
   try { tokRes = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(assertion) }); }
   catch (e) { return { stage: "oauth", detail: String(e && e.message || e).slice(0, 160) }; }
-  if (!tokRes.ok) return { stage: "oauth", status: tokRes.status, detail: (await tokRes.text()).slice(0, 200) };
+  if (!tokRes.ok) {
+    const errText = (await tokRes.text()).slice(0, 200);
+    // Echo the claims we actually sent (no signature, no key) and try
+    // once without the sub claim - some Google endpoints reject a
+    // service-account grant that carries one.
+    const claimObj = { iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 };
+    const claim2Obj = { iss: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 };
+    const claim2 = b64urlEncode(enc.encode(JSON.stringify(claim2Obj)));
+    const sig2 = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(head + "." + claim2));
+    const assertion2 = head + "." + claim2 + "." + b64urlEncode(sig2);
+    let tokRes2 = null;
+    try { tokRes2 = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(assertion2) }); } catch (e) { }
+    return { stage: "oauth", status: tokRes.status, detail: errText, claims: claimObj, siglen: assertion.split(".")[2].length, nosub_status: tokRes2 ? tokRes2.status : 0, nosub_detail: tokRes2 ? (await tokRes2.text()).slice(0, 200) : "" };
+  }
   const tokJson = await tokRes.json();
   let res = null;
   try {
