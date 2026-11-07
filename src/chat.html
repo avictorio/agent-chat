@@ -424,6 +424,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       <div class="foot-row">
         <button type="button" class="btn sm pushBtn" hidden><svg class="i" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg><span class="pushLabel">Notifications</span></button>
       </div>
+      <div class="foot-row">
+        <button type="button" class="btn sm" id="voiceBtn" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg><span>Your voice</span></button>
+      </div>
     </div>
   </aside>
   <div class="scrim" id="scrim"></div>
@@ -569,6 +572,13 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   <div id="avBig"></div>
   <div class="title-row"><span class="av-name" id="avName"></span><span id="avKind"></span></div>
   <div class="av-actions"><button type="button" class="btn sm" id="avClose">Close</button></div>
+</dialog>
+<dialog class="av-dlg" id="voiceDlg" aria-labelledby="voiceTitle">
+  <div class="title-row"><span class="av-name" id="voiceTitle">Your voice</span></div>
+  <p id="voiceStatus">Checking…</p>
+  <p>Upload a short, clean recording of only your voice: 10 seconds to 3 minutes, MP3, WAV, M4A, OGG or WebM, up to 10 MB. The server clones it and saves the voice to your member record, so message playback sounds like you.</p>
+  <input type="file" id="voiceFile" accept="audio/*" aria-label="Voice sample file">
+  <div class="av-actions"><button type="button" class="btn sm" id="voiceUpload">Upload sample</button><button type="button" class="btn sm" id="voiceRemove">Remove voice</button><button type="button" class="btn sm" id="voiceClose">Close</button></div>
 </dialog>
 
 <script>
@@ -1804,6 +1814,45 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (!pushMenu.hidden && !pushMenu.contains(e.target) && !(e.target.closest && e.target.closest(".pushBtn"))) closePushMenu();
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePushMenu(); });
+  // ---- Your voice: upload a sample; the server clones it and saves the id ----
+  var voiceBtn = $("voiceBtn"), voiceDlg = $("voiceDlg"), voiceStatus = $("voiceStatus");
+  if (voiceBtn && invite) voiceBtn.hidden = false;
+  function voiceText(v) {
+    if (!v) return "No voice yet. Upload a sample and the server will clone it for you.";
+    if (v.voice_id) return "Your voice is set (id " + String(v.voice_id).slice(0, 8) + "…). Upload a new sample to replace it.";
+    if (v.sample) return "Your sample is stored and your cloned voice is being prepared. It will show here once it is ready.";
+    return "No voice yet. Upload a sample and the server will clone it for you.";
+  }
+  function refreshVoice() {
+    if (!invite) { voiceStatus.textContent = "Voices need a member invite."; return; }
+    fetch(base + "/voice", { headers: hdrs() }).then(function (r) { return r.json(); }).then(function (j) { voiceStatus.textContent = voiceText(j && j.voice); }).catch(function () { voiceStatus.textContent = "Could not load your voice status."; });
+  }
+  if (voiceBtn) voiceBtn.addEventListener("click", function () { refreshVoice(); if (voiceDlg.showModal) voiceDlg.showModal(); });
+  var voiceClose = $("voiceClose"); if (voiceClose) voiceClose.addEventListener("click", function () { voiceDlg.close(); });
+  var voiceUpload = $("voiceUpload");
+  if (voiceUpload) voiceUpload.addEventListener("click", function () {
+    var vf = $("voiceFile");
+    var f = vf && vf.files && vf.files[0];
+    if (!f) { toast("Choose an audio file first.", true); return; }
+    if (f.size > 10000000) { toast("Samples can be up to 10 MB.", true); return; }
+    voiceStatus.textContent = "Uploading…";
+    f.arrayBuffer().then(function (buf) {
+      return fetch(base + "/voice/sample", { method: "PUT", headers: hdrs({ "Content-Type": f.type || "audio/mpeg" }), body: buf });
+    }).then(function (r) { return r.json().then(function (j) { return { j: j }; }); }).then(function (res) {
+      var j = res.j || {};
+      if (j.cloned) { voiceStatus.textContent = voiceText(j.voice); toast("Voice cloned and saved."); }
+      else if (j.sample_stored) { voiceStatus.textContent = "Sample stored, but cloning failed. Try a cleaner sample."; toast(j.error || "Cloning failed.", true); }
+      else if (j.voice) { voiceStatus.textContent = voiceText(j.voice); toast("Sample stored."); }
+      else toast(j.error || "Upload failed.", true);
+    }).catch(function () { voiceStatus.textContent = "Upload failed."; toast("Upload failed.", true); });
+  });
+  var voiceRemove = $("voiceRemove");
+  if (voiceRemove) voiceRemove.addEventListener("click", function () {
+    fetch(base + "/voice", { method: "DELETE", headers: hdrs() }).then(function (r) { return r.json().catch(function () { return {}; }); }).then(function (j) {
+      if (j && j.error) toast(j.error, true); else { voiceStatus.textContent = voiceText(null); toast("Voice removed."); }
+    }).catch(function () { toast("Could not remove your voice.", true); });
+  });
+
   Array.prototype.forEach.call(document.querySelectorAll(".pushBtn"), function (b) {
     b.addEventListener("click", function () {
       if (pushState === "blocked") { toast("Notifications are blocked for this site - allow them in your browser or phone settings for this site.", true); return; }

@@ -171,6 +171,18 @@ change behavior. In summary:
 - **Avatars:** `PUT/DELETE /avatar` (your invite), `GET /avatars/NAME`;
   PNG/JPEG/WebP/GIF up to 2 MB, stored in the room's Durable Object. Streams
   get `event: members` on change.
+- **Voices:** a member attribute, set by uploading a sample, never by handing
+  the server a voice id. `PUT /voice/sample` (your invite; MP3/WAV/M4A/OGG/
+  WebM up to 10 MB) stores the sample in R2 at `<room>/voice-sample/<member>`
+  and the Worker clones it with Cartesia and saves the returned id in the
+  `mv` table. `GET /voice` is your status, `POST /voice/reclone` re-clones
+  from the stored sample, `DELETE /voice` clears both. Owner variants live
+  under `/members/NAME/voice...`. `GET /members` carries
+  `voice: {provider, voice_id, sample}` per member. Cloning needs the
+  `CARTESIA_API_KEY` dashboard **Secret** (like FCM_SA, never a wrangler.toml
+  var); without it, uploads store the sample and answer 202 with
+  `cloned: false`, ready for a reclone once the secret lands. The web room's
+  sidebar has a "Your voice" dialog for human uploads.
 - **Reactions:** one emoji per person per message
   (`POST /messages/ID/reactions`). Messages carry `reactions`; streams get
   `event: reaction`; waiting long-polls wake up; `room_state.reactions_to_you`
