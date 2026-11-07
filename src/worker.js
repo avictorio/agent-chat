@@ -1768,6 +1768,85 @@ async function fcmAccessToken(env) {
   fcmCache.token = j.access_token; fcmCache.exp = now + (j.expires_in || 3600);
   return { sa: sa, token: fcmCache.token };
 }
+// Gmail sending through a Google Workspace service account with domain-wide
+// delegation: the account impersonates env.GMAIL_SENDER (a real mailbox on the
+// domain) with only the gmail.send scope. Same JWT pattern as FCM above; the
+// service-account JSON is the GMAIL_SA secret. Mail then comes from the
+// domain itself, so no DNS changes are needed - Google already signs for it.
+const gmailCache = { email: null, sender: null, key: null, token: null, exp: 0 };
+
+async function gmailAccessToken(env) {
+  try { return await gmailAccessTokenInner(env); } catch (e) { return null; }
+}
+
+async function gmailAccessTokenInner(env) {
+  const sa = parseServiceAccount(env.GMAIL_SA);
+  const sender = String(env.GMAIL_SENDER || "").trim();
+  if (!sa || !sa.client_email || !sa.private_key || !sender) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (gmailCache.email === sa.client_email && gmailCache.sender === sender && gmailCache.token && gmailCache.exp > now + 60) return gmailCache.token;
+  if (!gmailCache.key || gmailCache.email !== sa.client_email) {
+    gmailCache.key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+    gmailCache.email = sa.client_email;
+  }
+  gmailCache.sender = sender;
+  const enc = new TextEncoder();
+  const head = b64urlEncode(enc.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+  const claims = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sender, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/gmail.send", iat: now, exp: now + 3600 })));
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", gmailCache.key, enc.encode(head + "." + claims));
+  const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
+  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
+  if (!res.ok) return null;
+  const j = await res.json();
+  gmailCache.token = j.access_token; gmailCache.exp = now + (j.expires_in || 3600);
+  return gmailCache.token;
+}
+
+function mimePart(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
+}
+
+async function sendViaGmail(env, to, subject, text, html) {
+  let token = null;
+  try { token = await gmailAccessToken(env); } catch (e) { }
+  if (!token) return false;
+  const sender = String(env.GMAIL_SENDER || "").trim();
+  const boundary = "acgenesis" + Date.now().toString(36);
+  const mime = [
+    "From: Agent Chat <" + sender + ">",
+    "To: " + to,
+    "Subject: " + subject,
+    "MIME-Version: 1.0",
+    "Content-Type: multipart/alternative; boundary=\"" + boundary + "\"",
+    "",
+    "--" + boundary,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimePart(text),
+    "--" + boundary,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    mimePart(html),
+    "--" + boundary + "--",
+    "",
+  ].join("\r\n");
+  try {
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: b64urlEncode(new TextEncoder().encode(mime)) }),
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Returns "ok", "gone" (dead token - prune it), "skip" (not configured), "error".
 async function sendFcmDebug(env, token, note) {
   const sa = parseServiceAccount(env.FCM_SA);
@@ -2010,6 +2089,8 @@ async function sendGenesisEmail(env, to, room, name, linkUrl) {
     + "<p><a href=\"" + linkUrl + "\">Open " + escHtml(room) + "</a></p>"
     + "<p>Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.</p>"
     + "<p>- Agent Chat</p>";
+  if (env.GMAIL_SA && env.GMAIL_SENDER) return await sendViaGmail(env, to, subject, text, html);
+  if (!env.RESEND_API_KEY) return false;
   try {
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -2413,7 +2494,7 @@ export default {
     // answers 503 and creates nothing. Abuse caps live in KV by UTC day.
     if (path === "/api/create-room") {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      if (!env.RESEND_API_KEY) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
+      if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
       let cbody = null;
       try { cbody = await request.json(); } catch (e) {}
       const croom = String((cbody && cbody.room) || "").trim().toLowerCase();
@@ -2440,7 +2521,9 @@ export default {
         return json({ error: "Could not create the room's first invite" }, 500);
       }
       const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
-      if (!(await sendGenesisEmail(env, cemail, croom, cname, clink))) {
+      let csent = false;
+      try { csent = await sendGenesisEmail(env, cemail, croom, cname, clink); } catch (e) { }
+      if (!csent) {
         try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) {}
         return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
       }

@@ -168,8 +168,12 @@ change behavior. In summary:
   the same store. There is no open-by-name: rooms are reached by invite only.
 - **Room creation:** anyone can create a room from the home page via
   `POST /api/create-room {room, name, email}`. The Worker creates the room,
-  mints the creator's genesis invite and emails the link via Resend
-  (`RESEND_API_KEY` secret, `RESEND_FROM` optional); the link is never
+  mints the creator's genesis invite and emails the link; the link is never
+  returned by the API. Two transports, first configured wins: Gmail via a
+  Workspace service account with domain-wide delegation (`GMAIL_SA` secret +
+  `GMAIL_SENDER`, the mailbox it sends as; gmail.send scope only), or Resend
+  (`RESEND_API_KEY` secret, `RESEND_FROM` optional). Transports never throw:
+  a failed send returns false and the caller rolls the room back.
   returned by the API. If the send fails the room is rolled back. KV counters
   cap creation (30/day site-wide, 5/day per IP, 3/day per email).
 - **Member types:** each invite is `human` or `agent` (owner:
