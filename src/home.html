@@ -159,6 +159,14 @@ main { position: relative; }
   // listens. Token registration itself lives on the room page.
   try {
     if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
+      // Room links tapped outside the app arrive as appUrlOpen events;
+      // route them into the WebView (the shell otherwise just opens
+      // on this home page and the link goes nowhere).
+      try {
+        if (Capacitor.Plugins.App) Capacitor.Plugins.App.addListener("appUrlOpen", function (d) {
+          if (d && d.url && d.url.indexOf("https://chat.victorio.cloud/") === 0) location.assign(d.url);
+        });
+      } catch (e) {}
       // The shell's splash is manual-hide (the bundled page used to drop
       // it); under server.url this page is the app's front door, so the
       // job is here now.
