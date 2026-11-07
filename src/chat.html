@@ -331,6 +331,19 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .av-dlg .title-row { justify-content: center; margin-top: 16px; }
 .av-dlg .av-name { font-weight: 700; font-size: 18px; overflow-wrap: anywhere; }
 .av-dlg .av-actions { margin-top: 16px; display: flex; justify-content: center; }
+.voice-dlg { text-align: left; padding: 18px; width: min(470px, calc(100vw - 24px)); }
+.voice-dlg .vd-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.voice-dlg p { margin: 0 0 10px; font-size: 14px; line-height: 1.45; }
+.voice-dlg .vd-status { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.voice-dlg .vd-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 6px; }
+.voice-dlg .voice-script { padding: 10px 12px; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+.voice-dlg .vd-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.voice-dlg .vd-meta { font-size: 13px; color: var(--muted); }
+.voice-dlg audio { width: 100%; height: 36px; margin-bottom: 10px; }
+.voice-dlg input[type="file"] { flex: 1; min-width: 0; font-size: 13px; padding: 6px 8px; }
+.voice-dlg .vd-hint { font-size: 12.5px; color: var(--muted); margin-top: -2px; }
+.voice-dlg .vd-actions { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.voice-dlg .vd-sp { flex: 1; }
 .add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .add .grow { flex: 1; min-width: 200px; }
 .add textarea { width: 100%; }
@@ -592,17 +605,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   <div class="title-row"><span class="av-name" id="avName"></span><span id="avKind"></span></div>
   <div class="av-actions"><button type="button" class="btn sm" id="avClose">Close</button></div>
 </dialog>
-<dialog class="av-dlg" id="voiceDlg" aria-labelledby="voiceTitle">
-  <div class="title-row"><span class="av-name" id="voiceTitle">Your voice</span></div>
-  <p id="voiceStatus">Checking\u2026</p>
-  <p><strong>Record it here, in one take.</strong> Quiet room, no music or echo, mic close, and speak like yourself on a good day \u2014 a clone copies your mood, pace and energy, not just your voice. Keep it flowing: long pauses teach it to pause.</p>
-  <p>Read this aloud, naturally, like you are telling a friend:</p>
-  <p class="voice-script">\u201cHey, this is my voice \u2014 the real one, not the announcer one. Last Tuesday I drove to the coast with the windows down, singing along badly and thinking about coffee. Do you know how the first cup decides the whole morning? This year I planted twelve tomatoes, which is eleven more than anybody needs. So call me when you land, bring the blue charger, and don\u2019t worry \u2014 I saved you the good seat by the window.\u201d</p>
-  <div class="av-actions"><button type="button" class="btn sm" id="voiceRec">\u25cf Record</button><span id="voiceRecMeta">Aim for the whole script, about 30 seconds.</span></div>
+<dialog class="av-dlg voice-dlg" id="voiceDlg" aria-labelledby="voiceTitle">
+  <div class="vd-head"><span class="av-name" id="voiceTitle">Your voice</span><button type="button" class="btn sm quiet" id="voiceClose" aria-label="Close">&#10005;</button></div>
+  <p class="vd-status" id="voiceStatus">Checking…</p>
+  <p>Record in one take — quiet room, mic close, speak naturally. A clone copies your mood and pace, not just your voice.</p>
+  <p class="vd-label">Read this aloud</p>
+  <p class="voice-script">“Hey, this is my voice — the real one, not the announcer one. Last Tuesday I drove to the coast with the windows down, singing along badly and thinking about coffee. Do you know how the first cup decides the whole morning? This year I planted twelve tomatoes, which is eleven more than anybody needs. So call me when you land, bring the blue charger, and don’t worry — I saved you the good seat by the window.”</p>
+  <div class="vd-row"><button type="button" class="btn sm primary" id="voiceRec">● Record</button><span class="vd-meta" id="voiceRecMeta">The whole script is about 30 seconds.</span></div>
   <audio id="voicePreview" controls hidden></audio>
-  <p>Or upload a file instead: MP3, WAV, M4A, OGG or WebM, up to 10 MB.</p>
-  <input type="file" id="voiceFile" accept="audio/*" aria-label="Voice sample file">
-  <div class="av-actions"><button type="button" class="btn sm" id="voiceUpload">Upload sample</button><button type="button" class="btn sm" id="voiceRemove">Remove voice</button><button type="button" class="btn sm" id="voiceClose">Close</button></div>
+  <div class="vd-row"><input type="file" id="voiceFile" accept="audio/*" aria-label="Voice sample file"></div>
+  <p class="vd-hint">Or upload a file instead — MP3, WAV, M4A, OGG or WebM, up to 10 MB.</p>
+  <div class="vd-actions"><button type="button" class="btn sm" id="voiceRemove">Remove voice</button><span class="vd-sp"></span><button type="button" class="btn sm primary" id="voiceUpload">Upload sample</button></div>
 </dialog>
 <dialog class="av-dlg" id="installDlg" aria-labelledby="installTitle">
   <div class="title-row"><span class="av-name" id="installTitle">Install Agent Chat</span></div>
