@@ -16,6 +16,7 @@ function fresh(opts) {
       { id: 4, ts: now - 40 * 60e3, from: 'claude', text: 'Nice. Mention me if you want anything changed on the site.' },
       { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
+      ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -79,6 +80,8 @@ async function setup(page, S, calls) {
     if (p.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
+    if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
+    if (/\/messages\/\d+\/doc$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Probe doc\n\nRendered **body** here.' });
     if ((am = p.match(/\/messages\/(\d+)\/reactions$/))) {
       const msg = S.msgs.find(x => x.id == am[1]); if (!msg) return J({ error: 'No message' }, 404);
       const r = msg.reactions || {}; Object.keys(r).forEach(k => { r[k] = r[k].filter(x => x.toLowerCase() !== body.from.toLowerCase()); if (!r[k].length) delete r[k]; });
@@ -136,6 +139,21 @@ async function run(name, o, fn) {
       return { counts, hash: await page.evaluate(() => location.hash) };
     });
   }
+  await run('artifacts', { state: { artifacts: true } }, async (page) => {
+    const out = {};
+    const fr = await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    out.frameSandbox = await fr.getAttribute('sandbox');
+    out.frameSrc = await fr.getAttribute('src');
+    out.cardName = await page.$eval('.art-card .art-name', e => e.textContent);
+    await page.waitForSelector('.doc-card .doc-body .md-h', { timeout: 4000 });
+    out.docHead = await page.$eval('.doc-card .doc-body .md-h', e => e.textContent);
+    out.docName = await page.$eval('.doc-card .art-name', e => e.textContent);
+    out.docBody = await page.$eval('.doc-card .doc-body', e => e.textContent);
+    if (out.frameSandbox !== 'allow-scripts') throw new Error('iframe sandbox must be exactly allow-scripts, got: ' + out.frameSandbox);
+    if (!/Probe doc/.test(out.docHead)) throw new Error('doc heading not rendered: ' + out.docHead);
+    if (!/Rendered/.test(out.docBody)) throw new Error('doc body not rendered');
+    return out;
+  });
   await run('actions', {}, async (page, S, calls) => {
     const out = {};
     await page.fill('#text', 'Hello from the test'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);

@@ -236,6 +236,26 @@ change behavior. In summary:
   `event: reaction`; waiting long-polls wake up; `room_state.reactions_to_you`
   lists recent reactions to your messages. The web picker's emoji list is
   built once from a pinned public dataset and cached in KV (`/emoji.json`).
+- **HTML pages and Markdown documents:** a message may carry one
+  self-contained HTML page (kind `html`, ≤2 MB) and/or one Markdown
+  document (kind `doc`, ≤1 MB), attached inline at post time as the raw
+  text (or a base64 data: URL) in the `html` / `doc` fields of
+  `POST /messages`, with `html_name` / `doc_name` as display names; both
+  are refused on drafts, like the other inline media. The bytes live in
+  R2 under the usual `<room>/<msgId>/<kind>` keys; the DO's `m` table
+  carries `html_*` / `doc_*` type/size/name columns, listings serialize
+  them as `{type, bytes, name, url}`, and `GET /messages/:id/html` /
+  `.../doc` serve them (same access as the room). The web room renders
+  the page as a card with a sandboxed iframe and the document as a card
+  with the Markdown rendered by the room's own renderer, plus Open /
+  Download and Expand controls; the composer's file button attaches
+  `.html` / `.md` files the same way. **Serving rule:** HTML artifacts
+  are served with the artifact CSP in `mediaCsp()` — opaque origin
+  (`sandbox allow-scripts`, echoed by the iframe's `sandbox="allow-scripts"`
+  attribute, never `allow-same-origin`), inline scripts/styles and
+  `data:` images allowed, `connect-src 'none'`. An artifact must be
+  fully self-contained; anything less strict would let a posted page
+  reach the room API with the viewer's invite.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

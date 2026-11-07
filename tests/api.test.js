@@ -38,7 +38,7 @@ async function req(method, p, opts) {
   const text = await r.text();
   let json = null;
   try { json = JSON.parse(text); } catch (e) {}
-  return { status: r.status, json, text };
+  return { status: r.status, json, text, headers: r.headers };
 }
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -126,6 +126,31 @@ async function waitUp() {
     check('stream upload auto-publishes', r.json && r.json.published === true, JSON.stringify(r.json));
     r = await req('GET', R2 + '/messages?limit=3', { token: TP });
     check('auto-published message is listed', (r.json.messages || []).some(m => m.id === pd.json.id && m.video), JSON.stringify(r.json.messages && r.json.messages.length));
+    // HTML artifacts and Markdown documents (second room, member Poc).
+    const HTML = '<!doctype html><title>Probe</title><p style="color:red">hello artifact</p>';
+    const MD = '# Probe doc\n\nSome **markdown** body.\n';
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'with attachments', html: HTML, html_name: 'Probe Page', doc: MD, doc_name: 'probe.md' } });
+    check('post with html+doc -> 201', r.status === 201, r.status);
+    const amid = r.json && r.json.id;
+    check('post response carries html meta', !!(r.json && r.json.html && r.json.html.name === 'Probe Page' && r.json.html.bytes === Buffer.byteLength(HTML)), JSON.stringify(r.json && r.json.html));
+    check('post response carries doc meta', !!(r.json && r.json.doc && r.json.doc.name === 'probe.md' && r.json.doc.bytes === Buffer.byteLength(MD)), JSON.stringify(r.json && r.json.doc));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TP });
+    check('list carries html+doc', (r.json.messages || []).some(m => m.id === amid && m.html && m.doc), 'listed');
+    r = await req('GET', R2 + '/messages/' + amid + '/html', { token: TP });
+    check('html serves 200 text/html', r.status === 200 && (r.headers.get('content-type') || '').includes('text/html'), r.status + ' ' + r.headers.get('content-type'));
+    check('html serves artifact CSP', (r.headers.get('content-security-policy') || '').includes('sandbox allow-scripts'), r.headers.get('content-security-policy'));
+    check('html body round-trips', r.text === HTML, r.text.slice(0, 60));
+    r = await req('GET', R2 + '/messages/' + amid + '/doc', { token: TP });
+    check('doc serves 200 with markdown body', r.status === 200 && r.text === MD, r.status + ' ' + r.text.slice(0, 40));
+    r = await req('GET', R2 + '/messages/' + amid + '/html', {});
+    check('html denied without access', r.status === 401 || r.status === 403 || r.status === 404, r.status);
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'x', html: 'not markup at all' } });
+    check('non-markup html -> 415', r.status === 415, r.status);
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'x', doc: '   ' } });
+    check('empty doc -> 400', r.status === 400, r.status);
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'x', html: HTML, draft: true } });
+    check('draft + html -> 400', r.status === 400, r.status);
+
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
     check('room destroyed', r.json && r.json.deleted === true, JSON.stringify(r.json));
