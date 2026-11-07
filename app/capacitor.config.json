@@ -4,6 +4,8 @@
   "webDir": "dist",
   "backgroundColor": "#141413",
   "server": {
+    "url": "https://chat.victorio.cloud",
+    "errorPath": "index.html",
     "allowNavigation": [
       "chat.victorio.cloud"
     ]
