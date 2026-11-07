@@ -411,13 +411,26 @@ export class Room extends DurableObject {
     } catch (e) { return null; }
   }
 
-  setVoiceId(name, provider, voiceId) {
+  async setVoiceId(name, provider, voiceId) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), provider, voiceId, (prev && prev.sample_key) || null, (prev && prev.sample_type) || null, (prev && prev.sample_ts) || null, Date.now());
     this.notifyMembers();
+    await this.invalidateSpeakCache(name);
     return this.voiceOf(name);
+  }
+
+  // A voice change makes every cached speak rendering of that member's messages
+  // stale: drop them so the next play re-synthesizes in the new voice.
+  async invalidateSpeakCache(name) {
+    const ids = this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray();
+    for (const r of ids) {
+      const meta = this.mediaMeta(r.id, "speak");
+      if (!meta) continue;
+      if (meta.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(meta.r2key); } catch (e) {} }
+      this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'speak'", r.id);
+    }
   }
 
   async clearVoice(name) {
@@ -426,6 +439,7 @@ export class Room extends DurableObject {
     if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) {} }
     this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
     this.notifyMembers();
+    await this.invalidateSpeakCache(name);
     return true;
   }
 
