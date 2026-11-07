@@ -185,7 +185,11 @@ change behavior. In summary:
   large file through the DO (it OOMs). A message is **not officially posted
   until its attached media upload completes** (owner rule): `POST /messages
   {draft: true}` creates an invisible draft, uploads attach to it, and
-  `/publish` makes it live. Abandoned drafts are swept after 24 h.
+  `/publish` makes it live. Abandoned drafts are swept after 24 h. A draft
+  created with `publish_on_complete: true` is published by the server itself
+  the moment its video upload verifies (stream or chunked finish) — the app
+  Phase 3 path, for uploads that finish while no client is alive to call
+  `/publish`. The `m.pubauto` column carries the flag.
 - **Message delete:** `DELETE /messages/:id` (sender or owner only) aborts
   any in-flight upload, deletes the R2 objects, and drops the message and
   its index rows.

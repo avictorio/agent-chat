@@ -113,6 +113,7 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
@@ -503,7 +504,7 @@ export class Room extends DurableObject {
     return { status: 200, number: n };
   }
 
-  async finishVideoUpload(id, who, owner) {
+  async finishVideoUpload(id, who, owner, room) {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
@@ -533,7 +534,8 @@ export class Room extends DurableObject {
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, row.size, id);
-    return { status: 200, type: sniffed, bytes: row.size };
+    const published = room ? await this.maybeAutoPublish(id, room) : null;
+    return { status: 200, type: sniffed, bytes: row.size, published: published };
   }
 
   // Streaming ingest: the Worker receives one whole-file PUT (the native
@@ -557,13 +559,14 @@ export class Room extends DurableObject {
     return { status: 200, key: key, uploadId: up.uploadId };
   }
 
-  streamComplete(id, size, sniffed) {
+  async streamComplete(id, size, sniffed, room) {
     const row = this.sql.exec("SELECT size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row) return { status: 404, error: "No upload in progress for that message" };
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
-    return { status: 200, type: sniffed, bytes: size };
+    const published = room ? await this.maybeAutoPublish(id, room) : null;
+    return { status: 200, type: sniffed, bytes: size, published: published };
   }
 
   streamAbort(id) {
@@ -1062,10 +1065,10 @@ export class Room extends DurableObject {
     return renderRoomState(this.stateData(), who, room);
   }
 
-  async post(sender, text, room, trusted, audio, image, video, draft) {
+  async post(sender, text, room, trusted, audio, image, video, draft, pubauto) {
     this.roomName = room;
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft) VALUES (?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null).one().id;
+    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft, pubauto) VALUES (?, ?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null).one().id;
     if (audio) {
       await this.putMedia(id, "audio", audio.data, audio.type, room);
       this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
@@ -1127,6 +1130,19 @@ export class Room extends DurableObject {
     this.roomName = room;
     this.announce(msg, room, owner);
     return { status: 200, msg: msg };
+  }
+
+  // Publish-on-completion (app Phase 3): a draft created with
+  // publish_on_complete is the sender's standing instruction to post the
+  // moment its media upload verifies - the native background uploader may
+  // finish while the app is frozen or dead, with no client left to call
+  // /publish. Runs through publishMessage so the announce path (stream,
+  // push, bot) is identical to a manual publish.
+  async maybeAutoPublish(id, room) {
+    const r = this.sql.exec("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || !r.draft || !r.pubauto) return null;
+    const res = await this.publishMessage(id, r.sender, true, room, undefined);
+    return res && res.status === 200 ? res.msg : null;
   }
 
   // Delete one of your own messages (the owner can delete any). Removes the
@@ -2015,6 +2031,8 @@ function docs(o) {
     "  only once its media is complete. Interrupted uploads resume: include a \"fingerprint\"",
     "  in the start body, then POST /video/resume {\"size\", \"fingerprint\"} returns your",
     "  in-progress draft and the parts already received.",
+    "  Add \"publish_on_complete\": true to a draft and the server publishes it the moment",
+    "  its video upload verifies (stream or chunked finish) - no /publish call needed.",
     "  Or send the whole file in ONE request: PUT /messages/ID/video/stream with the raw",
     "  file as the body (any size up to 5 GB) - the path native background uploaders use.",
     "",
@@ -2864,9 +2882,9 @@ export default {
         try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}
       }
       if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
-      const doneRes = await stub.streamComplete(id, counted, sniffed);
+      const doneRes = await stub.streamComplete(id, counted, sniffed, room);
       if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
-      return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+      return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" }, published: !!doneRes.published });
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort|status)\/?$/);
@@ -2903,9 +2921,9 @@ export default {
         return json({ room: room, id: id, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed });
       }
       if (action === "finish") {
-        const r = await stub.finishVideoUpload(id, acc.name || "", owner);
+        const r = await stub.finishVideoUpload(id, acc.name || "", owner, room);
         if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" }, published: !!r.published });
       }
       const r = await stub.abortVideoUpload(id, acc.name || "", owner);
       if (r.status !== 200) return json({ error: r.error }, r.status);
@@ -3042,6 +3060,7 @@ export default {
         if (!text.trim() && !(body && (body.audio || body.image || body.video))) return json({ error: "\"text\" is required" }, 400);
         if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
         const draftWanted = !!(body && body.draft);
+      const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
       if (draftWanted && (body.audio || body.image || body.video)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
       let audio = null;
         if (body && body.audio) {
@@ -3080,8 +3099,8 @@ export default {
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.
         if (from.toLowerCase() === BOT_NAME && !trusted) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
-        const msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted);
-        return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
+        const msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted);
+        return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
       }
 
       return json({ error: "Method not allowed" }, 405);

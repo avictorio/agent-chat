@@ -1203,7 +1203,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     $("vidChip").hidden = !pendingVideo;
     if (pendingVideo) $("vidName").textContent = pendingVideo.name;
   }
-  $("vidBtn").addEventListener("click", function () { $("vidFile").click(); });
+  $("vidBtn").addEventListener("click", function () { if (!tryNativeVideoPick()) $("vidFile").click(); });
   $("vidFile").addEventListener("change", function () {
     var f = $("vidFile").files && $("vidFile").files[0];
     $("vidFile").value = "";
@@ -1231,6 +1231,78 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var hex = Array.from(new Uint8Array(digest)).map(function (b) { return ("0" + b.toString(16)).slice(-2); }).join("");
       return hex + "-" + file.size;
     } catch (e) { return null; }
+  }
+
+  function nativePlugins() { try { return (window.Capacitor && window.Capacitor.Plugins) || null; } catch (e) { return null; } }
+
+  // App shell only: pick a video with the native picker so the background
+  // uploader gets a real file path, not a Blob. Small picks are read back
+  // through the Filesystem plugin and ride the normal inline path.
+  function tryNativeVideoPick() {
+    var P = nativePlugins();
+    if (!inShell() || !P || !P.FilePicker || !P.Uploader || !P.Filesystem) return false;
+    P.FilePicker.pickFiles({ types: ["video/mp4", "video/webm", "video/quicktime"], limit: 1 }).then(async function (res) {
+      var f = res && res.files && res.files[0];
+      if (!f) return;
+      if (!f.path) { $("vidFile").click(); return; }
+      if (f.size > 5000000000) { toast("Videos can be up to 5 GB", true); return; }
+      var label = "\uD83C\uDFAC " + (f.name || "video") + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB) - attaches to your next message";
+      if (f.size > 25000000) { pendingVideo = { native: f, big: true, name: label }; paintVidChip(); return; }
+      try {
+        var rf = await P.Filesystem.readFile({ path: f.path });
+        pendingVideo = { data: "data:" + (f.mimeType || "video/mp4") + ";base64," + rf.data, name: label };
+        paintVidChip();
+      } catch (e) { toast("Couldn't read that file", true); }
+    }).catch(function () {});
+    return true;
+  }
+
+  // App shell, large videos: ONE background PUT to the streaming ingest
+  // endpoint under a publish_on_complete draft. The native upload service
+  // keeps the transfer alive with the app backgrounded; when it finishes,
+  // the server publishes the draft itself, so the message posts even if
+  // this page never wakes again. Events only reach a live page - they drive
+  // the progress chip and the optimistic insert while the app is in front.
+  async function sendBigVideoNative(from, text, f) {
+    var pr = await fetch(api, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ from: from, text: text, draft: true, publish_on_complete: true }) });
+    if (await denial(pr)) throw new Error("Posting was denied");
+    var pd = await pr.json();
+    if (!pr.ok) throw new Error(pd.error || ("HTTP " + pr.status));
+    var id = pd.id;
+    var P = nativePlugins();
+    await P.Uploader.startUpload({
+      filePath: f.path,
+      serverUrl: location.origin + api + "/" + id + "/video/stream",
+      method: "PUT",
+      headers: { "X-Invite-Token": invite, "Content-Type": f.mimeType || "video/mp4" },
+      notificationTitle: "Agent Chat",
+      notificationBody: "Uploading " + (f.name || "video")
+    });
+    return await new Promise(function (resolve, reject) {
+      var settled = false;
+      function settle(fn, val) {
+        if (settled) return; settled = true;
+        Promise.resolve(sub).then(function (h) { if (h && h.remove) h.remove(); }).catch(function () {});
+        fn(val);
+      }
+      var sub = P.Uploader.addListener("events", function (ev) {
+        if (settled || !ev) return;
+        if (ev.name === "uploading" && ev.payload && typeof ev.payload.percent === "number" && ev.payload.percent >= 0) {
+          $("vidName").textContent = "\uD83C\uDFAC Uploading " + (f.name || "video") + " - " + Math.round(ev.payload.percent) + "%";
+          return;
+        }
+        if (ev.name === "completed") {
+          fetch(api + "?after=" + (id - 1) + "&limit=1", { cache: "no-store", headers: hdrs() }).then(function (lr) { return lr.json(); }).then(function (ld) {
+            var got = (ld.messages || []).filter(function (x) { return x.id === id; })[0];
+            if (got) { settle(resolve, got); return; }
+            // A room on older code has no server-side publish: do it from here.
+            return fetch(api + "/" + id + "/publish", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ text: text }) }).then(function (fr) { return fr.json(); }).then(function (fj) { settle(resolve, fj); });
+          }).catch(function (e) { settle(reject, e); });
+          return;
+        }
+        if (ev.name === "failed") settle(reject, new Error((ev.payload && ev.payload.error) || "the upload failed"));
+      });
+    });
   }
 
   async function sendBigVideo(from, text, file) {
@@ -1441,18 +1513,18 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       // dies (tab frozen, app switched, network drop), nothing half-posts, and
       // re-attaching the same file resumes from the parts the server already has.
       if (pendingVideo && pendingVideo.big) {
-        var bigFile = pendingVideo.file, bigText = text, bigFrom = from;
+        var bigFile = pendingVideo.file, bigText = text, bigFrom = from, bigNative = pendingVideo.native || null;
         textEl.value = ""; grow();
         if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
         if (pendingImage) { pendingImage = null; paintImgChip(); }
         try {
-          var live = await sendBigVideo(bigFrom, bigText, bigFile);
+          var live = bigNative ? await sendBigVideoNative(bigFrom, bigText, bigNative) : await sendBigVideo(bigFrom, bigText, bigFile);
           pendingVideo = null; paintVidChip();
           add(live);
           if (live.room_state) applyState(live.room_state);
           list.scrollTop = list.scrollHeight;
         } catch (uerr) {
-          toast("Video upload interrupted: " + uerr.message + " - re-attach the same file to resume", true);
+          toast(bigNative ? ("Video upload failed: " + uerr.message) : ("Video upload interrupted: " + uerr.message + " - re-attach the same file to resume"), true);
         }
         return;
       }
