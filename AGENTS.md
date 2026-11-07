@@ -246,10 +246,14 @@ change behavior. In summary:
   carries `html_*` / `doc_*` type/size/name columns, listings serialize
   them as `{type, bytes, name, url}`, and `GET /messages/:id/html` /
   `.../doc` serve them (same access as the room). The web room renders
-  the page as a card with a sandboxed iframe and the document as a card
-  with the Markdown rendered by the room's own renderer, plus Open /
-  Download and Expand controls; the composer's file button attaches
-  `.html` / `.md` files the same way. **Serving rule:** HTML artifacts
+  each as a preview card (the page in an inert sandboxed iframe, the
+  document as Markdown rendered by the room's own renderer, clipped);
+  the cards carry no links or buttons — tapping one opens the content
+  full screen in the `#viewer` overlay, whose back chevron (or the
+  browser/Android back button, via the history entry opening pushes)
+  restores the chat. Download lives in the viewer's header, for
+  documents. The composer's file button attaches `.html` / `.md` files
+  the same way. **Serving rule:** HTML artifacts
   are served with the artifact CSP in `mediaCsp()` — opaque origin
   (`sandbox allow-scripts`, echoed by the iframe's `sandbox="allow-scripts"`
   attribute, never `allow-same-origin`), inline scripts/styles and
@@ -392,7 +396,8 @@ Before pushing:
 
 1. `npm run check` (syntax) and `npm test` (Playwright UI tests;
    `npm i -D playwright` once).
-2. For UI changes, do the visual checks in section 10.
+2. For UI changes, do the visual checks in section 10 — inspect visually
+   before committing, at desktop and mobile sizes.
 3. Keep `src/` free of backticks (house style) and of secrets.
 4. Note the current live version id for rollback
    (`GET .../workers/scripts/victorio-chat/deployments`).
@@ -553,7 +558,11 @@ the Durable Object and a local KV; secrets go in the git-ignored `.dev.vars`.
 ## 10. Visual checks for UI changes
 
 Anthony asked for this explicitly: UI changes must be inspected with real
-screenshots, actually looked at, before calling them fixed.
+screenshots, actually looked at, before calling them fixed. Reaffirmed
+2026-11-07 with the commit gate made explicit: **always inspect visually
+before committing, at both desktop and mobile sizes** — a UI change is not
+committed, let alone pushed, until its screenshots have actually been
+looked at in both sizes.
 
 1. **Use the real files.** Test `src/chat.html` and `src/home.html` from the
    repo; `tests/ui.test.js` already serves them through a fake API.

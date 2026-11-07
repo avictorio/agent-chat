@@ -152,7 +152,39 @@ async function run(name, o, fn) {
     if (out.frameSandbox !== 'allow-scripts') throw new Error('iframe sandbox must be exactly allow-scripts, got: ' + out.frameSandbox);
     if (!/Probe doc/.test(out.docHead)) throw new Error('doc heading not rendered: ' + out.docHead);
     if (!/Rendered/.test(out.docBody)) throw new Error('doc body not rendered');
+    // Cards are previews only: no Open / Expand / Download links on them.
+    out.cardLinks = await page.$$eval('.art-card a, .art-card button, .doc-card a, .doc-card button', els => els.length);
+    if (out.cardLinks !== 0) throw new Error('cards must carry no links or buttons, found ' + out.cardLinks);
+    await shot(page, 'artifacts-cards.png');
+    // Tapping the page card opens the full-screen viewer; browser back closes it.
+    await page.click('.art-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
+    await shot(page, 'artifacts-viewer-page.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    // Tapping the doc card opens the viewer with the full document; the chevron closes it.
+    await page.click('.doc-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-doc .md-h', { timeout: 4000 });
+    out.viewerDoc = await page.$eval('#viewer .viewer-doc', e => e.textContent);
+    out.viewerDl = await page.$eval('#viewerDl', e => !e.hidden);
+    await shot(page, 'artifacts-viewer-doc.png');
+    await page.click('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    if (!/Rendered/.test(out.viewerDoc)) throw new Error('viewer doc not rendered');
+    if (!out.viewerDl) throw new Error('viewer must offer Download for a document');
     return out;
+  });
+  await run('artifacts-mobile', { state: { artifacts: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    await shot(page, 'artifacts-mobile-cards.png');
+    await page.tap('.art-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'artifacts-mobile-viewer.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
   });
   await run('actions', {}, async (page, S, calls) => {
     const out = {};

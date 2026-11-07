@@ -288,17 +288,25 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .img-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: none; }
 .msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; }
 .msg-video { display: block; width: 100%; max-width: 440px; max-height: 440px; border-radius: 10px; margin-top: 6px; background: #000; }
-.art-card, .doc-card { margin-top: 6px; max-width: 640px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.art-card, .doc-card { margin-top: 6px; max-width: 640px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; }
 .art-head, .doc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .art-kind { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 10.5px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; white-space: nowrap; }
 .art-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .art-size { color: var(--mut); white-space: nowrap; }
 .art-head .sp, .doc-head .sp { flex: 1; }
-.art-frame { display: block; width: 100%; height: 380px; border: 0; background: #fff; }
-.art-card.tall .art-frame { height: 72vh; }
-.doc-body { padding: 10px 14px; max-height: 300px; overflow: auto; }
-.doc-card.open .doc-body { max-height: none; }
+.art-go { color: var(--mut); font-size: 17px; line-height: 1; padding: 0 2px; }
+.art-frame { display: block; width: 100%; height: 380px; border: 0; background: #fff; pointer-events: none; }
+.doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
 .doc-body .md-p:first-child { margin-top: 0; }
+#viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }
+#viewer[hidden] { display: none; }
+.viewer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--panel); }
+.viewer-back { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 34px; height: 34px; border-radius: 999px; font-size: 20px; line-height: 1; cursor: pointer; flex: none; }
+.viewer-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer-head .sp { flex: 1; }
+.viewer-body { flex: 1; overflow: auto; }
+.viewer-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.viewer-doc { max-width: 760px; margin: 0 auto; padding: 18px 18px 40px; }
 .compose-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 #text { width: 100%; border: 0; background: transparent; resize: none; padding: 4px 0 2px; min-height: 46px; max-height: 40vh; box-shadow: none; min-width: 0; }
 .composer-meta { max-width: 880px; margin: 6px auto 0; font-size: 12px; color: var(--muted); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
@@ -612,6 +620,16 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         <p id="lockedText">Open the invite link you were given to join.</p>
       </div>
     </section>
+
+    <div id="viewer" hidden role="dialog" aria-modal="true">
+      <div class="viewer-head">
+        <button type="button" class="viewer-back" id="viewerBack" aria-label="Back to the room">‹</button>
+        <span class="viewer-title" id="viewerTitle"></span>
+        <span class="sp"></span>
+        <a class="linkbtn" id="viewerDl" hidden>Download</a>
+      </div>
+      <div class="viewer-body" id="viewerBody"></div>
+    </div>
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
@@ -1094,19 +1112,20 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       hd.appendChild(el("span", "art-name", m.html.name || "Page"));
       hd.appendChild(el("span", "art-size", Math.max(1, Math.round((m.html.bytes || 0) / 1024)) + " KB"));
       hd.appendChild(el("span", "sp"));
-      var open = el("a", "linkbtn", "Open"); open.href = hurl; open.target = "_blank"; open.rel = "noopener";
-      hd.appendChild(open);
-      var exp = el("button", "linkbtn", "Expand"); exp.type = "button";
-      exp.addEventListener("click", function () {
-        var tall = card.classList.toggle("tall");
-        exp.textContent = tall ? "Collapse" : "Expand";
-      });
-      hd.appendChild(exp);
+      hd.appendChild(el("span", "art-go", "›"));
       card.appendChild(hd);
       var fr = el("iframe", "art-frame");
       fr.src = hurl; fr.loading = "lazy"; fr.title = m.html.name || "Shared page";
       fr.setAttribute("sandbox", "allow-scripts");
       card.appendChild(fr);
+      card.addEventListener("click", function () {
+        openViewer(m.html.name || "Page", function (vb) {
+          var vf = el("iframe", "viewer-frame");
+          vf.src = hurl; vf.title = m.html.name || "Shared page";
+          vf.setAttribute("sandbox", "allow-scripts");
+          vb.appendChild(vf);
+        }, null);
+      });
       body.appendChild(card);
     }
     if (m.doc && m.doc.url) {
@@ -1117,14 +1136,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       dhd.appendChild(el("span", "art-name", m.doc.name || "Document.md"));
       dhd.appendChild(el("span", "art-size", Math.max(1, Math.round((m.doc.bytes || 0) / 1024)) + " KB"));
       dhd.appendChild(el("span", "sp"));
-      var dl = el("a", "linkbtn", "Download"); dl.href = durl; dl.target = "_blank"; dl.rel = "noopener"; dl.setAttribute("download", m.doc.name || "document.md");
-      dhd.appendChild(dl);
-      var dexp = el("button", "linkbtn", "Expand"); dexp.type = "button";
-      dexp.addEventListener("click", function () {
-        var open2 = dcard.classList.toggle("open");
-        dexp.textContent = open2 ? "Collapse" : "Expand";
-      });
-      dhd.appendChild(dexp);
+      dhd.appendChild(el("span", "art-go", "›"));
       dcard.appendChild(dhd);
       var dbody = el("div", "doc-body");
       dbody.appendChild(el("p", "md-p", "Loading document…"));
@@ -1135,7 +1147,21 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         dbody.appendChild(md(text));
       }).catch(function () {
         dbody.textContent = "";
-        dbody.appendChild(el("p", "md-p", "Couldn't load the document - use Download to read it."));
+        dbody.appendChild(el("p", "md-p", "Couldn't load the document - tap to try again."));
+      });
+      dcard.addEventListener("click", function () {
+        openViewer(m.doc.name || "Document.md", function (vb) {
+          var vd = el("div", "viewer-doc");
+          vd.appendChild(el("p", "md-p", "Loading document…"));
+          vb.appendChild(vd);
+          loadDoc(m.id, durl).then(function (text) {
+            vd.textContent = "";
+            vd.appendChild(md(text));
+          }).catch(function () {
+            vd.textContent = "";
+            vd.appendChild(el("p", "md-p", "Couldn't load the document - use Download to read it."));
+          });
+        }, durl);
       });
     }
     row.appendChild(body);
@@ -1158,6 +1184,34 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     frag.appendChild(row);
     return frag;
   }
+  // Full-screen viewer for page and document cards: the card is a preview,
+  // tapping it opens the content full screen. Opening pushes a history
+  // entry, so the browser (or Android) back button closes the viewer and
+  // restores the chat, exactly like the back chevron does.
+  var viewerIsOpen = false, viewerPushed = false;
+  function openViewer(title, build, dlUrl) {
+    var v = $("viewer"), vb = $("viewerBody");
+    vb.textContent = "";
+    build(vb);
+    $("viewerTitle").textContent = title;
+    var dl = $("viewerDl");
+    if (dlUrl) { dl.hidden = false; dl.href = dlUrl; dl.setAttribute("download", title); }
+    else { dl.hidden = true; dl.removeAttribute("href"); }
+    v.hidden = false;
+    viewerIsOpen = true;
+    viewerPushed = false;
+    try { history.pushState({ agentChatViewer: 1 }, ""); viewerPushed = true; } catch (e) {}
+    vb.scrollTop = 0;
+  }
+  function closeViewer(fromPop) {
+    if (!viewerIsOpen) return;
+    viewerIsOpen = false;
+    $("viewer").hidden = true;
+    $("viewerBody").textContent = "";
+    if (!fromPop && viewerPushed) { viewerPushed = false; try { history.back(); } catch (e) {} }
+  }
+  window.addEventListener("popstate", function () { closeViewer(true); });
+  $("viewerBack").addEventListener("click", function () { closeViewer(false); });
   var docCache = {};
   function loadDoc(id, url) {
     if (!docCache[id]) {
