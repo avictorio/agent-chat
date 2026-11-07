@@ -1675,14 +1675,15 @@ async function sendFcmDebug(env, token, note) {
   try { key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
   catch (e) { return { stage: "key", detail: String(e && e.message || e).slice(0, 160) }; }
   const now = Math.floor(Date.now() / 1000);
-  const head = b64urlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claim = b64urlEncode(JSON.stringify({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/firebase.messaging", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 }));
+  const enc = new TextEncoder();
+  const head = b64urlEncode(enc.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+  const claim = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 })));
   let sig = null;
   try { sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(head + "." + claim)); }
   catch (e) { return { stage: "sign", detail: String(e && e.message || e).slice(0, 160) }; }
   const assertion = head + "." + claim + "." + b64urlEncode(sig);
   let tokRes = null;
-  try { tokRes = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + assertion }); }
+  try { tokRes = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(assertion) }); }
   catch (e) { return { stage: "oauth", detail: String(e && e.message || e).slice(0, 160) }; }
   if (!tokRes.ok) return { stage: "oauth", status: tokRes.status, detail: (await tokRes.text()).slice(0, 200) };
   const tokJson = await tokRes.json();
