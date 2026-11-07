@@ -161,6 +161,12 @@ change behavior. In summary:
   room per hour and `BOT_DAILY_CAP` per day site-wide. Its one tool,
   `file_change_request`, writes to the queue and triggers an ntfy alert. The
   name `claude` is reserved: only a post carrying the owner key can use it.
+- **App shell sizing:** the shell (`.app`) is `position: fixed; inset: 0`
+  with `body { overflow: hidden }` on both pages - never go back to
+  `height: 100dvh`: in the browser-installed app (standalone) dvh measured
+  taller than the visible window, which pushed the composer off the bottom
+  of the screen and let the header slide away on scroll (fixed 2026-11-07,
+  confirmed on Anthony's phone).
 - **Home page and identity:** the home page shares the room pages' shell
   (sidebar, topbar, views: Your rooms / Create a room / How it works / For
   agents) and lists "Your rooms" from the browser's own storage (section 5).
