@@ -371,17 +371,18 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .locked-box h2 { margin: 12px 0 6px; font-size: 20px; }
 .locked-box p { color: var(--muted); margin: 0; }
 
+  .install-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }
+  .install-strip[hidden] { display: none; }
+  .install-strip img { width: 28px; height: 28px; border-radius: 7px; flex: none; }
+  .install-strip .ist-text { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .install-strip .ist-text strong { color: var(--ink); }
+
 /* Phones and narrow windows: the sidebar becomes a drawer. */
 @media (max-width: 760px) {
   .topbar {
     display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; border-bottom: 1px solid var(--line);
     background: var(--panel); min-height: 52px;
   }
-  .install-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }
-  .install-strip[hidden] { display: none; }
-  .install-strip img { width: 28px; height: 28px; border-radius: 7px; flex: none; }
-  .install-strip .ist-text { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .install-strip .ist-text strong { color: var(--ink); }
   .topbar .title { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar .title span { color: var(--muted); font-weight: 400; }
   .side {
@@ -1318,6 +1319,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   // After a native upload completes, the server has normally published the
   // draft itself (publish_on_complete): fetch the live message to show it.
   // On a room running older code, fall back to publishing from here.
+  async function fetchIfLive(id) {
+    var lr = await fetch(api + "?after=" + (id - 1) + "&limit=1", { cache: "no-store", headers: hdrs() });
+    var ld = await lr.json();
+    return (ld.messages || []).filter(function (x) { return x.id === id; })[0] || null;
+  }
+
   async function fetchLiveOrPublish(id, text) {
     var lr = await fetch(api + "?after=" + (id - 1) + "&limit=1", { cache: "no-store", headers: hdrs() });
     var ld = await lr.json();
@@ -1341,22 +1348,18 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (!pr.ok) throw new Error(pd.error || ("HTTP " + pr.status));
     var id = pd.id;
     var P = nativePlugins();
-    await P.Uploader.startUpload({
-      filePath: f.path,
-      serverUrl: location.origin + api + "/" + id + "/video/stream",
-      method: "PUT",
-      headers: { "X-Invite-Token": invite, "Content-Type": f.mimeType || "video/mp4" },
-      notificationTitle: "Agent Chat",
-      notificationBody: "Uploading " + (f.name || "video")
-    });
-    return await new Promise(function (resolve, reject) {
-      var settled = false;
+    // The listener registers BEFORE the upload starts, and a liveness poll
+    // backs it up: an event emitted in the gap (or lost entirely) used to
+    // leave this promise unsettled forever and wedge the composer.
+    var done = new Promise(function (resolve, reject) {
+      var settled = false, sub = null, poll = null;
       function settle(fn, val) {
         if (settled) return; settled = true;
+        if (poll) clearInterval(poll);
         Promise.resolve(sub).then(function (h) { if (h && h.remove) h.remove(); }).catch(function () {});
         fn(val);
       }
-      var sub = P.Uploader.addListener("events", function (ev) {
+      sub = P.Uploader.addListener("events", function (ev) {
         if (settled || !ev) return;
         if (ev.name === "uploading" && ev.payload && typeof ev.payload.percent === "number" && ev.payload.percent >= 0) {
           $("vidName").textContent = "\uD83C\uDFAC Uploading " + (f.name || "video") + " - " + Math.round(ev.payload.percent) + "%";
@@ -1368,7 +1371,18 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         }
         if (ev.name === "failed") settle(reject, new Error((ev.payload && ev.payload.error) || "the upload failed"));
       });
+      poll = setInterval(function () { fetchIfLive(id).then(function (mm) { if (mm) settle(resolve, mm); }).catch(function () {}); }, 5000);
+      setTimeout(function () { settle(reject, new Error("the upload timed out")); }, 600000);
     });
+    await P.Uploader.startUpload({
+      filePath: f.path,
+      serverUrl: location.origin + api + "/" + id + "/video/stream",
+      method: "PUT",
+      headers: { "X-Invite-Token": invite, "Content-Type": f.mimeType || "video/mp4" },
+      notificationTitle: "Agent Chat",
+      notificationBody: "Uploading " + (f.name || "video")
+    });
+    return await done;
   }
 
   // App shell, videos over the 100 MB single-request cap: a native
@@ -1395,19 +1409,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (!pr.ok) throw new Error(pd.error || ("HTTP " + pr.status));
       id = pd.id;
     }
-    await P.ChunkedUploader.start({
-      key: String(id), apiBase: location.origin + api, id: id, token: invite,
-      filePath: f.path, type: f.mimeType || "video/mp4", size: f.size,
-      fingerprint: fp || "", name: f.name || "video"
-    });
-    return await new Promise(function (resolve, reject) {
-      var settled = false;
+    // Listener and settle poll first, then start (same reasoning as the
+    // stream leg: never let an early or lost event wedge the composer).
+    var done = new Promise(function (resolve, reject) {
+      var settled = false, sub = null, poll = null;
       function settle(fn, val) {
         if (settled) return; settled = true;
+        if (poll) clearInterval(poll);
         Promise.resolve(sub).then(function (h) { if (h && h.remove) h.remove(); }).catch(function () {});
         fn(val);
       }
-      var sub = P.ChunkedUploader.addListener("chunkedEvents", function (ev) {
+      sub = P.ChunkedUploader.addListener("chunkedEvents", function (ev) {
         if (settled || !ev || String(ev.key) !== String(id)) return;
         if (ev.name === "progress" && typeof ev.percent === "number" && ev.percent >= 0) {
           $("vidName").textContent = "\uD83C\uDFAC Uploading " + (f.name || "video") + " - " + Math.round(ev.percent) + "% (background-safe: you can switch apps)";
@@ -1419,7 +1431,15 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         }
         if (ev.name === "failed") settle(reject, new Error(ev.error || "the upload failed"));
       });
+      poll = setInterval(function () { fetchIfLive(id).then(function (mm) { if (mm) settle(resolve, mm); }).catch(function () {}); }, 5000);
+      setTimeout(function () { settle(reject, new Error("the upload timed out")); }, 900000);
     });
+    await P.ChunkedUploader.start({
+      key: String(id), apiBase: location.origin + api, id: id, token: invite,
+      filePath: f.path, type: f.mimeType || "video/mp4", size: f.size,
+      fingerprint: fp || "", name: f.name || "video"
+    });
+    return await done;
   }
 
   async function sendBigVideo(from, text, file) {
@@ -1631,11 +1651,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       // re-attaching the same file resumes from the parts the server already has.
       if (pendingVideo && pendingVideo.big) {
         var bigFile = pendingVideo.file, bigText = text, bigFrom = from, bigNative = pendingVideo.native || null, bigChunked = pendingVideo.nativeChunked || null;
-        textEl.value = ""; grow();
-        if (pendingClip) { pendingClip = null; $("clipChip").hidden = true; }
-        if (pendingImage) { pendingImage = null; paintImgChip(); }
+        // Nothing is cleared up front: if the upload fails, the caption is
+        // still in the composer and any clip/image stays attached, so a
+        // retry sends what the user actually wrote.
         try {
           var live = bigChunked ? await sendBigVideoChunkedNative(bigFrom, bigText, bigChunked) : (bigNative ? await sendBigVideoNative(bigFrom, bigText, bigNative) : await sendBigVideo(bigFrom, bigText, bigFile));
+          textEl.value = ""; grow();
           pendingVideo = null; paintVidChip();
           add(live);
           if (live.room_state) applyState(live.room_state);
@@ -1877,7 +1898,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   var voiceClose = $("voiceClose"); if (voiceClose) voiceClose.addEventListener("click", function () { voiceDlg.close(); });
 
   // Recorder, same shape as the composer's: MediaRecorder, webm/opus where offered.
-  var vRec = null, vStream = null, vChunks = [], vMime = "", vTimer = null, vStarted = 0, vBlob = null, vSecs = 0;
+  var vRec = null, vStream = null, vChunks = [], vMime = "", vTimer = null, vStarted = 0, vBlob = null, vSecs = 0, vDiscard = false;
   var voiceRec = $("voiceRec"), voiceRecMeta = $("voiceRecMeta"), voicePreview = $("voicePreview");
   function vClock() { var t = Math.max(0, Math.round((Date.now() - vStarted) / 1000)); return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2); }
   function vStopTracks() { if (vStream) { vStream.getTracks().forEach(function (t) { t.stop(); }); vStream = null; } }
@@ -1896,6 +1917,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       vMime = vRec.mimeType || "";
       vRec.ondataavailable = function (e) { if (e.data && e.data.size) vChunks.push(e.data); };
       vRec.onstop = function () {
+        if (vDiscard) { vDiscard = false; vBlob = null; vChunks = []; vResetRec(); voicePreview.hidden = true; voiceRecMeta.textContent = "The whole script is about 30 seconds."; return; }
         vSecs = Math.max(0, Math.round((Date.now() - vStarted) / 1000));
         vBlob = new Blob(vChunks, { type: vMime || "audio/webm" });
         vChunks = [];
@@ -1906,13 +1928,14 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         var vf = $("voiceFile"); if (vf) vf.value = "";
       };
       vRec.start(250);
+      vDiscard = false;
       vStarted = Date.now();
       voiceRec.classList.add("recording"); voiceRec.textContent = "\u25a0 Stop";
       voiceRecMeta.textContent = "\u25cf 0:00 - read the script, then tap Stop";
       vTimer = setInterval(function () { voiceRecMeta.textContent = "\u25cf " + vClock() + " - read the script, then tap Stop"; }, 500);
     });
   }
-  if (voiceDlg) voiceDlg.addEventListener("close", function () { if (vRec) { try { vRec.stop(); } catch (e) {} } vResetRec(); });
+  if (voiceDlg) voiceDlg.addEventListener("close", function () { if (vRec) { vDiscard = true; try { vRec.stop(); } catch (e) {} } vResetRec(); });
   var voiceFileEl = $("voiceFile");
   if (voiceFileEl) voiceFileEl.addEventListener("change", function () {
     if (voiceFileEl.files && voiceFileEl.files[0]) { vBlob = null; voicePreview.hidden = true; voiceRecMeta.textContent = voiceFileEl.files[0].name + " - ready to upload."; }
@@ -2500,7 +2523,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (k !== rsKey) {
       rsKey = k;
       renderCounts();
-      if (!first) { clearTimeout(loadTimer); loadTimer = setTimeout(loadAll, 700); }
+      if (!first && current !== "chat") { clearTimeout(loadTimer); loadTimer = setTimeout(loadAll, 700); }
     }
   }
   // Counts come from the full board when it's loaded (always current), otherwise from room_state.
@@ -2893,12 +2916,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     var mb = board.mb || { members: [] };
     // Members of an invite-only room can invite new people and agents.
     $("invForm").hidden = !(isMember && mb.members.length);
-    if (!mb.invite_only && !mb.members.length) {
+    if (!mb.members.length) {
       $("mDesc").textContent = "Who has access to this room.";
-      box.appendChild(emptyState("This room is public: anyone with the link can read and post. Inviting people is available in invite-only rooms."));
+      box.appendChild(emptyState("No members yet."));
       return;
     }
-    $("mDesc").textContent = (mb.invite_only ? "This room is invite-only. Each person or agent joins with their own invite link." : "This room is open to everyone right now. Invites stay valid for when it's locked again.") + (isMember ? " You can invite someone new below." : "");
+    $("mDesc").textContent = "This room is invite-only. Each person or agent joins with their own invite link." + (isMember ? " You can invite someone new below." : "");
     var order = { active: 0, unused: 1, revoked: 2 };
     mb.members.slice().sort(function (a, b) { return (order[a.status] - order[b.status]) || a.name.localeCompare(b.name); }).forEach(function (x) {
       var card = el("div", "card member" + (x.status === "revoked" ? " subtle" : ""));

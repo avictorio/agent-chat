@@ -117,8 +117,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
 .hint.bad { color: var(--danger); }
 .list-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 4px 12px 6px; font-weight: 600; }
-.roomrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; text-decoration: none; color: var(--ink); }
+.roomrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; color: var(--ink); }
 .roomrow:hover { background: var(--hover); }
+.roomrow .rowmain { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-decoration: none; color: var(--ink); }
 .roomrow .tile { width: 38px; height: 38px; flex: none; border-radius: 10px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
 .roomrow .rmeta { flex: 1; min-width: 0; }
 .roomrow .rn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -414,8 +415,9 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
     wrap.hidden = rooms.length === 0;
     list.innerHTML = "";
     rooms.forEach(function (r) {
-      var row = document.createElement("a"); row.className = "roomrow";
-      row.href = "/r/" + encodeURIComponent(r.room);
+      var row = document.createElement("div"); row.className = "roomrow";
+      var main = document.createElement("a"); main.className = "rowmain";
+      main.href = "/r/" + encodeURIComponent(r.room);
       var tile = document.createElement("span"); tile.className = "tile"; tile.textContent = tileText(r.room);
       var meta = document.createElement("span"); meta.className = "rmeta";
       var rn = document.createElement("div"); rn.className = "rn"; rn.textContent = r.room;
@@ -429,7 +431,8 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       });
       var chev = document.createElement("span"); chev.className = "chev";
       chev.innerHTML = '<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
-      row.appendChild(fg); row.appendChild(tile); row.appendChild(meta); row.appendChild(chev);
+      main.appendChild(tile); main.appendChild(meta); main.appendChild(chev);
+      row.appendChild(fg); row.appendChild(main);
       list.appendChild(row);
       if (!r.you && r.token) {
         // Resolve the identity this token carries, then cache it on-device.
@@ -482,7 +485,7 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
   var cRoom = $("cRoom"), cName = $("cName"), cEmail = $("cEmail"), cMsg = $("cMsg"), cGo = $("cGo");
   function cHint(msg, bad) { cMsg.textContent = msg; cMsg.className = bad ? "hint bad" : "hint"; }
   cRoom.addEventListener("input", function () {
-    var v = cRoom.value.trim().toLowerCase();
+    var v = cRoom.value.trim().toLowerCase().replace(/\s+/g, "-");
     $("cRoomUrl").textContent = "chat.victorio.cloud/r/" + (v || "...");
   });
   $("createForm").addEventListener("submit", function (e) {
@@ -512,7 +515,7 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       } else if (r.status === 429) {
         cHint("Too many rooms created just now - try again in a little while.", true);
       } else if (r.status === 503) {
-        cHint("Room creation opens soon - email delivery is still being set up.", true);
+        cHint("Room creation is unavailable right now - try again later.", true);
       } else {
         cHint((r.d && r.d.error) || "Something went wrong - try again.", true);
       }
