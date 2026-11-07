@@ -2076,6 +2076,15 @@ export default {
           { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
         ] });
     }
+    if (path === "/.well-known/assetlinks.json" && request.method === "GET") {
+      // Android App Links association for the native app: room links
+      // (chat.victorio.cloud/r/...) open the app when it is installed.
+      // The fingerprint below is the Android debug key the Legion builds
+      // sign with; add the Play app-signing fingerprint alongside it when
+      // Play distribution starts, or app links stop verifying for those
+      // builds (they degrade to the browser, never to an error).
+      return json([{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: "cloud.victorio.chat", sha256_cert_fingerprints: ["E4:38:DC:8A:9A:83:11:82:65:56:F7:8A:67:08:83:D0:D9:EA:CD:83:7F:97:C8:70:C5:7B:F9:76:CA:78:05:DC"] } }]);
+    }
     if (path === "/sw.js" && request.method === "GET") {
       return new Response(PUSH_SW, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Service-Worker-Allowed": "/", "Cache-Control": "no-cache" } });
     }

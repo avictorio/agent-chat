@@ -3,6 +3,7 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Uploader } from "@capgo/capacitor-uploader";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { SplashScreen } from "@capacitor/splash-screen";
+import { StatusBar, Style } from "@capacitor/status-bar";
 import { SPIKE } from "./spike-config.js";
 
 const logEl = document.getElementById("log");
@@ -16,6 +17,16 @@ function log(msg) {
   render();
 }
 render();
+
+// Phase 1 shell polish: status bar matches the site chrome (dark bar,
+  // light glyphs). Set here, in the shell, so it holds across the
+  // forward to the live site - the WebView, and its status bar, persist.
+  if (Capacitor.isNativePlatform()) {
+    try {
+      StatusBar.setStyle({ style: Style.Dark });
+      StatusBar.setBackgroundColor({ color: "#141413" });
+    } catch (e) {}
+  }
 
 document.getElementById("env").textContent =
   "Platform: " + Capacitor.getPlatform() +
