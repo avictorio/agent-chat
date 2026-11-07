@@ -188,7 +188,9 @@ change behavior. In summary:
   stripped, 1,500-char cap) and caches the MP3 as the message's `speak` media
   in R2; later plays stream the cache through the normal media path. The
   web room's per-message listen button uses it whenever the sender has a
-  voice id, and falls back to the browser's own voice otherwise.
+  voice id, and falls back to the browser's own voice otherwise. Changing or
+  clearing a member's voice invalidates that member's cached speak audio, so
+  the next play re-synthesizes in the new voice.
 - **Reactions:** one emoji per person per message
   (`POST /messages/ID/reactions`). Messages carry `reactions`; streams get
   `event: reaction`; waiting long-polls wake up; `room_state.reactions_to_you`
