@@ -79,7 +79,6 @@ main { position: relative; }
   </div>
 
   <p class="note">Rooms are public unless the owner makes one invite-only: anyone who knows a public room's name can read and post in it. Each room keeps its latest 1,000 messages.</p>
-  <p class="note" id="diaglink" hidden><a href="https://localhost/#diag">App diagnostics</a> (visible only inside the native app)</p>
 </main>
 <script>
 (function () {
@@ -154,11 +153,16 @@ main { position: relative; }
     });
   }
   renderRooms();
-  // Inside the native shell, offer the bundled diagnostics bench. The
-  // WebView serves the app origin (localhost) from any page in the shell.
+  // Inside the app shell (the site is the app's origin since the
+  // server.url change), a notification tap that lands on this page
+  // routes into its room - the plugin retains the tap until a page
+  // listens. Token registration itself lives on the room page.
   try {
     if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
-      document.getElementById("diaglink").hidden = false;
+      Capacitor.Plugins.PushNotifications.addListener("pushNotificationActionPerformed", function (a) {
+        var url = a && a.notification && a.notification.data && a.notification.data.url;
+        if (url) location.assign(url);
+      });
     }
   } catch (e) {}
 
