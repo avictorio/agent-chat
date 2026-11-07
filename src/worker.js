@@ -708,20 +708,23 @@ export class Room extends DurableObject {
     return { devices: out };
   }
   async notifyPush(msg, room) {
-    const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
-    if (!rows.length) return;
     const sender = String(msg.from || "").toLowerCase();
-    const targets = rows.filter((r) => r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
-    if (!targets.length) return;
     const text = String(msg.text || "").trim();
     const excerpt = text ? (text.length > 120 ? text.slice(0, 117) + "..." : text) : "(attachment)";
     const payload = JSON.stringify({ title: msg.from + " - Agent Chat", body: excerpt, url: "/r/" + room, tag: "room-" + room });
+    // Web push (browser subscriptions).
+    const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
+    const targets = rows.filter((r) => r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     for (const r of targets) {
       try {
         const status = await sendWebPush(this.env, r, payload);
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
       } catch (e) {}
     }
+    // Native devices (app Phase 2). This block must NOT sit behind the
+    // web flow's exits: it originally did, behind an early return for
+    // rooms with no browser subscriptions, which silently disabled
+    // app push in exactly the rooms that only have app users.
     const drows = this.sql.exec("SELECT member, platform, token, mode FROM pushdev").toArray();
     if (drows.length) {
       const note = JSON.parse(payload);
