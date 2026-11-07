@@ -960,20 +960,23 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   /* ---------- messages ---------- */
   var last = null, seen = {}, arr = [], unread = 0, isMember = false;
   // Human / Agent labels come from the room's member list (invite-only rooms).
-  var kinds = {}, kindsKey = "";
+  var kinds = {}, kindsKey = "", voices = {};
   function kindOf(n) { return kinds[String(n || "").toLowerCase()] || null; }
+  function voiceOf(n) { return voices[String(n || "").toLowerCase()] || null; }
   function kindTag(k) { return el("span", "tag k-" + k, k === "human" ? "Human" : "Agent"); }
   function updateKinds() {
     var next = {};
     var avs = {};
+    var vcs = {};
     (board && board.mb && board.mb.members || []).forEach(function (m) {
       var key = m.name.toLowerCase();
       if (m.kind) next[key] = m.kind;
       if (m.avatar && (m.status !== "revoked" || !avs[key])) avs[key] = m.avatar;
+      if (m.voice && m.voice.voice_id) vcs[key] = m.voice.voice_id;
     });
-    var k = JSON.stringify([next, avs]);
+    var k = JSON.stringify([next, avs, vcs]);
     if (k === kindsKey) return;
-    kinds = next; avatars = avs; kindsKey = k;
+    kinds = next; avatars = avs; voices = vcs; kindsKey = k;
     var bottom = atBottom();
     renderAll();
     if (bottom) list.scrollTop = list.scrollHeight;
@@ -1034,7 +1037,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     rb.innerHTML = ICON_REACT;
     rb.addEventListener("click", function (e) { e.stopPropagation(); openReactions(m.id, row); });
     acts.appendChild(rb);
-    if (canSpeak) {
+    if (canSpeak || voiceOf(m.from)) {
       var sp = el("button", "speak"); sp.type = "button"; sp.dataset.id = m.id;
       sp.addEventListener("click", function () { speakMsg(m); });
       paintSpeak(sp);
@@ -2329,9 +2332,32 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (cur.trim()) out.push(cur);
     return out;
   }
+  var speakAudio = null;
+  function stopServerSpeak() { if (speakAudio) { try { speakAudio.pause(); } catch (e) {} speakAudio = null; } }
+  // Play the message in the sender's cloned voice (the server synthesizes it once and
+  // caches it). Toggling the button stops it, like the browser-voice path.
+  function speakServer(m) {
+    var again = speakingId === m.id;
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+    stopServerSpeak();
+    speakingId = null;
+    if (!again) {
+      speakingId = m.id;
+      var src = base + "/messages/" + m.id + "/speak" + (invite ? "?invite=" + encodeURIComponent(invite) : "");
+      speakAudio = new Audio(src);
+      speakAudio.onended = function () { if (speakingId === m.id) { speakingId = null; speakAudio = null; paintAllSpeak(); } };
+      var failed = function () { if (speakingId === m.id) { speakingId = null; speakAudio = null; paintAllSpeak(); toast("Could not play that in " + m.from + "\u2019s voice.", true); } };
+      speakAudio.onerror = failed;
+      var pr = speakAudio.play();
+      if (pr && pr.catch) pr.catch(failed);
+    }
+    paintAllSpeak();
+  }
   function speakMsg(m) {
+    if (voiceOf(m.from)) { speakServer(m); return; }
     var synth = window.speechSynthesis;
     var again = speakingId === m.id;
+    stopServerSpeak();
     synth.cancel();
     speakingId = null;
     if (!again) {

@@ -429,6 +429,13 @@ export class Room extends DurableObject {
     return true;
   }
 
+  // What a speak request needs: the message's sender and text. Drafts never speak.
+  speakSource(id) {
+    const r = this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || r.draft) return null;
+    return { sender: r.sender, text: r.text };
+  }
+
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
   // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: read as a fallback
@@ -1843,6 +1850,33 @@ async function cartesiaClone(env, data, type, memberName) {
   if (!r.ok || !j || !j.id) throw new Error("Cartesia cloning failed (" + r.status + ")" + (j && (j.error || j.message) ? ": " + String(j.error || j.message).slice(0, 160) : ""));
   return j.id;
 }
+
+// Strip the Markdown that would sound like noise read aloud, and cap the length
+// (a speak request is one synthesis, billed per character).
+function speakableText(text) {
+  var t = String(text || "");
+  t = t.replace(/```[\s\S]*?```/g, " ");
+  t = t.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  t = t.replace(/`([^`]*)`/g, "$1");
+  t = t.replace(/[*_#>~|]/g, " ");
+  t = t.replace(/\s+/g, " ").trim();
+  return t.slice(0, 1500);
+}
+
+// Synthesize text in a cloned voice with Cartesia; returns the MP3 bytes.
+async function cartesiaSpeak(env, voiceId, text) {
+  const r = await fetch("https://api.cartesia.ai/tts/bytes", {
+    method: "POST",
+    headers: { "X-API-Key": env.CARTESIA_API_KEY, "Cartesia-Version": "2025-04-16", "Content-Type": "application/json" },
+    body: JSON.stringify({ model_id: "sonic-3", transcript: text, voice: { mode: "id", id: voiceId }, output_format: { container: "mp3", bit_rate: 128000, sample_rate: 44100 } }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => null);
+    throw new Error("Cartesia speech failed (" + r.status + ")" + (j && (j.error || j.message) ? ": " + String(j.error || j.message).slice(0, 160) : ""));
+  }
+  return r.arrayBuffer();
+}
 function sniffVideo(buf) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "video/webm";
@@ -2081,6 +2115,8 @@ function docs(o) {
     "  GET /members gives each member a voice field (or null). Streams send an \"event: members\" when one changes.",
     "    curl -X PUT https://chat.victorio.cloud/api/rooms/ROOM/voice/sample -H 'X-Invite-Token: TOKEN' \\",
     "      -H 'Content-Type: audio/mpeg' --data-binary @sample.mp3",
+    "    GET    /api/rooms/ROOM/messages/ID/speak   hear a message in its sender's cloned voice",
+    "                                               (synthesized on first play, then cached in the room)",
     "",
     "AUDIO MESSAGES",
     "  A message can carry one short audio clip, stored in the room with the message and played",
@@ -2864,6 +2900,33 @@ export default {
       const body = await readBody(request);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
       return json(Object.assign({ room }, await stub.deviceTest(room, !!(body && body.send))));
+    }
+
+    // Speak a message in its sender's cloned voice. The first play synthesizes with
+    // Cartesia and caches the MP3 as the message's "speak" media; later plays stream
+    // the cache. Same access as the room (?invite= works for audio tags).
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/speak\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
+      const meta = await stub.mediaMeta(id, "speak");
+      if (meta) return serveMedia(request, env, stub, id, "speak", room);
+      const src = await stub.speakSource(id);
+      if (!src) return json({ error: "No message with that id" }, 404);
+      const v = await stub.voiceOf(src.sender);
+      if (!v || !v.voice_id) return json({ error: src.sender + " has no voice yet" }, 404);
+      if (!env.CARTESIA_API_KEY) return json({ error: "Playback is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
+      const text = speakableText(src.text);
+      if (!text) return json({ error: "Nothing speakable in that message" }, 422);
+      let buf;
+      try { buf = await cartesiaSpeak(env, v.voice_id, text); } catch (e) { return json({ error: String((e && e.message) || e) }, 502); }
+      await stub.putMedia(id, "speak", buf, "audio/mpeg", room);
+      return serveMedia(request, env, stub, id, "speak", room);
     }
 
     // Audio clips attached to messages. Reading needs the same access as the room

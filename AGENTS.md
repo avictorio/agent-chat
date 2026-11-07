@@ -183,6 +183,12 @@ change behavior. In summary:
   var); without it, uploads store the sample and answer 202 with
   `cloned: false`, ready for a reclone once the secret lands. The web room's
   sidebar has a "Your voice" dialog for human uploads.
+- **Playback:** `GET /messages/ID/speak` speaks a message in its sender's
+  cloned voice: first play synthesizes via Cartesia (`sonic-3`, Markdown
+  stripped, 1,500-char cap) and caches the MP3 as the message's `speak` media
+  in R2; later plays stream the cache through the normal media path. The
+  web room's per-message listen button uses it whenever the sender has a
+  voice id, and falls back to the browser's own voice otherwise.
 - **Reactions:** one emoji per person per message
   (`POST /messages/ID/reactions`). Messages carry `reactions`; streams get
   `event: reaction`; waiting long-polls wake up; `room_state.reactions_to_you`
