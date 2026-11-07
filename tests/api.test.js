@@ -7,6 +7,9 @@
 //   npm run test:api
 //
 // Uses port 8798 and a throwaway .dev.vars (backed up and restored).
+// Hermetic: room names, emails and client IPs are unique per run - the
+// create-room caps count attempts in the persistent local KV, so reusing
+// identities makes the suite fail on its own leftovers.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -15,6 +18,7 @@ const ROOT = path.join(__dirname, '..');
 const PORT = 8798;
 const BASE = 'http://localhost:' + PORT;
 const OWNER = 'api-test-owner-key';
+const SUF = Date.now().toString(36);
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 
 let failures = 0;
@@ -60,7 +64,7 @@ async function waitUp() {
   const child = spawn('npx', ['wrangler', 'dev', '--port', String(PORT)], { cwd: ROOT, detached: true, stdio: 'ignore' });
   try {
     check('wrangler dev comes up', await waitUp());
-    const R = '/api/rooms/apitest-main';
+    const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);
     r = await req('GET', R + '/messages?limit=1');
@@ -95,13 +99,13 @@ async function waitUp() {
     check('revoked token -> 403', r.status === 403, r.status);
 
     // Public creation: existed / validation / send-failure rollback.
-    r = await req('POST', '/api/create-room', { json: { room: 'apitest-main', name: 'X', email: 'x@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.1' }, json: { room: 'apitest-main-' + SUF, name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create existing -> 409', r.status === 409, r.status);
-    r = await req('POST', '/api/create-room', { json: { room: 'Bad Name!', name: 'X', email: 'x@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.2' }, json: { room: 'Bad Name!', name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create bad name -> 400', r.status === 400, r.status);
-    r = await req('POST', '/api/create-room', { json: { room: 'apitest-rb', name: 'Rb', email: 'rb@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.3' }, json: { room: 'apitest-rb-' + SUF, name: 'Rb', email: 'rb-' + SUF + '@example.com' } });
     check('send failure -> 502', r.status === 502, r.status);
-    r = await req('GET', '/api/rooms/apitest-rb/members', { owner: true });
+    r = await req('GET', '/api/rooms/apitest-rb-' + SUF + '/members', { owner: true });
     check('rolled-back room is gone', r.status === 404, r.status);
 
     // invite_only invariants.
@@ -113,7 +117,7 @@ async function waitUp() {
     check('zero-invite room still invite_only', r.json && r.json.invite_only === true && r.json.members.length === 0);
 
     // Publish-on-complete + destruction (second room).
-    const R2 = '/api/rooms/apitest-poc';
+    const R2 = '/api/rooms/apitest-poc-' + SUF;
     await req('POST', R2, { owner: true });
     const invP = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Poc', kind: 'human' } });
     const TP = invP.json.token;
@@ -123,13 +127,13 @@ async function waitUp() {
     r = await req('GET', R2 + '/messages?limit=3', { token: TP });
     check('auto-published message is listed', (r.json.messages || []).some(m => m.id === pd.json.id && m.video), JSON.stringify(r.json.messages && r.json.messages.length));
     await req('DELETE', R2 + '/invites', { owner: true });
-    r = await req('DELETE', R2 + '?confirm=apitest-poc', { owner: true });
+    r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
     check('room destroyed', r.json && r.json.deleted === true, JSON.stringify(r.json));
     r = await req('GET', R2 + '/members', { owner: true });
     check('destroyed room 404s', r.status === 404, r.status);
 
     // Clean up room one.
-    await req('DELETE', R + '?confirm=apitest-main', { owner: true });
+    await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });
   } finally {
     try { process.kill(-child.pid, 'SIGKILL'); } catch (e) {}
     if (backup) fs.writeFileSync(DEV_VARS, backup); else try { fs.unlinkSync(DEV_VARS); } catch (e) {}
