@@ -124,6 +124,7 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE m ADD COLUMN video_size INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch (e) {}
+    this.sql.exec("CREATE TABLE IF NOT EXISTS pushdev (member TEXT NOT NULL, platform TEXT NOT NULL, token TEXT PRIMARY KEY, ts INTEGER NOT NULL, mode TEXT DEFAULT 'all')");
     this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS oq (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, claimed_by TEXT, resolved_by TEXT, resolution TEXT, updated INTEGER NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS dg (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL)");
@@ -669,6 +670,24 @@ export class Room extends DurableObject {
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   }
+  // Native device tokens (Phase 2 of the app plan): one row per token,
+  // member + mode semantics identical to web push. APNs rows can register
+  // now; their sender lands with the iOS leg.
+  deviceRegister(member, platform, token, mode) {
+    this.sql.exec("INSERT OR REPLACE INTO pushdev (member, platform, token, ts, mode) VALUES (?, ?, ?, ?, ?)",
+      String(member || "").toLowerCase(), platform === "ios" ? "ios" : "android", String(token || ""), Date.now(), mode === "mentions" ? "mentions" : "all");
+    return { status: 200 };
+  }
+  deviceUnregister(member, token, owner) {
+    if (owner) this.sql.exec("DELETE FROM pushdev WHERE token = ?", String(token || ""));
+    else this.sql.exec("DELETE FROM pushdev WHERE token = ? AND member = ?", String(token || ""), String(member || "").toLowerCase());
+    return { status: 200 };
+  }
+  deviceStatus(member, token) {
+    const rows = this.sql.exec("SELECT token, mode, platform FROM pushdev WHERE member = ?", String(member || "").toLowerCase()).toArray();
+    const mine = token ? rows.find((r) => r.token === token) : null;
+    return { devices: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null, platform: mine ? mine.platform : null };
+  }
   async notifyPush(msg, room) {
     const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
     if (!rows.length) return;
@@ -683,6 +702,18 @@ export class Room extends DurableObject {
         const status = await sendWebPush(this.env, r, payload);
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
       } catch (e) {}
+    }
+    const drows = this.sql.exec("SELECT member, platform, token, mode FROM pushdev").toArray();
+    if (drows.length) {
+      const note = JSON.parse(payload);
+      const dtargets = drows.filter((r) => r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
+      for (const r of dtargets) {
+        if (r.platform !== "android") continue;
+        try {
+          const st = await sendFcm(this.env, r.token, note);
+          if (st === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
+        } catch (e) {}
+      }
     }
   }
 
@@ -1556,6 +1587,56 @@ function mentionsName(text, name) {
   if (!t || !n) return false;
   const esc = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp("(^|[^A-Za-z0-9_])@" + esc + "(?![A-Za-z0-9_])", "i").test(t);
+}
+
+// ---- Native push: FCM HTTP v1, authorized by a service account kept as
+// the Worker secret FCM_SA (the whole JSON). Without the secret, sends
+// quietly skip: the registry still works and web push is unaffected. The
+// OAuth access token and the imported signing key are cached per isolate.
+let fcmCache = { email: "", token: "", exp: 0, key: null };
+function pemToDer(pem) {
+  const b64 = String(pem || "").replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
+  const bin = atob(b64);
+  const der = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) der[i] = bin.charCodeAt(i);
+  return der;
+}
+async function fcmAccessToken(env) {
+  const sa = JSON.parse(env.FCM_SA || "null");
+  if (!sa || !sa.client_email || !sa.private_key || !sa.project_id) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (fcmCache.email === sa.client_email && fcmCache.token && fcmCache.exp > now + 60) return { sa: sa, token: fcmCache.token };
+  if (!fcmCache.key || fcmCache.email !== sa.client_email) {
+    fcmCache.key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+    fcmCache.email = sa.client_email;
+  }
+  const enc = new TextEncoder();
+  const head = b64urlEncode(enc.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+  const claims = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 })));
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", fcmCache.key, enc.encode(head + "." + claims));
+  const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
+  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
+  if (!res.ok) return null;
+  const j = await res.json();
+  fcmCache.token = j.access_token; fcmCache.exp = now + (j.expires_in || 3600);
+  return { sa: sa, token: fcmCache.token };
+}
+// Returns "ok", "gone" (dead token - prune it), "skip" (not configured), "error".
+async function sendFcm(env, token, note) {
+  let auth = null;
+  try { auth = await fcmAccessToken(env); } catch (e) { return "error"; }
+  if (!auth) return "skip";
+  let res;
+  try {
+    res = await fetch("https://fcm.googleapis.com/v1/projects/" + auth.sa.project_id + "/messages:send", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + auth.token, "Content-Type": "application/json" },
+      body: JSON.stringify({ message: { token: token, notification: { title: note.title, body: note.body }, data: { url: note.url || "" }, android: { priority: "high", notification: { tag: note.tag || "" } } } })
+    });
+  } catch (e) { return "error"; }
+  if (res.ok) return "ok";
+  if (res.status === 404) return "gone";
+  return "error";
 }
 
 async function sendWebPush(env, sub, payloadText) {
@@ -2489,6 +2570,31 @@ export default {
       if (!endpoint) return json({ error: "\"endpoint\" is required" }, 400);
       await stub.pushUnsubscribe(acc.name || "", endpoint, owner);
       return json({ room, subscribed: false });
+    }
+
+    // Native device tokens for a room (app Phase 2), tied to the invite's
+    // member name, modes mirroring web push. POST-only JSON like the rest.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/push\/device\/(register|unregister|status)\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const body = await readBody(request);
+      const action = m[2];
+      const token = String((body && body.token) || "");
+      if (action === "status") return json(Object.assign({ room }, await stub.deviceStatus(acc.name || "", token)));
+      if (!token || token.length > 4096) return json({ error: "\"token\" is required" }, 400);
+      if (action === "register") {
+        const platform = body.platform === "ios" ? "ios" : "android";
+        const mode = body.mode === "mentions" ? "mentions" : "all";
+        await stub.deviceRegister(acc.name || "", platform, token, mode);
+        return json({ room, registered: true, mode: mode, platform: platform });
+      }
+      await stub.deviceUnregister(acc.name || "", token, owner);
+      return json({ room, registered: false });
     }
 
     // Audio clips attached to messages. Reading needs the same access as the room
