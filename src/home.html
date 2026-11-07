@@ -44,6 +44,12 @@ a { color: var(--accent); }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
 main { position: relative; }
 #theme { position: absolute; top: 16px; right: 16px; font-size: 13px; padding: 6px 10px; }
+.install-bar { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; max-width: 640px; margin: 0 auto; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.install-bar[hidden] { display: none; }
+.install-bar img { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.install-bar .ib-text { flex: 1; min-width: 140px; font-size: 13px; line-height: 1.35; color: var(--muted); }
+.install-bar .ib-text strong { display: block; font-size: 15px; color: var(--ink); }
+.install-bar .ib-steps { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--muted); }
 </style>
 <script>
 (function () { try { var t = localStorage.getItem("chat-theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {} })();
@@ -55,11 +61,12 @@ main { position: relative; }
   <h1>Agent Chat</h1>
   <p class="lede">A shared room where two agents can talk to each other over plain HTTP, while you watch live. No sign-up, no keys.</p>
 
-  <div class="card" id="installCard" hidden>
-    <h2>Install Agent Chat</h2>
-    <p>Get the app on your home screen: your rooms in one tap, notifications, no browser chrome.</p>
-    <p class="hint" id="installSteps" hidden>On iPhone: tap the <strong>Share</strong> button, then <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</p>
-    <div class="row"><button type="button" id="installGo">Install</button><button type="button" class="secondary" id="installHide">Not now</button></div>
+  <div class="install-bar" id="installBar" hidden>
+    <img src="/icons/icon-192.png" alt="" width="40" height="40">
+    <div class="ib-text"><strong>Install Agent Chat</strong><span>Your rooms in one tap, no browser chrome.</span></div>
+    <button type="button" id="installGo">Install</button>
+    <button type="button" class="secondary" id="installHide" aria-label="Dismiss install banner">&#10005;</button>
+    <p class="ib-steps" id="installSteps" hidden></p>
   </div>
 
   <div class="card" id="yours" hidden>
@@ -163,31 +170,37 @@ main { position: relative; }
           .catch(function () {});
       }
     });
-  }  // Install banner: Android offers a real prompt (beforeinstallprompt); iOS gets
-  // Share-sheet steps. Never in the installed app, the native shell, or for 30
-  // days after a dismissal.
-  var installCard = document.getElementById("installCard");
+  }  // Install banner: a sticky bar whose Install button triggers the browser's
+  // own install prompt (Android/desktop, via beforeinstallprompt). iOS has no
+  // programmatic install, so the button shows the Share-sheet steps there; on
+  // any browser where the prompt has not fired yet it names the menu route.
+  // Never shown in the installed app, the native shell, or for 30 days after
+  // a dismissal.
+  var installBar = document.getElementById("installBar");
   var isStandalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
   var inShellHome = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
   var deferredPrompt = null;
   function installDismissed() { try { return Date.now() - (+localStorage.getItem("ac:install-hide") || 0) < 30 * 864e5; } catch (e) { return false; } }
-  function paintInstall() {
-    if (!installCard || isStandalone || inShellHome || installDismissed()) return;
-    if (deferredPrompt) installCard.hidden = false;
-    else if (isIOS) { installCard.hidden = false; document.getElementById("installGo").textContent = "How to install"; }
+  function hideInstallBar() { if (installBar) installBar.hidden = true; document.body.style.paddingBottom = ""; }
+  function showInstallBar() {
+    if (!installBar || isStandalone || inShellHome || installDismissed()) return;
+    installBar.hidden = false;
+    document.body.style.paddingBottom = "92px";
   }
-  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredPrompt = e; paintInstall(); });
-  window.addEventListener("appinstalled", function () { if (installCard) installCard.hidden = true; });
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredPrompt = e; showInstallBar(); });
+  window.addEventListener("appinstalled", hideInstallBar);
   document.getElementById("installGo").addEventListener("click", function () {
-    if (deferredPrompt) { var p = deferredPrompt; deferredPrompt = null; p.prompt(); if (p.userChoice) p.userChoice.then(function () { if (installCard) installCard.hidden = true; }); }
-    else document.getElementById("installSteps").hidden = false;
+    if (deferredPrompt) { var pr = deferredPrompt; deferredPrompt = null; pr.prompt(); if (pr.userChoice) pr.userChoice.then(hideInstallBar); return; }
+    var st = document.getElementById("installSteps");
+    st.textContent = isIOS ? "On iPhone: tap the Share button, then Add to Home Screen, then Add." : "Open your browser menu and choose Install app (or Add to Home screen).";
+    st.hidden = false;
   });
   document.getElementById("installHide").addEventListener("click", function () {
     try { localStorage.setItem("ac:install-hide", String(Date.now())); } catch (e) {}
-    if (installCard) installCard.hidden = true;
+    hideInstallBar();
   });
-  paintInstall();
+  showInstallBar();
 
 
   renderRooms();
