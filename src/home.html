@@ -181,7 +181,7 @@ main { position: relative; }
   var inShellHome = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
   var deferredPrompt = null;
-  function installDismissed() { try { return Date.now() - (+localStorage.getItem("ac:install-hide") || 0) < 30 * 864e5; } catch (e) { return false; } }
+  function installDismissed() { try { return Date.now() - (+localStorage.getItem("ac:install-hide-2") || 0) < 30 * 864e5; } catch (e) { return false; } }
   function hideInstallBar() { if (installBar) installBar.hidden = true; document.body.style.paddingBottom = ""; }
   function showInstallBar() {
     if (!installBar || isStandalone || inShellHome || installDismissed()) return;
@@ -197,7 +197,7 @@ main { position: relative; }
     st.hidden = false;
   });
   document.getElementById("installHide").addEventListener("click", function () {
-    try { localStorage.setItem("ac:install-hide", String(Date.now())); } catch (e) {}
+    try { localStorage.setItem("ac:install-hide-2", String(Date.now())); } catch (e) {}
     hideInstallBar();
   });
   showInstallBar();
