@@ -19,6 +19,10 @@ const PORT = 8798;
 const BASE = 'http://localhost:' + PORT;
 const OWNER = 'api-test-owner-key';
 const SUF = Date.now().toString(36);
+// Per-run client IPs for the create-room checks: the creation caps count
+// attempts per IP in the persistent local KV, so fixed literals exhaust
+// their daily budget after a few same-day runs and fail as 429s.
+const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 
 let failures = 0;
@@ -99,11 +103,11 @@ async function waitUp() {
     check('revoked token -> 403', r.status === 403, r.status);
 
     // Public creation: existed / validation / send-failure rollback.
-    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.1' }, json: { room: 'apitest-main-' + SUF, name: 'X', email: 'x-' + SUF + '@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '1' }, json: { room: 'apitest-main-' + SUF, name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create existing -> 409', r.status === 409, r.status);
-    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.2' }, json: { room: 'Bad Name!', name: 'X', email: 'x-' + SUF + '@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '2' }, json: { room: 'Bad Name!', name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create bad name -> 400', r.status === 400, r.status);
-    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': '10.1.0.3' }, json: { room: 'apitest-rb-' + SUF, name: 'Rb', email: 'rb-' + SUF + '@example.com' } });
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '3' }, json: { room: 'apitest-rb-' + SUF, name: 'Rb', email: 'rb-' + SUF + '@example.com' } });
     check('send failure -> 502', r.status === 502, r.status);
     r = await req('GET', '/api/rooms/apitest-rb-' + SUF + '/members', { owner: true });
     check('rolled-back room is gone', r.status === 404, r.status);
