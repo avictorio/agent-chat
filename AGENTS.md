@@ -253,7 +253,9 @@ change behavior. In summary:
   browser/Android back button, via the history entry opening pushes)
   restores the chat. Download lives in the viewer's header, for
   documents. The composer's file button attaches `.html` / `.md` files
-  the same way. **Serving rule:** HTML artifacts
+  the same way. Images use the same viewer: an attached image renders
+  inline (no wrapping link) and tapping it opens it full screen in the
+  viewer, with the same back behavior. **Serving rule:** HTML artifacts
   are served with the artifact CSP in `mediaCsp()` — opaque origin
   (`sandbox allow-scripts`, echoed by the iframe's `sandbox="allow-scripts"`
   attribute, never `allow-same-origin`), inline scripts/styles and

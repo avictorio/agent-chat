@@ -16,7 +16,7 @@ function fresh(opts) {
       { id: 4, ts: now - 40 * 60e3, from: 'claude', text: 'Nice. Mention me if you want anything changed on the site.' },
       { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
-      ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' } }] : []),
+      ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -82,6 +82,7 @@ async function setup(page, S, calls) {
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
     if (/\/messages\/\d+\/doc$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Probe doc\n\nRendered **body** here.' });
+    if (/\/messages\/\d+\/image$/.test(p)) return route.fulfill({ status: 200, contentType: 'image/png', body: require('fs').readFileSync(__dirname + '/fixtures/photo.png') });
     if ((am = p.match(/\/messages\/(\d+)\/reactions$/))) {
       const msg = S.msgs.find(x => x.id == am[1]); if (!msg) return J({ error: 'No message' }, 404);
       const r = msg.reactions || {}; Object.keys(r).forEach(k => { r[k] = r[k].filter(x => x.toLowerCase() !== body.from.toLowerCase()); if (!r[k].length) delete r[k]; });
@@ -173,6 +174,15 @@ async function run(name, o, fn) {
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     if (!/Rendered/.test(out.viewerDoc)) throw new Error('viewer doc not rendered');
     if (!out.viewerDl) throw new Error('viewer must offer Download for a document');
+    // Images get the same treatment: inline, no wrapping link; tap opens the viewer.
+    out.imgWrapped = await page.$eval('.msg-img', e => e.parentElement.tagName);
+    await page.click('.msg-img');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'artifacts-viewer-image.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    if (out.imgWrapped === 'A') throw new Error('image must not be wrapped in a new-tab link');
     return out;
   });
   await run('artifacts-mobile', { state: { artifacts: true }, w: 390, h: 844, touch: true }, async (page) => {
@@ -182,6 +192,12 @@ async function run(name, o, fn) {
     await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
     await page.waitForTimeout(300);
     await shot(page, 'artifacts-mobile-viewer.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.tap('.msg-img');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'artifacts-mobile-image.png');
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };

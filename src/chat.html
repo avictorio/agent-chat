@@ -286,7 +286,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .attach-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 0 4px; }
 .attach-row[hidden] { display: none; }
 .img-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: none; }
-.msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; }
+.msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; cursor: zoom-in; }
+.viewer-img { display: block; max-width: 100%; max-height: calc(100dvh - 76px); object-fit: contain; margin: 12px auto; }
 .msg-video { display: block; width: 100%; max-width: 440px; max-height: 440px; border-radius: 10px; margin-top: 6px; background: #000; }
 .art-card, .doc-card { margin-top: 6px; max-width: 640px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; }
 .art-head, .doc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
@@ -1090,9 +1091,14 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     body.appendChild(tx);
     if (m.image && m.image.url) {
       var iurl = m.image.url + (invite ? (m.image.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
-      var ia = el("a"); ia.href = iurl; ia.target = "_blank"; ia.rel = "noopener";
       var im = el("img", "msg-img"); im.src = iurl; im.alt = "Attached image"; im.loading = "lazy";
-      ia.appendChild(im); body.appendChild(ia);
+      im.addEventListener("click", function () {
+        openViewer("Image", function (vb) {
+          var vi = el("img", "viewer-img"); vi.src = iurl; vi.alt = "Attached image";
+          vb.appendChild(vi);
+        }, null);
+      });
+      body.appendChild(im);
     }
     if (m.video && m.video.url) {
       var vd = el("video", "msg-video"); vd.controls = true; vd.preload = "metadata";
