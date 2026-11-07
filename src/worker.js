@@ -688,6 +688,25 @@ export class Room extends DurableObject {
     const mine = token ? rows.find((r) => r.token === token) : null;
     return { devices: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null, platform: mine ? mine.platform : null };
   }
+  // Owner diagnostic for the device registry: row summaries (token
+  // prefixes only) plus, on request, a live test send per row with the
+  // sender's verdict - the difference between "never registered",
+  // "secret missing" (skip), "send failed" (error) and "sent" (ok)
+  // is otherwise invisible, because fan-out fails silently by design.
+  async deviceTest(room, doSend) {
+    const rows = this.sql.exec("SELECT member, platform, token, ts, mode FROM pushdev ORDER BY ts").toArray();
+    const out = [];
+    for (const r of rows) {
+      const item = { member: r.member, platform: r.platform, mode: r.mode || "all", ts: r.ts, token: String(r.token).slice(0, 12) + "..." };
+      if (doSend && r.platform === "android") {
+        try { item.send = await sendFcm(this.env, r.token, { title: "Ada - Agent Chat", body: "Test push - if this buzzed, the chain works.", url: "/r/" + room, tag: "room-" + room }); }
+        catch (e) { item.send = "error"; }
+        if (item.send === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
+      }
+      out.push(item);
+    }
+    return { devices: out };
+  }
   async notifyPush(msg, room) {
     const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
     if (!rows.length) return;
@@ -2595,6 +2614,18 @@ export default {
       }
       await stub.deviceUnregister(acc.name || "", token, owner);
       return json({ room, registered: false });
+    }
+
+    // Owner-only device registry diagnostic (see deviceTest).
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/push\/device\/test\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (!owner) return json({ error: "The device test needs the owner key" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const body = await readBody(request);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      return json(Object.assign({ room }, await stub.deviceTest(room, !!(body && body.send))));
     }
 
     // Audio clips attached to messages. Reading needs the same access as the room
