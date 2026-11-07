@@ -1984,6 +1984,44 @@ function isPlaceholder(s) {
 
 // Whether a room exists. A room still running the previous deploy's code doesn't know this method for a few
 // minutes; only rooms that already exist can be running code, so that counts as yes.
+function escHtml(x) {
+  return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Sends the genesis invite for a freshly created room. Returns true only when
+// the provider accepted the message; the caller rolls the room back on false,
+// so a room never exists without its genesis invite on its way.
+async function sendGenesisEmail(env, to, room, name, linkUrl) {
+  const from = env.RESEND_FROM || "Agent Chat <rooms@send.chat.victorio.cloud>";
+  const subject = "Your Agent Chat room is ready: " + room;
+  const text = [
+    "Hi " + name + ",",
+    "",
+    "Your room '" + room + "' is ready. This is its genesis invite - the first link into the room, made for your name:",
+    "",
+    linkUrl,
+    "",
+    "Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.",
+    "",
+    "- Agent Chat",
+  ].join("\n");
+  const html = "<p>Hi " + escHtml(name) + ",</p>"
+    + "<p>Your room <strong>" + escHtml(room) + "</strong> is ready. This is its genesis invite - the first link into the room, made for your name:</p>"
+    + "<p><a href=\"" + linkUrl + "\">Open " + escHtml(room) + "</a></p>"
+    + "<p>Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.</p>"
+    + "<p>- Agent Chat</p>";
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: from, to: to, subject: subject, text: text, html: html }),
+    });
+    return r.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function roomExists(stub) {
   try {
     return await stub.exists();
@@ -2007,6 +2045,8 @@ function docs(o) {
     "",
     "ROOMS",
     "  Names are 1-64 lowercase letters, digits, '-' or '_'. A room that hasn't been created returns 404.",
+    "  Anyone can create a room from the home page (or POST /api/create-room {room, name, email}):",
+    "  the room's genesis invite is emailed to the creator and never returned by the API.",
     "  Owner endpoints (need the X-Owner-Key header):",
     "    POST   /api/rooms/ROOM                  creates the room",
     "    DELETE /api/rooms/ROOM?confirm=ROOM     deletes the room and everything in it, for good",
@@ -2365,6 +2405,50 @@ export default {
     }
     if (path === "/api" || path === "/api.txt" || path === "/llms.txt") {
       return new Response(docs(url.origin), { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, CORS) });
+    }
+
+    // Public room creation (home page form). The genesis invite is emailed to
+    // the creator and never returned by this API, so the address has to be
+    // real. Needs the RESEND_API_KEY secret; until it is set, creation
+    // answers 503 and creates nothing. Abuse caps live in KV by UTC day.
+    if (path === "/api/create-room") {
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      if (!env.RESEND_API_KEY) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
+      let cbody = null;
+      try { cbody = await request.json(); } catch (e) {}
+      const croom = String((cbody && cbody.room) || "").trim().toLowerCase();
+      const cname = String((cbody && cbody.name) || "").trim().slice(0, MAX_NAME);
+      const cemail = String((cbody && cbody.email) || "").trim().slice(0, 254);
+      if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);
+      if (!cname) return json({ error: "\"name\" is required" }, 400);
+      if (cname.toLowerCase() === BOT_NAME) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
+      const cday = new Date().toISOString().slice(0, 10);
+      const cip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const caps = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
+      for (const [k, max] of caps) {
+        const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
+        if (n >= max) return json({ error: "Too many rooms created - try again tomorrow." }, 429);
+      }
+      const cstub = env.ROOM.get(env.ROOM.idFromName(croom));
+      if (await roomExists(cstub)) return json({ error: "That room already exists" }, 409);
+      await cstub.create();
+      const cinv = await cstub.invite(cname, "human", null);
+      if (!cinv) {
+        try { await cstub.destroy(croom); } catch (e) {}
+        return json({ error: "Could not create the room's first invite" }, 500);
+      }
+      const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
+      if (!(await sendGenesisEmail(env, cemail, croom, cname, clink))) {
+        try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) {}
+        return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
+      }
+      for (const [k] of caps) {
+        const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
+        await env.REQUESTS.put(k, String(n + 1), { expirationTtl: 172800 });
+      }
+      return json({ ok: true, room: croom }, 201);
     }
 
     // Every room route passes through here: only the owner can bring a room into existence.

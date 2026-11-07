@@ -415,7 +415,7 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { cHint("That email address does not look complete.", true); cEmail.focus(); return; }
     cGo.disabled = true;
     cHint("Creating your room and sending the invite...");
-    fetch("/api/rooms/create", {
+    fetch("/api/create-room", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room: room, name: name, email: email })
