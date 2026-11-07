@@ -1495,7 +1495,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function pushSupported() { return !inShell() && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window; }
   function paintPush() {
     var btns = document.querySelectorAll(".pushBtn");
-    var show = pushSupported() || iosNeedsInstall();
+    var show = inShell() || pushSupported() || iosNeedsInstall();
     var label = { off: "Notifications off", on: pushMode === "mentions" ? "Mentions only" : "Notifications on", blocked: "Notifications blocked", install: "Notifications - setup" }[pushState] || "Notifications";
     Array.prototype.forEach.call(btns, function (b) {
       b.hidden = !show;
@@ -1512,6 +1512,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     return Uint8Array.from(atob(t), function (c) { return c.charCodeAt(0); });
   }
   async function paintPushState() {
+    if (inShell()) { await paintShellPushState(); return; }
     if (!pushSupported()) { pushState = iosNeedsInstall() ? "install" : "off"; paintPush(); return; }
     if (Notification.permission === "denied") { pushState = "blocked"; paintPush(); return; }
     try {
@@ -1539,6 +1540,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     paintPush();
   }
   async function pushOn(mode) {
+    if (inShell()) { await shellPushOn(mode); return; }
     mode = mode === "mentions" ? "mentions" : "all";
     var perm = await Notification.requestPermission();
     if (perm !== "granted") { paintPushState(); if (perm === "denied") toast("Notifications are blocked for this site in your browser settings.", true); return; }
@@ -1557,6 +1559,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     paintPushState();
   }
   async function pushOff() {
+    if (inShell()) { await shellPushOff(); return; }
     var reg = await navigator.serviceWorker.getRegistration("/");
     var sub = reg ? await reg.pushManager.getSubscription() : null;
     if (sub) {
@@ -1565,6 +1568,75 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     }
     toast("Notifications off for this device.");
     paintPushState();
+  }
+  // ---- Native shell push (app Phase 2): the bell drives the Capacitor
+  // push plugin and the room's device-token registry, with the same
+  // modes and the same quiet re-register discipline as web push. The
+  // member's chosen mode is kept in the same localStorage key the web
+  // flow uses, so the two never disagree about intent.
+  var shellPushToken = null, shellPushWired = false;
+  function shellPlatform() { try { return window.Capacitor.getPlatform() === "ios" ? "ios" : "android"; } catch (e) { return "android"; } }
+  function shellPushApi(action, body) {
+    return fetch(base + "/push/device/" + action, { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify(body || {}) });
+  }
+  function wireShellPush() {
+    if (shellPushWired || !inShell()) return;
+    shellPushWired = true;
+    var P = window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (!P) return;
+    P.addListener("registration", function (t) {
+      shellPushToken = t.value;
+      try { localStorage.setItem("ac:devtoken", t.value); } catch (e) {}
+      var want = null;
+      try { want = localStorage.getItem(pushModeKey()); } catch (e) {}
+      if (want === "all" || want === "mentions") shellPushApi("register", { token: t.value, platform: shellPlatform(), mode: want }).catch(function () {});
+    });
+    P.addListener("registrationError", function () {});
+    P.addListener("pushNotificationActionPerformed", function (a) {
+      var url = a && a.notification && a.notification.data && a.notification.data.url;
+      if (url) location.assign(url);
+    });
+  }
+  async function paintShellPushState() {
+    wireShellPush();
+    var want = null;
+    try { want = localStorage.getItem(pushModeKey()); } catch (e) {}
+    if (want !== "all" && want !== "mentions") { pushState = "off"; paintPush(); return; }
+    try { await window.Capacitor.Plugins.PushNotifications.register(); } catch (e) {}
+    var tok = shellPushToken;
+    try { tok = tok || localStorage.getItem("ac:devtoken"); } catch (e) {}
+    if (tok) {
+      try {
+        var sr = await shellPushApi("status", { token: tok });
+        var sd = await sr.json();
+        if (sd.registered) { pushMode = sd.mode || "all"; pushState = "on"; paintPush(); return; }
+        await shellPushApi("register", { token: tok, platform: shellPlatform(), mode: want });
+      } catch (e) {}
+    }
+    pushMode = want; pushState = "on"; paintPush();
+  }
+  async function shellPushOn(mode) {
+    mode = mode === "mentions" ? "mentions" : "all";
+    var P = window.Capacitor.Plugins.PushNotifications;
+    var perm = await P.requestPermissions();
+    if (!perm || perm.receive !== "granted") { toast("Notifications are blocked for the app - allow them in your phone's app settings.", true); return; }
+    try { localStorage.setItem(pushModeKey(), mode); } catch (e) {}
+    await P.register();
+    var tok = shellPushToken;
+    try { tok = tok || localStorage.getItem("ac:devtoken"); } catch (e) {}
+    if (tok) await shellPushApi("register", { token: tok, platform: shellPlatform(), mode: mode });
+    pushMode = mode; pushState = "on";
+    toast(mode === "mentions" ? "Mentions only - you'll be buzzed when someone @-mentions you." : "Notifications on for this device.");
+    paintPush();
+  }
+  async function shellPushOff() {
+    try { localStorage.removeItem(pushModeKey()); } catch (e) {}
+    var tok = shellPushToken;
+    try { tok = tok || localStorage.getItem("ac:devtoken"); } catch (e) {}
+    if (tok) await shellPushApi("unregister", { token: tok }).catch(function () {});
+    pushState = "off";
+    toast("Notifications off for this device.");
+    paintPush();
   }
   var pushMenu = document.createElement("div");
   pushMenu.className = "pushMenu";
@@ -1611,6 +1683,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     paintPushState();
     document.addEventListener("visibilitychange", function () { if (!document.hidden) paintPushState(); });
   } else if (iosNeedsInstall()) { pushState = "install"; paintPush(); }
+  if (inShell()) { wireShellPush(); paintPushState(); }
 
   /* ---------- mentions: highlight + autocomplete ---------- */
   // The textarea's own text is transparent; a mirrored backdrop behind it paints

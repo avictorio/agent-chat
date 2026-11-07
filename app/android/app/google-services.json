@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "756647771345",
+    "project_id": "agent-chat-87861",
+    "storage_bucket": "agent-chat-87861.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:756647771345:android:750f37c0ebf4c3ade799f0",
+        "android_client_info": {
+          "package_name": "cloud.victorio.chat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCy-cyFDyGaQ8GvGE9yQ5EBKv-UuYX_u1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

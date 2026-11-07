@@ -41,7 +41,14 @@ document.getElementById("clearLog").onclick = () => { logs = []; try { localStor
 // This bundled page only forwards there, and stays behind as the
 // Phase 0 diagnostics bench when the owner taps to stay.
 let stayDiag = /(^#|&)diag\b/.test(location.hash);
-const goHome = () => { if (!stayDiag) location.replace("https://chat.victorio.cloud/"); };
+let navTarget = "";
+try {
+  PushNotifications.addListener("pushNotificationActionPerformed", (a) => {
+    const url = a && a.notification && a.notification.data && a.notification.data.url;
+    if (url) navTarget = url;
+  });
+} catch (e) {}
+const goHome = () => { if (!stayDiag) location.replace("https://chat.victorio.cloud" + (navTarget || "/")); };
 const diagTimer = setTimeout(goHome, 900);
 if (stayDiag) {
   clearTimeout(diagTimer);
