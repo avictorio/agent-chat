@@ -31,10 +31,20 @@ public class ChunkedUploaderPlugin extends Plugin {
         catch (Exception ignored) {}
     }
 
+
+    // PluginCall.getLong only accepts values org.json parsed as Long;
+    // ordinary file sizes arrive as Integer and silently fall back to the
+    // default (which sent size 0 to /video/start and earned a 413). Read
+    // the raw number instead.
+    private static long numAsLong(PluginCall call, String name, long def) {
+        Object v = call.getData().opt(name);
+        return v instanceof Number ? ((Number) v).longValue() : def;
+    }
+
     @PluginMethod
     public void fingerprint(PluginCall call) {
         final String path = call.getString("filePath");
-        final long size = call.getLong("size", 0L);
+        final long size = numAsLong(call, "size", 0L);
         if (path == null || path.isEmpty()) { call.reject("filePath required"); return; }
         new Thread(() -> {
             try {
@@ -58,7 +68,7 @@ public class ChunkedUploaderPlugin extends Plugin {
             cfg.put("token", call.getString("token", ""));
             cfg.put("filePath", call.getString("filePath", ""));
             cfg.put("type", call.getString("type", "video/mp4"));
-            cfg.put("size", call.getLong("size", 0L));
+            cfg.put("size", numAsLong(call, "size", 0L));
             cfg.put("fingerprint", call.getString("fingerprint", ""));
             cfg.put("name", call.getString("name", "video"));
         } catch (Exception e) {

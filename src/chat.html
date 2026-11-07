@@ -1585,7 +1585,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
           if (live.room_state) applyState(live.room_state);
           list.scrollTop = list.scrollHeight;
         } catch (uerr) {
-          toast(bigNative ? ("Video upload failed: " + uerr.message) : ("Video upload interrupted: " + uerr.message + " - re-attach the same file to resume"), true);
+          toast(bigChunked ? ("Video upload failed: " + uerr.message + " - re-attach the same file to resume") : (bigNative ? ("Video upload failed: " + uerr.message) : ("Video upload interrupted: " + uerr.message + " - re-attach the same file to resume")), true);
         }
         return;
       }
