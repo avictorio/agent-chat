@@ -189,7 +189,12 @@ change behavior. In summary:
   created with `publish_on_complete: true` is published by the server itself
   the moment its video upload verifies (stream or chunked finish) — the app
   Phase 3 path, for uploads that finish while no client is alive to call
-  `/publish`. The `m.pubauto` column carries the flag.
+  `/publish`. The `m.pubauto` column carries the flag. In the Android shell,
+  picks over 25 MB upload natively from chat.html: up to 100 MB as one
+  background PUT to the stream endpoint (@capgo uploader, after a native
+  FilePicker pick), and over 100 MB via the in-app ChunkedUploader plugin
+  (ChunkedUploadService foreground service driving start/part/finish, with
+  the web fingerprint computed natively for resume).
 - **Message delete:** `DELETE /messages/:id` (sender or owner only) aborts
   any in-flight upload, deletes the R2 objects, and drops the message and
   its index rows.
