@@ -159,6 +159,10 @@ main { position: relative; }
   // listens. Token registration itself lives on the room page.
   try {
     if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) {
+      // The shell's splash is manual-hide (the bundled page used to drop
+      // it); under server.url this page is the app's front door, so the
+      // job is here now.
+      try { Capacitor.Plugins.SplashScreen.hide(); } catch (e) {}
       Capacitor.Plugins.PushNotifications.addListener("pushNotificationActionPerformed", function (a) {
         var url = a && a.notification && a.notification.data && a.notification.data.url;
         if (url) location.assign(url);
