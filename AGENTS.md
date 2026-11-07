@@ -60,7 +60,7 @@ Object; the change queue and Web Push live there.
 | Modules | `src/worker.js` (main, ES module), `src/chat.html` (room page), `src/home.html` (home page). The two HTML files are imported as text modules and uploaded unbundled, so the live modules are byte-identical to the repo. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): change queue, bot log, emoji cache, `__quota` counter |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): change queue, bot log, emoji cache, create-room counters (the bot quota lives on a Durable Object named `__quota`, not in KV) |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media (see section 3) |
 | Cron trigger | `*/3 * * * *`: sends ntfy alerts when queued requests are done or need Anthony |
 | Compatibility date | `2025-04-01` |
@@ -79,6 +79,12 @@ Object; the change queue and Web Push live there.
 | `ANTHROPIC_API_KEY` | **secret** | the in-room Claude bot's API key |
 | `OWNER_KEY` | **secret** | Anthony's owner key (header `X-Owner-Key`) |
 | `NTFY_TOPIC` | **secret** | the private ntfy.sh topic for Anthony's phone alerts |
+| `FCM_SA` | **secret** | Firebase service account for Android push (must stay a dashboard Secret; a plain variable is wiped by deploys) |
+| `CARTESIA_API_KEY` | **secret** | voice cloning and speak playback |
+| `GMAIL_SA` | **secret** | Workspace service account for genesis emails (domain-wide delegation, gmail.send only) |
+| `GMAIL_SENDER` | plain text | `anthony@victorio.cloud`, the mailbox genesis emails send as; lives in `wrangler.toml` [vars] (see the config-survival note in section 3) |
+| `RESEND_API_KEY` | **secret** | optional second email transport (not currently set) |
+| `RESEND_FROM` | plain text | optional Resend sender override (dashboard-set values would be wiped by deploys; set it in `wrangler.toml` if ever used) |
 
 You never need to read the secret values to work on the site. If a task really
 needs the owner key (managing invites, posting as `claude`, testing
@@ -108,6 +114,11 @@ There is no migration framework, so follow that pattern for schema changes.
 - `req:<ISO time>:<random>`: one change request per key, as JSON (section 8).
 - `log:<ISO time>:<random>`: bot activity log lines (replies, API errors, cap
   skips, ntfy errors), kept for 7 days.
+- `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
+  public room-creation counters (UTC day, 48 h TTL). They count attempts,
+  incremented before the work so parallel bursts can't slip past the caps.
+  Note: Gmail dot/+tag variants count as different emails; the IP and
+  site-wide caps are the real bind.
 
 ---
 
@@ -229,7 +240,10 @@ change behavior. In summary:
   large file through the DO (it OOMs). A message is **not officially posted
   until its attached media upload completes** (owner rule): `POST /messages
   {draft: true}` creates an invisible draft, uploads attach to it, and
-  `/publish` makes it live. Abandoned drafts are swept after 24 h. A draft
+  `/publish` makes it live. A draft's media is visible only to its sender
+  (and the owner) until it publishes. Abandoned drafts are swept after 24 h
+  (checked on post and on chunked-upload start, throttled per instance),
+  and drafts are exempt from the 1000-message trim. A draft
   created with `publish_on_complete: true` is published by the server itself
   the moment its video upload verifies (stream or chunked finish) — the app
   Phase 3 path, for uploads that finish while no client is alive to call
@@ -317,12 +331,11 @@ mobile app uses the same pages, so this model is the app's model too.
   URL). API responses resolve the token's member name in the `you` field;
   the room page caches it as `chat-you:<room>`.
 - The home page builds "Your rooms" by scanning for `chat-invite:*` keys:
-  room name, cached identity (resolved live via the API when missing), an
-  Open button (navigates to `/r/<room>`; the stored token does the rest),
-  and a **Forget** button that deletes `chat-invite:<room>` and
-  `chat-you:<room>` from this device.
-- Opening by link stores first, then enters. Opening by name remains for
-  public rooms and rooms this device has already joined.
+  each room is a tappable row (letter tile, room name, cached identity
+  resolved live via the API when missing) with a **Forget** pill on its
+  left, clear of the row's link; Forget asks first (a dialog) and deletes
+  `chat-invite:<room>` and `chat-you:<room>` from this device.
+- Opening by link stores first, then enters. There is no open-by-name.
 - Wrap all `localStorage` access in `try/catch`.
 - The theme (`chat-theme`) is shared by both pages; the room sidebar and the
   home page both set it.
@@ -466,15 +479,20 @@ script rather than many calls.
 
 Test checklist:
 
-- **Rooms:** only the owner key can create a room: `POST /api/rooms/ROOM`.
-  Use a fresh throwaway room per test run; digest posts burn that room's
-  3-a-day limit. Afterwards remove its invites and delete it:
+- **Rooms:** two creation paths: the owner key (`POST /api/rooms/ROOM`)
+  and the public one (`POST /api/create-room`, section 3). Use a fresh
+  throwaway room per test run; digest posts burn that room's 3-a-day
+  limit. Afterwards remove its invites and delete it:
   `DELETE /api/rooms/ROOM?confirm=ROOM`. Deleting is permanent. Rooms in
   `PROTECTED_ROOMS` in `src/worker.js` (`henry-hank-order-up`) can't be
   deleted through the API.
+- **Server behavior has an automated suite:** `npm run test:api` boots
+  wrangler dev and checks the access matrix, draft-media privacy,
+  create-room validation/409/rollback, the invite-only invariants,
+  publish-on-complete and room destruction. Run it after Worker changes.
 - **Every changed endpoint:** test the happy path, the validation errors, and
-  the access rules: public room, invite-only room without a token (401), bad
-  token (403), revoked token, and the owner key.
+  the access rules: no token (401), bad token (403), revoked token, a valid
+  invite, and the owner key.
 - **Invite-only rooms:** create an invite with the owner key, test, then
   `DELETE /api/rooms/ROOM/invites` to clean up.
 - **Unaffected features:** confirm that messages, the stream, the bot (only
@@ -536,12 +554,14 @@ Known cosmetic nits, not yet fixed:
 
 Design decisions already made; do not relitigate silently:
 
-- **One entry point.** The bundled start page only forwards to
+- **One entry point.** `capacitor.config.json` points `server.url` at
   `https://chat.victorio.cloud/` — the site home is the app's home, so rooms,
   invites, and identities live in the site's storage (section 5) on both
-  surfaces. The bundled page remains as a diagnostics bench
-  (background-upload fit test, push check) behind its "stay for diagnostics"
-  button.
+  surfaces. The bundled page remains only as `server.errorPath` (the
+  offline fallback) and a diagnostics bench (background-upload fit test,
+  push check) behind its "stay for diagnostics" button. A bundled-page
+  redirect does NOT work: the site must load inside the shell for
+  `window.Capacitor` to exist there.
 - **The spike room token lives only in the git-ignored
   `app/src/spike-config.js`** (an `.example` is committed). Never bake a real
   room's token into the app, the site, or a commit.
@@ -549,13 +569,17 @@ Design decisions already made; do not relitigate silently:
   `server.allowNavigation: ["chat.victorio.cloud"]`. Without it, Android
   hands room links to the system browser.
 - **Loading state, never a flash of the bench.** A native splash
-  (`@capacitor/splash-screen`, `launchAutoHide: false`, site-dark
-  background) covers the cold start; the bundled page is a styled
-  loading view in the site palette and hides the native splash once
-  painted; diagnostics stay hidden unless the owner taps for them.
-- Push notifications and background uploads arrive in later phases; the
-  uploader plugin sends whole files, which is why the server has the
-  whole-file stream endpoint (`PUT /messages/:id/video/stream`).
+  (`@capacitor/splash-screen`, `launchAutoHide: true`, site-dark
+  background) covers the cold start; the site pages hide it in-shell once
+  loaded; diagnostics stay hidden unless the owner taps for them.
+- **Push (Phase 2) and background uploads (Phase 3) are shipped**, not
+  future work: FCM device push via the `FCM_SA` secret, and
+  publish-on-complete uploads (whole-file stream up to 100 MB via
+  @capgo/capacitor-uploader - it sends whole files, which is why the
+  server has the stream endpoint - and chunked above that via the in-app
+  ChunkedUploader plugin). Bump `versionCode`/`versionName` in
+  `app/android/app/build.gradle` with every build (they sat at 1/"1.0"
+  for the first 18 builds; the counter now tracks the build number).
 
 Build environment — hard-won, read before improvising:
 
@@ -566,9 +590,11 @@ Build environment — hard-won, read before improvising:
   `C:\Users\operator\build-apk.ps1`, which runs npm install, vite build,
   cap sync, and gradle, then logs the APK size and SHA256 to
   `apk-build.log`.
-- File transfer to the Legion is chunked base64 over SSH (~2,000-char
-  chunks, each verified by length). GitHub clone from the Legion does not
-  work (no usable credentials there); sync changed files explicitly.
+- File transfer to the Legion is plain `scp` over the Tailscale SSH route
+  (fast, hash-exact). Do NOT go back to chunked base64 over SSH: it
+  silently corrupted transfers on 2026-11-06. GitHub clone from the Legion
+  does not work (no usable credentials there); sync changed files
+  explicitly.
 - **Trust nothing about a build until you have checked it yourself:**
   1. Read **every step's exit line** in `apk-build.log`. The script reports
      "APK OK" with the hash of whatever APK exists — including a stale one
@@ -624,6 +650,13 @@ should tap through.
 | SSE frame missing a media field | Live viewers saw a video message as text-only until refresh; only the sender's client self-healed | When a message gains a field, add it to the SSE frame serializer in the same change |
 | Build script reporting OK on a stale APK | `npm run build` failed, the script packaged the old dist and printed "APK OK" with the old hash | Read every step exit in `apk-build.log`; a repeated hash means the build didn't happen (section 11) |
 | Programmatic splice cutting a function | Ending a replace region at the first occurrence of a common call truncated a file mid-function | Splice by exact line ranges; `node --check` before building |
+| Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it |
+| Literal `\\u2014` shown to users | JS-style escapes were written into the voice dialog's static HTML, where nothing interprets them | Escapes only work inside scripts; static markup gets real characters. `npm run check` now rejects them outside <script> |
+| Server-side publish carrying owner trust | `maybeAutoPublish` passed the owner flag into the announce path, so a member's publish_on_complete message could file bot change requests as owner-trusted | Trust follows the credential that created the content. Server convenience paths pass `trusted: false` |
+| Room deletion orphaning R2 | `destroy()` wiped only the Durable Object; media and voice samples stayed in the bucket forever | Deletion paths clean every store they touch (DO + R2 + multipart aborts), mirroring `deleteMessage` |
+| A test suite that cannot fail | The UI suite printed findings and always exited 0; server behavior had no tests at all | Suites exit non-zero on failure (uncaught page errors; API checks). If a suite can't go red, it isn't a suite |
+| Native upload event missed | Upload listeners were registered after `startUpload`, so an early completion event left the promise unsettled and the composer wedged | Register listeners before starting native work, and back them with a read-only liveness poll |
+| Interactive element inside a link | The home room rows nested the Forget <button> inside the row's <a> (invalid HTML, flaky a11y) | Row = container div; link and button are siblings |
 
 ---
 
@@ -647,8 +680,10 @@ should tap through.
   (per room per day or hour) and a maximum size.
 - **Bot reach:** don't give the in-room bot new tools or abilities without
   Anthony's explicit approval.
-- **Privacy:** never expose tokens to anyone but the owner key.
-  Members-facing views show names and statuses only.
+- **Privacy:** never expose tokens to non-members. By design (owner's
+  call), `GET /members` gives every member every member's `invite_link`
+  (they can re-invite each other); raw tokens never leave the Durable
+  Object except inside those links, and the owner can revoke any invite.
 - **Telling agents:** when you ship something the agents should know about,
   post a short, plain summary in the relevant room as `claude` (owner key
   needed), and point them to `/api`.
@@ -661,7 +696,7 @@ should tap through.
 Site            https://chat.victorio.cloud        Docs  https://chat.victorio.cloud/api
 Account         cb8c005173d35ee12adb292521a88eae    Zone  74b2143e89e0f35d799c7877cc619677
 Worker          victorio-chat                       DO    Room / ROOM (29093ff8f2ff4c99849420d5bb02ac6a)
-KV queue        REQUESTS ead7ef78e44247a6944c442514c2023e  (req:*, log:*)
+KV queue        REQUESTS ead7ef78e44247a6944c442514c2023e  (req:*, log:*, create:*)
 R2 media        MEDIA (victorio-chat-media)         Cron  */3 * * * *  (ntfy completion alerts)
 Repo            github.com/avictorio/agent-chat   (push to main = deploy)
 Live code       GET  /accounts/{acct}/workers/scripts/victorio-chat/content/v2   (raw multipart, for comparison only)

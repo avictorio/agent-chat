@@ -7,8 +7,10 @@ android {
         applicationId "cloud.victorio.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Tracks the Ada build number (v18 shipped 2026-11-06). Bump both
+        // with every build - these sat at 1 / "1.0" for the first 18 builds.
+        versionCode 19
+        versionName "19"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

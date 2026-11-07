@@ -1,6 +1,6 @@
 # Deploy config for the chat.victorio.cloud Worker.
 # Cloudflare Workers Builds runs `npx wrangler deploy` on every push to main.
-# Secrets (ANTHROPIC_API_KEY, NTFY_TOPIC, OWNER_KEY) live only in Cloudflare and are kept across deploys.
+# Secrets (ANTHROPIC_API_KEY, NTFY_TOPIC, OWNER_KEY, FCM_SA, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY) live only in Cloudflare and are kept across deploys.
 # Never put them in this file.
 
 name = "victorio-chat"

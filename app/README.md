@@ -1,33 +1,41 @@
 # Agent Chat — native app (Capacitor)
 
-Capacitor shell around the Agent Chat web app. Phase 0 (spike) state as of
-2026-11-06: project scaffolded, Android platform added, plugins synced, and
-the spike page (launcher + background-upload fit test + push check) built.
-First APK built 2026-11-06 on Anthony's Legion (JDK 21 + SDK 36 installed
-there for this): app-debug.apk, 5,937,379 bytes, SHA256
-58582911eaff44960fb3e5c8a647e74a8b4d64577a0fac1bceef4160b4ebb931.
-The only remaining Phase 0 step is the on-device background-upload run.
-The server side it tests against — `PUT /messages/:id/video/stream`, the
-whole-file streaming ingest — is live in production.
+Capacitor shell around the Agent Chat web app. The authoritative guide is
+the repo's root `AGENTS.md`, section 11 — this file is only a status card.
 
-## Plugins (Phase 0 findings)
+## Current state (2026-11-07)
 
-- `@capgo/capacitor-uploader` — the background uploader. Verified from its
-  API: `startUpload({ filePath, serverUrl, method: "PUT", headers })` with
-  progress/completion events; iOS uses a background URLSession, Android a
-  foreground upload service (gotev UploadService, dataSync type). It sends
-  WHOLE files, not byte ranges — hence the streaming ingest endpoint.
-- `@capacitor/filesystem` — builds the spike's 30 MB test file and provides
-  real file paths for the uploader.
-- `@capacitor/push-notifications` — wired in; registration will fail until
-  Firebase/APNs exist (Phase 2), which the spike page states.
+- **Design:** `server.url` points the shell at https://chat.victorio.cloud —
+  the site IS the app (home, rooms, identity in site storage). The bundled
+  page is the offline/error fallback and a diagnostics bench.
+- **Phases 0–3 are done and proven on-device:** shell + identity (v11),
+  FCM push (v15, Firebase project `agent-chat-87861`), background uploads
+  with server-side publish-on-complete (v18 — a 282 MB video posted through
+  the chunked path with the phone locked). The one path not yet exercised
+  on a device is the 25–100 MB stream leg inside the real composer.
+- **Current build:** v18 (SHA-256 76B49D36…). `versionCode`/`versionName`
+  in `app/android/app/build.gradle` track the build number — bump them
+  with every build.
+- **Builds run on Anthony's Legion** (`C:\Users\operator\build-apk.ps1`,
+  JDK 21 + Android SDK 36); agent VMs can't build (process supervision
+  kills Gradle). Files cross via scp over the Tailscale SSH route.
+- **Parked:** the iOS leg — waits on a Mac build machine (MacStadium,
+  Anthony to order) and Apple Developer enrollment. APNs slots into the
+  existing per-platform push registry when it lands.
+- **Plugins:** @capgo/capacitor-uploader (whole-file background PUTs),
+  @capawesome/capacitor-file-picker (native picks), @capacitor/app (deep
+  links), @capacitor/push-notifications, @capacitor/filesystem,
+  @capacitor/splash-screen, @capacitor/status-bar, plus the in-app
+  ChunkedUploader plugin (foreground service, fingerprint resume).
+  Pitfall: Capacitor's PluginCall.getLong silently zeroes ordinary file
+  sizes — read numeric args as raw Numbers (see root AGENTS.md section 3).
 
 ## Build
 
-Needs JDK 21 + Android SDK 36 (compileSdk 36). JAVA_HOME must point at JDK 21:
-  one of the Capacitor plugin modules (capacitor-filesystem) declares a
-  Java 21 toolchain, so a JDK 17-only machine fails the Gradle build even
-  though Gradle itself runs on 17. Verified on the Legion build below.
+Needs JDK 21 + Android SDK 36 (compileSdk 36). JAVA_HOME must point at JDK
+21: one of the Capacitor plugin modules (capacitor-filesystem) declares a
+Java 21 toolchain, so a JDK 17-only machine fails the Gradle build even
+though Gradle itself runs on 17.
 
     cd app
     npm install
@@ -37,26 +45,5 @@ Needs JDK 21 + Android SDK 36 (compileSdk 36). JAVA_HOME must point at JDK 21:
     # APK: android/app/build/outputs/apk/debug/app-debug.apk
 
 `src/spike-config.js` (git-ignored) carries the THROWAWAY test room's invite
-token for the fit test; copy `src/spike-config.example.js` and fill it in.
-
-## Why there is no APK from Ada's VM (2026-11-06)
-
-The VM's process supervision kills the Gradle daemon seconds after it
-starts (daemon log: greeting written, then "STOPPED (by user or operating
-system)") — across foreground, --no-daemon, and tracked background
-launches. Gradle cannot build without its daemon, so APKs must be built on
-a normal machine (Anthony's Legion, Android Studio anywhere) or a cloud
-build (Capgo / EAS-style). sdkmanager also cannot use this VM's egress
-proxy (Java CONNECT parsing); the SDK at ~/android-sdk was laid out by
-hand from the dl.google.com zips, and Gradle 8.14.3 sits at ~/gradle-dist —
-both persist in the home directory if the VM is replaced, but they do not
-remove the daemon constraint.
-
-## Spike test (on device)
-
-1. Install the debug APK, open "Agent Chat".
-2. Section 1: paste your real invite link, open the room in the shell.
-3. Section 2: Run the fit test, then switch apps / lock the phone for a
-   minute. The event log (persisted) should show the upload completing
-   while the app was backgrounded; the page then verifies the message
-   server-side and publishes it into the throwaway room.
+token for the diagnostics bench; copy `src/spike-config.example.js` and
+fill it in.
