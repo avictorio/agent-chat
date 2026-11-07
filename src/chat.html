@@ -430,6 +430,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       <div class="foot-row">
         <button type="button" class="btn sm" id="voiceBtn" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg><span>Your voice</span></button>
       </div>
+      <div class="foot-row">
+        <button type="button" class="btn sm" id="installBtn" hidden><svg class="i" viewBox="0 0 24 24"><path d="M12 3v10m0 0l-4-4m4 4l4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>Install app</span></button>
+      </div>
     </div>
   </aside>
   <div class="scrim" id="scrim"></div>
@@ -587,6 +590,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   <p>Or upload a file instead: MP3, WAV, M4A, OGG or WebM, up to 10 MB.</p>
   <input type="file" id="voiceFile" accept="audio/*" aria-label="Voice sample file">
   <div class="av-actions"><button type="button" class="btn sm" id="voiceUpload">Upload sample</button><button type="button" class="btn sm" id="voiceRemove">Remove voice</button><button type="button" class="btn sm" id="voiceClose">Close</button></div>
+</dialog>
+<dialog class="av-dlg" id="installDlg" aria-labelledby="installTitle">
+  <div class="title-row"><span class="av-name" id="installTitle">Install Agent Chat</span></div>
+  <p>Get the app on your home screen: your rooms in one tap, notifications, no browser chrome.</p>
+  <p>On iPhone: tap the <strong>Share</strong> button in Safari, then <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</p>
+  <div class="av-actions"><button type="button" class="btn sm" id="installClose">Close</button></div>
 </dialog>
 
 <script>
@@ -1908,6 +1917,20 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (j && j.error) toast(j.error, true); else { voiceStatus.textContent = voiceText(null); vBlob = null; voicePreview.hidden = true; toast("Voice removed."); }
     }).catch(function () { toast("Could not remove your voice.", true); });
   });
+
+  // ---- Install (PWA): the browser's own prompt on Android, steps on iOS ----
+  var installBtn = $("installBtn"), installDlg = $("installDlg"), deferredPrompt = null;
+  var isStandaloneApp = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+  var isIOSDevice = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+  function paintInstallBtn() { if (installBtn) installBtn.hidden = !(!isStandaloneApp && !inShell() && (!!deferredPrompt || isIOSDevice)); }
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredPrompt = e; paintInstallBtn(); });
+  window.addEventListener("appinstalled", function () { deferredPrompt = null; paintInstallBtn(); });
+  if (installBtn) installBtn.addEventListener("click", function () {
+    if (deferredPrompt) { var pr = deferredPrompt; deferredPrompt = null; pr.prompt(); if (pr.userChoice) pr.userChoice.then(function () { paintInstallBtn(); }); return; }
+    if (installDlg && installDlg.showModal) installDlg.showModal();
+  });
+  var installClose = $("installClose"); if (installClose) installClose.addEventListener("click", function () { installDlg.close(); });
+  paintInstallBtn();
 
   Array.prototype.forEach.call(document.querySelectorAll(".pushBtn"), function (b) {
     b.addEventListener("click", function () {
