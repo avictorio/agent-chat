@@ -363,6 +363,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; border-bottom: 1px solid var(--line);
     background: var(--panel); min-height: 52px;
   }
+  .install-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 14px; }
+  .install-strip[hidden] { display: none; }
+  .install-strip img { width: 28px; height: 28px; border-radius: 7px; flex: none; }
+  .install-strip .ist-text { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .install-strip .ist-text strong { color: var(--ink); }
   .topbar .title { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar .title span { color: var(--muted); font-weight: 400; }
   .side {
@@ -447,6 +452,13 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       <button type="button" class="btn quiet icon-btn pushBtn" aria-label="Notifications" title="Notifications" hidden><svg class="i" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg></button>
       <span class="topdot" id="topDot" title="Connecting"></span>
     </header>
+
+    <div class="install-strip" id="installStrip" hidden>
+      <img src="/icons/icon-192.png" alt="" width="28" height="28">
+      <span class="ist-text"><strong>Install Agent Chat</strong><span id="installStripHint"> - one tap, no browser chrome</span></span>
+      <button type="button" class="btn sm primary" id="installGoStrip">Install</button>
+      <button type="button" class="btn sm quiet" id="installHideStrip" aria-label="Dismiss install banner">&#10005;</button>
+    </div>
 
     <section class="view" id="view-chat" aria-label="Chat">
       <div class="msgs" id="list">
@@ -1919,16 +1931,28 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   });
 
   // ---- Install (PWA): the browser's own prompt on Android, steps on iOS ----
-  var installBtn = $("installBtn"), installDlg = $("installDlg"), deferredPrompt = null;
+  // The strip under the topbar shows on any not-installed visit (same 30-day
+  // dismissal key as the home banner); the sidebar entry waits until a real
+  // prompt exists or the device is iOS.
+  var installBtn = $("installBtn"), installDlg = $("installDlg"), installStrip = $("installStrip"), deferredPrompt = null;
   var isStandaloneApp = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
   var isIOSDevice = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
-  function paintInstallBtn() { if (installBtn) installBtn.hidden = !(!isStandaloneApp && !inShell() && (!!deferredPrompt || isIOSDevice)); }
-  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredPrompt = e; paintInstallBtn(); });
-  window.addEventListener("appinstalled", function () { deferredPrompt = null; paintInstallBtn(); });
-  if (installBtn) installBtn.addEventListener("click", function () {
+  function installDismissed() { try { return Date.now() - (+localStorage.getItem("ac:install-hide-2") || 0) < 30 * 864e5; } catch (e) { return false; } }
+  function paintInstallBtn() {
+    var base = !isStandaloneApp && !inShell() && !installDismissed();
+    if (installBtn) installBtn.hidden = !(base && (!!deferredPrompt || isIOSDevice));
+    if (installStrip) installStrip.hidden = !base;
+  }
+  function runInstall() {
     if (deferredPrompt) { var pr = deferredPrompt; deferredPrompt = null; pr.prompt(); if (pr.userChoice) pr.userChoice.then(function () { paintInstallBtn(); }); return; }
-    if (installDlg && installDlg.showModal) installDlg.showModal();
-  });
+    if (isIOSDevice) { if (installDlg && installDlg.showModal) installDlg.showModal(); return; }
+    var hint = $("installStripHint"); if (hint) hint.textContent = " - open the browser menu and choose Install app";
+  }
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredPrompt = e; paintInstallBtn(); });
+  window.addEventListener("appinstalled", function () { deferredPrompt = null; try { localStorage.setItem("ac:install-hide-2", String(Date.now())); } catch (e) {} paintInstallBtn(); });
+  if (installBtn) installBtn.addEventListener("click", runInstall);
+  var installGoStrip = $("installGoStrip"); if (installGoStrip) installGoStrip.addEventListener("click", runInstall);
+  var installHideStrip = $("installHideStrip"); if (installHideStrip) installHideStrip.addEventListener("click", function () { try { localStorage.setItem("ac:install-hide-2", String(Date.now())); } catch (e) {} paintInstallBtn(); });
   var installClose = $("installClose"); if (installClose) installClose.addEventListener("click", function () { installDlg.close(); });
   paintInstallBtn();
 
