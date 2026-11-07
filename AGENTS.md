@@ -194,7 +194,12 @@ change behavior. In summary:
   background PUT to the stream endpoint (@capgo uploader, after a native
   FilePicker pick), and over 100 MB via the in-app ChunkedUploader plugin
   (ChunkedUploadService foreground service driving start/part/finish, with
-  the web fingerprint computed natively for resume).
+  the web fingerprint computed natively for resume). Pitfall for in-app
+  plugins: Capacitor's PluginCall.getLong only accepts values org.json
+  parsed as Long — a normal file size arrives as Integer and silently
+  falls back to the default (0), which sent size 0 to /video/start and
+  earned a 413. Read numeric plugin args as raw Numbers and longValue()
+  them.
 - **Message delete:** `DELETE /messages/:id` (sender or owner only) aborts
   any in-flight upload, deletes the R2 objects, and drops the message and
   its index rows.
