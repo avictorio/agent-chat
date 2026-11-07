@@ -15,7 +15,7 @@
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --side: #efede7; --ink: #1d1c1a; --muted: #6b6862; --line: #e3e0d8;
   --hover: rgba(0, 0, 0, 0.045); --accent: #2f5d50; --accent-ink: #ffffff; --accent-soft: #e2ebe7;
-  --danger: #b3412f; --danger-soft: rgba(179, 65, 47, 0.1);
+  --danger: #b3412f; --danger-soft: rgba(179, 65, 47, 0.1); --danger-ink: #ffffff;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   color-scheme: only light;
 }
@@ -23,7 +23,7 @@
   :root:not([data-theme="light"]) {
     --bg: #141413; --panel: #1c1c1a; --side: #181816; --ink: #ecebe6; --muted: #9a978f; --line: #2d2c29;
     --hover: rgba(255, 255, 255, 0.05); --accent: #7fb8a4; --accent-ink: #10201b; --accent-soft: #1f2a26;
-    --danger: #e58b78; --danger-soft: rgba(229, 139, 120, 0.12);
+    --danger: #e58b78; --danger-soft: rgba(229, 139, 120, 0.12); --danger-ink: #2a130d;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     color-scheme: dark;
   }
@@ -31,7 +31,7 @@
 :root[data-theme="dark"] {
   --bg: #141413; --panel: #1c1c1a; --side: #181816; --ink: #ecebe6; --muted: #9a978f; --line: #2d2c29;
   --hover: rgba(255, 255, 255, 0.05); --accent: #7fb8a4; --accent-ink: #10201b; --accent-soft: #1f2a26;
-  --danger: #e58b78; --danger-soft: rgba(229, 139, 120, 0.12);
+  --danger: #e58b78; --danger-soft: rgba(229, 139, 120, 0.12); --danger-ink: #2a130d;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
@@ -123,8 +123,24 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .roomrow .rn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roomrow .who { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roomrow .chev { color: var(--muted); display: flex; }
-.roomrow .forget { flex: none; color: var(--muted); }
-.roomrow .forget.armed { color: var(--danger); font-weight: 600; }
+.roomrow .forget {
+  flex: none; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--danger); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 999px; padding: 5px 13px;
+}
+.roomrow .forget:hover { background: var(--danger-soft); border-color: var(--danger); }
+.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: var(--danger-ink); font-weight: 600; }
+.btn.danger-solid:hover { filter: brightness(1.06); background: var(--danger); }
+dialog {
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 14px; padding: 22px; width: min(420px, calc(100vw - 32px));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+dialog h3 { margin: 0 0 8px; font-size: 17px; }
+dialog p { margin: 0; color: var(--muted); font-size: 14px; }
+dialog p strong { color: var(--ink); }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 .empty { text-align: center; padding: 26px 16px 20px; color: var(--muted); }
 .empty svg { width: 34px; height: 34px; color: var(--muted); margin-bottom: 8px; }
 .empty p { margin: 0 auto 14px; max-width: 42ch; }
@@ -245,6 +261,14 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
           <p>No rooms yet. Open an invite link above, or create your own.</p>
           <button type="button" class="btn primary" id="emptyCreate">Create a room</button>
         </div>
+        <dialog id="forgetDlg" aria-labelledby="forgetTitle">
+          <h3 id="forgetTitle">Forget this room?</h3>
+          <p><strong id="forgetName"></strong> will be removed from this device, along with your invite for it. You will need the invite link again to get back in. The room itself is not deleted.</p>
+          <div class="dlg-actions">
+            <button type="button" class="btn" id="forgetNo">Cancel</button>
+            <button type="button" class="btn danger-solid" id="forgetYes">Forget</button>
+          </div>
+        </dialog>
       </div></div>
     </section>
 
@@ -396,23 +420,15 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       var rn = document.createElement("div"); rn.className = "rn"; rn.textContent = r.room;
       var who = document.createElement("div"); who.className = "who"; who.textContent = r.you ? "as " + r.you : "tap to open";
       meta.appendChild(rn); meta.appendChild(who);
-      var fg = document.createElement("button"); fg.type = "button"; fg.className = "btn sm quiet forget"; fg.textContent = "Forget";
+      var fg = document.createElement("button"); fg.type = "button"; fg.className = "forget"; fg.textContent = "Forget";
       fg.title = "Remove this room from this device";
-      var armed = null;
       fg.addEventListener("click", function (e) {
         e.preventDefault(); e.stopPropagation();
-        if (!armed) {
-          fg.textContent = "Forget?"; fg.classList.add("armed");
-          armed = setTimeout(function () { fg.textContent = "Forget"; fg.classList.remove("armed"); armed = null; }, 3500);
-          return;
-        }
-        clearTimeout(armed);
-        try { localStorage.removeItem("chat-invite:" + r.room); localStorage.removeItem("chat-you:" + r.room); } catch (e2) {}
-        renderRooms();
+        askForget(r);
       });
       var chev = document.createElement("span"); chev.className = "chev";
       chev.innerHTML = '<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
-      row.appendChild(tile); row.appendChild(meta); row.appendChild(fg); row.appendChild(chev);
+      row.appendChild(fg); row.appendChild(tile); row.appendChild(meta); row.appendChild(chev);
       list.appendChild(row);
       if (!r.you && r.token) {
         // Resolve the identity this token carries, then cache it on-device.
@@ -425,6 +441,28 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
       }
     });
   }
+  /* ---------- forget confirmation ---------- */
+  var forgetDlg = $("forgetDlg");
+  var pendingForget = null;
+  function doForget() {
+    if (!pendingForget) return;
+    try { localStorage.removeItem("chat-invite:" + pendingForget.room); localStorage.removeItem("chat-you:" + pendingForget.room); } catch (e) {}
+    pendingForget = null;
+    renderRooms();
+  }
+  function askForget(r) {
+    pendingForget = r;
+    $("forgetName").textContent = r.room;
+    if (forgetDlg && forgetDlg.showModal) forgetDlg.showModal();
+    else if (window.confirm("Forget " + r.room + "? It will be removed from this device.")) doForget();
+  }
+  if (forgetDlg) {
+    $("forgetYes").addEventListener("click", function () { doForget(); forgetDlg.close(); });
+    $("forgetNo").addEventListener("click", function () { pendingForget = null; forgetDlg.close(); });
+    forgetDlg.addEventListener("click", function (e) { if (e.target === forgetDlg) { pendingForget = null; forgetDlg.close(); } });
+    forgetDlg.addEventListener("cancel", function () { pendingForget = null; });
+  }
+
   renderRooms();
 
   $("joinlink").addEventListener("submit", function (e) {
