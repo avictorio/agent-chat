@@ -699,8 +699,8 @@ export class Room extends DurableObject {
     for (const r of rows) {
       const item = { member: r.member, platform: r.platform, mode: r.mode || "all", ts: r.ts, token: String(r.token).slice(0, 12) + "..." };
       if (doSend && r.platform === "android") {
-        try { item.send = await sendFcm(this.env, r.token, { title: "Ada - Agent Chat", body: "Test push - if this buzzed, the chain works.", url: "/r/" + room, tag: "room-" + room }); }
-        catch (e) { item.send = "error"; }
+        try { item.send = await sendFcmDebug(this.env, r.token, { title: "Ada - Agent Chat", body: "Test push - if this buzzed, the chain works.", url: "/r/" + room, tag: "room-" + room }); }
+        catch (e) { item.send = { stage: "exception", detail: String(e && e.message || e).slice(0, 160) }; }
         if (item.send === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
       }
       out.push(item);
@@ -1667,6 +1667,33 @@ async function fcmAccessToken(env) {
   return { sa: sa, token: fcmCache.token };
 }
 // Returns "ok", "gone" (dead token - prune it), "skip" (not configured), "error".
+async function sendFcmDebug(env, token, note) {
+  const sa = parseServiceAccount(env.FCM_SA);
+  if (!sa) return { stage: "parse", detail: "service account JSON did not parse" };
+  if (!sa.client_email || !sa.private_key || !sa.project_id) return { stage: "parse", detail: "key fields missing" };
+  let key = null;
+  try { key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
+  catch (e) { return { stage: "key", detail: String(e && e.message || e).slice(0, 160) }; }
+  const now = Math.floor(Date.now() / 1000);
+  const head = b64urlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = b64urlEncode(JSON.stringify({ iss: sa.client_email, scope: "https://www.googleapis.com/auth/firebase.messaging", aud: "https://oauth2.googleapis.com/token", iat: now, exp: now + 3600 }));
+  let sig = null;
+  try { sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(head + "." + claim)); }
+  catch (e) { return { stage: "sign", detail: String(e && e.message || e).slice(0, 160) }; }
+  const assertion = head + "." + claim + "." + b64urlEncode(sig);
+  let tokRes = null;
+  try { tokRes = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + assertion }); }
+  catch (e) { return { stage: "oauth", detail: String(e && e.message || e).slice(0, 160) }; }
+  if (!tokRes.ok) return { stage: "oauth", status: tokRes.status, detail: (await tokRes.text()).slice(0, 200) };
+  const tokJson = await tokRes.json();
+  let res = null;
+  try {
+    res = await fetch("https://fcm.googleapis.com/v1/projects/" + sa.project_id + "/messages:send", { method: "POST", headers: { "Authorization": "Bearer " + tokJson.access_token, "Content-Type": "application/json" }, body: JSON.stringify({ message: { token: token, notification: { title: note.title, body: note.body }, data: { url: note.url || "" }, android: { priority: "high", notification: { tag: note.tag || "" } } } }) });
+  } catch (e) { return { stage: "fcm", detail: String(e && e.message || e).slice(0, 160) }; }
+  if (res.ok) return { stage: "fcm", status: res.status, verdict: "ok" };
+  return { stage: "fcm", status: res.status, verdict: res.status === 404 ? "gone" : "error", detail: (await res.text()).slice(0, 200) };
+}
+
 async function sendFcm(env, token, note) {
   let auth = null;
   try { auth = await fcmAccessToken(env); } catch (e) { return "error"; }
