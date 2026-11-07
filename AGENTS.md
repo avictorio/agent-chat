@@ -91,6 +91,11 @@ needs the owner key (managing invites, posting as `claude`, testing
 invite-only rooms), ask Anthony for it and keep it out of anything you write
 down.
 
+This inventory is mirrored by `scripts/check-config.js` (the required-secret
+list and the optional entries), which powers the drift check in section 7.
+When a variable or secret is added or retired, update this table, the script
+and `wrangler.toml` in the same commit.
+
 ### Durable Object storage (per room)
 
 The SQLite tables are created in the `Room` constructor with `CREATE TABLE IF
@@ -371,14 +376,34 @@ Before pushing:
 3. Keep `src/` free of backticks (house style) and of secrets.
 4. Note the current live version id for rollback
    (`GET .../workers/scripts/victorio-chat/deployments`).
+5. If the change touches `wrangler.toml` or any dashboard-side configuration,
+   run the drift check first (next item) so the deploy cannot carry a
+   surprise in either direction.
+
+Config drift check — `npm run check:config`:
+
+- Compares the Worker's **live** plain variables against `wrangler.toml`
+  [vars] and the live secret **names** against the section 2 inventory, via
+  a read-only Cloudflare API token Ada holds in encrypted storage
+  (Workers Scripts Read + Account Settings Read; it cannot change anything,
+  and the API never returns secret values).
+- Run it before pushing a config-touching change and again after the deploy
+  lands. Exit 1 means drift: a live variable missing from the file (the next
+  deploy would **delete** it — the GMAIL_SENDER trap), a file variable
+  missing or different live, or a required secret gone.
+- **Never fix drift by syncing live settings down into the repo.** The file
+  is the source of truth for plain variables and Secrets are the source of
+  truth for secrets; drift means one of them was edited in the wrong place.
+  Move the value to its proper home, or restore what was lost, and say which
+  happened. Unexplained drift blocks the deploy.
 
 After pushing:
 
 1. Wait for the build (Cloudflare dashboard → Workers & Pages → victorio-chat
    → Deployments, or the commit's status on GitHub).
-2. Confirm the live module hashes match the commit, the secrets are still
-   listed (`GET .../secrets`) and the cron is still `*/3 * * * *`
-   (`GET .../schedules`).
+2. Confirm the live module hashes match the commit, run `npm run check:config`
+   (variables and secrets against the file and the section 2 inventory) and
+   confirm the cron is still `*/3 * * * *` (`GET .../schedules`).
 3. Fetch the changed page and confirm the new content is actually served.
 4. **For Durable Object changes, probe behavior against a live room.** A warm
    DO instance outlives deploys and keeps serving the old generation for
@@ -650,7 +675,7 @@ should tap through.
 | SSE frame missing a media field | Live viewers saw a video message as text-only until refresh; only the sender's client self-healed | When a message gains a field, add it to the SSE frame serializer in the same change |
 | Build script reporting OK on a stale APK | `npm run build` failed, the script packaged the old dist and printed "APK OK" with the old hash | Read every step exit in `apk-build.log`; a repeated hash means the build didn't happen (section 11) |
 | Programmatic splice cutting a function | Ending a replace region at the first occurrence of a common call truncated a file mid-function | Splice by exact line ranges; `node --check` before building |
-| Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it |
+| Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it; `npm run check:config` (section 7) compares live config against the file and the section 2 inventory mechanically |
 | Literal `\\u2014` shown to users | JS-style escapes were written into the voice dialog's static HTML, where nothing interprets them | Escapes only work inside scripts; static markup gets real characters. `npm run check` now rejects them outside <script> |
 | Server-side publish carrying owner trust | `maybeAutoPublish` passed the owner flag into the announce path, so a member's publish_on_complete message could file bot change requests as owner-trusted | Trust follows the credential that created the content. Server convenience paths pass `trusted: false` |
 | Room deletion orphaning R2 | `destroy()` wiped only the Durable Object; media and voice samples stayed in the bucket forever | Deletion paths clean every store they touch (DO + R2 + multipart aborts), mirroring `deleteMessage` |
