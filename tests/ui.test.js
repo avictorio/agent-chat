@@ -109,6 +109,7 @@ async function setup(page, S, calls) {
     return route.fulfill({ status: 404, body: 'nf' });
   });
 }
+let FAILURES = 0;
 async function run(name, o, fn) {
   const b = await chromium.launch({ args: o.args || [] });
   const ctx = await b.newContext({ colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch });
@@ -121,6 +122,8 @@ async function run(name, o, fn) {
   await page.waitForTimeout(500);
   const r = await fn(page, S, calls);
   await b.close();
+  const fatal = errs.filter(e => !e.startsWith('console:'));
+  if (fatal.length) { FAILURES++; console.log('FAIL ' + name + ': uncaught page errors: ' + JSON.stringify(fatal)); }
   console.log(name, errs.length ? 'ERRORS: ' + JSON.stringify(errs) : 'no page errors', r ? JSON.stringify(r) : '');
 }
 (async () => {
@@ -480,4 +483,50 @@ async function run(name, o, fn) {
   await run('no-speech-api', { init: () => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; } }, async (page) => ({ micHidden: await page.$eval('#mic', b => b.hidden) }));
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
+  await runHome();
+  if (FAILURES) { console.error('UI SUITE: ' + FAILURES + ' scenario(s) had uncaught page errors'); process.exitCode = 1; }
+  else console.log('UI SUITE: no uncaught page errors');
 })();
+
+const HOME = fs.readFileSync(__dirname + '/../src/home.html', 'utf8');
+async function runHome() {
+  const name = 'home-page';
+  const b = await chromium.launch({});
+  const ctx = await b.newContext({ viewport: { width: 1280, height: 860 } }); // desktop: the sidebar (and its view tabs) is visible; on phones it sits behind the drawer
+  const page = await ctx.newPage();
+  const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+  await page.route('https://chat.victorio.cloud/**', async (route) => {
+    const u = new URL(route.request().url()); const p = u.pathname;
+    const J = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(o) });
+    if (p === '/' || p === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html', body: HOME });
+    if (p.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
+    if (p.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
+    return route.fulfill({ status: 404, body: 'nf' });
+  });
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('chat-invite:demo-room', 'tok_demo');
+      localStorage.setItem('chat-invite:second-room', 'tok_second');
+    } catch (e) {}
+  });
+  const out = {};
+  try {
+  await page.goto('https://chat.victorio.cloud/');
+  await page.waitForTimeout(900);
+  out.rows = await page.$$eval('.roomrow', rs => rs.length);
+  out.forgetInsideLink = await page.$eval('body', () => !!document.querySelector('.roomrow a .forget'));
+  out.forgetIsSibling = await page.$eval('body', () => !!document.querySelector('.roomrow > .forget'));
+  out.asYou = await page.$$eval('.roomrow .who', ws => ws.map(w => w.textContent));
+  await page.click('.tab[data-view="create"]');
+  await page.waitForTimeout(200);
+  await page.fill('#cRoom', 'My Room');
+  out.preview = await page.$eval('#cRoomUrl', e => e.textContent);
+  } catch (e) { FAILURES++; console.log('FAIL ' + name + ': harness error: ' + e.message); }
+  await b.close();
+  const fatal = errs.filter(e => !e.startsWith('console:'));
+  if (fatal.length) { FAILURES++; console.log('FAIL ' + name + ': ' + JSON.stringify(fatal)); }
+  if (out.rows !== 2 || out.forgetInsideLink || !out.forgetIsSibling || out.preview.indexOf('/r/my-room') < 0) {
+    FAILURES++; console.log('FAIL ' + name + ': assertions: ' + JSON.stringify(out));
+  }
+  console.log(name, errs.length ? 'ERRORS: ' + JSON.stringify(errs) : 'no page errors', JSON.stringify(out));
+}

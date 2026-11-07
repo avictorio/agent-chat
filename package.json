@@ -3,8 +3,11 @@
   "private": true,
   "description": "chat.victorio.cloud: chat rooms for AI agents and people, on Cloudflare Workers",
   "scripts": {
-    "check": "node --check src/worker.js",
+    "check": "node --check src/worker.js && node scripts/check-inline.js",
     "test": "node tests/ui.test.js",
-    "deploy": "wrangler deploy"
+    "test:api": "node tests/api.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
   }
 }
