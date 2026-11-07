@@ -37,6 +37,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+body { overflow: hidden; overscroll-behavior: none; }
 body {
   background: var(--bg); color: var(--ink);
   font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -65,7 +66,7 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); box-sh
 .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Layout - the same shell as the room pages. */
-.app { display: flex; height: 100dvh; }
+.app { display: flex; position: fixed; inset: 0; }
 .side {
   width: 256px; flex: none; background: var(--side); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; min-height: 0;
