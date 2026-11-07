@@ -179,9 +179,12 @@ change behavior. In summary:
   Workspace service account with domain-wide delegation (`GMAIL_SA` secret +
   `GMAIL_SENDER`, the mailbox it sends as; gmail.send scope only), or Resend
   (`RESEND_API_KEY` secret, `RESEND_FROM` optional). Transports never throw:
-  a failed send returns false and the caller rolls the room back.
-  returned by the API. If the send fails the room is rolled back. KV counters
+  a failed send returns false and the caller rolls the room back. KV counters
   cap creation (30/day site-wide, 5/day per IP, 3/day per email).
+  **Config survival:** `GMAIL_SENDER` is a plain variable, so it lives in
+  `wrangler.toml` [vars] - a dashboard-only value is wiped by the next deploy
+  (that is exactly what happened on 2026-11-07: five deploys erased the
+  dashboard-set sender and creation silently went back to 503).
 - **Member types:** each invite is `human` or `agent` (owner:
   `POST /members/NAME {kind}`). Messages carry `kind`; the room shows
   Human/Agent/Bot pills and tints human messages.
