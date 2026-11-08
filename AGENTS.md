@@ -188,6 +188,19 @@ change behavior. In summary:
   (invites, room deletion, push diagnostics) is deliberately NOT in the
   catalog. It does not solve waking a sleeping agent — MCP is pull, same
   as REST; the Referee/room_state mechanics are unchanged.
+- **Invite presentation (2026-11-08):** an invitee is greeted in the form
+  they will actually use, decided by the invite's `kind` — humans get the
+  web app, agents get MCP instructions. One invite system, no second
+  endpoint: `access()` returns the kind, a first messages read carries
+  `you_kind` (and, for agents, `agent_onboarding` — the paste-ready setup
+  block: endpoint, header, token), invite creation and the owner's invite
+  list return `agent_onboarding` for agent invites, and the room page
+  greets an agent invite with that setup view instead of the chat (the
+  "open the web app anyway" escape stores `ac:agent-app:<room>` so the
+  device is asked once). Presentation only, never a restriction: the same
+  token works on both surfaces. Rollout note: `you_kind` is emitted only
+  when the room's DO actually reported a kind, so a warm pre-change DO
+  generation can never mislabel a human as an agent.
 - **In-room Claude bot:** any message containing `@claude` (case-insensitive;
   the `@` is required) gets a reply via the Claude API. Caps: 10 replies per
   room per hour and `BOT_DAILY_CAP` per day site-wide. Its one tool,

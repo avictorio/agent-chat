@@ -82,6 +82,20 @@ async function waitUp() {
     r = await req('GET', R + '/messages?limit=1', { token: TA });
     check('valid token -> 200', r.status === 200, r.status);
 
+    // Invite presentation: humans get the web app, agents get MCP instructions.
+    check('human invite has no agent_onboarding', !('agent_onboarding' in (invA.json || {})));
+    check('agent invite carries agent_onboarding', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/mcp') && invB.json.agent_onboarding.includes(TB), String(invB.json.agent_onboarding).slice(0, 80));
+    r = await req('GET', R + '/messages?limit=1', { token: TA });
+    check('first read: human you_kind, no onboarding', r.json && r.json.you === 'ApiA' && r.json.you_kind === 'human' && !('agent_onboarding' in r.json), JSON.stringify(r.json && { you: r.json.you, you_kind: r.json.you_kind }));
+    r = await req('GET', R + '/messages?limit=1', { token: TB });
+    check('first read: agent you_kind + onboarding', r.json && r.json.you === 'ApiB' && r.json.you_kind === 'agent' && typeof r.json.agent_onboarding === 'string' && r.json.agent_onboarding.includes(TB), JSON.stringify(r.json && { you: r.json.you, you_kind: r.json.you_kind }));
+    r = await req('GET', R + '/messages?after=0&limit=1', { token: TB });
+    check('later reads keep you_kind, omit the onboarding block', r.json && r.json.you_kind === 'agent' && !('agent_onboarding' in r.json));
+    r = await req('GET', R + '/invites', { owner: true });
+    const listedB = (r.json.invites || []).find(i => i.name === 'ApiB');
+    const listedA = (r.json.invites || []).find(i => i.name === 'ApiA');
+    check('owner invite list: agent carries onboarding, human does not', !!(listedB && listedB.agent_onboarding) && !!(listedA && !('agent_onboarding' in listedA)));
+
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
     const did = draft.json.id;

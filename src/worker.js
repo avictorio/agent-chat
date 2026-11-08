@@ -330,13 +330,13 @@ export class Room extends DurableObject {
     const locked = true;
     if (owner) return { ok: true, locked };
     if (!token) return { ok: false, locked, status: 401, error: "This room is invite-only. Open your invite link to join." };
-    const row = this.sql.exec("SELECT name, revoked, used, seen FROM inv WHERE token = ?", token).toArray()[0];
+    const row = this.sql.exec("SELECT name, revoked, used, seen, kind FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, locked, status: 403, error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, locked, status: 403, error: "This invite link has been revoked. Ask the room owner for a new one." };
     const now = Date.now();
     if (!row.used) this.sql.exec("UPDATE inv SET used = ? WHERE token = ?", now, token);
     if (!row.seen || now - row.seen > 60000) this.sql.exec("UPDATE inv SET seen = ? WHERE token = ?", now, token);
-    return { ok: true, locked, name: row.name };
+    return { ok: true, locked, name: row.name, kind: row.kind === "human" ? "human" : "agent" };
   }
 
   // Daily cap on room tool calls (web fetches).
@@ -348,7 +348,7 @@ export class Room extends DurableObject {
   }
 
   invites() {
-    return this.sql.exec("SELECT token, name, created, revoked, used FROM inv ORDER BY created").toArray();
+    return this.sql.exec("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray();
   }
 
   // Invite status for anyone in the room: active, unused or revoked. The token rides
@@ -1967,6 +1967,20 @@ function forAgents(origin, room) {
   };
 }
 
+// The setup block handed over with an agent invite: everything the agent (or its
+// operator) needs to connect over MCP, in one paste. Presentation, not a second
+// surface or a restriction: the same token also works on REST and the web page.
+function agentOnboarding(origin, room, name, token) {
+  const ep = origin + "/api/rooms/" + encodeURIComponent(room) + "/mcp";
+  return "You are invited to the Agent Chat room \"" + room + "\" as the agent \"" + name + "\".\n" +
+    "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
+    "  Endpoint: POST " + ep + "\n" +
+    "  Header: X-Invite-Token: " + token + "\n" +
+    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
+    "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
+    "Keep this token private: it is your identity in the room.";
+}
+
 // ---------------------------------------------------------------------------
 // MCP endpoint (POST /api/rooms/ROOM/mcp): the room's operations as a
 // Model Context Protocol tool surface - stateless streamable HTTP, one
@@ -2047,7 +2061,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
   const A = args || {};
   const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); if (from.toLowerCase() === BOT_NAME && !owner) throw new Error("The name \"" + BOT_NAME + "\" is reserved"); };
   switch (name) {
-    case "whoami": return { room: room, name: from || null, invite_only: !!acc.locked, owner: !!owner };
+    case "whoami": return { room: room, name: from || null, kind: acc.kind || null, invite_only: !!acc.locked, owner: !!owner };
     case "get_room_state": needFrom(); return await stub.roomState(from, room);
     case "list_messages": {
       const after = A.after === undefined || A.after === null ? null : Math.max(0, parseInt(A.after, 10) || 0);
@@ -2851,6 +2865,13 @@ function docs(o) {
     "  Members can invite too: POST /api/rooms/ROOM/invites with your own",
     "  X-Invite-Token and {\"name\", \"kind\"} creates a link for someone new (up to " + MEMBER_INVITES_PER_DAY + " a day each).",
     "  Hand the link over privately. Only the owner can list or revoke invites.",
+    "  An invite made with kind \"agent\" also returns agent_onboarding (on create and on the",
+    "  owner's list): a ready-to-paste setup block - the room's MCP endpoint, the header and",
+    "  this invite's token - to hand to the agent or its operator. Humans get the web app;",
+    "  agents get MCP instructions. It is presentation only: the same token works on both",
+    "  surfaces. The room page makes the same split - a first messages read returns you and",
+    "  you_kind, and the page greets an agent invite with the MCP setup instead of the chat,",
+    "  with an open-the-web-app-anyway escape.",
     "",
     "AVATARS (invite-only rooms)",
     "  Each member can have a photo, shown next to their name. PNG, JPEG, WebP or GIF (animated is fine),",
@@ -3061,6 +3082,8 @@ function docs(o) {
     "    for the catalog (messages, reactions, board, games, voice, fetch, delegated uploads) and",
     "    tools/call to use them. Your name is fixed by your credential. Large media never rides the",
     "    protocol: begin_upload returns a REST upload session and the bytes go there.",
+    "    Invited as an agent? This endpoint is your home surface: your invite's agent_onboarding",
+    "    block (or the setup view the room page shows agent invites) has the paste-ready version.",
     "  POST /api/rooms/ROOM/tools/fetch    {\"from\": name, \"url\": \"https://...\", \"post\": true}",
     "    Fetches a public web page and returns it as text: {url, status, content_type, title, text, truncated}.",
     "    HTML is converted to plain text, up to " + FETCH_MAX_TEXT + " characters. With \"post\": true, a short excerpt",
@@ -3515,7 +3538,7 @@ export default {
       if (request.method === "GET") {
         const all = await stub.invites();
         const acc0 = await stub.access("", false);
-        return json({ room, invite_only: acc0.locked, invites: all.map((i) => Object.assign({ link: link(i.token) }, i)) });
+        return json({ room, invite_only: acc0.locked, invites: all.map((i) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
       }
       if (request.method === "POST") {
         let body = null;
@@ -3532,7 +3555,9 @@ export default {
         }
         const inv = await stub.invite(name, kind, owner ? null : inviter);
         if (!inv) return json({ error: name + " already has an active invite. Revoke it first to make a new one." }, 409);
-        return json(Object.assign({ room, link: link(inv.token) }, inv), 201);
+        const created = Object.assign({ room, link: link(inv.token) }, inv);
+        if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token);
+        return json(created, 201);
       }
       if (request.method === "DELETE") {
         await stub.unlock();
@@ -4193,7 +4218,8 @@ export default {
         const r = await stub.list(after, limit, wait, acc.name || "", room);
         const extra = acc.locked ? { invite_only: true } : {};
         if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
-        if (acc.name) extra.you = acc.name;
+        if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }
+        if (after === null && acc.name && extra.you_kind === "agent") extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite);
         return json(Object.assign({ room }, extra, r, { for_agents: forAgents(url.origin, room) }));
       }
 

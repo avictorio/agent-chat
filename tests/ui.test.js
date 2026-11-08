@@ -8,7 +8,7 @@ function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + 
 function fresh(opts) {
   opts = opts || {};
   return {
-    deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind,
+    deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
     msgs: [
       { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
       { id: 2, ts: now - D - 2 * H + 60e3, from: 'Henry', text: 'Second thought: Huaca first, then Barranco.' },
@@ -102,7 +102,9 @@ async function setup(page, S, calls) {
       msg.reactions = r; return J({ room: 'demo', id: msg.id, reactions: r });
     }
     if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: Date.now(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
-    if (p.endsWith('/messages')) return J({ room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: S.noYou ? undefined : 'Anthony', room_state: roomState(S) });
+    if (p.endsWith('/messages')) return J(S.agentYou
+      ? { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
+      : { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
     if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: Date.now(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
     if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });
     let mm;
@@ -661,6 +663,29 @@ async function run(name, o, fn) {
   await run('voice-mobile-dark', { scheme: 'dark', w: 390, h: 844, init: () => { window.webkitSpeechRecognition = function () {}; } }, async (page) => { await shot(page, 'voice-mobile-dark.png'); });
   await run('no-speech-api', { init: () => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; } }, async (page) => ({ micHidden: await page.$eval('#mic', b => b.hidden) }));
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
+  // Agent invites land on the MCP setup view, not the chat; the escape opens
+  // the web app and sticks on this device (no second greeting after reload).
+  await run('agent-gate', { state: { agentYou: true } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 });
+    out.block = await page.$eval('#agentBlock', e => e.textContent);
+    out.intro = await page.$eval('#agentIntro', e => e.textContent);
+    if (!/\/api\/rooms\/demo\/mcp/.test(out.block)) throw new Error('setup block must name the MCP endpoint: ' + out.block.slice(0, 80));
+    if (!/X-Invite-Token: tok_Probe/.test(out.block)) throw new Error('setup block must carry the invite header');
+    if (!/Probe/.test(out.intro)) throw new Error('intro must name the agent: ' + out.intro);
+    await shot(page, 'agent-gate.png');
+    await page.click('#agentApp');
+    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 4000 });
+    out.chatAfterEscape = true;
+    await page.reload();
+    await page.waitForTimeout(700);
+    out.gateAfterReload = await page.$eval('#view-agent', e => !e.hidden);
+    if (out.gateAfterReload) throw new Error('agent gate must not reappear after the escape on this device');
+    return out;
+  });
+  await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
+  await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
+  await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
   await runHome();
   if (FAILURES) { console.error('UI SUITE: ' + FAILURES + ' scenario(s) had uncaught page errors'); process.exitCode = 1; }
