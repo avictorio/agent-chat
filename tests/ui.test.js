@@ -17,6 +17,7 @@ function fresh(opts) {
       { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
       ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
+      ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -41,6 +42,16 @@ function fresh(opts) {
     ],
     skd: [ { id: 4, ts: now - 2 * D, added_by: 'Ada', title: 'Lock the room', date: ymd(-1), done: now - D, done_by: 'Anthony' } ],
     dg: [ { id: 1, ts: now - 6 * H, day: ymd(0), author: 'Ada', text: 'Agreed on invite-only access. Open: digest cadence and dinner booking.' } ],
+    game: opts.game ? { id: 1, type: 'lightcycles', status: 'running', created_by: 'Henry', card_msg: 9, w: 12, h: 10, tick: 3, tick_seconds: 900, deadline: now + 600e3, winner: null, record_keeper: null,
+      players: [
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', dir: 'right', alive: true, x: 5, y: 5, moved: true },
+        { name: 'Henry', color: 'orange', hex: '#fb923c', dir: 'left', alive: true, x: 7, y: 5, moved: false },
+        { name: 'Anthony', color: 'pink', hex: '#f472b6', dir: 'down', alive: true, x: 6, y: 3, moved: false },
+      ],
+      trails: [[3, 5, 0], [4, 5, 0], [5, 5, 0], [9, 5, 1], [8, 5, 1], [7, 5, 1], [6, 0, 2], [6, 1, 2], [6, 2, 2], [6, 3, 2]],
+      log: [{ tick: 0, text: 'Match created by Henry - Ada, Henry, Anthony on the grid.' }],
+      awaiting: ['Henry', 'Anthony'],
+      you: { playing: true, alive: true, dir: 'down', queued: null, legal_moves: ['down', 'left', 'right'] } } : null,
     mb: { invite_only: true, members: [
       { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null },
       { name: 'Henry', kind: 'agent', avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null },
@@ -110,6 +121,8 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); return J({ room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }, 201); }
+    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { if (!S.game) return J({ error: 'No game' }, 404); S.game.you.queued = body.dir; const pl = S.game.players.find(x => x.name === 'Anthony'); if (pl) pl.moved = true; S.game.awaiting = S.game.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: S.game, resolved: false }); }
+    if ((mm = p.match(/games\/(\d+)$/))) { if (!S.game || S.game.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: S.game }); }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -199,6 +212,45 @@ async function run(name, o, fn) {
     await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
     await page.waitForTimeout(200);
     await shot(page, 'artifacts-mobile-image.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
+  });
+  // Light Cycles: the match card renders a live board; tapping it opens the
+  // arena with a direction pad for a player (reverse disabled), and a pad
+  // tap queues the move through the API.
+  await run('game-card', { state: { game: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    out.trailCells = await page.$$eval('.game-card .lc-svg rect', els => els.length);
+    out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
+    if (out.trailCells < 10) throw new Error('board should render trails and heads, got ' + out.trailCells + ' rects');
+    if (!/Tick 3/.test(out.cardMeta)) throw new Error('card meta wrong: ' + out.cardMeta);
+    await shot(page, 'game-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
+    out.padBtns = await page.$$eval('#viewer .lc-btn', els => els.map(b => b.getAttribute('aria-label') + ':' + (b.disabled ? 'off' : 'on')));
+    if (!/Light Cycles #1/.test(out.viewerTitle)) throw new Error('viewer title wrong: ' + out.viewerTitle);
+    if (!out.padBtns.includes('Steer up:off')) throw new Error('reverse (up, heading down) must be disabled: ' + JSON.stringify(out.padBtns));
+    if (!out.padBtns.includes('Steer left:on')) throw new Error('left must be playable: ' + JSON.stringify(out.padBtns));
+    await shot(page, 'game-arena.png');
+    await page.click('#viewer .lc-btn[aria-label="Steer left"]');
+    await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 4000 });
+    out.moveCall = calls.filter(c => c.includes('/games/1/moves')).pop() || '';
+    if (!/"dir":"left"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
+    await shot(page, 'game-arena-queued.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('game-card-mobile', { state: { game: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await shot(page, 'game-mobile-card.png');
+    await page.tap('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'game-mobile-arena.png');
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };

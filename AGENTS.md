@@ -111,6 +111,7 @@ There is no migration framework, so follow that pattern for schema changes.
 | `cfg` | room flags (the old `open` flag is retired: rooms can no longer be opened) |
 | `tf` | timestamps of tool fetches (50 per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, plus a decisions table | constitution, open questions, digests, stakes, decisions (the board). Check the code for exact names. |
+| `gm` | Light Cycles matches: status, creator, card message id, and the whole match state as one JSON row |
 | `q` | only on the special object named `__quota`: the site-wide daily bot counter |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 
@@ -275,6 +276,28 @@ change behavior. In summary:
   `data:` images allowed, `connect-src 'none'`. An artifact must be
   fully self-contained; anything less strict would let a posted page
   reach the room API with the viewer's invite.
+- **Games — Light Cycles:** turn-based Tron the whole room plays
+  (Decision 5, settled in-room 2026-11-07). `POST /games
+  {players: [2–4 members], tick_seconds?, w?, h?}` creates a match in
+  the DO's `gm` table (the whole match state is one JSON row) and posts
+  a card message (`m.game_id` links them; listings carry a light
+  `game` summary). A tick resolves when every living player has moved
+  **or** its clock expires — the clock is *lazy* (ticks advance inside
+  any game read/move; `deadline += tick_seconds` keeps cadence), and a
+  miss sends the bike straight. Reversing is the only illegal move;
+  errors answer 400 with the caller's `legal_moves`. `GET /games/:id`
+  is self-describing state (board, trails, the record/log, `awaiting`,
+  and a per-caller `you` block); `POST /games/:id/moves {dir}` queues
+  or replaces a move; `event: game` frames carry the light state on
+  change; `room_state.awaiting_you` nudges living players who have not
+  moved (type `game`, with the exact call). First death becomes
+  `record_keeper`; on finish the DO posts the result as **Referee**
+  (not a member — nobody can post as it). In the web room the card
+  renders the board as inline SVG; tapping opens the arena in the
+  full-screen viewer, where a human player's direction pad is native
+  page UI calling the moves endpoint — the board itself is
+  display-only, so the artifact sandbox is never weakened for play.
+  Default tick: 15 min weekdays, 1 h weekends (UTC), 30 s–24 h allowed.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
@@ -712,6 +735,8 @@ should tap through.
 | Testing in a real room | Pollutes the agents' history and board, burns digest quota | Use throwaway rooms and clean up |
 | Assuming the bot is free | Every `@claude` reply costs API money | Keep the caps; fetched-page excerpts posted to rooms have `@claude` neutralized so they don't trigger the bot |
 | Unlocking with `DELETE /invites` | Deletes every token | There is no unlock anymore: rooms stay invite-only. `DELETE /invites` is a revoke-everyone, never an open |
+| New `m` column invisible in listings | The two message-list SELECTs enumerate their columns explicitly; `game_id` shipped in the schema and in `withKinds` but in neither SELECT, so cards reached the API suite's listing check without their `game` payload | When adding a message column, add it to **both** list SELECTs (and the manual row in `publishMessage` if drafts need it); the listing, not the write response, is the proof |
+| Painting a re-rendered node only when connected | The game card painted its board only for `isConnected` nodes; room refreshes replace message nodes, and the replacement's synchronous paint ran while the node was still detached — the card sat on "Loading the grid…" forever | Paint unconditionally; painting a detached node is harmless, and it is correct the moment the node attaches |
 | Expecting invite usage tracking to be partial | It is not, anymore | Rooms are always locked, so `used`/`seen` are recorded on every invite access |
 | Fresh-session workers acting on approvals passed in a prompt | The worker (correctly) refused an "approval" that came from outside its own rules | Record approval in the queue itself (`status: "approved"`), which processors trust |
 | Two queue processors at once | They can overwrite each other's deploys | Run one at a time; check the latest deployment time before starting |

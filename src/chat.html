@@ -298,6 +298,28 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .art-head .sp, .doc-head .sp { flex: 1; }
 .art-go { color: var(--mut); font-size: 17px; line-height: 1; padding: 0 2px; }
 .art-frame { display: block; width: 100%; height: 380px; border: 0; background: #fff; pointer-events: none; }
+.game-card { margin-top: 6px; max-width: 640px; border: 1px solid rgba(34, 211, 238, .4); border-radius: 10px; overflow: hidden; background: #04060d; cursor: pointer; }
+.game-board { background: #04060d; }
+.game-card .art-head { background: #04060d; border-bottom: 1px solid rgba(34, 211, 238, .25); }
+.game-card .art-name { color: #e2f4fd; }
+.game-card .art-size { color: #8fb8c9; }
+.game-card .art-kind { color: #22d3ee; border-color: rgba(34, 211, 238, .5); }
+.game-card .art-go { color: #8fb8c9; }
+.lc-svg { display: block; width: 100%; height: auto; }
+.lc-arena { max-width: 720px; margin: 0 auto; padding: 12px 14px 20px; }
+.lc-board-big .lc-svg { max-height: 58vh; }
+.lc-meta { color: var(--dim); font-size: 13px; margin: 8px 0 2px; }
+.lc-players { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.lc-chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; color: var(--text); }
+.lc-chip.out { opacity: .55; }
+.lc-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.lc-pad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 6px; justify-content: center; margin: 14px auto 4px; }
+.lc-btn { font-size: 22px; border-radius: 12px; border: 1px solid rgba(34, 211, 238, .45); background: #0a1420; color: #a5f3fc; cursor: pointer; }
+.lc-btn:disabled { opacity: .28; cursor: default; }
+.lc-btn.queued { background: #164e63; color: #ecfeff; }
+.lc-note { text-align: center; color: var(--dim); font-size: 13px; min-height: 18px; }
+.lc-log { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.lc-log div { font-size: 13px; color: var(--dim); padding: 2px 0; }
 .doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
 .doc-body .md-p:first-child { margin-top: 0; }
 #viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }
@@ -1186,6 +1208,28 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         }, durl);
       });
     }
+    if (m.game && m.game.id) {
+      var gcard = el("div", "game-card");
+      var ghd = el("div", "art-head");
+      ghd.appendChild(el("span", "art-kind", "Game"));
+      ghd.appendChild(el("span", "art-name", "Light Cycles #" + m.game.id));
+      var gmeta = el("span", "art-size", "");
+      ghd.appendChild(gmeta);
+      ghd.appendChild(el("span", "sp"));
+      ghd.appendChild(el("span", "art-go", "›"));
+      gcard.appendChild(ghd);
+      var gboard = el("div", "game-board");
+      gboard.appendChild(el("p", "md-p", "Loading the grid…"));
+      gcard.appendChild(gboard);
+      (function (gid) {
+        gcard.addEventListener("click", function () { openGameViewer(gid); });
+      })(m.game.id);
+      body.appendChild(gcard);
+      registerGameCard(m.game.id, gboard, gmeta);
+      paintGameMeta(gmeta, m.game);
+      if (gameCache[m.game.id]) renderGameCards(m.game.id);
+      else fetchGame(m.game.id);
+    }
     row.appendChild(body);
     // Footer: reaction chips on the left, the react and listen buttons on the right.
     var foot = el("div", "msg-foot");
@@ -1228,6 +1272,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function closeViewer(fromPop) {
     if (!viewerIsOpen) return;
     viewerIsOpen = false;
+    if (gameViewTimer) { clearInterval(gameViewTimer); gameViewTimer = 0; }
+    gameView = null;
     $("viewer").hidden = true;
     $("viewerBody").textContent = "";
     if (!fromPop && viewerPushed) { viewerPushed = false; try { history.back(); } catch (e) {} }
@@ -1245,6 +1291,141 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     }
     return docCache[id];
   }
+  /* ---------- Light Cycles: cards, arena, direction pad ----------
+     The card board and the arena render from game state (GET /games/ID,
+     kept fresh by event: game frames and a slow poll). The arena page is
+     native to the room - the pad calls the moves endpoint with the
+     viewer's own invite. The board itself is display-only SVG. */
+  var gameCache = {}, gameCards = {}, gameView = null, gameViewTimer = 0, gameRenderKey = "";
+  function tickLen(ts) { return ts >= 3600 ? Math.round(ts / 3600) + " h" : Math.max(1, Math.round(ts / 60)) + " min"; }
+  function gameMetaText(g) {
+    if (!g) return "";
+    if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
+    var alive = (g.players || []).filter(function (p) { return p.alive; }).length;
+    return "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
+  }
+  function paintGameMeta(elm, g) { if (elm) elm.textContent = gameMetaText(g); }
+  function registerGameCard(id, board, meta) {
+    (gameCards[id] = gameCards[id] || []).push({ board: board, meta: meta });
+  }
+  function boardSvg(g) {
+    var s = '<svg class="lc-svg" viewBox="0 0 ' + g.w + ' ' + g.h + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Light Cycles board">';
+    s += '<rect x="0" y="0" width="' + g.w + '" height="' + g.h + '" fill="#04060d"/>';
+    var grid = "";
+    for (var x = 1; x < g.w; x++) grid += "M" + x + " 0V" + g.h;
+    for (var y = 1; y < g.h; y++) grid += "M0 " + y + "H" + g.w;
+    s += '<path d="' + grid + '" stroke="rgba(56,189,248,0.07)" stroke-width="0.04" fill="none"/>';
+    var byColor = {};
+    (g.trails || []).forEach(function (c) { (byColor[c[2]] = byColor[c[2]] || []).push(c); });
+    (g.players || []).forEach(function (p, i) {
+      (byColor[i] || []).forEach(function (c) {
+        s += '<rect x="' + c[0] + '" y="' + c[1] + '" width="1" height="1" fill="' + p.hex + '" opacity="0.45"/>';
+      });
+    });
+    (g.players || []).forEach(function (p) {
+      if (p.alive && typeof p.x === "number") s += '<rect x="' + p.x + '" y="' + p.y + '" width="1" height="1" fill="' + p.hex + '" stroke="#e0faff" stroke-width="0.14"/>';
+    });
+    s += "</svg>";
+    return s;
+  }
+  function renderGameCards(id) {
+    var g = gameCache[id];
+    var list = gameCards[id] || [];
+    if (!g || !g.trails) return;
+    for (var i = 0; i < list.length; i++) {
+      list[i].board.innerHTML = boardSvg(g);
+      paintGameMeta(list[i].meta, g);
+    }
+  }
+  function fetchGame(id) {
+    return fetch(base + "/games/" + id, { headers: hdrs(), cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.game) return;
+      gameCache[id] = d.game;
+      renderGameCards(id);
+      if (gameView && gameView.id === id) renderGameView(d.game);
+    }).catch(function () {});
+  }
+  function openGameViewer(id) {
+    gameRenderKey = "";
+    openViewer("Light Cycles #" + id, function (vb) {
+      var wrap = el("div", "lc-arena");
+      wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
+      vb.appendChild(wrap);
+      gameView = { id: id, wrap: wrap };
+      fetchGame(id);
+    }, null);
+    if (gameViewTimer) clearInterval(gameViewTimer);
+    gameViewTimer = setInterval(function () { if (gameView) fetchGame(gameView.id); }, 8000);
+  }
+  function renderGameView(g, force) {
+    if (!gameView || gameView.id !== g.id) return;
+    var key = g.status + "|" + g.tick + "|" + (g.you && g.you.queued || "") + "|" + (g.players || []).map(function (p) { return (p.alive ? 1 : 0) + (p.moved ? 1 : 0); }).join("");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    var wrap = gameView.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g) + (g.status === "running" && g.deadline ? " · tick closes " + new Date(g.deadline).toLocaleTimeString() : "")));
+    var big = el("div", "lc-board-big");
+    big.innerHTML = boardSvg(g);
+    wrap.appendChild(big);
+    var chips = el("div", "lc-players");
+    (g.players || []).forEach(function (p) {
+      var chip = el("span", "lc-chip" + (p.alive ? "" : " out"));
+      var dot = el("span", "lc-dot"); dot.style.background = p.hex;
+      chip.appendChild(dot);
+      chip.appendChild(document.createTextNode(p.name + (p.alive ? (g.status === "running" ? (p.moved ? " · moved ✓" : " · deciding…") : "") : " · out")));
+      chips.appendChild(chip);
+    });
+    wrap.appendChild(chips);
+    var note = el("div", "lc-note", "");
+    if (g.you && g.you.playing && g.status === "running" && g.you.alive) {
+      var pad = el("div", "lc-pad");
+      var dirs = [["up", "↑", 1, 0], ["left", "←", 0, 1], ["right", "→", 2, 1], ["down", "↓", 1, 2]];
+      dirs.forEach(function (dd) {
+        var b = el("button", "lc-btn" + (g.you.queued === dd[0] ? " queued" : ""), dd[1]);
+        b.type = "button";
+        b.style.gridColumn = String(dd[2] + 1);
+        b.style.gridRow = String(dd[3] + 1);
+        b.setAttribute("aria-label", "Steer " + dd[0]);
+        if ((g.you.legal_moves || []).indexOf(dd[0]) < 0) b.disabled = true;
+        b.addEventListener("click", function () { sendMove(g.id, dd[0], note); });
+        pad.appendChild(b);
+      });
+      wrap.appendChild(pad);
+      note.textContent = g.you.queued ? "Queued: " + g.you.queued + " - tap another direction to change it before the tick resolves." : "Your move: pick a direction before the tick closes.";
+      wrap.appendChild(note);
+    } else if (g.you && g.you.playing && g.status === "running") {
+      note.textContent = "You are out - the record is yours to keep.";
+      wrap.appendChild(note);
+    } else if (g.status === "running") {
+      note.textContent = "Spectating - the riders steer by API and by pad.";
+      wrap.appendChild(note);
+    }
+    if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
+    if (g.log && g.log.length) {
+      var log = el("div", "lc-log");
+      log.appendChild(el("div", "", "The record"));
+      g.log.forEach(function (ln) { log.appendChild(el("div", "", "Tick " + ln.tick + " - " + ln.text)); });
+      wrap.appendChild(log);
+    }
+  }
+  function sendMove(id, dir, note) {
+    if (note) note.textContent = "Queuing " + dir + "…";
+    fetch(base + "/games/" + id + "/moves", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify({ dir: dir }) }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.game) {
+        gameCache[id] = d.game;
+        renderGameCards(id);
+        renderGameView(d.game, true);
+      } else if (note) {
+        note.textContent = d.error || "That move was refused.";
+      }
+    }).catch(function () { if (note) note.textContent = "The move did not reach the referee."; });
+  }
+  setInterval(function () {
+    if (document.hidden) return;
+    for (var id in gameCards) fetchGame(id);
+  }, 20000);
+
   function renderAll() {
     msgsEl.textContent = "";
     if (!arr.length) { msgsEl.appendChild(el("div", "chat-empty", "No messages yet. Start the conversation below.")); return; }
@@ -1320,6 +1501,15 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     // Someone reacted to a message.
     es.addEventListener("reaction", function (e) {
       try { var d = JSON.parse(e.data), m = byId(d.id); if (m) { m.reactions = d.reactions || {}; paintReactions(m); } } catch (err) {}
+    });
+    // A Light Cycles match changed: refresh its card, and the arena if open.
+    es.addEventListener("game", function (e) {
+      try {
+        var d = JSON.parse(e.data);
+        if (!d.game || !d.game.id) return;
+        if (d.game.trails) { gameCache[d.game.id] = d.game; renderGameCards(d.game.id); }
+        if (gameView && gameView.id === d.game.id) fetchGame(d.game.id);
+      } catch (err) {}
     });
     es.addEventListener("message", function (e) {
       try {

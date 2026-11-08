@@ -155,6 +155,61 @@ async function waitUp() {
     r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'x', html: HTML, draft: true } });
     check('draft + html -> 400', r.status === 400, r.status);
 
+    // Games: Light Cycles end to end - create, legal moves, simultaneous
+    // resolution, the referee's finish post, the room_state nudge, and the
+    // lazy clock (an expired tick sends every bike straight).
+    const invRex = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Rex', kind: 'agent' } });
+    const invRae = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Rae', kind: 'agent' } });
+    const TRex = invRex.json.token, TRae = invRae.json.token;
+    await req('GET', R2 + '/members', { token: TRex });
+    await req('GET', R2 + '/members', { token: TRae });
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex', 'Ghost'] } });
+    check('game with a non-member -> 400', r.status === 400, r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 3600, w: 12, h: 10 } });
+    check('game created', r.status === 201 && r.json.game && r.json.game.status === 'running', r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    const G = r.json.game; const gid = G.id;
+    check('spawn + legal moves', G.players[0].x === 3 && G.players[0].y === 5 && G.you.legal_moves.join() === 'up,down,right', JSON.stringify(G.players[0]) + ' ' + JSON.stringify(G.you));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TP });
+    const card = (r.json.messages || []).find(x => x.game && x.game.id === gid);
+    check('card message carries the game', !!card, JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'left' } });
+    check('reverse move -> 400 with legal_moves', r.status === 400 && Array.isArray(r.json.legal_moves) && !r.json.legal_moves.includes('left'), r.status + ' ' + JSON.stringify(r.json));
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'warp' } });
+    check('bogus dir -> 400', r.status === 400, r.status);
+    const invRook = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Rook', kind: 'agent' } });
+    await req('GET', R2 + '/members', { token: invRook.json.token });
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: invRook.json.token, json: { dir: 'up' } });
+    check('non-player move -> 403', r.status === 403, r.status);
+    // The lazy-clock match: created now and left untouched; a later read
+    // must show its expired tick resolved with everyone sent straight.
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30, w: 12, h: 10 } });
+    const clockId = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'down' } });
+    check('queue a move', r.status === 200 && r.json.game.you.queued === 'down' && r.json.resolved === false, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    await req('POST', R2 + '/games/' + gid + '/moves', { token: TRex, json: { dir: 'up' } });
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TRae, json: { dir: 'left' } });
+    check('last move resolves the tick', r.status === 200 && r.json.resolved === true && r.json.game.tick === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    const toks = { Poc: TP, Rex: TRex, Rae: TRae };
+    let final = null;
+    for (let i = 0; i < 16 && !final; i++) {
+      const st = await req('GET', R2 + '/games/' + gid, { token: TP });
+      if (st.json.game.status === 'finished') { final = st.json.game; break; }
+      for (const p of st.json.game.players) {
+        if (!p.alive) continue;
+        await req('POST', R2 + '/games/' + gid + '/moves', { token: toks[p.name], json: { dir: p.dir } });
+      }
+    }
+    check('match finishes with a record', !!final && !!final.record_keeper && final.log.length >= 2, JSON.stringify(final).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'up' } });
+    check('move after finish -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages?limit=10', { token: TP });
+    check('referee posted the result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid)), JSON.stringify((r.json.messages || []).map(x => x.from)));
+    const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
+    check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
+    await new Promise(res => setTimeout(res, 31000));
+    r = await req('GET', R2 + '/games/' + clockId, { token: TP });
+    check('expired tick sends bikes straight', r.json.game.tick >= 1 && r.json.game.players[0].x >= 4 && r.json.game.players[0].alive, JSON.stringify(r.json.game.players));
+
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
     check('room destroyed', r.json && r.json.deleted === true, JSON.stringify(r.json));
