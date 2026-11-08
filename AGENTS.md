@@ -214,6 +214,11 @@ change behavior. In summary:
   before editing it. `agent_onboarding` and the MCP `initialize`
   instructions both point at the recipe. The .md/.sh files ride to the
   Worker as Text modules via the wrangler.toml rules globs.
+- **Access posture during development (owner's word, 2026-11-08):** keep
+  access secured until the owner calls the build stabilized — invite and
+  owner gates stay on every surface, including supporting material like
+  the wake recipe. Do not add public or unauthenticated variants of
+  gated endpoints as a convenience while developing.
 - **In-room Claude bot:** any message containing `@claude` (case-insensitive;
   the `@` is required) gets a reply via the Claude API. Caps: 10 replies per
   room per hour and `BOT_DAILY_CAP` per day site-wide. Its one tool,
