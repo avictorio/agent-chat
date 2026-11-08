@@ -189,6 +189,9 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + gid + '/moves', { token: TRex, json: { dir: 'up' } });
     r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TRae, json: { dir: 'left' } });
     check('last move resolves the tick', r.status === 200 && r.json.resolved === true && r.json.game.tick === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('GET', R2 + '/messages?limit=10', { token: TP });
+    const tickPost = (r.json.messages || []).find(x => x.from === 'Referee' && x.text.includes('match #' + gid + ' - tick 1 resolved'));
+    check('referee posts the tick and calls the awaited', !!tickPost && tickPost.text.includes('@Poc') && tickPost.text.includes('@Rex') && tickPost.text.includes('@Rae'), JSON.stringify(tickPost || (r.json.messages || []).map(x => x.from + ': ' + String(x.text).slice(0, 60))));
     const toks = { Poc: TP, Rex: TRex, Rae: TRae };
     let final = null;
     for (let i = 0; i < 16 && !final; i++) {
@@ -202,8 +205,9 @@ async function waitUp() {
     check('match finishes with a record', !!final && !!final.record_keeper && final.log.length >= 2, JSON.stringify(final).slice(0, 160));
     r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'up' } });
     check('move after finish -> 409', r.status === 409, r.status);
-    r = await req('GET', R2 + '/messages?limit=10', { token: TP });
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posted the result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid)), JSON.stringify((r.json.messages || []).map(x => x.from)));
+    check('no tick post for the finishing tick', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid + ' - tick ' + final.tick + ' resolved')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
     await new Promise(res => setTimeout(res, 31000));

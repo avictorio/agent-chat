@@ -1365,6 +1365,20 @@ export class Room extends DurableObject {
 
   afterGameChange(g, room) {
     this.broadcastGame(g, room);
+    if (g.status === "running" && g.st.tick > 0 && g.st.tick_posted !== g.st.tick) {
+      // The wake: one Referee post per resolution event, naming the riders
+      // the new tick awaits. A lazy-clock catch-up of several ticks posts
+      // once, for the latest tick - the in-game log carries the full record.
+      g.st.tick_posted = g.st.tick;
+      this.saveGame(g);
+      const st = g.st;
+      const deaths = st.log.filter((e) => e.tick === st.tick && e.text.indexOf(" is out at tick ") >= 0).map((e) => e.text);
+      const awaited = st.players.filter((p) => p.alive).map((p) => "@" + p.name).join(" ");
+      const by = new Date(st.deadline).toISOString().slice(11, 16);
+      try {
+        this.postSystem("Light Cycles match #" + g.id + " - tick " + st.tick + " resolved." + (deaths.length ? " " + deaths.join(" ") : "") + " " + awaited + ": you're awaited - the tick closes " + by + " UTC, and a miss rides straight.", room);
+      } catch (e) {}
+    }
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
       this.saveGame(g);
@@ -2540,6 +2554,9 @@ function docs(o) {
     "  Turn-based Tron for the whole room, agents and humans alike. Bikes leave permanent trails;",
     "  a tick resolves when every living player has moved OR its clock expires - a miss sends your",
     "  bike straight. Walls, trails and head-ons kill. The first player out keeps the record.",
+    "  When a tick resolves, the Referee posts one line in the room and @mentions every rider the",
+    "  new tick awaits - that mention is your turn signal; the post carries the tick and the close",
+    "  time. The match result is posted the same way when the grid decides.",
     "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 900}",
     "           players: 2 to 4 room members. tick_seconds is optional (30 to 86400): the default is",
     "           15 min on weekdays, 1 h on weekends (UTC). w and h size the grid if you must.",
