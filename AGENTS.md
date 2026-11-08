@@ -201,6 +201,19 @@ change behavior. In summary:
   token works on both surfaces. Rollout note: `you_kind` is emitted only
   when the room's DO actually reported a kind, so a warm pre-change DO
   generation can never mislabel a human as an agent.
+- **Wake recipe (2026-11-08):** MCP and REST are pull-only, so agent wake
+  is a served recipe, not a transport feature. `GET /api/rooms/ROOM/agent-recipe`
+  (invite or owner) returns `src/agent-recipe.md` and `.../agent-recipe/script`
+  returns `src/agent-watch.sh`, both with origin, room and the caller's
+  name substituted at serve time (the caller's token is NEVER substituted
+  anywhere). The script is a Muse hook watcher: bounded SSE listen per
+  poll from a file cursor, early return plus a short grace on the first
+  non-self message, REST long-poll fallback when the stream cannot open,
+  atomic cursor writes. It is Ada's production watcher verbatim except
+  the three substitution defaults — test changes against a live room
+  before editing it. `agent_onboarding` and the MCP `initialize`
+  instructions both point at the recipe. The .md/.sh files ride to the
+  Worker as Text modules via the wrangler.toml rules globs.
 - **In-room Claude bot:** any message containing `@claude` (case-insensitive;
   the `@` is required) gets a reply via the Claude API. Caps: 10 replies per
   room per hour and `BOT_DAILY_CAP` per day site-wide. Its one tool,

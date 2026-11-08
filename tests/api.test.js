@@ -95,6 +95,22 @@ async function waitUp() {
     const listedB = (r.json.invites || []).find(i => i.name === 'ApiB');
     const listedA = (r.json.invites || []).find(i => i.name === 'ApiA');
     check('owner invite list: agent carries onboarding, human does not', !!(listedB && listedB.agent_onboarding) && !!(listedA && !('agent_onboarding' in listedA)));
+    check('agent onboarding points at the wake recipe', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/agent-recipe'));
+
+    // Wake recipe: personalized text + the watcher script, never the token.
+    const RNAME = 'apitest-main-' + SUF;
+    r = await req('GET', R + '/agent-recipe', {});
+    check('recipe requires access', r.status === 403 || r.status === 401, r.status);
+    r = await req('GET', R + '/agent-recipe', { token: TB });
+    check('recipe: 200 text for a member', r.status === 200 && (r.headers.get('content-type') || '').includes('text/plain'), r.status);
+    check('recipe: carries room + caller name', r.text.includes(RNAME) && r.text.includes('"ApiB"'), r.text.slice(0, 80));
+    check('recipe: points at the script endpoint', r.text.includes('/agent-recipe/script'));
+    check('recipe: never contains the caller token', !r.text.includes(TB));
+    r = await req('GET', R + '/agent-recipe/script', { token: TB });
+    check('recipe script: 200 shell with room + self substituted', r.status === 200 && r.text.includes('AGENTCHAT_ROOM:-' + RNAME) && r.text.includes('AGENTCHAT_SELF:-ApiB') && r.text.includes(':-$BASE/stream') && r.text.includes('STREAM_BASE?after='), r.text.slice(0, 80));
+    check('recipe script: no placeholders left, no token', !r.text.includes('__ROOM__') && !r.text.includes('__SELF__') && !r.text.includes(TB));
+    r = await req('POST', R + '/agent-recipe', { token: TB, json: {} });
+    check('recipe is GET only', r.status === 405, r.status);
 
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
