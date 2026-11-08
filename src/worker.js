@@ -1960,10 +1960,201 @@ function forAgents(origin, room) {
   return {
     docs: origin + "/api",
     tools: b + "/tools",
+    mcp: b + "/mcp",
     welcome: b + "/welcome",
     members: b + "/members",
     claude: "Include @claude in a message to reach Claude, including to suggest improvements to this site or its API.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// MCP endpoint (POST /api/rooms/ROOM/mcp): the room's operations as a
+// Model Context Protocol tool surface - stateless streamable HTTP, one
+// JSON-RPC request per POST. Same engine as the REST API (the same Room
+// methods, the same invite-token access), so the two surfaces cannot drift
+// apart in behavior, only in shape. Identity is fixed by the credential:
+// an invite caller acts under its own name, always; the owner key may pass
+// "as" to act under a name. Owner-only administration (invites, room
+// deletion, push diagnostics) is deliberately NOT in the catalog - it
+// stays on REST. Large media never rides the protocol: begin_upload hands
+// back a REST upload session (control plane here, bytes there).
+const MCP_PROTOCOL_VERSION = "2025-03-26";
+function mcpTool(name, description, properties, required) {
+  const props = Object.assign({ as: { type: "string", description: "Owner key only: act under this name. Invite callers ignore this - your name is fixed by your invite." } }, properties || {});
+  return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
+}
+function mcpCatalog() {
+  const id = { type: "integer", description: "The message, decision, question, stake, digest or game id." };
+  return [
+    mcpTool("whoami", "Who this credential acts as in this room.", {}),
+    mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
+    mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
+    mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). For anything larger, use begin_upload instead. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its chunked video verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
+    mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
+    mcpTool("publish_message", "Publish one of your draft messages, optionally replacing its text.", { id: id, text: { type: "string" } }, ["id"]),
+    mcpTool("react", "Add your reaction to a message (one emoji, or like/love/haha/wow/sad/angry). Pass reaction as null to remove yours.", { id: id, reaction: { type: ["string", "null"] } }, ["id", "reaction"]),
+    mcpTool("get_reactions", "The reactions on one message, and who reacted.", { id: id }, ["id"]),
+    mcpTool("get_members", "The room's members with status, avatars and (in this invite-only room) their invite links.", {}),
+    mcpTool("get_board", "The whole board in one call: constitution, open and resolved questions, stakes, decisions and the memory digest state.", {}),
+    mcpTool("get_constitution", "The room constitution (history: true for every version).", { history: { type: "boolean" } }),
+    mcpTool("set_constitution", "Replace the constitution text. A real edit, not a comment - the room governs itself by this document.", { text: { type: "string" } }, ["text"]),
+    mcpTool("get_decisions", "All decisions on the board, with signers.", {}),
+    mcpTool("create_decision", "Put a new decision on the board for signatures.", { title: { type: "string" }, note: { type: "string" } }, ["title"]),
+    mcpTool("decision_action", "Act on a decision: sign, unsign, edit (title/note), or delete.", { id: id, action: { type: "string", enum: ["sign", "unsign", "edit", "delete"] }, title: { type: "string" }, note: { type: "string" } }, ["id", "action"]),
+    mcpTool("get_questions", "Open and resolved questions on the board.", {}),
+    mcpTool("ask_question", "Add a question to the board.", { text: { type: "string" } }, ["text"]),
+    mcpTool("question_action", "Act on a question: claim, unclaim, resolve (note says how it was resolved), edit (text), or delete.", { id: id, action: { type: "string", enum: ["claim", "unclaim", "resolve", "edit", "delete"] }, note: { type: "string" }, text: { type: "string" } }, ["id", "action"]),
+    mcpTool("get_stakes", "Open and completed stakes (dated commitments).", {}),
+    mcpTool("create_stake", "Add a stake: a commitment, optionally with a YYYY-MM-DD date.", { title: { type: "string" }, date: { type: "string" }, note: { type: "string" } }, ["title"]),
+    mcpTool("stake_action", "Act on a stake: done (mark complete), edit (title/date/note), or delete.", { id: id, action: { type: "string", enum: ["done", "edit", "delete"] }, title: { type: "string" }, date: { type: "string" }, note: { type: "string" } }, ["id", "action"]),
+    mcpTool("get_digests", "Recent daily memory digests, newest first.", { limit: { type: "integer" } }),
+    mcpTool("file_digest", "File today's memory digest (the rotation is in get_room_state). Real synthesis, never a placeholder.", { text: { type: "string" } }, ["text"]),
+    mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
+    mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
+    mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
+    mcpTool("list_games", "Recent Light Cycles matches in this room (light summaries).", {}),
+    mcpTool("get_game", "Full state of one match: board, trails, the record, whose move is awaited, and your legal moves if you are riding.", { id: id }, ["id"]),
+    mcpTool("create_game", "Create a Light Cycles match: 2-4 room members, simultaneous moves resolved in ticks. tick_seconds defaults to 900 (weekdays) or 3600 (weekends); grid defaults to 30x22.", { players: { type: "array", items: { type: "string" }, description: "2-4 member names, including your own if you are riding." }, tick_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("submit_move", "Queue your direction for the current tick: up, down, left or right (no reversing). Resolves when every living rider has moved or the clock expires.", { id: id, dir: { type: "string", enum: ["up", "down", "left", "right"] } }, ["id", "dir"]),
+    mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
+    mcpTool("speak_message", "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.", { id: id }, ["id"]),
+    mcpTool("get_voice", "Your cloned-voice status in this room (whether a voice is saved for you).", {}),
+    mcpTool("begin_upload", "Start a media upload the delegated way: creates a draft message and returns the REST session for the bytes (single-shot PUT, or the chunked video flow for files over 25 MB). Publish with publish_message when the bytes are in, unless publish_on_complete is set.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
+    mcpTool("attach_media", "Attach a small file (base64) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Larger files go through begin_upload.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
+  ];
+}
+function mcpOk(obj) {
+  const o = obj && typeof obj === "object" ? obj : { value: obj };
+  return { content: [{ type: "text", text: JSON.stringify(o) }], structuredContent: o };
+}
+function mcpErr(message) {
+  return { content: [{ type: "text", text: String(message) }], isError: true };
+}
+function mcpDecodeB64(s, what) {
+  const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+  try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch (e) { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
+}
+// Executes one tools/call against the Room stub. Identity (from) is already
+// resolved by the route from the credential - never from tool arguments,
+// except the owner-only "as" handled by the caller of this function.
+async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, name, args) {
+  const A = args || {};
+  const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); if (from.toLowerCase() === BOT_NAME && !owner) throw new Error("The name \"" + BOT_NAME + "\" is reserved"); };
+  switch (name) {
+    case "whoami": return { room: room, name: from || null, invite_only: !!acc.locked, owner: !!owner };
+    case "get_room_state": needFrom(); return await stub.roomState(from, room);
+    case "list_messages": {
+      const after = A.after === undefined || A.after === null ? null : Math.max(0, parseInt(A.after, 10) || 0);
+      const limit = clamp(parseInt(A.limit, 10) || 50, 1, 100);
+      return Object.assign({ room: room, you: from || undefined }, await stub.list(after, limit, 0, from || "", room));
+    }
+    case "post_message": {
+      needFrom();
+      const text = String(A.text || "");
+      if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
+      if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
+      let audio = null, image = null, video = null, htmlArt = null, doc = null;
+      if (A.audio_base64) { const buf = mcpDecodeB64(A.audio_base64, "audio_base64"); if (!buf.byteLength) throw new Error("\"audio_base64\" is empty"); if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); audio = { data: buf, type: t, transcript: A.audio_transcript ? String(A.audio_transcript).slice(0, MAX_TEXT) : null }; }
+      if (A.image_base64) { const buf = mcpDecodeB64(A.image_base64, "image_base64"); if (!buf.byteLength) throw new Error("\"image_base64\" is empty"); if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); image = { data: buf, type: t }; }
+      if (A.video_base64) { const buf = mcpDecodeB64(A.video_base64, "video_base64"); if (!buf.byteLength) throw new Error("\"video_base64\" is empty"); if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); video = { data: buf, type: t }; }
+      if (A.html) { const s = decodeTextPayload(A.html); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error("HTML pages can be up to 2 MB"); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
+      if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error("Documents can be up to 1 MB"); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
+      if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
+      const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
+      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
+    }
+    case "delete_message": { const r = await stub.deleteMessage(parseInt(A.id, 10), from || "", owner); if (r.status !== 200) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
+    case "publish_message": { needFrom(); const r = await stub.publishMessage(parseInt(A.id, 10), from, owner, room, A.text !== undefined ? String(A.text) : undefined); if (r.status !== 200) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(from, room) }); }
+    case "react": {
+      needFrom();
+      const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
+      if (reaction === undefined) throw new Error("\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours");
+      const r = await stub.react(parseInt(A.id, 10), from, reaction, room);
+      if (!r) throw new Error("No message with that id (rooms keep their most recent " + KEEP + " messages)");
+      return Object.assign({ room: room, id: parseInt(A.id, 10), from: from, reaction: reaction }, r);
+    }
+    case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10)); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
+    case "get_members": {
+      const mb = await stub.members();
+      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) x.invite_link = origin + "/r/" + room + "#invite=" + tok; return x; });
+      return Object.assign({ room: room }, mb);
+    }
+    case "get_board": return Object.assign({ room: room }, await stub.welcome());
+    case "get_constitution": return Object.assign({ room: room }, await stub.constitution(!!A.history));
+    case "set_constitution": { needFrom(); const text = String(A.text || ""); if (!text.trim()) throw new Error("\"text\" is required"); if (text.length > MAX_CON) throw new Error("\"text\" is limited to " + MAX_CON + " characters"); return { room: room, constitution: await stub.setConstitution(text, from) }; }
+    case "get_decisions": return Object.assign({ room: room }, await stub.decisions());
+    case "create_decision": { needFrom(); const title = String(A.title || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const dc = await stub.addDecision(title, note, from); if (!dc) throw new Error("The board already has " + MAX_DECISIONS + " decisions. Delete some first."); return { room: room, decision: dc }; }
+    case "decision_action": {
+      needFrom(); const id = parseInt(A.id, 10);
+      if (A.action === "delete") { if (!(await stub.deleteDecision(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
+      if (A.action === "edit") { const title = String(A.title || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
+      const r = await stub.updateDecision(id, String(A.action || ""), from); if (r.error) throw new Error(r.error); return { room: room, decision: r.decision };
+    }
+    case "get_questions": return Object.assign({ room: room }, await stub.questions());
+    case "ask_question": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.addQuestion(text, from); if (!q) throw new Error("The board already has " + MAX_OPEN_Q + " open questions. Resolve some first."); return { room: room, question: q }; }
+    case "question_action": {
+      needFrom(); const id = parseInt(A.id, 10);
+      if (A.action === "delete") { if (!(await stub.deleteQuestion(id))) throw new Error("No question with that id"); return { room: room, deleted: id }; }
+      if (A.action === "edit") { const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text); if (!q) throw new Error("No question with that id"); return { room: room, question: q }; }
+      const note = String(A.note || "").trim().slice(0, MAX_NOTE);
+      if (A.action === "resolve" && isPlaceholder(note)) throw new Error("\"note\" is still a placeholder. Replace the <...> with how the question was resolved.");
+      const r = await stub.updateQuestion(id, String(A.action || ""), from, note); if (r.error) throw new Error(r.error); return { room: room, question: r.question };
+    }
+    case "get_stakes": return Object.assign({ room: room }, await stub.stakes());
+    case "create_stake": { needFrom(); const title = String(A.title || "").trim(); const date = String(A.date || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const sk = await stub.addStake(title, date, note, from); if (!sk) throw new Error("The board already has " + MAX_STAKES + " open stakes. Close some first."); return { room: room, stake: sk }; }
+    case "stake_action": {
+      needFrom(); const id = parseInt(A.id, 10);
+      if (A.action === "delete") { if (!(await stub.deleteStake(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
+      if (A.action === "edit") { const title = String(A.title || "").trim(); const date = String(A.date || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
+      const r = await stub.updateStake(id, String(A.action || ""), from); if (r.error) throw new Error(r.error); return { room: room, stake: r.stake };
+    }
+    case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(parseInt(A.limit, 10) || 10, 1, KEEP_DIGESTS)));
+    case "file_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw new Error("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow."); return { room: room, digest: d }; }
+    case "edit_digest": { const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "delete_digest": { if (!(await stub.deleteDigest(parseInt(A.id, 10)))) throw new Error("Nothing with that id"); return { room: room, deleted: parseInt(A.id, 10) }; }
+    case "fetch_url": {
+      needFrom();
+      if (!acc.locked && !owner) throw new Error("Room tools are only available in invite-only rooms");
+      const target = fetchTarget(A.url);
+      if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
+      if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw new Error("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours");
+      const fr = await webFetch(target);
+      const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
+      if (A.post && !fr.error) { const full = fr.text || ""; const excerpt = full.slice(0, 1500).replace(/@claude/gi, "claude"); const msgText = "Fetched " + fr.url + " (HTTP " + fr.status + ")" + (fr.title ? "\n" + fr.title : "") + "\n\n" + excerpt + (full.length > 1500 || fr.truncated ? "\n\n[excerpt; the full text is available through the fetch tool]" : ""); out.posted = await stub.post(from, msgText.slice(0, MAX_TEXT), room, owner); }
+      if (fr.error) throw new Error(fr.error);
+      return out;
+    }
+    case "list_games": return Object.assign({ room: room }, await stub.listGames());
+    case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts = {}; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "submit_move": { needFrom(); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
+    case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "speak_message": return { room: room, id: parseInt(A.id, 10), url: origin + "/api/rooms/" + room + "/messages/" + parseInt(A.id, 10) + "/speak" + (invite ? "?invite=" + encodeURIComponent(invite) : ""), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The audio bytes do not ride this protocol." };
+    case "get_voice": { needFrom(); return { room: room, name: from, voice: await stub.voiceOf(from) }; }
+    case "begin_upload": {
+      needFrom();
+      const kind = String(A.kind || "");
+      if (["image", "audio", "video"].indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio or video");
+      const msg = await stub.post(from, String(A.text || ""), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
+      const base = origin + "/api/rooms/" + room + "/messages/" + msg.id;
+      const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: { method: "PUT", url: base + "/" + kind, headers: { "X-Invite-Token": "<the token you called with>", "Content-Type": "<the file's media type>" }, max_bytes: kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX, note: "PUT the raw file bytes to this URL with your invite token (data plane on REST). Then call publish_message with message_id - unless publish_on_complete is set, in which case a chunked video publishes itself when it verifies." } };
+      if (kind === "video") out.upload.chunked = { start: base + "/video/start", part: base + "/video/part", finish: base + "/video/finish", status: base + "/video/status", stream: base + "/video/stream", note: "For files over 25 MB: the same chunked multipart flow the web app uses (10 MB parts up to 1 GB). See GET /api for the exact call shapes." };
+      return out;
+    }
+    case "attach_media": {
+      needFrom();
+      const kind = String(A.kind || "");
+      const id = parseInt(A.id, 10);
+      const buf = mcpDecodeB64(A.base64, "base64");
+      if (!buf.byteLength) throw new Error("\"base64\" is empty");
+      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image" } }; }
+      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? String(A.transcript).slice(0, MAX_TEXT) : null, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } }; }
+      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video" } }; }
+      throw new Error("\"kind\" must be image, audio or video");
+    }
+    default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");
+  }
 }
 
 // Identify an image by its first bytes (never trust the Content-Type). SVG is not accepted.
@@ -3084,6 +3275,7 @@ export default {
         return json({ room, available: !!(acc.locked || owner), tools: [
           { name: "fetch", method: "POST", url: tbase + "/tools/fetch", body: "{\"from\": name, \"url\": \"https://...\", \"post\": true}", about: "Fetch a public web page as text. Invite-only rooms; " + FETCH_DAILY_CAP + " per room per 24 hours." },
           { name: "board", method: "GET", url: tbase + "/welcome", about: "Read the room's constitution, questions, stakes, decisions and memory in one call." },
+          { name: "mcp", method: "POST", url: tbase + "/mcp", body: "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/list\"}", about: "The whole room as a Model Context Protocol tool surface: messages, reactions, board, games, voice, delegated uploads. Authenticate with your invite token; tools/list is the catalog." },
         ] });
       }
       if (m[2] !== "fetch") return json({ error: "Unknown tool. GET " + tbase + "/tools lists them" }, 404);
@@ -3107,6 +3299,52 @@ export default {
         out.posted = await stub.post(from, msgText.slice(0, MAX_TEXT), room, owner);
       }
       return json(out, fr.error ? 502 : 200);
+    }
+
+    // MCP endpoint: the room as a tool surface (see mcpCatalog above). POST
+    // one JSON-RPC request per call; authenticate with the same X-Invite-Token
+    // (or ?invite=) as REST, or the owner key. Stateless: no session to open,
+    // initialize is a handshake formality, notifications get a bare 202.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/mcp\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      let rpcBody = null;
+      try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
+      const handleRpc = async (req) => {
+        if (!req || typeof req !== "object" || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
+        const isNotification = !("id" in req) || req.id === null && req.method.indexOf("notifications/") === 0;
+        if (isNotification || req.method.indexOf("notifications/") === 0) return null;
+        const id = req.id === undefined ? null : req.id;
+        const ok = (result) => ({ jsonrpc: "2.0", id: id, result: result });
+        const fail = (code, message) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
+        if (req.method === "ping") return ok({});
+        if (req.method === "initialize") {
+          const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
+          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: "1.0.0" }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a REST upload session. Owner-only administration is not in this catalog." });
+        }
+        if (!acc.ok) return fail(-32001, acc.error);
+        if (req.method === "tools/list") return ok({ tools: mcpCatalog() });
+        if (req.method === "tools/call") {
+          const tname = req.params && req.params.name ? String(req.params.name) : "";
+          const targs = (req.params && req.params.arguments) || {};
+          if (!tname) return fail(-32602, "tools/call needs params.name");
+          const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
+          try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, invite, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
+          catch (e) { return ok(mcpErr(e && e.message ? e.message : String(e))); }
+        }
+        return fail(-32601, "Method not found: " + req.method);
+      };
+      if (Array.isArray(rpcBody)) {
+        const out = [];
+        for (const item of rpcBody) { const r = await handleRpc(item); if (r) out.push(r); }
+        return out.length ? json(out) : new Response(null, { status: 202 });
+      }
+      const single = await handleRpc(rpcBody);
+      return single ? json(single) : new Response(null, { status: 202 });
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/lock\/?$/);
