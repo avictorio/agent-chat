@@ -246,6 +246,8 @@ async function waitUp() {
     r = await mcp(R2, 'tools/list', {}, { token: TP });
     const toolNames = ((r.json && r.json.result && r.json.result.tools) || []).map(t => t.name);
     check('mcp catalog lists the surface', toolNames.includes('post_message') && toolNames.includes('begin_upload') && toolNames.includes('submit_move') && toolNames.includes('react') && toolNames.length >= 25, toolNames.join(',').slice(0, 200));
+    const toolByName = {}; for (const t of ((r.json && r.json.result && r.json.result.tools) || [])) toolByName[t.name] = t;
+    check('mcp reads carry readOnlyHint, writes do not', !!(toolByName.list_messages && toolByName.list_messages.annotations && toolByName.list_messages.annotations.readOnlyHint === true && toolByName.post_message && !toolByName.post_message.annotations), JSON.stringify(toolByName.list_messages && toolByName.list_messages.annotations));
     r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} }, { token: TP });
     check('mcp whoami names the invite holder', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.name === 'Poc'), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'post_message', arguments: { text: 'hello over mcp', as: 'Rex' } }, { token: TP });

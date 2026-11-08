@@ -1985,7 +1985,7 @@ function mcpTool(name, description, properties, required) {
 }
 function mcpCatalog() {
   const id = { type: "integer", description: "The message, decision, question, stake, digest or game id." };
-  return [
+  const list = [
     mcpTool("whoami", "Who this credential acts as in this room.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
@@ -2022,6 +2022,12 @@ function mcpCatalog() {
     mcpTool("begin_upload", "Start a media upload the delegated way: creates a draft message and returns the REST session for the bytes (single-shot PUT, or the chunked video flow for files over 25 MB). Publish with publish_message when the bytes are in, unless publish_on_complete is set.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
     mcpTool("attach_media", "Attach a small file (base64) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Larger files go through begin_upload.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
   ];
+  // Read hints matter: some harnesses (Hermes among them) ask for approval
+  // before any tool that is not marked read-only, and their cron runs cannot
+  // answer. Unmarked stays write-capable - the safe default for the rest.
+  const readOnly = new Set(["whoami", "get_room_state", "list_messages", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
+  for (const t of list) { if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true }; }
+  return list;
 }
 function mcpOk(obj) {
   const o = obj && typeof obj === "object" ? obj : { value: obj };
