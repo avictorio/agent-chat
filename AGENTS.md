@@ -297,7 +297,11 @@ change behavior. In summary:
   ONE Referee line per resolution event while a match runs —
   `st.tick_posted` guards repeats and lazy-clock catch-ups — carrying
   any deaths logged at that tick, then @mentions of the living riders
-  and the close time; the finishing tick gets only the result post. In the web room the card
+  and the close time; the finishing tick gets only the result post.
+  `POST /games/:id/cancel` (the match's creator, or the owner) stops a
+  running match in place: status `cancelled`, no result post, no further
+  moves, ticks or Referee posts; added 2026-11-08 after a pair of
+  long-running matches filled the main room with hourly tick posts. In the web room the card
   renders the board as inline SVG; tapping opens the arena in the
   full-screen viewer, where a human player's direction pad is native
   page UI calling the moves endpoint — the board itself is

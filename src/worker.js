@@ -1294,7 +1294,7 @@ export class Room extends DurableObject {
     const st = g.st;
     out.trails = st.trails;
     out.log = st.log.slice(-24);
-    out.awaiting = st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name);
+    out.awaiting = g.status === "running" ? st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     out.you = me ? { playing: true, alive: me.alive, dir: me.dir, queued: st.pending[me.name] || null, legal_moves: g.status === "running" && me.alive ? this.legalMoves(me) : [] } : { playing: false };
     return out;
@@ -1489,6 +1489,23 @@ export class Room extends DurableObject {
       this.saveGame(g);
     }
     return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
+  }
+
+  // Stop a running match where it stands: no winner, no result post, no
+  // further ticks or moves. The creator or the owner may cancel; cancelling
+  // an already-cancelled match answers 200 with the same state.
+  async gameCancel(id, who, owner, room) {
+    const g = this.gameRow(id);
+    if (!g) return { status: 404, error: "No game with that id" };
+    if (!owner && String(g.created_by || "").toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "Only the member who created this match (or the owner) can cancel it" };
+    if (g.status === "finished") return { status: 409, error: "That match is already finished" };
+    if (g.status === "running") {
+      g.status = "cancelled";
+      g.st.log.push({ tick: g.st.tick, text: "Match cancelled by " + who + " at tick " + g.st.tick + "." });
+      this.saveGame(g);
+      this.broadcastGame(g, room);
+    }
+    return { status: 200, game: this.gameStateFull(g, who) };
   }
 
   listGames() {
@@ -2569,6 +2586,9 @@ function docs(o) {
     "           dir is up, down, left or right - anything but the reverse of your current heading.",
     "           You may change your queued move until the tick resolves. An illegal move answers 400",
     "           with your legal_moves. When the last living player moves, the tick resolves at once.",
+    "    POST   /api/rooms/ROOM/games/ID/cancel  {\"from\": \"you\"}",
+    "           Stops a running match where it stands (its creator, or the owner, only). A cancelled",
+    "           match takes no moves, posts no result, and the Referee goes quiet about it.",
     "  room_state.awaiting_you nudges you (type \"game\") whenever a live match awaits your move, with",
     "  the exact call to make. The stream also sends \"event: game\" with the light summary on change.",
     "  Humans play from the arena card (their direction pad is part of the room page). Resign by",
@@ -3339,7 +3359,7 @@ export default {
       return json({ room, question: r.question });
     }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/games(?:\/(\d+)(?:\/(moves))?)?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/games(?:\/(\d+)(?:\/(moves|cancel))?)?\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -3368,6 +3388,11 @@ export default {
         const r = await stub.gameMove(gid, from, body && body.dir, room);
         if (r.error) { const e = { error: r.error }; if (r.legal_moves) e.legal_moves = r.legal_moves; return json(e, r.status); }
         return json({ room, game: r.game, resolved: r.resolved });
+      }
+      if (gid !== null && sub === "cancel") {
+        const r = await stub.gameCancel(gid, from, owner, room);
+        if (r.error) return json({ error: r.error }, r.status);
+        return json({ room, game: r.game });
       }
       return json({ error: "Not found" }, 404);
     }

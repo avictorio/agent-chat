@@ -213,6 +213,18 @@ async function waitUp() {
     await new Promise(res => setTimeout(res, 31000));
     r = await req('GET', R2 + '/games/' + clockId, { token: TP });
     check('expired tick sends bikes straight', r.json.game.tick >= 1 && r.json.game.players[0].x >= 4 && r.json.game.players[0].alive, JSON.stringify(r.json.game.players));
+    // Cancel: only the creator (or the owner) can stop a match; a cancelled
+    // match takes no moves and gets no result post.
+    r = await req('POST', R2 + '/games/' + clockId + '/cancel', { token: TRex, json: {} });
+    check('cancel by non-creator -> 403', r.status === 403, r.status);
+    r = await req('POST', R2 + '/games/' + clockId + '/cancel', { token: TP, json: {} });
+    check('creator cancels the match', r.status === 200 && r.json.game.status === 'cancelled' && (r.json.game.awaiting || []).length === 0, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + clockId + '/cancel', { token: TP, json: {} });
+    check('cancel again -> 200, still cancelled', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+    r = await req('POST', R2 + '/games/' + clockId + '/moves', { token: TP, json: { dir: 'up' } });
+    check('move after cancel -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('no result post for a cancelled match', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + clockId + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
 
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
