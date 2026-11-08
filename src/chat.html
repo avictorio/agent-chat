@@ -298,6 +298,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .art-head .sp, .doc-head .sp { flex: 1; }
 .art-go { color: var(--mut); font-size: 17px; line-height: 1; padding: 0 2px; }
 .art-frame { display: block; width: 100%; height: 380px; border: 0; background: #fff; pointer-events: none; }
+.yt-card { margin-top: 6px; max-width: 440px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; }
+.yt-card .art-kind { color: #e5484d; }
+.yt-thumbwrap { position: relative; background: #000; aspect-ratio: 16 / 9; }
+.yt-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.yt-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 62px; height: 42px; border-radius: 10px; background: rgba(205, 25, 25, .93); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; pointer-events: none; }
+.yt-frame { background: #000; }
 .game-card { margin-top: 6px; max-width: 640px; border: 1px solid rgba(34, 211, 238, .4); border-radius: 10px; overflow: hidden; background: #04060d; cursor: pointer; }
 .game-board { background: #04060d; }
 .game-card .art-head { background: #04060d; border-bottom: 1px solid rgba(34, 211, 238, .25); }
@@ -1101,6 +1107,58 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     return kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
   }
   function isMine(m) { return !!me() && same(m.from, me()); }
+  // YouTube links in message text render as tap-to-play cards: a thumbnail
+  // in the stream, and the real player only inside the full-screen viewer,
+  // so the stream itself never loads third-party iframes. The video id is
+  // pulled from a strict host + 11-char-id match, and the embed URL is
+  // built from the id alone, never from the pasted URL.
+  var ytTitleCache = {};
+  function ytId(u) {
+    var m = /^(?:https?:\/\/)?(?:[a-z]+\.)?youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/|v\/)([A-Za-z0-9_-]{11})/.exec(u)
+      || /^(?:https?:\/\/)?youtu\.be\/([A-Za-z0-9_-]{11})/.exec(u)
+      || /^(?:https?:\/\/)?(?:[a-z]+\.)?youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/.exec(u);
+    return m ? m[1] : null;
+  }
+  function ytLinks(text) {
+    var out = [], seen = {}, urls = String(text || "").match(/https?:\/\/[^\s<>\[\]()]+/g) || [];
+    for (var i = 0; i < urls.length && out.length < 2; i++) {
+      var id = ytId(urls[i].replace(/[.,;:!?]+$/, ""));
+      if (id && !seen[id]) { seen[id] = 1; out.push({ id: id, url: urls[i] }); }
+    }
+    return out;
+  }
+  function ytCard(yt) {
+    var card = el("div", "yt-card");
+    var hd = el("div", "art-head");
+    hd.appendChild(el("span", "art-kind", "YouTube"));
+    var nm = el("span", "art-name", "Watch on YouTube");
+    hd.appendChild(nm);
+    hd.appendChild(el("span", "sp"));
+    hd.appendChild(el("span", "art-go", "›"));
+    card.appendChild(hd);
+    var tw = el("div", "yt-thumbwrap");
+    var im = el("img", "yt-thumb"); im.src = "https://i.ytimg.com/vi/" + yt.id + "/hqdefault.jpg"; im.alt = "Video thumbnail"; im.loading = "lazy";
+    tw.appendChild(im);
+    tw.appendChild(el("div", "yt-play", "▶"));
+    card.appendChild(tw);
+    if (ytTitleCache[yt.id]) { nm.textContent = ytTitleCache[yt.id]; nm.title = ytTitleCache[yt.id]; }
+    else {
+      fetch("https://www.youtube.com/oembed?url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + yt.id) + "&format=json").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        if (j && j.title) { ytTitleCache[yt.id] = j.title; nm.textContent = j.title; nm.title = j.title; }
+      }).catch(function () {});
+    }
+    card.addEventListener("click", function () {
+      openViewer(ytTitleCache[yt.id] || "YouTube", function (vb) {
+        var vf = el("iframe", "viewer-frame yt-frame");
+        vf.src = "https://www.youtube-nocookie.com/embed/" + yt.id + "?autoplay=1&rel=0";
+        vf.title = ytTitleCache[yt.id] || "YouTube video";
+        vf.setAttribute("allow", "autoplay; encrypted-media; picture-in-picture; fullscreen");
+        vf.setAttribute("allowfullscreen", "");
+        vb.appendChild(vf);
+      }, null);
+    });
+    return card;
+  }
   function msgNode(m, prev) {
     var frag = document.createDocumentFragment();
     var newDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
@@ -1127,6 +1185,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     }
     var tx = el("div", "text"); tx.appendChild(md(m.text));
     body.appendChild(tx);
+    var ytlist = ytLinks(m.text);
+    for (var yi = 0; yi < ytlist.length; yi++) body.appendChild(ytCard(ytlist[yi]));
     if (m.image && m.image.url) {
       var iurl = m.image.url + (invite ? (m.image.url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(invite) : "");
       var im = el("img", "msg-img"); im.src = iurl; im.alt = "Attached image"; im.loading = "lazy";

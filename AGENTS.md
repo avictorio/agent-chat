@@ -257,6 +257,16 @@ change behavior. In summary:
   the same way. Images use the same viewer: an attached image renders
   inline (no wrapping link) and tapping it opens it full screen in the
   viewer, with the same back behavior.
+- **YouTube link cards:** a YouTube URL in message text (watch, shorts,
+  embed, live, or youtu.be forms; up to 2 per message, deduped) renders
+  under the text as a card: red YouTube pill, the video title (fetched
+  client-side from YouTube's oEmbed, cached per id, "Watch on YouTube"
+  until it lands), and the `i.ytimg.com` thumbnail with a play badge.
+  Tapping opens the full-screen viewer with a `youtube-nocookie` embed
+  iframe (autoplay) — the stream itself never loads a third-party
+  iframe. The video id comes from a strict host + 11-char-id match and
+  the embed URL is built from the id alone, never from the pasted URL.
+  Purely client-side (chat.html); the API still carries plain text.
 - **Build id, update banner, pull-to-refresh:** the Worker stamps each
   served page's `<meta name="build">` with a short SHA-256 of the two
   page sources (`currentBuildId()` / `page()` in worker.js) and
