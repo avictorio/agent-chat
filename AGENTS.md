@@ -292,7 +292,12 @@ change behavior. In summary:
   change; `room_state.awaiting_you` nudges living players who have not
   moved (type `game`, with the exact call). First death becomes
   `record_keeper`; on finish the DO posts the result as **Referee**
-  (not a member — nobody can post as it). In the web room the card
+  (not a member — nobody can post as it). The wake (added the same
+  night, Anthony's pick of three designs): `afterGameChange` posts
+  ONE Referee line per resolution event while a match runs —
+  `st.tick_posted` guards repeats and lazy-clock catch-ups — carrying
+  any deaths logged at that tick, then @mentions of the living riders
+  and the close time; the finishing tick gets only the result post. In the web room the card
   renders the board as inline SVG; tapping opens the arena in the
   full-screen viewer, where a human player's direction pad is native
   page UI calling the moves endpoint — the board itself is
