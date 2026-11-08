@@ -120,6 +120,8 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN owntrust INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
@@ -373,14 +375,19 @@ export class Room extends DurableObject {
     return out;
   }
 
-  reactionsOf(id) {
-    if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) return null;
+  reactionsOf(id, who, owner) {
+    const r = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return null;
+    // Drafts are invisible to everyone but their sender and the owner, here
+    // as everywhere else: a draft answers exactly like a missing message.
+    if (r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
     return this.reactionsFor(id);
   }
 
-  react(id, who, emoji, room) {
-    const msg = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+  react(id, who, emoji, room, owner) {
+    const msg = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!msg) return null;
+    if (msg.draft && !owner && String(msg.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
     const ts = Date.now();
     this.sql.exec("DELETE FROM rx WHERE msg = ? AND lower(who) = lower(?)", id, who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
@@ -592,6 +599,7 @@ export class Room extends DurableObject {
       this.sql.exec("DELETE FROM md WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM au WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM im WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM rx WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
     }
   }
@@ -628,6 +636,8 @@ export class Room extends DurableObject {
     const row = this.sql.exec("SELECT r2key, upload_id, parts, part_size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
     if (row.part_size && data && data.byteLength > row.part_size) return { status: 413, error: "That part is larger than this upload's part size" };
+    n = Math.floor(Number(n));
+    if (!Number.isFinite(n) || n < 1 || n > 10000) return { status: 400, error: "Part number out of range" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
     const part = await up.uploadPart(n, data);
@@ -701,7 +711,12 @@ export class Room extends DurableObject {
     return { status: 200, type: sniffed, bytes: size, published: published };
   }
 
-  streamAbort(id) {
+  async streamAbort(id) {
+    // Discard means the R2 multipart dies too, as in abortVideoUpload: the
+    // one current caller aborts it first, but the upload id is deleted here,
+    // so a caller that trusted this method alone would orphan the session.
+    const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
     return { status: 200 };
@@ -1187,7 +1202,7 @@ export class Room extends DurableObject {
     await this.sweepDrafts();
     this.roomName = room;
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft, pubauto) VALUES (?, ?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null).one().id;
+    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
     if (audio) {
       await this.putMedia(id, "audio", audio.data, audio.type, room);
       this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
@@ -1400,7 +1415,7 @@ export class Room extends DurableObject {
   // never claims a member's name, and members cannot post as it.
   postSystem(text, room) {
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text) VALUES (?, ?, ?) RETURNING id", ts, "Referee", text).one().id;
+    const id = this.sql.exec("INSERT INTO m (ts, sender, text, pub_ts) VALUES (?, ?, ?, ?) RETURNING id", ts, "Referee", text, ts).one().id;
     const msg = this.withKinds([{ id: id, ts: ts, from: "Referee", text: text }])[0];
     this.announce(msg, room, false);
     return msg;
@@ -1410,7 +1425,7 @@ export class Room extends DurableObject {
   // renders in the stream and opens the arena full-screen.
   async postGameCard(sender, text, gameId, room) {
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, game_id) VALUES (?, ?, ?, ?) RETURNING id", ts, sender, text, gameId).one().id;
+    const id = this.sql.exec("INSERT INTO m (ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", ts, sender, text, gameId, ts).one().id;
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room, false);
@@ -1524,13 +1539,22 @@ export class Room extends DurableObject {
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
+    // An empty shell never goes live: MCP begin_upload can mint a draft with
+    // no text (a media container captioned later), which REST's post path
+    // forbids creating - this is the uniform backstop for both surfaces.
+    const finalText = (text !== undefined && text !== null) ? String(text) : (r.text || "");
+    if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
-    this.sql.exec("UPDATE m SET draft = NULL WHERE id = ?", id);
+    this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
     const f = this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name };
     const msg = this.withKinds([row])[0];
     this.roomName = room;
-    this.announce(msg, room, owner);
+    // Trust follows the credential that CREATED the draft (recorded as
+    // owntrust at post time), never the publisher's: an owner publishing a
+    // member's draft must not launder its text into owner-trusted bot input,
+    // the same rule maybeAutoPublish states for the server-side path.
+    this.announce(msg, room, !!r.owntrust);
     return { status: 200, msg: msg };
   }
 
@@ -1669,11 +1693,17 @@ export class Room extends DurableObject {
     if (after === null) {
       return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, game_id FROM m WHERE id > ? AND (draft IS NULL OR draft = 0) ORDER BY id LIMIT ?', after, limit).toArray());
+    // Forward reads are id-ordered, plus one exception: a draft that published
+    // after the cursor was taken keeps its original (lower) id, so id alone
+    // would skip it forever. pub_ts is the publish time; anything published
+    // after the cursor message was is owed to the reader too.
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray());
   }
 
   lastId() {
-    return this.sql.exec("SELECT MAX(id) AS id FROM m").one().id || 0;
+    // The highest id a reader can actually see: drafts do not count. A cursor
+    // taken from last_id must never skip a message that publishes later.
+    return this.sql.exec("SELECT MAX(id) AS id FROM m WHERE draft IS NULL OR draft = 0").one().id || 0;
   }
 
   async list(after, limit, wait, who, room) {
@@ -1843,7 +1873,18 @@ function withReactions(s, d, who) {
   if (!d || !d.rx || !who) return s;
   const w = String(who).toLowerCase();
   const mine = d.rx.filter((r) => String(r.to).toLowerCase() === w && String(r.who).toLowerCase() !== w).slice(0, 5);
-  if (mine.length) s.reactions_to_you = mine.map((r) => ({ message_id: r.msg, reaction: r.emoji, from: r.who, at: new Date(r.ts).toISOString().replace(".000Z", "Z"), excerpt: r.excerpt }));
+  if (!mine.length) return s;
+  const entries = mine.map((r) => ({ message_id: r.msg, reaction: r.emoji, from: r.who, at: new Date(r.ts).toISOString().replace(".000Z", "Z"), excerpt: r.excerpt }));
+  // The reactions ride on top of a block the caller already shrank to fit
+  // STATE_MAX_BYTES: trim them back off until the FINAL block fits the same
+  // budget, so the cap the steps loop enforces is the cap that ships.
+  const enc = new TextEncoder();
+  while (entries.length) {
+    s.reactions_to_you = entries;
+    if (enc.encode(JSON.stringify(s)).length <= STATE_MAX_BYTES) return s;
+    entries.pop();
+  }
+  delete s.reactions_to_you;
   return s;
 }
 
@@ -2093,11 +2134,11 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
       needFrom();
       const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
       if (reaction === undefined) throw new Error("\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours");
-      const r = await stub.react(parseInt(A.id, 10), from, reaction, room);
+      const r = await stub.react(parseInt(A.id, 10), from, reaction, room, owner);
       if (!r) throw new Error("No message with that id (rooms keep their most recent " + KEEP + " messages)");
       return Object.assign({ room: room, id: parseInt(A.id, 10), from: from, reaction: reaction }, r);
     }
-    case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10)); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
+    case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10), from, owner); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
     case "get_members": {
       const mb = await stub.members();
       mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) x.invite_link = origin + "/r/" + room + "#invite=" + tok; return x; });
@@ -2134,8 +2175,8 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(parseInt(A.limit, 10) || 10, 1, KEEP_DIGESTS)));
     case "file_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw new Error("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow."); return { room: room, digest: d }; }
-    case "edit_digest": { const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
-    case "delete_digest": { if (!(await stub.deleteDigest(parseInt(A.id, 10)))) throw new Error("Nothing with that id"); return { room: room, deleted: parseInt(A.id, 10) }; }
+    case "edit_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "delete_digest": { needFrom(); if (!(await stub.deleteDigest(parseInt(A.id, 10)))) throw new Error("Nothing with that id"); return { room: room, deleted: parseInt(A.id, 10) }; }
     case "fetch_url": {
       needFrom();
       if (!acc.locked && !owner) throw new Error("Room tools are only available in invite-only rooms");
@@ -3170,8 +3211,9 @@ export default {
     // the creator and never returned by this API, so the address has to be
     // real. Needs an email transport (Gmail or Resend secrets); until one is
     // set, creation answers 503 and creates nothing. Abuse caps live in KV
-    // by UTC day and count ATTEMPTS (counted before the work, so a parallel
-    // burst cannot slip past them; a failed attempt still costs quota).
+    // by UTC day and count ATTEMPTS (counted before the work, so a failed
+    // attempt still costs quota). KV counters are not atomic, so a parallel
+    // burst can overshoot a cap slightly - an abuse brake, not a guarantee.
     if (path === "/api/create-room") {
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
@@ -3231,7 +3273,10 @@ export default {
         if (!owner) return json({ error: "Creating or deleting a room needs the owner key" }, 403);
         if (request.method === "POST") {
           if (exists) return json({ error: "That room already exists" }, 409);
-          await rstub.create();
+          // create() reports whether IT made the room: a second concurrent
+          // create that slipped past the exists check gets its 409 too.
+          const made = await rstub.create();
+          if (!made) return json({ error: "That room already exists" }, 409);
           return json({ room: name, created: true }, 201);
         }
         if (PROTECTED_ROOMS.indexOf(name) >= 0) return json({ error: "This room is protected and can't be deleted" }, 403);
@@ -3318,11 +3363,17 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       const who = acc.name || "agent";
-      const fill = (t) => t.split("__SCRIPT_URL__").join(url.origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe/script")
-        .split("__ORIGIN__").join(url.origin)
-        .split("__ROOM__").join(room)
-        .split("__NAME__").join(who)
-        .split("__SELF__").join(who);
+      const subs = {
+        __SCRIPT_URL__: url.origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe/script",
+        __ORIGIN__: url.origin,
+        __ROOM__: room,
+        __NAME__: who,
+        __SELF__: who,
+      };
+      // One pass with a lookup, never a chain: substituted values are not
+      // rescanned, so a member (or room) whose name IS a placeholder string
+      // gets it verbatim instead of being rewritten by a later pass.
+      const fill = (t) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => subs[mm]);
       return new Response(fill(m[2] ? AGENT_WATCH : AGENT_RECIPE), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
 
@@ -3824,8 +3875,14 @@ export default {
         const p256dh = String(keysIn.p256dh || "");
         const auth = String(keysIn.auth || "");
         if (!/^https:\/\//.test(endpoint)) return json({ error: "subscription.endpoint must be an https URL" }, 400);
-        if (b64urlDecode(p256dh).length !== 65) return json({ error: "subscription.keys.p256dh is not a 65-byte public key" }, 400);
-        if (b64urlDecode(auth).length < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
+        // b64urlDecode throws on malformed input (bad characters, impossible
+        // lengths): validate like every other base64 path in this file and
+        // answer 400, not an unhandled 500.
+        let pLen = -1, aLen = -1;
+        try { pLen = b64urlDecode(p256dh).length; } catch (e) {}
+        try { aLen = b64urlDecode(auth).length; } catch (e) {}
+        if (pLen !== 65) return json({ error: "subscription.keys.p256dh is not a 65-byte public key" }, 400);
+        if (aLen < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
         const mode = body.mode === "mentions" ? "mentions" : "all";
         await stub.pushSubscribe(acc.name || "", { endpoint: endpoint, p256dh: p256dh, auth: auth }, mode);
         return json({ room, subscribed: true, mode: mode });
@@ -3885,8 +3942,8 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-      const meta = await stub.mediaMeta(id, "speak", { name: acc.name, owner: acc.owner });
-      if (meta) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: acc.owner });
+      const meta = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
+      if (meta) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });
       const src = await stub.speakSource(id);
       if (!src) return json({ error: "No message with that id" }, 404);
       const v = await stub.voiceOf(src.sender);
@@ -3898,15 +3955,28 @@ export default {
       const skey = room + ":" + id;
       if (SPEAK_INFLIGHT.has(skey)) {
         try { await SPEAK_INFLIGHT.get(skey); } catch (e) {}
-        const meta2 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: acc.owner });
-        if (meta2) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: acc.owner });
+        const meta2 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
+        if (meta2) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });
       }
       let buf;
-      const synth = (async () => { const b = await cartesiaSpeak(env, v.voice_id, text); await stub.putMedia(id, "speak", b, "audio/mpeg", room); return b; })();
+      const synth = (async () => {
+        const b = await cartesiaSpeak(env, v.voice_id, text);
+        // Cache only if the sender's voice is still the one synthesized. A
+        // reclone landing mid-synthesis runs its invalidation against an
+        // empty cache; caching this buffer anyway would resurrect the old
+        // voice for this message indefinitely.
+        const v2 = await stub.voiceOf(src.sender);
+        if (v2 && v2.voice_id === v.voice_id) await stub.putMedia(id, "speak", b, "audio/mpeg", room);
+        return b;
+      })();
       SPEAK_INFLIGHT.set(skey, synth);
       try { buf = await synth; } catch (e) { return json({ error: String((e && e.message) || e) }, 502); }
       finally { SPEAK_INFLIGHT.delete(skey); }
-      return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: acc.owner });
+      const meta3 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
+      if (meta3) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });
+      // Uncached on purpose (the voice changed mid-synthesis): serve this
+      // play straight from the buffer; the next play re-synthesizes fresh.
+      return new Response(buf, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
     }
 
     // Audio clips attached to messages. Reading needs the same access as the room
@@ -3920,7 +3990,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: acc.owner });
+        return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
@@ -3954,7 +4024,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: acc.owner });
+        return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
@@ -3987,7 +4057,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
-        return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: acc.owner });
+        return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
       }
       if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
       if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
@@ -4024,7 +4094,7 @@ export default {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-      return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: acc.owner });
+      return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: owner });
     }
 
     // Chunked video upload (multipart into R2) for files past the single-request
@@ -4212,7 +4282,7 @@ export default {
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       const id = parseInt(m[2], 10);
       if (request.method === "GET") {
-        const r = await stub.reactionsOf(id);
+        const r = await stub.reactionsOf(id, acc.name, owner);
         if (!r) return json({ error: "No message with that id" }, 404);
         return json({ room, id, reactions: r });
       }
@@ -4227,7 +4297,7 @@ export default {
       if (from.toLowerCase() === BOT_NAME && !owner) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
       const reaction = request.method === "DELETE" ? null : normReaction(body.reaction);
       if (reaction === undefined) return json({ error: "\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours" }, 400);
-      const r = await stub.react(id, from, reaction, room);
+      const r = await stub.react(id, from, reaction, room, owner);
       if (!r) return json({ error: "No message with that id (rooms keep their most recent " + KEEP + " messages)" }, 404);
       return json({ room, id, from, reaction, message_from: r.message_from, reactions: r.reactions });
     }

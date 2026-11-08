@@ -112,6 +112,41 @@ async function waitUp() {
     r = await req('POST', R + '/agent-recipe', { token: TB, json: {} });
     check('recipe is GET only', r.status === 405, r.status);
 
+    // Draft cursor integrity: last_id counts only published messages, and a
+    // draft that publishes late still reaches a poller whose cursor passed it.
+    r = await req('GET', R + '/messages?limit=1', { token: TB });
+    const L0 = r.json.last_id;
+    const dr = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'cursor draft', draft: true } });
+    const D = dr.json.id;
+    check('draft minted above the published frontier', D > L0, D + ' vs ' + L0);
+    r = await req('GET', R + '/messages?limit=1', { token: TB });
+    check('last_id ignores the draft', r.json.last_id === L0, r.json.last_id + ' vs ' + L0);
+    const live = await req('POST', R + '/messages', { token: TB, json: { from: 'ApiB', text: 'live after draft' } });
+    const M = live.json.id;
+    r = await req('POST', R + '/messages/' + D + '/publish', { token: TA, json: {} });
+    check('publish the draft', r.status === 200, r.status);
+    r = await req('GET', R + '/messages?after=' + M, { token: TB });
+    check('late-published draft reaches a poller past its id', (r.json.messages || []).some((x) => x.id === D), JSON.stringify((r.json.messages || []).map((x) => x.id)));
+    r = await req('GET', R + '/messages?after=' + L0, { token: TB });
+    check('forward read returns both the live message and the draft', (r.json.messages || []).some((x) => x.id === M) && (r.json.messages || []).some((x) => x.id === D));
+
+    // Reactions respect draft privacy: a draft answers like a missing message.
+    const dr2 = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'reaction draft', draft: true } });
+    const D2 = dr2.json.id;
+    r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: '👍' } });
+    check('react to another member\'s draft -> 404', r.status === 404, r.status);
+    r = await req('GET', R + '/messages/' + D2 + '/reactions', { token: TB });
+    check('read reactions on another member\'s draft -> 404', r.status === 404, r.status);
+    r = await req('GET', R + '/messages/' + D2 + '/reactions', { token: TA });
+    check('sender reads own draft reactions', r.status === 200, r.status);
+    await req('POST', R + '/messages/' + D2 + '/publish', { token: TA, json: {} });
+    r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: '👍' } });
+    check('react after publish works', r.status === 200, r.status);
+
+    // Push subscribe validates its keys instead of throwing on bad base64url.
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://example.com/x', keys: { p256dh: '!!!', auth: 'AAAAAAAAAAAAAAAAAAAAAA' } } } });
+    check('malformed push keys -> 400, not 500', r.status === 400, r.status);
+
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
     const did = draft.json.id;
@@ -121,6 +156,8 @@ async function waitUp() {
     check('other member cannot read draft media', r.status === 404, r.status);
     r = await req('GET', R + '/messages/' + did + '/image?invite=' + TA);
     check('sender reads own draft media', r.status === 200, r.status);
+    r = await req('GET', R + '/messages/' + did + '/image', { owner: true });
+    check('owner reads draft media', r.status === 200, r.status);
     r = await req('POST', R + '/messages/' + did + '/publish', { token: TA, json: {} });
     check('publish works', r.status === 200, r.status);
     r = await req('GET', R + '/messages/' + did + '/image?invite=' + TB);
@@ -306,6 +343,21 @@ async function waitUp() {
     check('mcp publish completes the upload', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && r.json.result.structuredContent.id === up.message_id), JSON.stringify(r.json).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=10', { token: TRex });
     check('delegated upload is room-visible', (r.json.messages || []).some(x => x.id === up.message_id && x.image), JSON.stringify((r.json.messages || []).map(x => x.id)).slice(0, 120));
+    // begin_upload without text mints an empty container draft: publishing it
+    // bare is refused; a caption at publish time completes it.
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });
+    const upE = r.json && r.json.result && r.json.result.structuredContent;
+    r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upE.message_id } }, { token: TP });
+    check('empty draft cannot publish', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upE.message_id, text: 'captioned at publish' } }, { token: TP });
+    check('publish with a caption completes the empty draft', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    // Digest edits need an identity, like every sibling MCP write.
+    r = await mcp(R2, 'tools/call', { name: 'file_digest', arguments: { text: 'A digest filed for the identity check.' } }, { token: TP });
+    const dg = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.digest;
+    r = await mcp(R2, 'tools/call', { name: 'edit_digest', arguments: { id: dg.id, text: 'edited anonymously' } }, { owner: true });
+    check('mcp edit_digest without an identity is refused', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'edit_digest', arguments: { id: dg.id, text: 'edited with an identity' } }, { token: TP });
+    check('mcp edit_digest as a named member works', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
 
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });

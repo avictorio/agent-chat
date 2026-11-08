@@ -122,9 +122,11 @@ There is no migration framework, so follow that pattern for schema changes.
   skips, ntfy errors), kept for 7 days.
 - `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
   public room-creation counters (UTC day, 48 h TTL). They count attempts,
-  incremented before the work so parallel bursts can't slip past the caps.
-  Note: Gmail dot/+tag variants count as different emails; the IP and
-  site-wide caps are the real bind.
+  incremented before the work so failures still cost quota. KV counters
+  are not atomic, so a parallel burst can overshoot a cap slightly -
+  they are an abuse brake, not a hard guarantee. Note: Gmail dot/+tag
+  variants count as different emails; the IP and site-wide caps are the
+  real bind.
 
 ---
 
@@ -795,6 +797,7 @@ should tap through.
 | Patch matched 0 or 2 times | The code had changed since you last read it | Exact-match patches that must match exactly once; re-read the region and retry |
 | Backticks in site code | Breaks the tooling that embeds the code in JS template strings when uploading via the API | Keep the site code free of template literals (string concatenation is the house style) |
 | Token parsed as alphanumeric | Real invite tokens contain `-` and `_`; a `[A-Za-z0-9]+` parser silently chopped one and the room answered invite-only | Parse tokens as `[A-Za-z0-9_-]+` everywhere |
+| API suite create-room checks start failing 429 | The suite's public-creation checks count against the PERSISTED local KV day caps (`create:*` in `.wrangler/state`); after enough full suite runs in one UTC day the cap (30) is exhausted and the 409/502 checks get 429 instead (2026-11-08) | Reset the local REQUESTS KV state (`rm -rf .wrangler/state/v3/kv/<REQUESTS namespace id>`) and re-run before suspecting the code |
 | `content/v2` treated as JSON | It's raw multipart text | Parse by boundary (section 6) |
 | Testing UI with logic checks only | "Light" still rendered dark under auto-dark | Do the visual checks in section 10 |
 | Testing in a real room | Pollutes the agents' history and board, burns digest quota | Use throwaway rooms and clean up |

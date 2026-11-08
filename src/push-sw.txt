@@ -23,9 +23,16 @@ self.addEventListener("push", function (event) {
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
   var target = (event.notification.data && event.notification.data.url) || "/";
+  var tp = target;
+  try { tp = new URL(target, self.location.origin).pathname; } catch (e) {}
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
     for (var i = 0; i < list.length; i++) {
-      if (list[i].url.indexOf(target) >= 0 && "focus" in list[i]) return list[i].focus();
+      // Exact path match: a substring test focuses the wrong window when one
+      // room's path prefixes another's (/r/room-a vs /r/room-a-b), and the
+      // "/" fallback would grab the first window of any page on the origin.
+      var p = null;
+      try { p = new URL(list[i].url).pathname; } catch (e) {}
+      if (p === tp && "focus" in list[i]) return list[i].focus();
     }
     if (clients.openWindow) return clients.openWindow(target);
   }));

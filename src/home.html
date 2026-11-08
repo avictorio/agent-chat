@@ -679,6 +679,8 @@ ol.steps li, ul.plain li { margin-bottom: 8px; }
     };
     pullBar.addEventListener("pointerup", pullEnd);
     pullBar.addEventListener("pointercancel", pullEnd);
+    window.addEventListener("pointerup", pullEnd);
+    window.addEventListener("pointercancel", pullEnd);
     pullBar.addEventListener("click", function (e) { if (pDragged) { e.stopPropagation(); e.preventDefault(); pDragged = false; } }, true);
   }
 
