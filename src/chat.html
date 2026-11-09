@@ -326,6 +326,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .lc-note { text-align: center; color: var(--dim); font-size: 13px; min-height: 18px; }
 .lc-log { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .lc-log div { font-size: 13px; color: var(--dim); padding: 2px 0; }
+.duel-board { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.lc-board-big .duel-board { background: #04060d; border: 1px solid rgba(34, 211, 238, .25); border-radius: 10px; }
+.duel-row { display: flex; align-items: center; gap: 8px; color: #e2f4fd; font-size: 15px; }
+.duel-name { font-weight: 600; }
+.duel-pips { color: #fbbf24; letter-spacing: 2px; margin-left: auto; }
+.duel-state { color: #8fb8c9; font-size: 12px; }
+.duel-pad { display: flex; gap: 8px; justify-content: center; margin: 14px auto 4px; flex-wrap: wrap; }
+.duel-btn { font-size: 15px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(34, 211, 238, .45); background: #0a1420; color: #a5f3fc; cursor: pointer; }
+.duel-btn.queued { background: #164e63; color: #ecfeff; }
+.duel-rounds { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+.duel-rounds div { font-size: 13px; color: var(--dim); padding: 2px 0; }
 .doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
 .doc-body .md-p:first-child { margin-top: 0; }
 #viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }
@@ -1316,7 +1327,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var gcard = el("div", "game-card");
       var ghd = el("div", "art-head");
       ghd.appendChild(el("span", "art-kind", "Game"));
-      ghd.appendChild(el("span", "art-name", "Light Cycles #" + m.game.id));
+      ghd.appendChild(el("span", "art-name", (m.game.type === "duel" ? "Duel #" : "Light Cycles #") + m.game.id));
       var gmeta = el("span", "art-size", "");
       ghd.appendChild(gmeta);
       ghd.appendChild(el("span", "sp"));
@@ -1404,6 +1415,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function tickLen(ts) { return ts >= 3600 ? Math.round(ts / 3600) + " h" : Math.max(1, Math.round(ts / 60)) + " min"; }
   function gameMetaText(g) {
     if (!g) return "";
+    if (g.type === "duel") {
+      var sc = g.score || {};
+      var dline = (g.players || []).map(function (p) { return p.name + " " + (sc[p.name] != null ? sc[p.name] : (p.wins || 0)); }).join(" · ");
+      if (g.status === "finished") return "Final · " + dline + (g.winner ? " · " + g.winner + " takes the duel" : " · no winner");
+      return "Round " + g.round + " · " + dline + " · first to " + g.target;
+    }
     if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
     var alive = (g.players || []).filter(function (p) { return p.alive; }).length;
     return "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
@@ -1432,10 +1449,35 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     s += "</svg>";
     return s;
   }
+  var THROW_EMOJI = { rock: "🪨", paper: "📄", scissors: "✂️" };
+  function duelBoard(g) {
+    var wrap = el("div", "duel-board");
+    (g.players || []).forEach(function (p) {
+      var row = el("div", "duel-row");
+      var dot = el("span", "lc-dot"); dot.style.background = p.hex;
+      row.appendChild(dot);
+      row.appendChild(el("span", "duel-name", p.name));
+      var pips = "";
+      for (var i = 0; i < (g.target || 0); i++) pips += i < (p.wins || 0) ? "●" : "○";
+      row.appendChild(el("span", "duel-pips", pips));
+      if (g.status === "running" && typeof p.thrown === "boolean") row.appendChild(el("span", "duel-state", p.thrown ? "thrown ✓" : "throwing…"));
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
   function renderGameCards(id) {
     var g = gameCache[id];
     var list = gameCards[id] || [];
-    if (!g || !g.trails) return;
+    if (!g) return;
+    if (g.type === "duel") {
+      for (var i = 0; i < list.length; i++) {
+        list[i].board.textContent = "";
+        list[i].board.appendChild(duelBoard(g));
+        paintGameMeta(list[i].meta, g);
+      }
+      return;
+    }
+    if (!g.trails) return;
     for (var i = 0; i < list.length; i++) {
       list[i].board.innerHTML = boardSvg(g);
       paintGameMeta(list[i].meta, g);
@@ -1451,7 +1493,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   }
   function openGameViewer(id) {
     gameRenderKey = "";
-    openViewer("Light Cycles #" + id, function (vb) {
+    openViewer(((gameCache[id] && gameCache[id].type === "duel") ? "Duel #" : "Light Cycles #") + id, function (vb) {
       var wrap = el("div", "lc-arena");
       wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
       vb.appendChild(wrap);
@@ -1461,8 +1503,48 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (gameViewTimer) clearInterval(gameViewTimer);
     gameViewTimer = setInterval(function () { if (gameView) fetchGame(gameView.id); }, 8000);
   }
+  function renderDuelView(g, force) {
+    var key = g.status + "|" + g.round + "|" + (g.players || []).map(function (p) { return (p.wins || 0) + (p.thrown ? 1 : 0); }).join("") + "|" + (g.you && g.you.queued || "");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    var wrap = gameView.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g) + (g.status === "running" && g.deadline ? " · round closes " + new Date(g.deadline).toLocaleTimeString() : "")));
+    var big = el("div", "lc-board-big");
+    big.appendChild(duelBoard(g));
+    wrap.appendChild(big);
+    var note = el("div", "lc-note", "");
+    if (g.you && g.you.playing && g.status === "running") {
+      var pad = el("div", "duel-pad");
+      ["rock", "paper", "scissors"].forEach(function (t) {
+        var b = el("button", "duel-btn" + (g.you.queued === t ? " queued" : ""), (THROW_EMOJI[t] || "") + " " + t);
+        b.type = "button";
+        b.addEventListener("click", function () { sendMove(g.id, t, note); });
+        pad.appendChild(b);
+      });
+      wrap.appendChild(pad);
+      note.textContent = g.you.queued ? "Thrown: " + g.you.queued + " - tap another to change it before the round resolves." : "Your throw: pick one. It stays hidden until your rival has thrown too.";
+      wrap.appendChild(note);
+    } else if (g.status === "running") {
+      note.textContent = "Spectating - throws stay hidden until each round resolves.";
+      wrap.appendChild(note);
+    }
+    if (g.rounds && g.rounds.length) {
+      var hist = el("div", "duel-rounds");
+      hist.appendChild(el("div", "", "Rounds"));
+      g.rounds.forEach(function (r) {
+        var parts = (g.players || []).map(function (p) {
+          var t = (r.throws || {})[p.name];
+          return p.name + " " + (t ? (THROW_EMOJI[t] || "") + " " + t : "- no throw");
+        });
+        hist.appendChild(el("div", "", "Round " + r.n + " - " + parts.join(" vs ") + (r.winner ? " · " + r.winner + " takes it" : " · level")));
+      });
+      wrap.appendChild(hist);
+    }
+  }
   function renderGameView(g, force) {
     if (!gameView || gameView.id !== g.id) return;
+    if (g.type === "duel") { renderDuelView(g, force); return; }
     var key = g.status + "|" + g.tick + "|" + (g.you && g.you.queued || "") + "|" + (g.players || []).map(function (p) { return (p.alive ? 1 : 0) + (p.moved ? 1 : 0); }).join("");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
@@ -1611,7 +1693,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       try {
         var d = JSON.parse(e.data);
         if (!d.game || !d.game.id) return;
-        if (d.game.trails) { gameCache[d.game.id] = d.game; renderGameCards(d.game.id); }
+        if (d.game.trails || d.game.type === "duel") { gameCache[d.game.id] = d.game; renderGameCards(d.game.id); }
         if (gameView && gameView.id === d.game.id) fetchGame(d.game.id);
       } catch (err) {}
     });

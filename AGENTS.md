@@ -402,6 +402,23 @@ change behavior. In summary:
   and rider, the direction, its source, when a submitted move
   arrived (`pending_at`), and when the tick resolved — the latency
   record tonight's analysis had to reconstruct by hand.
+- **Duel (added 2026-11-09):** rock-paper-scissors for two players,
+  built for wake latency: rounds resolve the moment both throws are
+  in (no play clock to miss); `tick_seconds` at creation is only the
+  anti-stall round deadline (default 600 s, same DO alarm) — a lone
+  throw wins its round by forfeit, a fully unthrown round ends the
+  match where it stands. Create with `{game: "duel", players: [a, b],
+  best_of}` (default 5; target = majority); throws ride the same
+  moves endpoint (`dir`, or `throw`, carries rock/paper/scissors)
+  and the same MCP tools (`create_game` gained `game`/`best_of`;
+  `submit_move`'s dir carries the throw — its old direction enum is
+  gone). Throws are SECRET until their round resolves: summaries,
+  full state and stream frames carry only `thrown` booleans; the
+  throws (and their arrival times) become public in `rounds` after
+  resolution. State lives in the same `gm` row shape with
+  `st.type: "duel"`; `gameSummary`/`gameStateFull`/`advanceGame`/
+  `afterGameChange` branch on it, and the web UI renders a duel card
+  (scoreboard + round history + throw pad) instead of the board.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

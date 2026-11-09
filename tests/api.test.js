@@ -300,6 +300,20 @@ async function waitUp() {
     check('result post reports move totals', refPosts.length === 1 && refPosts[0].text.includes('Moves submitted:'), refPosts.map(x => x.text.slice(0, 160)).join(' | '));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
+    // Duel forfeit probe: created before the clock wait below with a 30s
+    // round deadline and only one throw in - after the wait, its round
+    // must have resolved by forfeit (alarm or read catch-up; same record).
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 30 } });
+    check('duel created', r.status === 201 && r.json.game.type === 'duel' && r.json.game.target === 2 && r.json.game.round === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    const duelF = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + duelF + '/moves', { token: TP, json: { dir: 'rock' } });
+    check('duel throw queues without resolving', r.status === 200 && r.json.resolved === false && r.json.game.you.queued === 'rock', r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('GET', R2 + '/games/' + duelF, { token: TRex });
+    // Secrecy: the rival sees Poc has thrown, and his own queued throw is
+    // null - Poc's actual throw appears nowhere. (legal_moves names all
+    // three throws as public vocabulary, so it is stripped before scanning.)
+    const rivalView = JSON.stringify(r.json.game).split('"legal_moves":["rock","paper","scissors"]').join('');
+    check('duel throw stays secret from the rival', r.status === 200 && (r.json.game.players.find(p => p.name === 'Poc') || {}).thrown === true && r.json.game.you.queued === null && !rivalView.includes('rock'), JSON.stringify(r.json.game).slice(0, 200));
     await new Promise(res => setTimeout(res, 31000));
     r = await req('GET', R2 + '/games/' + clockId, { token: TP });
     check('expired tick sends bikes straight', r.json.game.tick >= 1 && r.json.game.players[0].x >= 4 && r.json.game.players[0].alive, JSON.stringify(r.json.game.players));
@@ -320,6 +334,31 @@ async function waitUp() {
     check('move after cancel -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('no result post for a cancelled match', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + clockId + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
+    r = await req('GET', R2 + '/games/' + duelF, { token: TP });
+    const fr = (r.json.game.rounds || [])[0];
+    check('duel round resolves by forfeit at the deadline', r.json.game.status === 'running' && r.json.game.round === 2 && !!fr && fr.winner === 'Poc' && fr.throws.Poc === 'rock' && !('Rex' in fr.throws) && typeof fr.throws_at.Poc === 'number', JSON.stringify(r.json.game).slice(0, 220));
+    await req('POST', R2 + '/games/' + duelF + '/cancel', { token: TP, json: {} });
+    // A played duel: ties score nobody, throws go public once a round
+    // resolves, and reaching the target finishes it with a result post.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
+    const duelP = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'spock' } });
+    check('duel bogus throw -> 400', r.status === 400 && Array.isArray(r.json.legal_moves), r.status + ' ' + JSON.stringify(r.json));
+    await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'rock' } });
+    r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TRex, json: { throw: 'rock' } });
+    check('duel tie round scores nobody', r.status === 200 && r.json.resolved === true && r.json.game.round === 2 && r.json.game.score.Poc === 0 && r.json.game.score.Rex === 0 && (r.json.game.rounds[0] || {}).winner === null, JSON.stringify(r.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'rock' } });
+    r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TRex, json: { dir: 'scissors' } });
+    check('duel round reveals both throws', r.status === 200 && r.json.game.score.Poc === 1 && (r.json.game.rounds[1] || {}).throws.Rex === 'scissors', JSON.stringify(r.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'paper' } });
+    r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TRex, json: { dir: 'rock' } });
+    check('duel finishes at the target', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Poc', JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'rock' } });
+    check('duel throw after finish -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('referee posted the duel result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelP + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    check('duel with 3 players -> 400', r.status === 400, r.status);
 
     // Stream subscriptions: events= narrows the frame kinds, game=
     // restricts game frames to given matches, and a malformed
@@ -422,6 +461,13 @@ async function waitUp() {
     check('mcp moves resolve a tick', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.resolved === true && r.json.result.structuredContent.game.tick === 1), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'cancel_game', arguments: { id: mcpGame.id } }, { token: TP });
     check('mcp cancel stops the match', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game.status === 'cancelled'), JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { game: 'duel', players: ['Poc', 'Rex'], best_of: 1, tick_seconds: 3600 } }, { token: TP });
+    const mcpDuel = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('mcp duel created', !!mcpDuel && mcpDuel.type === 'duel' && mcpDuel.target === 1, JSON.stringify(r.json).slice(0, 200));
+    await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpDuel.id, dir: 'scissors' } }, { token: TP });
+    r = await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpDuel.id, dir: 'paper' } }, { token: TRex });
+    const mcpDuelEnd = r.json && r.json.result && r.json.result.structuredContent;
+    check('mcp duel throws resolve and finish a best-of-1', !!mcpDuelEnd && mcpDuelEnd.resolved === true && mcpDuelEnd.game.status === 'finished' && mcpDuelEnd.game.winner === 'Poc', JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', text: 'mcp delegated upload' } }, { token: TP });
     const up = r.json && r.json.result && r.json.result.structuredContent;
     check('mcp begin_upload returns a REST session', !!up && !!up.message_id && up.upload && up.upload.method === 'PUT' && String(up.upload.url).includes('/messages/' + up.message_id + '/image'), JSON.stringify(r.json).slice(0, 220));
