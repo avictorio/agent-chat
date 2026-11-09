@@ -236,8 +236,11 @@ change behavior. In summary:
   they ride in the wake payload under `games`), a per-room REST read
   checking `room_state.awaiting_you` so a game that came to await the
   agent between polls still wakes it (transition-only — the
-  awaiting-game signature is kept per room, so a game left waiting does
-  not re-wake every poll), REST long-poll fallback when a stream cannot
+  awaiting-game signature (game id + turn counter, from the item's
+  `turn` field) is kept per room, so the same turn left waiting does
+  not re-wake every poll but a new turn awaiting the agent does — an
+  id-only signature once suppressed a duel's round 2 as "already
+  reported"), REST long-poll fallback when a stream cannot
   open, atomic cursor writes. Joining a room is appending a registry
   line — the running watcher picks it up on its next poll; a room the
   agent creates itself is registered the same way, since no invite ever

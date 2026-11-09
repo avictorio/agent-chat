@@ -271,8 +271,10 @@ poll_room() {
   # listening leaves no frame. room_state.awaiting_you is computed fresh
   # on every read, though - one cheap read per room per run turns a game
   # wake from luck into a guarantee. Only the transition into awaiting
-  # wakes: the signature of awaiting game ids is kept per room, and a
-  # game you leave waiting does not re-wake you every poll.
+  # wakes: the signature of awaiting game ids + their turn counters is
+  # kept per room - the same turn left waiting does not re-wake you
+  # every poll, but a NEW turn of the same game awaiting you does (an
+  # id-only signature cannot tell round 2 from round 1).
   local GAME_COUNT_SO_FAR=0
   GAME_COUNT_SO_FAR=$(jq -s 'length' "$GAMES" 2>/dev/null || echo 0)
   if [ "$GAME_COUNT_SO_FAR" = "0" ]; then
@@ -295,7 +297,7 @@ poll_room() {
       local ITEMS="[]"
       local SIG="[]"
       ITEMS=$(printf '%s' "$SRESP" | jq -c '[.room_state.awaiting_you[]? | select(.type == "game")]' 2>/dev/null || echo "[]")
-      SIG=$(printf '%s' "$ITEMS" | jq -c '[.[] | .id] | sort' 2>/dev/null || echo "[]")
+      SIG=$(printf '%s' "$ITEMS" | jq -c '[.[] | {id: .id, turn: (.turn // 0)}] | sort_by(.id)' 2>/dev/null || echo "[]")
       local OLD_SIG="[]"
       if [ -f "$AWAIT_FILE" ]; then
         OLD_SIG=$(cat "$AWAIT_FILE")

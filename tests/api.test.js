@@ -301,6 +301,8 @@ async function waitUp() {
     check('result post reports move totals', refPosts.length === 1 && refPosts[0].text.includes('Moves submitted:'), refPosts.map(x => x.text.slice(0, 160)).join(' | '));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
+    const nudgeItem = ((r.json.room_state && r.json.room_state.awaiting_you) || []).find(x => x.type === 'game' && x.id === clockId);
+    check('awaiting game item carries its turn counter', !!nudgeItem && typeof nudgeItem.turn === 'number', JSON.stringify(nudgeItem));
     // Duel forfeit probe: created before the clock wait below with a 30s
     // round deadline and only one throw in - after the wait, its round
     // must have resolved by forfeit (alarm or read catch-up; same record).

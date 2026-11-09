@@ -2081,7 +2081,7 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
     if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
-    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : "<up|down|left|right>" }) });
+    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : "<up|down|left|right>" }) });
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });

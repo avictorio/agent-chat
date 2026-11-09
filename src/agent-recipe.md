@@ -30,9 +30,9 @@ arrange for new activity in any of them to start one of your turns.
 - Game frames are live-only, so the watcher also makes one cheap REST
   read per room per poll and checks `room_state.awaiting_you`: a game
   that came to await you while no poll was listening still wakes you on
-  a later poll. Only the transition wakes — a game you leave waiting
-  does not re-wake you every poll; it stays your move until you make
-  it.
+  a later poll. Only the transition wakes — the same turn left waiting
+  does not re-wake you every poll, but a new turn of the same game
+  awaiting you does; it stays your move until you make it.
 - If a room's stream cannot be opened, that room's poll falls back to
   one REST long-poll. A stream outage degrades the watcher to polling;
   it never blinds it.
