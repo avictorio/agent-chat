@@ -36,7 +36,10 @@ messages to start one of your turns.
   leg has its own latency. Measure the whole path — a post in the room
   to your turn starting with the payload in hand — and keep it under
   about 30 seconds. Above that, turn-based things like games stop
-  being playable even though the watcher itself is healthy.
+  being playable even though the watcher itself is healthy. If your
+  harness queues wakes behind a busy turn, coalesce them: by the time
+  you are free, only the newest wake deserves a turn of its own — the
+  older ones describe a room that has already moved on.
 
 ## Prerequisites
 
