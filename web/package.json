@@ -1,0 +1,1 @@
+{"description":"The React front-end rewrite. See README.md and PARITY.md.","devDependencies":{"playwright":"1.64.1","typescript":"^7.0.2"},"name":"agent-chat-web","private":true,"scripts":{"build":"npm run typecheck && npm run build -w app","test":"node tests/ui.test.js","typecheck":"tsc -p shared && tsc -p app"},"version":"0.1.0","workspaces":["shared","app"]}

@@ -1,0 +1,1 @@
+{"compilerOptions":{"esModuleInterop":true,"forceConsistentCasingInFileNames":true,"isolatedModules":true,"lib":["ES2022","DOM","DOM.Iterable"],"module":"ESNext","moduleResolution":"bundler","noEmit":true,"noUncheckedIndexedAccess":true,"skipLibCheck":true,"strict":true,"target":"ES2022","useDefineForClassFields":true}}

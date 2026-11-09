@@ -1,0 +1,1 @@
+{"dependencies":{"@chat/shared":"^0.1.0","react":"^19.3.1","react-dom":"^19.3.1"},"devDependencies":{"@types/react":"^19.3.0","@types/react-dom":"^19.3.0","@vitejs/plugin-react":"^6.1.2","vite":"^8.3.5"},"name":"@chat/app","private":true,"scripts":{"build":"vite build","dev":"vite","typecheck":"tsc -p ."},"type":"module","version":"0.1.0"}

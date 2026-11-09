@@ -40,8 +40,19 @@ is not modified by this project, and every behavior it has today is the spec.
 
 ## Milestones
 
-- [ ] M1 Parity harness: this checklist + the ported suite running against
+- [~] M1 Parity harness: this checklist + the ported suite running against
       a skeleton app (all red), staging worker serving it
+      — 2026-11-09: workspaces scaffolded (@chat/shared types + client,
+      @chat/app Vite + React 19 + TS skeleton; typecheck and production
+      build green, versions matching the SHA panel). Ported suite lives
+      at web/tests/ui.test.js (npm test in web/): the fake-API core and
+      scenarios are verbatim from tests/ui.test.js. Baseline: the M1
+      smoke scenario passes (invite stored + scrubbed, fixture messages
+      render through the typed client); the five ported parity scenarios
+      (duel-card, markdown-light/dark/mobile, agent-gate) all fail, as
+      expected — the features do not exist yet. Staging Worker code and
+      config are in web/staging/; its first deploy waits on a
+      Workers-scoped API token (or a Builds connection) from the owner.
 - [ ] M2 Shell: layout, identity, themes, install strip, update banner,
       pull-to-refresh
 - [ ] M3 Message core: feed, stream, composer, markdown, speech text
