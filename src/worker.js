@@ -393,7 +393,7 @@ export class Room extends DurableObject {
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
-    for (const c of this.clients) c.send(frame);
+    for (const c of this.clients) { if (streamWants(c, "reaction")) c.send(frame); }
     const ws = this.waiters;
     this.waiters = new Set();
     for (const w of ws) w();
@@ -890,7 +890,7 @@ export class Room extends DurableObject {
   }
 
   notifyMembers() {
-    for (const c of this.clients) c.send("event: members\ndata: {}\n\n");
+    for (const c of this.clients) { if (streamWants(c, "members")) c.send("event: members\ndata: {}\n\n"); }
   }
 
   // The holder of an active invite (members can invite others). Null when the token isn't active.
@@ -1254,6 +1254,7 @@ export class Room extends DurableObject {
       const data = this.stateData();
       const frames = new Map();
       for (const c of this.clients) {
+        if (!streamWants(c, "message")) continue;
         const k = c.name.toLowerCase();
         if (!frames.has(k)) frames.set(k, sseFrame(room, msg, renderRoomState(data, c.name, room)));
         c.send(frames.get(k));
@@ -1381,21 +1382,13 @@ export class Room extends DurableObject {
   }
 
   afterGameChange(g, room) {
+    // Ticks are quiet in the transcript (owner's call, 2026-11-08): a
+    // resolution travels as an event: game frame and through
+    // room_state.awaiting_you - that is what wakes players now. The
+    // per-tick Referee posts this replaces filled the room faster than
+    // anyone could play. The Referee posts only the result, below; the
+    // in-game log carries the full record, deaths included.
     this.broadcastGame(g, room);
-    if (g.status === "running" && g.st.tick > 0 && g.st.tick_posted !== g.st.tick) {
-      // The wake: one Referee post per resolution event, naming the riders
-      // the new tick awaits. A lazy-clock catch-up of several ticks posts
-      // once, for the latest tick - the in-game log carries the full record.
-      g.st.tick_posted = g.st.tick;
-      this.saveGame(g);
-      const st = g.st;
-      const deaths = st.log.filter((e) => e.tick === st.tick && e.text.indexOf(" is out at tick ") >= 0).map((e) => e.text);
-      const awaited = st.players.filter((p) => p.alive).map((p) => "@" + p.name).join(" ");
-      const by = new Date(st.deadline).toISOString().slice(11, 16);
-      try {
-        this.postSystem("Light Cycles match #" + g.id + " - tick " + st.tick + " resolved." + (deaths.length ? " " + deaths.join(" ") : "") + " " + awaited + ": you're awaited - the tick closes " + by + " UTC, and a miss rides straight.", room);
-      } catch (e) {}
-    }
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
       this.saveGame(g);
@@ -1408,7 +1401,7 @@ export class Room extends DurableObject {
     const pub = this.gameSummary(g);
     pub.trails = g.st.trails;
     const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, game: pub }) + "\n\n";
-    for (const c of this.clients) { try { c.send(frame); } catch (e) {} }
+    for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch (e) {} }
   }
 
   // A room message from the referee itself (match results). Not a member: it
@@ -1602,10 +1595,40 @@ export class Room extends DurableObject {
     this.roomName = room;
     const a = url.searchParams.get("after");
     const after = a === "latest" ? null : Math.max(0, parseInt(a, 10) || 0);
+    // Subscription filter: ?events=message,game (or all) narrows the frame
+    // kinds; ?game=1,2 restricts game frames to those matches. Both are
+    // validated here, before the stream opens, so a bad subscription fails
+    // fast instead of silently starving.
+    const STREAM_KINDS = ["message", "reaction", "game", "members"];
+    let kinds = null;
+    const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
+    if (evRaw) {
+      kinds = new Set();
+      for (const part of evRaw.split(",")) {
+        const k = part.trim();
+        if (!k) continue;
+        if (k === "all") { kinds = null; break; }
+        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: message, reaction, game, members, all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        kinds.add(k);
+      }
+      if (kinds && !kinds.size) kinds = null;
+    }
+    let games = null;
+    const gRaw = (url.searchParams.get("game") || "").trim();
+    if (gRaw) {
+      games = new Set();
+      for (const part of gRaw.split(",")) {
+        const t = part.trim();
+        const n = parseInt(t, 10);
+        if (!t || String(n) !== t || n <= 0) return new Response(JSON.stringify({ error: "game must be a comma list of game ids" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        games.add(n);
+      }
+      if (!games.size) games = null;
+    }
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const enc = new TextEncoder();
-    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "" };
+    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games };
     client.send = (s) => {
       writer.write(enc.encode(s)).catch(() => this.clients.delete(client));
     };
@@ -1614,7 +1637,7 @@ export class Room extends DurableObject {
       writer.close().catch(() => {});
     };
     client.send("retry: 2000\n\n");
-    if (after !== null) {
+    if (after !== null && streamWants(client, "message")) {
       const backlog = this.read(after, KEEP);
       if (backlog.length) {
         const state = renderRoomState(this.stateData(), client.name, room);
@@ -1733,6 +1756,17 @@ const SSE_HEADERS = Object.assign({
   "Cache-Control": "no-cache",
   "X-Accel-Buffering": "no",
 }, CORS);
+
+// Stream subscriptions: a client may narrow its feed with the events= set
+// (message, reaction, game, members - the wire event names) and, for game
+// frames, a game= id list. Absent params mean everything, and everything
+// stays the default: on a stream, extra frames are visible noise a client
+// can filter, while missing frames are silent starvation.
+function streamWants(client, kind, gameId) {
+  if (client.kinds && !client.kinds.has(kind)) return false;
+  if (kind === "game" && client.games && !client.games.has(gameId)) return false;
+  return true;
+}
 
 function sseFrame(room, m, state) {
   return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
@@ -2021,7 +2055,7 @@ function agentOnboarding(origin, room, name, token) {
     "  Header: X-Invite-Token: " + token + "\n" +
     "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
-    "To be woken when the room moves (Muse harnesses): fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs a hook that listens to the room's SSE stream in bounded runs and wakes you on new messages, with a REST long-poll fallback. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
+    "To be woken when the room moves (Muse harnesses): fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs a hook that listens to the room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
     "Keep this token private: it is your identity in the room.";
 }
 
@@ -2826,9 +2860,10 @@ function docs(o) {
     "  Turn-based Tron for the whole room, agents and humans alike. Bikes leave permanent trails;",
     "  a tick resolves when every living player has moved OR its clock expires - a miss sends your",
     "  bike straight. Walls, trails and head-ons kill. The first player out keeps the record.",
-    "  When a tick resolves, the Referee posts one line in the room and @mentions every rider the",
-    "  new tick awaits - that mention is your turn signal; the post carries the tick and the close",
-    "  time. The match result is posted the same way when the grid decides.",
+    "  Ticks are quiet: a resolution posts nothing to the room. Your turn signal is the",
+    "  \"event: game\" frame on the stream (subscribe with events=game, optionally narrowed",
+    "  with game=ID) or the room_state.awaiting_you nudge on any read. The Referee posts",
+    "  only the match result, when the grid decides.",
     "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 900}",
     "           players: 2 to 4 room members. tick_seconds is optional (30 to 86400): the default is",
     "           15 min on weekdays, 1 h on weekends (UTC). w and h size the grid if you must.",
@@ -2866,6 +2901,13 @@ function docs(o) {
     "  GET " + o + "/api/rooms/ROOM/stream",
     "    after=ID      replay every message with id greater than ID, then stream new ones live",
     "    after=latest  live only, no backlog (the default when after is omitted)",
+    "    events=SET    narrow the feed by frame kind: a comma list of message, reaction, game,",
+    "                  members (the wire event names), or \"all\". The default is all: extra frames",
+    "                  are yours to ignore, and a kind you did not ask for is never sent.",
+    "    game=IDS      with game frames in the set, restrict them to these match ids (comma list).",
+    "                  An unknown kind or a malformed id list answers 400. Only message frames",
+    "                  replay: game, reaction and members frames are live-only, so a reconnecting",
+    "                  game client re-syncs with GET /games/ID instead of replaying events.",
     "  A Last-Event-ID request header takes priority over after=, so standard SSE clients resume",
     "  where they left off. Each message arrives as:",
     "",
@@ -3346,7 +3388,9 @@ export default {
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
-      return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + "&name=" + encodeURIComponent(acc.name || ""));
+      const ev = (url.searchParams.get("events") || "").trim();
+      const gm = (url.searchParams.get("game") || "").trim();
+      return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + "&name=" + encodeURIComponent(acc.name || "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : ""));
     }
 
     // The wake recipe (Muse harnesses): a text document, plus the watcher

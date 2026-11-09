@@ -5,6 +5,9 @@
 # window: the server replays everything after the cursor first, then live
 # frames arrive as they are posted. The run returns early once a non-self
 # message has been seen (plus a short grace period to coalesce a burst).
+# Game frames wake too: they carry no message id, so they never move the
+# cursor - the woken agent checks the match state itself and moves if a
+# game awaits it.
 # If the stream cannot be opened at all, the run falls back to one REST
 # long-poll, so a stream outage degrades to plain polling instead of
 # blindness. Cursor + spool live under the state dir; the cursor advances
@@ -71,6 +74,8 @@ TMPD=$(mktemp -d)
 trap 'rm -rf "$TMPD"' EXIT
 COLLECTED="$TMPD/messages.jsonl"
 : > "$COLLECTED"
+GAMES="$TMPD/games.jsonl"
+: > "$GAMES"
 
 # --- Primary path: the SSE stream -------------------------------------------
 # curl runs as a direct background child writing to a FIFO, so its PID is
@@ -79,7 +84,7 @@ COLLECTED="$TMPD/messages.jsonl"
 STREAM_BASE="${AGENTCHAT_STREAM_BASE:-$BASE/stream}"
 FIFO="$TMPD/stream.fifo"
 mkfifo "$FIFO"
-curl -sN --fail --no-buffer --max-time $((WINDOW + 5)) "${AUTH_ARGS[@]}" "$STREAM_BASE?after=$CURSOR" > "$FIFO" &
+curl -sN --fail --no-buffer --max-time $((WINDOW + 5)) "${AUTH_ARGS[@]}" "$STREAM_BASE?after=$CURSOR&events=all" > "$FIFO" &
 CPID=$!
 exec 3< "$FIFO"
 FD=3
@@ -90,6 +95,16 @@ GRACE_SET=0
 EVENT=""
 DATA=""
 DEADLINE=$((SECONDS + WINDOW))
+
+start_grace() {
+  if [ "$GRACE_SET" = "0" ]; then
+    GRACE_SET=1
+    GRACE_DEADLINE=$((SECONDS + GRACE))
+    if [ "$GRACE_DEADLINE" -lt "$DEADLINE" ]; then
+      DEADLINE=$GRACE_DEADLINE
+    fi
+  fi
+}
 
 while :; do
   REMAINING=$((DEADLINE - SECONDS))
@@ -110,7 +125,8 @@ while :; do
       ;;
     "")
       # Blank line: a frame is complete. Only message frames carry a
-      # message id, so only they move the cursor or wake.
+      # message id, so only they move the cursor; game frames wake
+      # without touching it.
       if [ "$EVENT" = "message" ] && [ -n "$DATA" ]; then
         SAW_FRAME=1
         MID=$(printf '%s' "$DATA" | jq -r '.id // empty' 2>/dev/null || true)
@@ -120,14 +136,15 @@ while :; do
         fi
         if [ -n "$FROM" ] && [ "$FROM" != "$SELF" ]; then
           printf '%s' "$DATA" | jq -c 'del(.room_state)' >> "$COLLECTED"
-          if [ "$GRACE_SET" = "0" ]; then
-            GRACE_SET=1
-            GRACE_DEADLINE=$((SECONDS + GRACE))
-            if [ "$GRACE_DEADLINE" -lt "$DEADLINE" ]; then
-              DEADLINE=$GRACE_DEADLINE
-            fi
-          fi
+          start_grace
         fi
+      elif [ "$EVENT" = "game" ] && [ -n "$DATA" ]; then
+        # A game changed (a move, a resolved tick, a finish). Collect a
+        # compact copy - trails are the bulk of the frame and the woken
+        # agent re-reads full state anyway - and start the same grace.
+        SAW_FRAME=1
+        printf '%s' "$DATA" | jq -c 'del(.game.trails)' >> "$GAMES" 2>/dev/null || true
+        start_grace
       fi
       EVENT=""
       DATA=""
@@ -162,12 +179,14 @@ if [ "$SAW_LINE" = "0" ] && [ ! -s "$COLLECTED" ]; then
   fi
 fi
 
-COUNT=$(jq -s 'length' "$COLLECTED")
+MSG_COUNT=$(jq -s 'length' "$COLLECTED")
+GAME_COUNT=$(jq -s 'length' "$GAMES")
+COUNT=$((MSG_COUNT + GAME_COUNT))
 
 if [ "$DRY" = "1" ]; then
   log "dry run"
   if [ "$COUNT" -gt 0 ]; then
-    wake "dry-run: would wake on new messages" "{\"count\":$COUNT}"
+    wake "dry-run: would wake on room activity" "{\"count\":$COUNT}"
   else
     silent "dry-run: no new messages"
   fi
@@ -175,14 +194,24 @@ if [ "$DRY" = "1" ]; then
 fi
 
 write_cursor "$CURSOR"
-if [ "$COUNT" -gt 0 ]; then
+if [ "$MSG_COUNT" -gt 0 ]; then
   jq -s '.' "$COLLECTED" | jq -c '.[]' >> "$SPOOL_FILE"
 fi
 
 log "polled room (stream)"
 if [ "$COUNT" -gt 0 ]; then
-  PAYLOAD=$(jq -s --arg room "$ROOM" '{room:$room,messages:.}' "$COLLECTED")
-  wake "new messages in $ROOM" "$PAYLOAD"
+  MSGS_JSON=$(jq -s '.' "$COLLECTED")
+  if [ "$GAME_COUNT" -gt 0 ]; then
+    GAMES_JSON=$(jq -s '.' "$GAMES")
+    PAYLOAD=$(jq -n --arg room "$ROOM" --argjson messages "$MSGS_JSON" --argjson games "$GAMES_JSON" '{room:$room,messages:$messages,games:$games}')
+  else
+    PAYLOAD=$(jq -n --arg room "$ROOM" --argjson messages "$MSGS_JSON" '{room:$room,messages:$messages}')
+  fi
+  if [ "$MSG_COUNT" -gt 0 ]; then
+    wake "new messages in $ROOM" "$PAYLOAD"
+  else
+    wake "game update in $ROOM" "$PAYLOAD"
+  fi
 else
   silent "no new messages"
 fi

@@ -257,8 +257,7 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TRae, json: { dir: 'left' } });
     check('last move resolves the tick', r.status === 200 && r.json.resolved === true && r.json.game.tick === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     r = await req('GET', R2 + '/messages?limit=10', { token: TP });
-    const tickPost = (r.json.messages || []).find(x => x.from === 'Referee' && x.text.includes('match #' + gid + ' - tick 1 resolved'));
-    check('referee posts the tick and calls the awaited', !!tickPost && tickPost.text.includes('@Poc') && tickPost.text.includes('@Rex') && tickPost.text.includes('@Rae'), JSON.stringify(tickPost || (r.json.messages || []).map(x => x.from + ': ' + String(x.text).slice(0, 60))));
+    check('referee stays quiet on a resolved tick', !(r.json.messages || []).some(x => x.from === 'Referee'), JSON.stringify((r.json.messages || []).map(x => x.from + ': ' + String(x.text).slice(0, 60))));
     const toks = { Poc: TP, Rex: TRex, Rae: TRae };
     let final = null;
     for (let i = 0; i < 16 && !final; i++) {
@@ -274,7 +273,8 @@ async function waitUp() {
     check('move after finish -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posted the result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid)), JSON.stringify((r.json.messages || []).map(x => x.from)));
-    check('no tick post for the finishing tick', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid + ' - tick ' + final.tick + ' resolved')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
+    const refPosts = (r.json.messages || []).filter(x => x.from === 'Referee' && x.text.includes('match #' + gid));
+    check('exactly one referee post per match (the result)', refPosts.length === 1 && refPosts[0].text.includes('is over'), JSON.stringify(refPosts.map(x => x.text.slice(0, 60))));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
     await new Promise(res => setTimeout(res, 31000));
@@ -292,6 +292,62 @@ async function waitUp() {
     check('move after cancel -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('no result post for a cancelled match', !(r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + clockId + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
+
+    // Stream subscriptions: events= narrows the frame kinds, game=
+    // restricts game frames to given matches, and a malformed
+    // subscription answers 400 before the stream opens. The default
+    // (no params) stays the full feed.
+    r = await req('GET', R2 + '/stream?events=bogus', { token: TP });
+    check('stream: unknown event kind -> 400', r.status === 400 && String(r.json && r.json.error).includes('message'), r.status + ' ' + JSON.stringify(r.json));
+    r = await req('GET', R2 + '/stream?game=abc', { token: TP });
+    check('stream: malformed game list -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json));
+    async function openStream(p, token) {
+      const ctl = new AbortController();
+      const resp = await fetch(BASE + p, { headers: { 'X-Invite-Token': token }, signal: ctl.signal });
+      const frames = [];
+      let buf = '';
+      const dec = new TextDecoder();
+      (async () => {
+        try {
+          const reader = resp.body.getReader();
+          for (;;) {
+            const part = await reader.read();
+            if (part.done) break;
+            buf += dec.decode(part.value, { stream: true });
+            let i;
+            while ((i = buf.indexOf('\n\n')) >= 0) { frames.push(buf.slice(0, i)); buf = buf.slice(i + 2); }
+          }
+        } catch (e) {}
+      })();
+      return { status: resp.status, frames, close: () => { try { ctl.abort(); } catch (e) {} } };
+    }
+    async function waitFor(fn, ms) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise(res => setTimeout(res, 100)); } return fn(); }
+    let s = await openStream(R2 + '/stream?after=0', TP);
+    check('stream: default feed replays message frames', await waitFor(() => s.frames.some(f => f.includes('event: message')), 4000), JSON.stringify(s.frames).slice(0, 120));
+    s.close();
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30, w: 12, h: 10 } });
+    const gid2 = r.json.game.id;
+    s = await openStream(R2 + '/stream?events=game', TP);
+    await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'stream filter probe' } });
+    await new Promise(res => setTimeout(res, 1500));
+    check('stream: events=game sends no message frames', !s.frames.some(f => f.includes('event: message')), JSON.stringify(s.frames).slice(0, 160));
+    // Game frames broadcast when a tick resolves (both riders move), not
+    // on a merely queued move - the resolution is the turn signal.
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TP, json: { dir: 'down' } });
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TRex, json: { dir: 'up' } });
+    check('stream: events=game delivers game frames', await waitFor(() => s.frames.some(f => f.includes('event: game') && f.includes('"id":' + gid2)), 4000), JSON.stringify(s.frames).slice(0, 160));
+    s.close();
+    s = await openStream(R2 + '/stream?events=game&game=' + (gid2 + 999), TP);
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TP, json: { dir: 'right' } });
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TRex, json: { dir: 'left' } });
+    await new Promise(res => setTimeout(res, 1500));
+    check('stream: game= restricts frames to the listed matches', !s.frames.some(f => f.includes('event: game')), JSON.stringify(s.frames).slice(0, 160));
+    s.close();
+    s = await openStream(R2 + '/stream?events=game&game=' + gid2, TP);
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TP, json: { dir: 'up' } });
+    await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TRex, json: { dir: 'down' } });
+    check('stream: game= passes the listed match', await waitFor(() => s.frames.some(f => f.includes('event: game') && f.includes('"id":' + gid2)), 4000), JSON.stringify(s.frames).slice(0, 160));
+    s.close();
 
     // MCP endpoint: the room as a tool surface. Handshake, role-filtered
     // catalog, identity fixed by the credential, and the daily-driver tools

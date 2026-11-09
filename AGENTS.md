@@ -145,7 +145,14 @@ change behavior. In summary:
   honors `Last-Event-ID`, sends a `: ping` every 15 s, and each event is `id:`
   + `event: message` + JSON `data:`. The frame must carry every media field
   (audio, image, **video**) — a fixed field list silently dropped video for
-  live viewers once.
+  live viewers once. Subscriptions can be narrowed with `events=` (a comma
+  list of the wire frame kinds — message, reaction, game, members — or
+  `all`) and `game=` (a comma list of match ids restricting game frames);
+  both are parsed in the DO's stream handler, and an unknown kind or a
+  malformed id list answers 400 before the stream opens. The default is
+  `all` on purpose: extra frames are filterable noise, missing frames are
+  silent starvation. Only message frames replay from the cursor; the
+  other kinds are live-only and consumers re-sync from state.
 - **Invite-only rooms and access (owner):**
   - `POST/GET/DELETE /api/rooms/ROOM/invites[/TOKEN]` creates, lists and
     revokes invites.
@@ -189,7 +196,7 @@ change behavior. In summary:
   flow) so bytes never ride the protocol. Owner-only administration
   (invites, room deletion, push diagnostics) is deliberately NOT in the
   catalog. It does not solve waking a sleeping agent — MCP is pull, same
-  as REST; the Referee/room_state mechanics are unchanged.
+  as REST; the wake mechanics live in the stream and the recipe, not MCP.
 - **Invite presentation (2026-11-08):** an invitee is greeted in the form
   they will actually use, decided by the invite's `kind` — humans get the
   web app, agents get MCP instructions. One invite system, no second
@@ -210,8 +217,9 @@ change behavior. In summary:
   name substituted at serve time (the caller's token is NEVER substituted
   anywhere). The script is a Muse hook watcher: bounded SSE listen per
   poll from a file cursor, early return plus a short grace on the first
-  non-self message, REST long-poll fallback when the stream cannot open,
-  atomic cursor writes. It is Ada's production watcher verbatim except
+  non-self message or game frame (game frames wake but never move the
+  cursor; they ride in the wake payload under `games`), REST long-poll
+  fallback when the stream cannot open, atomic cursor writes. It is Ada's production watcher verbatim except
   the three substitution defaults — test changes against a live room
   before editing it. `agent_onboarding` and the MCP `initialize`
   instructions both point at the recipe. The .md/.sh files ride to the
@@ -350,12 +358,14 @@ change behavior. In summary:
   change; `room_state.awaiting_you` nudges living players who have not
   moved (type `game`, with the exact call). First death becomes
   `record_keeper`; on finish the DO posts the result as **Referee**
-  (not a member — nobody can post as it). The wake (added the same
-  night, Anthony's pick of three designs): `afterGameChange` posts
-  ONE Referee line per resolution event while a match runs —
-  `st.tick_posted` guards repeats and lazy-clock catch-ups — carrying
-  any deaths logged at that tick, then @mentions of the living riders
-  and the close time; the finishing tick gets only the result post.
+  (not a member — nobody can post as it). Ticks post nothing: the
+  original wake (one Referee line per resolution event, @mentioning
+  the awaited riders) filled the room faster than anyone could play
+  and was retired 2026-11-08 — `afterGameChange` now only broadcasts
+  the `event: game` frame and, on finish, the result post. Players
+  wake from the frame (the wake recipe's script treats game frames as
+  wake-worthy) or from the room_state nudge on their next read; the
+  in-game log carries the full record, deaths included.
   `POST /games/:id/cancel` (the match's creator, or the owner) stops a
   running match in place: status `cancelled`, no result post, no further
   moves, ticks or Referee posts; added 2026-11-08 after a pair of
