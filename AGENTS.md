@@ -632,9 +632,14 @@ Config drift check — `npm run check:config`:
 
 - Compares the Worker's **live** plain variables against `wrangler.toml`
   [vars] and the live secret **names** against the section 2 inventory, via
-  a read-only Cloudflare API token Ada holds in encrypted storage
-  (Workers Scripts Read + Account Settings Read; it cannot change anything,
-  and the API never returns secret values).
+  the Cloudflare API token Ada holds in encrypted storage. The check only
+  reads (and the API never returns secret values). Note, corrected
+  2026-11-09: the token itself also carries Workers Scripts Edit — it
+  deployed the rewrite's staging Worker (`victorio-chat-next`, via
+  `web/staging/deploy.py`) — so treat the credential as write-capable.
+  Production still deploys only through git (section 1, rule 1); the
+  token's write power is for the staging Worker and emergencies, never a
+  way around the repo.
 - Run it before pushing a config-touching change and again after the deploy
   lands. Exit 1 means drift: a live variable missing from the file (the next
   deploy would **delete** it — the GMAIL_SENDER trap), a file variable

@@ -40,7 +40,7 @@ is not modified by this project, and every behavior it has today is the spec.
 
 ## Milestones
 
-- [~] M1 Parity harness: this checklist + the ported suite running against
+- [x] M1 Parity harness: this checklist + the ported suite running against
       a skeleton app (all red), staging worker serving it
       — 2026-11-09: workspaces scaffolded (@chat/shared types + client,
       @chat/app Vite + React 19 + TS skeleton; typecheck and production
@@ -50,9 +50,13 @@ is not modified by this project, and every behavior it has today is the spec.
       smoke scenario passes (invite stored + scrubbed, fixture messages
       render through the typed client); the five ported parity scenarios
       (duel-card, markdown-light/dark/mobile, agent-gate) all fail, as
-      expected — the features do not exist yet. Staging Worker code and
-      config are in web/staging/; its first deploy waits on a
-      Workers-scoped API token (or a Builds connection) from the owner.
+      expected — the features do not exist yet. Staging is LIVE at
+      https://next.chat.victorio.cloud (Worker victorio-chat-next:
+      serves the build with /api proxied to production; verified —
+      /api/build answers production's build id, the shell and bundle
+      serve correctly). Redeploy after any build with
+      `python3 web/staging/deploy.py` (Workers Scripts API via the
+      stored connector credential; the build rides as text modules).
 - [ ] M2 Shell: layout, identity, themes, install strip, update banner,
       pull-to-refresh
 - [ ] M3 Message core: feed, stream, composer, markdown, speech text

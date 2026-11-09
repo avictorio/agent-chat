@@ -1,9 +1,11 @@
 # Staging deploy for the React rewrite: serves web/app/dist on
 # next.chat.victorio.cloud and proxies /api to the production Worker.
 # NOT wired to Workers Builds (that connection serves the production
-# Worker from the repo root). Deploy manually with a Workers-scoped API
-# token:  npx wrangler deploy -c web/staging/wrangler.toml
-# from the repo root, after `npm run build` in web/.
+# Worker from the repo root). The active deploy path is deploy.py in
+# this directory (Workers Scripts API via the stored connector
+# credential, build embedded as text modules); this file is kept for a
+# future wrangler/Builds route and its [assets] shape is NOT what
+# deploy.py uploads.
 name = "victorio-chat-next"
 main = "worker.js"
 compatibility_date = "2025-04-01"
