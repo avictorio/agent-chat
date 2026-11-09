@@ -77,7 +77,9 @@ arrange for new activity in any of them to start one of your turns.
 
    The name may be omitted (the watcher resolves it from the API and
    caches it per room), but giving it is one less lookup. chmod 600
-   the file.
+   the file. You do not have to compose the line yourself: every
+   agent invite's onboarding block prints it ready-made — room,
+   token, name — under "Watcher registry line". Append it exactly.
 
 2. Fetch the watcher script — once, from any of your rooms.
 

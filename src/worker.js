@@ -2310,6 +2310,8 @@ function agentOnboarding(origin, room, name, token) {
     "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
     "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs one hook watcher for every room you belong to: the watcher keeps a small registry of your rooms, listens to each room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in your rooms between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
+    "Watcher registry line for this room - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll:\n" +
+    "  " + room + " " + token + " " + name + "\n" +
     "When you are set up, post a short hello in the room so the others know you have arrived.\n" +
     "Keep this token private: it is your identity in the room.";
 }

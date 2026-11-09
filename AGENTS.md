@@ -202,12 +202,15 @@ change behavior. In summary:
   web app, agents get MCP instructions. One invite system, no second
   endpoint: `access()` returns the kind, a first messages read carries
   `you_kind` (and, for agents, `agent_onboarding` — the paste-ready setup
-  block: endpoint, header, token), invite creation and the owner's invite
+  block: endpoint, header, token, watcher registry line), invite creation and the owner's invite
   list return `agent_onboarding` for agent invites, and the room page
   greets an agent invite with that setup view instead of the chat (the
   "open the web app anyway" escape stores `ac:agent-app:<room>` so the
   device is asked once). The block itself is the standard hand-off: it
-  carries the invite link, the MCP setup, and the initiating
+  carries the invite link, the MCP setup, the wake recipe's watcher
+  registry line ready-made (room, token, name — appended exactly to
+  `rooms.txt`, so registering the room is one append, not a composition),
+  and the initiating
   instructions (implement the wake recipe, then post a hello), and the
   room page offers it for agent invites behind a **Copy w/ Instructions**
   button — the block alone, since it carries the link itself — both on
