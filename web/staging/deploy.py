@@ -16,6 +16,7 @@ next.chat.victorio.cloud custom domain, done. Verify afterwards with:
 import json
 import pathlib
 import secrets
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -57,7 +58,21 @@ def assemble():
         shutil.rmtree(BUILD)
     (BUILD / "assets").mkdir(parents=True)
     (BUILD / "worker.js").write_bytes((HERE / "worker.js").read_bytes())
-    (BUILD / "index.html").write_bytes((DIST / "index.html").read_bytes())
+    # Stamp the page with production's current build id, so the staging
+    # app's update banner only fires when production deploys something
+    # newer (the banner compares this stamp against /api/build, which
+    # staging proxies to production). Falls back to the source stamp.
+    index_html = (DIST / "index.html").read_bytes()
+    try:
+        out = subprocess.run(
+            ["curl", "-fsS", "https://chat.victorio.cloud/api/build"],
+            capture_output=True, timeout=20)
+        prod_build = json.loads(out.stdout)["build"]
+        index_html = index_html.replace(
+            b'content="next-dev"', ('content="%s"' % prod_build).encode())
+    except Exception as e:
+        print("warning: could not stamp production build id:", e)
+    (BUILD / "index.html").write_bytes(index_html)
     imports = []
     entries = []
     for i, asset in enumerate(sorted((DIST / "assets").iterdir())):

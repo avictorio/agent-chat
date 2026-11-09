@@ -32,7 +32,15 @@ function typeFor(path) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+    // The PWA icons and manifest are binary/static on production; proxy
+    // them too so the staging shell's install strip and manifest link
+    // resolve (they can't ride along as text modules).
+    const proxied =
+      url.pathname === "/api" ||
+      url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/icons/") ||
+      url.pathname === "/manifest.webmanifest";
+    if (proxied) {
       const init = {
         method: request.method,
         headers: request.headers,

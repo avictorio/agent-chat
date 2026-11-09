@@ -7,6 +7,31 @@ import type {
 // A thin typed client over the room API. Same-origin only: the app is
 // served by the staging proxy Worker in development and by the chat
 // Worker after cutover, so /api paths are always relative.
+
+// A failed API call: carries the HTTP status and the server's own error
+// text, so callers can drive the access states (401/403 → locked view)
+// and surface real messages instead of inventing their own.
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// GET /api/build — the running deployment's build id, for the update
+// banner's comparison against the page's build meta stamp.
+export async function fetchBuild(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/build");
+    if (!res.ok) return null;
+    const d = (await res.json()) as { build?: string };
+    return d.build || null;
+  } catch {
+    return null;
+  }
+}
+
 export class RoomClient {
   readonly room: string;
   private token: string | null;
@@ -32,7 +57,7 @@ export class RoomClient {
     });
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
     if (!res.ok) {
-      throw new Error(data.error || "Request failed: " + res.status);
+      throw new ApiError(res.status, data.error || "Request failed: " + res.status);
     }
     return data;
   }

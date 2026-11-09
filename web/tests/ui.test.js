@@ -3,13 +3,13 @@
 // are copied VERBATIM from tests/ui.test.js — same fixtures, same
 // assertions — with only the page-serving branches changed: this suite
 // serves the built app (app/dist) instead of src/chat.html, and /api/build
-// answers the skeleton's stamp ('next-dev'). A scenario counts toward
+// answers 'uitestbuild1' when current (the served page is stamped the same,\n// like the original suite stamps src/chat.html). A scenario counts toward
 // parity only when it passes here. Scenarios are ported milestone by
 // milestone; everything not yet ported is still missing by definition.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const DIST = __dirname + '/../app/dist';
-const HTML = fs.readFileSync(DIST + '/index.html', 'utf8');
+const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="next-dev"', 'content="uitestbuild1"');
 const OUT = __dirname + '/shots/';
 fs.mkdirSync(OUT, { recursive: true });
 const now = Date.now(), H = 3600e3, D = 86400e3;
@@ -120,7 +120,7 @@ async function setup(page, S, calls) {
     if (p === '/emoji.json') return route.fulfill({ status: 200, contentType: 'application/json', body: require('fs').readFileSync(__dirname + '/../../tests/fixtures/emoji-compact.json') });
     if (p.startsWith('/assets/')) { try { const body = require('fs').readFileSync(DIST + p); return route.fulfill({ status: 200, contentType: p.endsWith('.css') ? 'text/css' : 'text/javascript', body }); } catch (e) { return route.fulfill({ status: 404, body: 'nf' }); } }
     if (p.startsWith('/r/') || p === '/') return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
-    if (p === '/api/build') return J({ build: S.behind ? 'uitestbuild2' : 'next-dev' });
+    if (p === '/api/build') return J({ build: S.behind ? 'uitestbuild2' : 'uitestbuild1' });
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
@@ -272,6 +272,90 @@ let FAILURES = 0;
     if (out.gateAfterReload) throw new Error('agent gate must not reappear after the escape on this device');
     return out;
   });
+
+  // --- M2 shell scenarios (ported verbatim from tests/ui.test.js) ---
+  for (const scheme of ['light', 'dark']) {
+    await run('desktop-' + scheme, { scheme }, async (page) => {
+      await shot(page, scheme + '-chat.png');
+      for (const t of ['constitution', 'decisions', 'questions', 'stakes', 'memory', 'members']) { await page.click('.tab[data-tab="' + t + '"]'); await page.waitForTimeout(200); await shot(page, scheme + '-' + t + '.png'); }
+      const counts = await page.$$eval('.tab .count', els => els.map(e => e.parentElement.dataset.tab + '=' + e.textContent + (e.classList.contains('alert') ? '!' : '')));
+      return { counts, hash: await page.evaluate(() => location.hash) };
+    });
+  }
+  await run('mobile-light', { w: 390, h: 844 }, async (page) => {
+    await shot(page, 'mobile-chat.png');
+    await page.click('#menu'); await page.waitForTimeout(350); await shot(page, 'mobile-drawer.png');
+    await page.click('.tab[data-tab="decisions"]'); await page.waitForTimeout(350); await shot(page, 'mobile-decisions.png');
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    return { scrollWidth: sw };
+  });
+  await run('mobile-dark', { w: 390, h: 844, scheme: 'dark' }, async (page) => { await shot(page, 'mobile-dark-chat.png'); await page.click('#menu'); await page.waitForTimeout(350); await shot(page, 'mobile-dark-drawer.png'); });
+  // Update banner: the page is stamped uitestbuild1, /api/build reports
+  // uitestbuild2, so the banner shows; dismissal is per build and the
+  // Refresh button reloads the page.
+  await run('update-banner', { state: { behind: true } }, async (page) => {
+    const out = {};
+    out.meta = await page.$eval('meta[name="build"]', e => e.getAttribute('content'));
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await shot(page, 'update-banner.png');
+    await page.click('#updateDismiss');
+    await page.waitForFunction(() => document.getElementById('updateStrip').hidden, null, { timeout: 4000 });
+    await page.reload(); await page.waitForTimeout(900);
+    out.afterDismissReload = await page.$eval('#updateStrip', e => e.hidden);
+    await page.evaluate(() => localStorage.removeItem('ac:build-dismissed'));
+    await page.reload();
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await Promise.all([page.waitForNavigation({ timeout: 5000 }), page.click('#updateRefresh')]);
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    out.refreshReloaded = true;
+    if (out.meta !== 'uitestbuild1') throw new Error('page build meta wrong: ' + out.meta);
+    if (!out.afterDismissReload) throw new Error('dismissal did not persist across reload');
+    return out;
+  });
+  await run('update-banner-mobile', { state: { behind: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await shot(page, 'update-banner-mobile.png');
+    return { ok: true };
+  });
+  await run('update-banner-current', {}, async (page) => {
+    await page.waitForTimeout(900);
+    const hidden = await page.$eval('#updateStrip', e => e.hidden);
+    if (!hidden) throw new Error('banner must stay hidden when the build is current');
+    return { hidden };
+  });
+  // Pull-to-refresh: a downward drag from the top bar. A short drag only
+  // shows the hint; past the threshold, releasing reloads the page.
+  await run('pull-refresh-mobile', { w: 390, h: 844, touch: true }, async (page) => {
+    const out = {};
+    const drag = (dy) => page.evaluate((d) => {
+      const bar = document.querySelector('.topbar');
+      const mk = (t, y) => new PointerEvent(t, { clientY: y, bubbles: true, pointerId: 7, isPrimary: true });
+      bar.dispatchEvent(mk('pointerdown', 120));
+      bar.dispatchEvent(mk('pointermove', 120 + d));
+    }, dy);
+    const release = () => page.evaluate(() => {
+      document.querySelector('.topbar').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, isPrimary: true }));
+    });
+    await drag(30);
+    out.shortHint = await page.$eval('#pullHintText', e => e.textContent);
+    await release(); await page.waitForTimeout(350);
+    out.shortHidden = await page.$eval('#pullHint', e => e.hidden);
+    await drag(120);
+    out.fullHint = await page.$eval('#pullHintText', e => e.textContent);
+    await shot(page, 'pull-refresh-mobile.png');
+    await Promise.all([page.waitForNavigation({ timeout: 5000 }), release()]);
+    out.reloaded = true;
+    if (out.shortHint !== 'Pull to refresh') throw new Error('short drag hint wrong: ' + out.shortHint);
+    if (!out.shortHidden) throw new Error('hint must hide after a short drag');
+    if (out.fullHint !== 'Release to refresh') throw new Error('full drag hint wrong: ' + out.fullHint);
+    return out;
+  });
+  await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
+  await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
+  await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
+  await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
+  await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
+  await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
   console.log(FAILURES ? 'PARITY SUITE: ' + FAILURES + ' failing scenario(s)' : 'PARITY SUITE: all ported scenarios pass');
   process.exit(FAILURES ? 1 : 0);
 })();

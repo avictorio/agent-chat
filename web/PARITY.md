@@ -57,8 +57,29 @@ is not modified by this project, and every behavior it has today is the spec.
       serve correctly). Redeploy after any build with
       `python3 web/staging/deploy.py` (Workers Scripts API via the
       stored connector credential; the build rides as text modules).
-- [ ] M2 Shell: layout, identity, themes, install strip, update banner,
+- [x] M2 Shell: layout, identity, themes, install strip, update banner,
       pull-to-refresh
+      — 2026-11-09: the current app's stylesheet is ported wholesale
+      (tokens, base, shell and every component block; markup lands per
+      milestone), and the shell is built: fixed layout, sidebar/drawer,
+      top bar, tab views with hidden-toggle routing and hash sync,
+      identity (invite intake, you, chat-you cache, name/posting-as
+      frame), status line, themes (pre-render boot script, Light/Dark
+      seg toggle persisted as chat-theme, color-scheme: only light),
+      agent gate, locked view on 401/403, install strip (shared 30-day
+      dismissal ac:install-hide-2), update banner (per-build dismissal),
+      pull-to-refresh from the top bar. Suite: desktop-light/dark,
+      mobile-light/dark, update-banner x3, pull-refresh-mobile, denied,
+      nonmember, agent-gate x4 and forced-dark-light all pass and their
+      shots were reviewed against the current app's — the remaining
+      visual deltas are exactly the unbuilt surfaces (message rendering
+      M3, board content and tab counts M4, composer tools M3, push and
+      voice sidebar rows with their features). markdown-dark/mobile
+      pass on screenshots only; the markdown assertions live in
+      markdown-light, still red until M3. duel-card still red (M6).
+      Staging redeployed: the deploy now stamps production's current
+      build id into the page (so the banner stays quiet until
+      production next deploys) and proxies /icons/* and the manifest.
 - [ ] M3 Message core: feed, stream, composer, markdown, speech text
 - [ ] M4 Reactions, board, members, invites
 - [ ] M5 Media: uploads, drafts, artifacts, YouTube cards, voice
@@ -73,18 +94,24 @@ is not modified by this project, and every behavior it has today is the spec.
 Status key: [ ] not started · [~] in progress · [x] port passes + shots reviewed
 
 ### A. Shell, identity, access
-- [ ] App shell: fixed layout, sidebar/drawer, top bar, safe-area insets
+- [x] App shell: fixed layout, sidebar/drawer, top bar, safe-area insets
       (scenarios: desktop-light, desktop-dark, mobile-light, mobile-dark)
-- [ ] Invite link entry: `#invite=` fragment stored as `chat-invite:<room>`,
+      — ported and shot-reviewed in M2; tab counts arrive with the
+      board data in M4
+- [x] Invite link entry: `#invite=` fragment stored as `chat-invite:<room>`,
       fragment scrubbed, identity resolved to `you` / `chat-you:<room>`
-- [ ] Name handling: no-name and non-member states (noname, nonmember)
-- [ ] Access errors: invite-only 401/403 states disable the UI (denied)
-- [ ] Agent gate: an agent invite sees the setup view with the onboarding
+- [~] Name handling: no-name and non-member states (noname, nonmember)
+      — nonmember passes; the name input / posting-as frame is built,
+      the posting-side states land with the composer in M3 (noname)
+- [x] Access errors: invite-only 401/403 states disable the UI (denied)
+- [x] Agent gate: an agent invite sees the setup view with the onboarding
       block and Copy w/ Instructions; "open the web app anyway" escape is
       asked once per device (agent-gate, agent-gate-dark, agent-gate-mobile,
       agent-gate-mobile-dark)
-- [ ] Themes: light/dark toggle persists; light opts out of browser
+- [~] Themes: light/dark toggle persists; light opts out of browser
       auto-dark (`color-scheme: only light`) (forced-dark-light)
+      — boot script, toggle and forced-dark shot proven in M2; the
+      persistence assertion rides the actions scenario port (M3/M4)
 
 ### B. Feed and messages
 - [ ] Message list rendering: grouping, timestamps, Human/Agent/Bot pills,
@@ -178,11 +205,14 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [ ] How-it-works and For-agents views; room link preview
 
 ### M. Update and install affordances
-- [ ] Build polling: banner on mismatch, per-build dismissal, Refresh
+- [x] Build polling: banner on mismatch, per-build dismissal, Refresh
       reloads (update-banner, update-banner-mobile, update-banner-current)
-- [ ] Pull-to-refresh from the top bar (pull-refresh-mobile)
-- [ ] Install strip: native prompt on Android, Share steps on iOS, one
+- [x] Pull-to-refresh from the top bar (pull-refresh-mobile)
+- [~] Install strip: native prompt on Android, Share steps on iOS, one
       shared 30-day dismissal across home and rooms (home-page)
+      — room side built in M2 (strip in every shell shot, shared
+      ac:install-hide-2 key, iOS steps dialog); the home-page scenario
+      proves the shared dismissal in M7
 
 ### N. Native (Capacitor) bridges — on-device proof required
 - [ ] Shell detection: splash dismissed in-shell once loaded
