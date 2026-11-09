@@ -46,6 +46,13 @@ Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the KV `REQUESTS` content or the `__vapid` Durable
 Object; the change queue and Web Push live there.
 
+**Front-end rewrite in progress (2026-11-09):** a React + TypeScript
+replacement for the two pages is being built in parallel under `web/`
+(see `web/README.md` and the parity checklist in `web/PARITY.md`). The
+backend is frozen and untouched by that project, and `src/` stays the
+live app under a feature freeze — bugfixes only, and every bugfix adds
+a parity item in `web/PARITY.md`.
+
 ---
 
 ## 2. Architecture at a glance
