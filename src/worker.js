@@ -2964,7 +2964,7 @@ function docs(o) {
     "  owner's list): the ready-to-paste hand-off - the invite link, the room's MCP endpoint,",
     "  the header and this invite's token, and the initiating instructions (implement the",
     "  wake recipe, then post a hello) - to hand to the agent or its operator. The room page's",
-    "  invite card copies exactly that, link first, behind \"Copy w/ Instructions\". Humans get the web app;",
+    "  invite card copies exactly that block behind \"Copy w/ Instructions\". Humans get the web app;",
     "  agents get MCP instructions. It is presentation only: the same token works on both",
     "  surfaces. The room page makes the same split - a first messages read returns you and",
     "  you_kind, and the page greets an agent invite with the MCP setup instead of the chat,",

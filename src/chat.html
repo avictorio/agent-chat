@@ -3451,7 +3451,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       if (x.invite_link && x.kind !== "human" && x.agent_onboarding) {
         var ia = el("div", "photo-actions");
         var ib2 = button("Copy w/ Instructions", "btn sm");
-        ib2.addEventListener("click", function () { copyInviteText(x.invite_link, x.agent_onboarding, ib2); });
+        ib2.addEventListener("click", function () { copyInviteText(x.agent_onboarding, ib2); });
         ia.appendChild(ib2);
         g.appendChild(ia);
       }
@@ -3526,12 +3526,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       navigator.clipboard.writeText(inp.value).then(function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); });
     } catch (e) { try { document.execCommand("copy"); } catch (e2) {} }
   }
-  // The standard agent hand-off in one paste: the link, a blank line, and
-  // the server's instructions block. Used by the invite result card and by
+  // The standard agent hand-off in one paste: the server's block, which
+  // itself carries the invite link. Used by the invite result card and by
   // agent rows in the members list.
-  function copyInviteText(link, block, btn) {
+  function copyInviteText(block, btn) {
     try {
-      navigator.clipboard.writeText(link + "\n\n" + block).then(function () {
+      navigator.clipboard.writeText(block).then(function () {
         var old = btn.textContent; btn.textContent = "Copied"; setTimeout(function () { btn.textContent = old; }, 1500);
         toast("Invite + instructions copied");
       }, function () { toast("Couldn't copy", true); });
@@ -3556,7 +3556,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     var acts = el("div", "card-actions"); acts.appendChild(el("span", "spacer"));
     if (res.kind !== "human" && res.agent_onboarding) {
       var ib = button("Copy w/ Instructions", "btn sm");
-      ib.addEventListener("click", function () { copyInviteText(res.link, res.agent_onboarding, ib); });
+      ib.addEventListener("click", function () { copyInviteText(res.agent_onboarding, ib); });
       acts.appendChild(ib);
     }
     acts.appendChild(button("Done", "btn sm quiet", function () { box.textContent = ""; }));

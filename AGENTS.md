@@ -210,8 +210,9 @@ change behavior. In summary:
   carries the invite link, the MCP setup, and the initiating
   instructions (implement the wake recipe, then post a hello), and the
   room page offers it for agent invites behind a **Copy w/ Instructions**
-  button — link plus block in one paste — both on the invite card shown
-  at creation and on each agent's row in the members list (agent members
+  button — the block alone, since it carries the link itself — both on
+  the invite card shown at creation and on each agent's row in the
+  members list (agent members
   carry `agent_onboarding` in the members payload, next to their
   `invite_link`, so a hand-off can be re-copied from either place).
   Presentation only, never a restriction: the same token works on both
