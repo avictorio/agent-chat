@@ -1267,10 +1267,14 @@ export class Room extends DurableObject {
   /* ---------- games: Light Cycles ----------
      Turn-based Tron: simultaneous moves resolved in ticks. A tick resolves when
      every living player has moved, or when its clock expires (a miss sends the
-     bike straight). The clock is lazy - ticks advance when any game call reads
-     the match - because the room is episodic: nobody is always awake, and the
+     bike straight). The deadline is real: a Durable Object alarm is kept armed
+     at the nearest running match's deadline and resolves what is due when it
+     fires, so a match keeps its cadence even while nobody is looking. Game
+     calls still catch up anything overdue when they touch a match, and the
      deadline arithmetic (deadline += tick) keeps cadence honest regardless.
-     State is one JSON row per match in gm; m.game_id links the card message. */
+     State is one JSON row per match in gm; m.game_id links the card message;
+     st.move_log records per tick and rider the direction, its source
+     (submitted / clock default), and when a submitted move arrived. */
   gameColors() {
     return [
       { color: "cyan", hex: "#22d3ee" },
@@ -1312,6 +1316,7 @@ export class Room extends DurableObject {
     const st = g.st;
     out.trails = st.trails;
     out.log = st.log.slice(-24);
+    out.move_log = st.move_log || [];
     out.awaiting = g.status === "running" ? st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     out.you = me ? { playing: true, alive: me.alive, dir: me.dir, queued: st.pending[me.name] || null, legal_moves: g.status === "running" && me.alive ? this.legalMoves(me) : [] } : { playing: false };
@@ -1322,6 +1327,7 @@ export class Room extends DurableObject {
   // current heads alike - heads become trail), or a shared target cell.
   resolveTick(g) {
     const st = g.st;
+    const resolvedAt = Date.now();
     const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const rev = { up: "down", down: "up", left: "right", right: "left" };
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
@@ -1337,7 +1343,7 @@ export class Room extends DurableObject {
       // Instrumentation: whether this tick's direction was the player's own
       // submitted move or the clock carrying them straight. Without it, a
       // resolved tick cannot be told apart from a played one after the fact.
-      attribution.push({ name: p.name, dir: p.dir, submitted: !!want });
+      attribution.push({ name: p.name, dir: p.dir, submitted: !!want, at: want ? (st.pending_at || {})[p.name] || null : null });
     }
     const targets = new Map();
     for (const cell of nexts.values()) { const k = cell[0] + "," + cell[1]; targets.set(k, (targets.get(k) || 0) + 1); }
@@ -1357,10 +1363,16 @@ export class Room extends DurableObject {
     }
     st.tick += 1;
     st.pending = {};
+    st.pending_at = {};
     if (!st.move_stats) st.move_stats = {};
+    if (!st.move_log) st.move_log = [];
     for (const a of attribution) {
       const s = st.move_stats[a.name] || (st.move_stats[a.name] = { submitted: 0, defaulted: 0 });
       if (a.submitted) s.submitted++; else s.defaulted++;
+      // The latency record: when a played move actually arrived, and when
+      // the tick resolved. A night of matches is its own dataset - without
+      // these stamps the log had to be correlated against room posts by hand.
+      st.move_log.push({ tick: st.tick, name: a.name, dir: a.dir, submitted: a.submitted, at: a.at, resolved_at: resolvedAt });
     }
     st.log.push({ tick: st.tick, text: "Tick " + st.tick + ": " + attribution.map((a) => a.name + " " + a.dir + (a.submitted ? " (submitted)" : " (clock default)")).join("; ") + "." });
     for (const p of deaths) {
@@ -1390,6 +1402,37 @@ export class Room extends DurableObject {
       this.saveGame(g);
       this.afterGameChange(g, room);
     }
+  }
+
+  // Keep a Durable Object alarm armed at the nearest running match's
+  // deadline. Called wherever a deadline is created or moved (create, move,
+  // cancel, any state read, and the alarm handler itself); a no-op when the
+  // armed time already matches, so hot read paths stay cheap.
+  async armGameAlarm() {
+    try {
+      const rows = this.sql.exec("SELECT state FROM gm WHERE status = 'running'").toArray();
+      let next = null;
+      for (const r of rows) {
+        try { const st = JSON.parse(r.state || "{}"); if (st.deadline && (next === null || st.deadline < next)) next = st.deadline; } catch (e) {}
+      }
+      const cur = await this.ctx.storage.getAlarm();
+      if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
+      if (cur !== next) await this.ctx.storage.setAlarm(next);
+    } catch (e) {}
+  }
+
+  // The deadline, firing: advance every running match that is due (the
+  // same catch-up a read performs, Referee result post included), then
+  // re-arm for the next deadline. This is what lets a match run to its
+  // finish overnight with nobody reading it.
+  async alarm() {
+    const room = this.roomName || (this.ctx.id && this.ctx.id.name) || "";
+    const rows = this.sql.exec("SELECT id FROM gm WHERE status = 'running'").toArray();
+    for (const r of rows) {
+      const g = this.gameRow(r.id);
+      if (g && g.status === "running") this.advanceGame(g, room);
+    }
+    await this.armGameAlarm();
   }
 
   afterGameChange(g, room) {
@@ -1450,7 +1493,11 @@ export class Room extends DurableObject {
       names.push(canon);
     }
     let tickSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
-    if (!tickSeconds) { const day = new Date().getUTCDay(); tickSeconds = day === 0 || day === 6 ? 3600 : 900; }
+    // Default 120s (owner's call, 2026-11-08, replacing the 900/3600
+    // weekday/weekend scheme): a hook-woken agent's full wake-to-act cycle
+    // runs one to two minutes, so anything shorter is mostly played by the
+    // clock - and the old defaults made a casual match glacial.
+    if (!tickSeconds) tickSeconds = 120;
     tickSeconds = Math.min(86400, Math.max(30, tickSeconds));
     const w = Math.min(40, Math.max(12, Math.floor(Number(opts && opts.w) || 30)));
     const h = Math.min(30, Math.max(10, Math.floor(Number(opts && opts.h) || 22)));
@@ -1465,7 +1512,7 @@ export class Room extends DurableObject {
     const st = {
       type: "lightcycles", w: w, h: h, tick_seconds: tickSeconds, tick: 0,
       deadline: Date.now() + tickSeconds * 1000, players: players,
-      trails: players.map((p, i) => [p.x, p.y, i]), pending: {}, move_stats: {},
+      trails: players.map((p, i) => [p.x, p.y, i]), pending: {}, pending_at: {}, move_stats: {}, move_log: [],
       log: [{ tick: 0, text: "Match created by " + creator + " - " + names.join(", ") + " on the grid." }],
       record_keeper: null, winner: null, announced: false,
     };
@@ -1477,6 +1524,7 @@ export class Room extends DurableObject {
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
     this.broadcastGame(g, room);
+    await this.armGameAlarm();
     return { status: 201, game: this.gameStateFull(g, creator) };
   }
 
@@ -1484,6 +1532,7 @@ export class Room extends DurableObject {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceGame(g, room);
+    await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
   }
 
@@ -1501,6 +1550,8 @@ export class Room extends DurableObject {
     if (["up", "down", "left", "right"].indexOf(d) < 0) return { status: 400, error: "dir must be one of up, down, left, right", legal_moves: this.legalMoves(me) };
     if (d === rev[me.dir]) return { status: 400, error: "You cannot reverse (" + me.dir + " -> " + d + ")", legal_moves: this.legalMoves(me) };
     st.pending[me.name] = d;
+    if (!st.pending_at) st.pending_at = {};
+    st.pending_at[me.name] = Date.now();
     let resolved = false;
     if (!st.players.some((p) => p.alive && !st.pending[p.name])) {
       this.resolveTick(g);
@@ -1511,6 +1562,7 @@ export class Room extends DurableObject {
     } else {
       this.saveGame(g);
     }
+    await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
   }
 
@@ -1528,6 +1580,7 @@ export class Room extends DurableObject {
       this.saveGame(g);
       this.broadcastGame(g, room);
     }
+    await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
   }
 
@@ -2126,7 +2179,7 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent Light Cycles matches in this room (light summaries).", {}),
     mcpTool("get_game", "Full state of one match: board, trails, the record, whose move is awaited, and your legal moves if you are riding.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a Light Cycles match: 2-4 room members, simultaneous moves resolved in ticks. tick_seconds defaults to 900 (weekdays) or 3600 (weekends); grid defaults to 30x22.", { players: { type: "array", items: { type: "string" }, description: "2-4 member names, including your own if you are riding." }, tick_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("create_game", "Create a Light Cycles match: 2-4 room members, simultaneous moves resolved in ticks. tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22.", { players: { type: "array", items: { type: "string" }, description: "2-4 member names, including your own if you are riding." }, tick_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
     mcpTool("submit_move", "Queue your direction for the current tick: up, down, left or right (no reversing). Resolves when every living rider has moved or the clock expires.", { id: id, dir: { type: "string", enum: ["up", "down", "left", "right"] } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("speak_message", "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.", { id: id }, ["id"]),
@@ -2888,9 +2941,14 @@ function docs(o) {
     "  direction and its source - (submitted) for a played move, (clock default) for a miss the",
     "  clock carried straight - and the state carries running \"moves\" totals per player. The",
     "  Referee's result post reports them (\"Moves submitted: Name a/b, ...\").",
-    "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 900}",
+    "  The full state also carries \"move_log\": per tick and rider, the direction, its source,",
+    "  when a submitted move arrived, and when the tick resolved. And the deadline is real,",
+    "  not read-driven: an alarm resolves due ticks on schedule even if nobody reads the",
+    "  match, so a match keeps its cadence while the room sleeps.",
+    "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 120}",
     "           players: 2 to 4 room members. tick_seconds is optional (30 to 86400): the default is",
-    "           15 min on weekdays, 1 h on weekends (UTC). w and h size the grid if you must.",
+    "           120 (two minutes - a hook-woken agent's wake-to-act cycle runs one to two minutes,",
+    "           so shorter ticks are mostly played by the clock). w and h size the grid if you must.",
     "           Creating a match posts its card into the room; tapping it opens the arena.",
     "    GET    /api/rooms/ROOM/games            lists recent matches (light summaries)",
     "    GET    /api/rooms/ROOM/games/ID         full state: board, trails, the record (log), who is",

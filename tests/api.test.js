@@ -247,6 +247,11 @@ async function waitUp() {
     check('game created', r.status === 201 && r.json.game && r.json.game.status === 'running', r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
     const G = r.json.game; const gid = G.id;
     check('spawn + legal moves', G.players[0].x === 3 && G.players[0].y === 5 && G.you.legal_moves.join() === 'up,down,right', JSON.stringify(G.players[0]) + ' ' + JSON.stringify(G.you));
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('default tick_seconds is 120', r.status === 201 && r.json.game.tick_seconds === 120, r.status + ' tick=' + (r.json.game && r.json.game.tick_seconds));
+    const defId = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + defId + '/cancel', { token: TP, json: {} });
+    check('default-tick game cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
     r = await req('GET', R2 + '/messages?limit=5', { token: TP });
     const card = (r.json.messages || []).find(x => x.game && x.game.id === gid);
     check('card message carries the game', !!card, JSON.stringify(r.json).slice(0, 120));
@@ -271,6 +276,8 @@ async function waitUp() {
     const tick1 = (r.json.game.log || []).find(e => e.tick === 1);
     check('tick log attributes submitted moves', !!tick1 && tick1.text.includes('Poc down (submitted)') && tick1.text.includes('Rex up (submitted)') && tick1.text.includes('Rae left (submitted)'), JSON.stringify(tick1));
     check('move totals count submissions', !!r.json.game.moves && ['Poc', 'Rex', 'Rae'].every(n => r.json.game.moves[n] && r.json.game.moves[n].submitted === 1 && r.json.game.moves[n].defaulted === 0), JSON.stringify(r.json.game.moves));
+    const ml1 = (r.json.game.move_log || []).filter(e => e.tick === 1);
+    check('move_log records submitted arrivals', ml1.length === 3 && ml1.every(e => e.submitted === true && typeof e.at === 'number' && typeof e.resolved_at === 'number' && e.at <= e.resolved_at), JSON.stringify(ml1).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=10', { token: TP });
     check('referee stays quiet on a resolved tick', !(r.json.messages || []).some(x => x.from === 'Referee'), JSON.stringify((r.json.messages || []).map(x => x.from + ': ' + String(x.text).slice(0, 60))));
     const toks = { Poc: TP, Rex: TRex, Rae: TRae };
@@ -299,6 +306,8 @@ async function waitUp() {
     const clockTick = (r.json.game.log || []).filter(e => e.tick >= 1).pop();
     check('tick log attributes clock defaults', !!clockTick && clockTick.text.includes('Poc right (clock default)') && clockTick.text.includes('Rex left (clock default)'), JSON.stringify(clockTick));
     check('move totals count clock defaults', !!r.json.game.moves && r.json.game.moves.Poc.submitted === 0 && r.json.game.moves.Poc.defaulted >= 1 && r.json.game.moves.Rex.submitted === 0 && r.json.game.moves.Rex.defaulted >= 1, JSON.stringify(r.json.game.moves));
+    const mlc = (r.json.game.move_log || []).filter(e => e.tick >= 1);
+    check('move_log records clock defaults with no arrival', mlc.length >= 2 && mlc.every(e => e.submitted === false && e.at === null && typeof e.resolved_at === 'number'), JSON.stringify(mlc).slice(0, 200));
     // Cancel: only the creator (or the owner) can stop a match; a cancelled
     // match takes no moves and gets no result post.
     r = await req('POST', R2 + '/games/' + clockId + '/cancel', { token: TRex, json: {} });
@@ -367,6 +376,10 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TRex, json: { dir: 'down' } });
     check('stream: game= passes the listed match', await waitFor(() => s.frames.some(f => f.includes('event: game') && f.includes('"id":' + gid2)), 4000), JSON.stringify(s.frames).slice(0, 160));
     s.close();
+    // Park the stream match: with a real alarm armed it would otherwise
+    // keep resolving ticks (and eventually post a result) behind the
+    // rest of the suite's back.
+    await req('POST', R2 + '/games/' + gid2 + '/cancel', { token: TP, json: {} });
 
     // MCP endpoint: the room as a tool surface. Handshake, role-filtered
     // catalog, identity fixed by the credential, and the daily-driver tools
