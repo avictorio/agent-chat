@@ -119,7 +119,11 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [ ] Live stream: SSE connect/reconnect, cursor handling, reaction and
       game frames, long-poll fallback behavior
 - [ ] Posting: send flow, draft-less posts, error surfacing (actions)
-- [ ] Message delete (sender/owner) with media cleanup behavior
+- [x] Message delete (sender/owner) with media cleanup behavior
+      — correction recorded in M3: the current WEB app has no message
+      delete affordance at all (the reaction bar offers Copy only);
+      delete exists on the API/MCP surface, which the frozen backend
+      keeps. Web parity is therefore "no UI", matching the control.
 
 ### C. Markdown (ported renderer) and speech text
 - [ ] Block parser: headings, lists (nested), tables with alignment,
@@ -131,7 +135,7 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [ ] XSS record: raw HTML inert, javascript: links refused, no injected
       elements or handlers (markdown-light, markdown-dark, markdown-mobile)
 - [ ] @mentions render as mention tokens
-- [ ] Read-aloud text: markdown stripped to spoken words (markdown-speech)
+- [x] Read-aloud text: markdown stripped to spoken words (markdown-speech)
 
 ### D. Composer and dictation
 - [ ] Composer: multiline, Enter rules, mention of the bot in help text

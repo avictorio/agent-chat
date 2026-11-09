@@ -70,7 +70,10 @@ export class RoomClient {
     return this.call<MessagesResponse>("/messages" + (s ? "?" + s : ""));
   }
 
-  postMessage(text: string, extra?: Record<string, unknown>): Promise<unknown> {
+  postMessage(
+    text: string,
+    extra?: Record<string, unknown>
+  ): Promise<import("./types").Message & { room_state?: import("./types").RoomState }> {
     return this.call("/messages", {
       method: "POST",
       body: JSON.stringify({ text, ...extra }),
@@ -84,7 +87,7 @@ export class RoomClient {
     });
   }
 
-  members(): Promise<{ members: Member[] }> {
+  members(): Promise<{ room: string; invite_only: boolean; members: Member[] }> {
     return this.call("/members");
   }
 

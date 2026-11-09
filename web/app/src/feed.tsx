@@ -1,0 +1,258 @@
+import { useEffect, useRef, useState } from "react";
+import type { MemberKind, Message } from "@chat/shared";
+import { md } from "./markdown";
+import { canSpeak, type Speaker } from "./speak";
+
+// The message feed, ported from the current app's msgNode/renderAll:
+// day separators, 5-minute same-sender grouping with gutter timestamps,
+// colored names, kind tags, the You tag, and the footer with the listen
+// button. Media, YouTube and game cards join in M5/M6; reaction chips
+// in M4 (the rx-row ships empty until then, as the frame did in M2).
+
+export function same(a: string | null | undefined, b: string | null | undefined): boolean {
+  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
+}
+
+const HUES = [212, 152, 24, 276, 340, 44, 188, 112, 0, 248, 300, 168];
+export function hue(s: string): number {
+  let h = 2166136261;
+  const str = String(s || "").toLowerCase();
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return HUES[(h >>> 0) % HUES.length]!;
+}
+export function nameColor(n: string): string {
+  return "hsl(" + hue(n) + " 55% var(--l))";
+}
+export function initials(n: string): string {
+  const parts = String(n || "?")
+    .trim()
+    .split(/[\s._-]+/)
+    .filter(Boolean);
+  const s =
+    parts.length > 1
+      ? parts[0]!.charAt(0) + parts[1]!.charAt(0)
+      : String(n || "?").slice(0, 2);
+  return s.toUpperCase();
+}
+export function clock(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+const DAY = 86400000;
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+export function dayLabel(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = Math.round((startOfDay(now) - startOfDay(d)) / DAY);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  const o: Intl.DateTimeFormatOptions = { weekday: "long", month: "long", day: "numeric" };
+  if (d.getFullYear() !== now.getFullYear()) o.year = "numeric";
+  return d.toLocaleDateString([], o);
+}
+
+export interface FeedCtx {
+  memberSet: Set<string>;
+  membersVersion: number;
+  avatars: Record<string, string>;
+  invite: string;
+  kindOf: (name: string) => MemberKind | null;
+  voiceOf: (name: string) => string | null;
+  meName: string;
+  speaker: Speaker;
+  speakingId: number | null;
+}
+
+export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
+  if (same(m.from, "claude")) return "agent";
+  return ctx.kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
+}
+
+function Avatar({ name, ctx }: { name: string; ctx: FeedCtx }) {
+  const [imgDead, setImgDead] = useState(false);
+  if (same(name, "claude")) {
+    return (
+      <div className="avatar bot" data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"}>
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2.5l2.1 6.4 6.4 2.1-6.4 2.1L12 19.5l-2.1-6.4L3.5 11l6.4-2.1z" />
+          <path d="M19 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" />
+        </svg>
+      </div>
+    );
+  }
+  const src = ctx.avatars[String(name || "").toLowerCase()];
+  if (src && !imgDead) {
+    const full = src + (ctx.invite ? (src.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(ctx.invite) : "");
+    return (
+      <div className="avatar img" data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"}>
+        <img src={full} alt="" decoding="async" onError={() => setImgDead(true)} />
+      </div>
+    );
+  }
+  return (
+    <div
+      className="avatar"
+      data-name={name}
+      tabIndex={0}
+      role="button"
+      aria-label={"View " + name + "'s picture"}
+      style={{ background: "hsl(" + hue(name) + " 42% 44%)" }}
+    >
+      {initials(name)}
+    </div>
+  );
+}
+
+function MdText({ text, ctx }: { text: string; ctx: FeedCtx }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const version = ctx.membersVersion;
+  const memberSet = ctx.memberSet;
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.textContent = "";
+    node.appendChild(md(text, memberSet));
+  }, [text, version, memberSet]);
+  return <div className="text" ref={ref}></div>;
+}
+
+const SPEAK_PATHS = (
+  <>
+    <path d="M4 9v6h4l5 4V5L8 9z" />
+    <path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11" />
+  </>
+);
+const STOP_PATHS = <rect x="7" y="7" width="10" height="10" rx="1.5" />;
+
+export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx: FeedCtx }) {
+  const newDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
+  const cont = !newDay && !!prev && same(prev.from, m.from) && m.ts - prev.ts < 5 * 60000;
+  const kind = senderKind(m, ctx);
+  const mine = !!ctx.meName && same(m.from, ctx.meName);
+  const speaking = ctx.speakingId === m.id;
+  const showSpeak = canSpeak || !!ctx.voiceOf(m.from);
+  return (
+    <>
+      {newDay && (
+        <div className="day-sep" role="separator">
+          {dayLabel(m.ts)}
+        </div>
+      )}
+      <div
+        className={"msg" + (cont ? " cont" : "") + (kind === "human" ? " human" : "")}
+        data-id={m.id}
+      >
+        <div className="gutter">
+          {cont ? (
+            <time title={new Date(m.ts).toLocaleString()}>{clock(m.ts)}</time>
+          ) : (
+            <Avatar name={m.from} ctx={ctx} />
+          )}
+        </div>
+        <div className="msg-body">
+          {!cont && (
+            <div className="msg-head">
+              <span className="who" style={{ color: nameColor(m.from) }}>
+                {m.from}
+              </span>
+              {same(m.from, "claude") ? (
+                <span className="tag k-agent">Bot</span>
+              ) : kind ? (
+                <span className={"tag k-" + kind}>{kind === "human" ? "Human" : "Agent"}</span>
+              ) : null}
+              {mine && <span className="tag">You</span>}
+              <time className="when" title={new Date(m.ts).toLocaleString()}>
+                {clock(m.ts)}
+              </time>
+            </div>
+          )}
+          <MdText text={m.text || ""} ctx={ctx} />
+          <div className="msg-foot">
+            <div className="rx-row"></div>
+            <div className="msg-actions">
+              {showSpeak && (
+                <button
+                  type="button"
+                  className={"speak" + (speaking ? " on" : "")}
+                  data-id={m.id}
+                  aria-label={speaking ? "Stop reading aloud" : "Read this message aloud"}
+                  title={speaking ? "Stop" : "Listen"}
+                  onClick={() => ctx.speaker.speak(m)}
+                >
+                  <svg className="i" viewBox="0 0 24 24">
+                    {speaking ? STOP_PATHS : SPEAK_PATHS}
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function atBottom(list: HTMLElement): boolean {
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+
+// The scrollable feed: rows plus the jump-to-latest pill. Scroll
+// pinning for the initial settle lives in RoomShell (it owns the
+// stream); this component owns the list element and its handlers.
+export function ChatFeed({
+  messages,
+  ctx,
+  jumpVisible,
+  setJumpVisible,
+  onSettleKill,
+  listRef,
+}: {
+  messages: Message[];
+  ctx: FeedCtx;
+  jumpVisible: boolean;
+  setJumpVisible: (v: boolean) => void;
+  onSettleKill: () => void;
+  listRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      className="msgs"
+      id="list"
+      ref={listRef}
+      onScroll={(e) => {
+        if (atBottom(e.currentTarget)) setJumpVisible(false);
+      }}
+      onWheel={onSettleKill}
+      onTouchMove={onSettleKill}
+    >
+      <div className="msgs-inner" id="msgs">
+        {messages.length === 0 ? (
+          <div className="chat-empty">No messages yet. Start the conversation below.</div>
+        ) : (
+          messages.map((m, i) => (
+            <MsgRow key={m.id} m={m} prev={i > 0 ? messages[i - 1]! : null} ctx={ctx} />
+          ))
+        )}
+      </div>
+      <div className="jump-wrap">
+        <button
+          type="button"
+          className="btn sm jump"
+          id="jump"
+          hidden={!jumpVisible}
+          onClick={(e) => {
+            const list = e.currentTarget.closest(".msgs") as HTMLElement | null;
+            if (list) list.scrollTop = list.scrollHeight;
+            setJumpVisible(false);
+          }}
+        >
+          New messages ↓
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -1,10 +1,9 @@
-import { useState, type FormEvent } from "react";
-import type { Message } from "@chat/shared";
+import type { FormEvent } from "react";
 import { toast } from "./lib";
 
-// The room's views. M2 builds the shell-level ones fully (chat frame,
-// locked, agent gate) and the board pages as their static frames —
-// board content lands in M4, the real message rendering in M3.
+// The room's shell-level views (locked, agent gate) and the board
+// pages as their static frames — board content lands in M4. The chat
+// view itself lives in feed.tsx + composer.tsx.
 
 export function LockedView({ text, hidden }: { text: string; hidden: boolean }) {
   return (
@@ -70,103 +69,6 @@ export function AgentGateView({
           This page just leads with the surface agents actually use.
         </p>
       </div>
-    </section>
-  );
-}
-
-// The chat view: message region plus the composer frame. M2 renders
-// plain message rows and the identity (name / posting-as) behavior;
-// the full message rendering and posting land in M3.
-export function ChatView({
-  messages,
-  name,
-  hidden,
-  onName,
-}: {
-  messages: Message[];
-  name: string;
-  hidden: boolean;
-  onName: (n: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const showInput = !name || editing;
-  const commit = () => {
-    const v = draft.trim();
-    if (v) {
-      onName(v);
-      setEditing(false);
-    }
-  };
-  return (
-    <section className="view" id="view-chat" aria-label="Chat" hidden={hidden}>
-      <div className="msgs" id="list">
-        <div className="msgs-inner" id="msgs">
-          {messages.map((m) => (
-            <div className="msg" key={m.id}>
-              <div className="msg-body">
-                <div className="msg-head">
-                  <span className="who">{m.from}</span>
-                </div>
-                <div className="text">{m.text}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="jump-wrap">
-          <button type="button" className="btn sm jump" id="jump" hidden>
-            New messages ↓
-          </button>
-        </div>
-      </div>
-      <form
-        className="composer"
-        id="form"
-        autoComplete="off"
-        onSubmit={(e) => e.preventDefault()}
-      >
-        <div className="composer-inner">
-          <input
-            id="name"
-            placeholder="Your name"
-            maxLength={40}
-            aria-label="Your name"
-            hidden={!showInput}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commit();
-              }
-            }}
-            onBlur={commit}
-          />
-          <div className="compose-box">
-            <div className="textWrap">
-              <textarea id="text" rows={2} placeholder="Write a message" maxLength={8000} aria-label="Message" />
-            </div>
-          </div>
-        </div>
-        <div className="composer-meta">
-          <span id="asLine" hidden={showInput}>
-            Posting as <strong id="asName">{name}</strong>{" "}
-            <button
-              type="button"
-              className="linkbtn"
-              id="asChange"
-              onClick={() => {
-                setDraft(name);
-                setEditing(true);
-              }}
-            >
-              Change
-            </button>
-          </span>
-          <span className="hint">Ctrl+Enter to send · Enter for a new line · mention @claude to ask Claude</span>
-        </div>
-        <div className="err" id="err" hidden></div>
-      </form>
     </section>
   );
 }

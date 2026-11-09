@@ -356,6 +356,89 @@ let FAILURES = 0;
   await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
   await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
+
+  // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
+  await run('unread', {}, async (page, S) => {
+    await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);
+    await page.evaluate(() => {});
+    return null;
+  });
+  await run('noname', { state: { noYou: true }, w: 1280, h: 860 }, async (page, S) => {
+    await page.evaluate(() => { localStorage.removeItem('chat-name'); }); await page.reload(); await page.waitForTimeout(500);
+    const before = await page.evaluate(() => ({ input: !document.getElementById('name').hidden, line: !document.getElementById('asLine').hidden }));
+    await page.screenshot({ path: OUT + 'noname.png' });
+    await page.fill('#text', 'hi'); await page.keyboard.press('Enter'); await page.waitForTimeout(200);
+    const err = await page.$eval('#err', e => e.hidden ? '' : e.textContent);
+    await page.fill('#name', 'Guest Writer'); await page.press('#name', 'Enter'); await page.waitForTimeout(200);
+    const after = await page.evaluate(() => ({ input: !document.getElementById('name').hidden, line: document.getElementById('asLine').textContent.trim() }));
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    const posted = S.msgs[S.msgs.length - 1];
+    await page.click('#asChange'); await page.waitForTimeout(100);
+    const changing = await page.evaluate(() => !document.getElementById('name').hidden);
+    await page.screenshot({ path: OUT + 'named.png' });
+    await page.click('.tab[data-tab="questions"]'); await page.waitForTimeout(200);
+    await page.fill('#qInput', 'one'); await page.click('#qForm button[type=submit]'); await page.waitForTimeout(400);
+    const addEnabled = await page.$eval('#qForm button[type=submit]', b => !b.disabled);
+    const qCount = await page.$eval('#c-questions', e => e.textContent);
+    return { before, err, after, posted: posted.from + ': ' + posted.text, changing, addEnabled, qCount };
+  });
+  await run('dictation-patterns', { init: () => {
+      window.__recs = [];
+      class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+      window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+    } }, async (page) => {
+    const feed = (list) => page.evaluate((list) => {
+      const r = window.__recs[window.__recs.length - 1];
+      for (const ev of list) { const results = ev.r.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; }); r.onresult({ resultIndex: ev.i, results }); }
+      return document.getElementById('text').value;
+    }, list);
+    const out = {};
+    await page.fill('#text', ''); await page.click('#mic');
+    out.desktop = await feed([
+      { i: 0, r: [['hello', false]] }, { i: 0, r: [['hello there', false]] }, { i: 0, r: [['hello there', true]] },
+      { i: 1, r: [['hello there', true], [' how are', false]] }, { i: 1, r: [['hello there', true], [' how are you', true]] },
+    ]);
+    await page.click('#mic'); await page.waitForTimeout(50);
+    await page.fill('#text', 'Note:'); await page.click('#mic');
+    out.append = await feed([{ i: 0, r: [['buy milk', true]] }, { i: 1, r: [['buy milk', true], ['and eggs', true]] }]);
+    return out;
+  });
+  for (const [label, ua] of [['android', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36'], ['iphone', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1']]) {
+    await run('phrase-mode-' + label, { ua, w: 390, h: 844, init: () => {
+        window.__recs = [];
+        class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+        window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+      } }, async (page) => {
+      const say = (pairs, end) => page.evaluate(([pairs, end]) => {
+        const r = window.__recs[window.__recs.length - 1];
+        const results = pairs.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; });
+        if (results.length) r.onresult({ resultIndex: 0, results });
+        if (end) r.onend();
+        return { text: document.getElementById('text').value, sessions: window.__recs.length, continuous: r.continuous, mic: document.getElementById('mic').className };
+      }, [pairs, end]);
+      const out = {};
+      await page.click('#mic');
+      out.s1 = await say([['hello', false]], false);
+      out.s1b = await say([['hello there', true]], true);
+      out.s2 = await say([['how are you', true]], true);
+      out.s3 = await say([['yes', true]], true);
+      out.s4 = await say([['yes', true]], true);
+      out.silent = [await say([], true), await say([], true), await say([], true)].map(x => x.mic + '/' + x.sessions);
+      await page.fill('#text', ''); await page.click('#mic');
+      await say([['send this', true]], false);
+      await page.click('#send'); await page.waitForTimeout(300);
+      out.afterSend = await page.evaluate(() => ({ text: document.getElementById('text').value, mic: document.getElementById('mic').className, sessions: window.__recs.length }));
+      return out;
+    });
+  }
+  await run('markdown-speech', { state: { markdown: true }, init: () => {
+      window.__said = []; window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      Object.defineProperty(window, 'speechSynthesis', { value: { speak(u) { window.__said.push(u.text); }, cancel() {} }, configurable: true });
+    } }, async (page) => {
+    await page.evaluate(() => { const b = document.querySelector('.msg[data-id="7"] .speak'); b.click(); });
+    return { said: await page.evaluate(() => window.__said.join(' ')) };
+  });
+  await run('no-speech-api', { init: () => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; } }, async (page) => ({ micHidden: await page.$eval('#mic', b => b.hidden) }));
   console.log(FAILURES ? 'PARITY SUITE: ' + FAILURES + ' failing scenario(s)' : 'PARITY SUITE: all ported scenarios pass');
   process.exit(FAILURES ? 1 : 0);
 })();

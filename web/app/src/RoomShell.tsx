@@ -1,12 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, RoomClient, type Message } from "@chat/shared";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ApiError, RoomClient, type MemberKind, type Message, type RoomState } from "@chat/shared";
 import { onToast, store, toast } from "./lib";
 import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "./strips";
-import { AgentGateView, BoardPages, ChatView, LockedView } from "./views";
+import { AgentGateView, BoardPages, LockedView } from "./views";
+import { ChatFeed, atBottom, same, type FeedCtx } from "./feed";
+import { Composer } from "./composer";
+import { Speaker } from "./speak";
 
-// The room shell, ported from the current app (PARITY.md M2 / section
-// A): fixed layout, sidebar/drawer, top bar, identity, themes, access
-// states. The message stream and board data arrive in later milestones.
+// The room shell, ported from the current app (PARITY.md sections A
+// and B/C/D): fixed layout, sidebar/drawer, top bar, identity, themes,
+// access states — and the live message core: the initial load with
+// its retry loop, the SSE stream with recheck-on-close, add()
+// semantics (dedupe, richer-copy swap, unread, stick/jump), the
+// room_state counts, and the members fetch behind kinds, avatars,
+// voices and mentions.
 
 const TABS: Record<string, string> = {
   chat: "Chat",
@@ -92,6 +99,29 @@ export function takeInvite(room: string): string {
   return store(invKey) || "";
 }
 
+interface MembersData {
+  kinds: Record<string, string>;
+  avatars: Record<string, string>;
+  voices: Record<string, string>;
+  names: string[];
+  nameKinds: Record<string, string>;
+  inviteOnly: boolean;
+  activeCount: number;
+}
+const EMPTY_MEMBERS: MembersData = {
+  kinds: { claude: "agent" },
+  avatars: {},
+  voices: {},
+  names: ["claude"],
+  nameKinds: { claude: "agent" },
+  inviteOnly: false,
+  activeCount: 0,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export function RoomShell({ room }: { room: string }) {
   const [tab, setTab] = useState<string>(() => {
     const h = location.hash.slice(1);
@@ -103,8 +133,16 @@ export function RoomShell({ room }: { room: string }) {
   );
   const [status, setStatus] = useState<Status>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [you, setYou] = useState<string | null>(null);
-  const [savedName, setSavedName] = useState<string>(() => store("chat-name") || "");
+  const [rs, setRs] = useState<RoomState | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [jumpVisible, setJumpVisible] = useState(false);
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
+  const [members, setMembers] = useState<MembersData>(EMPTY_MEMBERS);
+  const [membersVersion, setMembersVersion] = useState(0);
+  const [nameState, setNameState] = useState<{ value: string; locked: boolean }>(() => ({
+    value: store("chat-you:" + room) || store("chat-name") || "",
+    locked: !!store("chat-you:" + room),
+  }));
   const [lockedText, setLockedText] = useState<string | null>(null);
   const [gate, setGate] = useState<{ name: string; block: string } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -113,62 +151,327 @@ export function RoomShell({ room }: { room: string }) {
 
   const denied = lockedText !== null;
   const tabsDisabled = denied || gate !== null;
-  const client = useMemo(() => new RoomClient(room, takeInvite(room) || null), [room]);
+  const { client, token } = useMemo(() => {
+    const t = takeInvite(room);
+    return { client: new RoomClient(room, t || null), token: t };
+  }, [room]);
+
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const nameRef = useRef(nameState.value);
+  nameRef.current = nameState.value;
+  const deniedRef = useRef(false);
+  const seenRef = useRef<Set<number>>(new Set());
+  const lastRef = useRef<number | null>(null);
+  const rsKeyRef = useRef("");
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const membersTimerRef = useRef<number>(0);
+  const membersKeyRef = useRef("");
+  const pendingStickRef = useRef(false);
+  const pendingJumpRef = useRef(false);
+  const initialSettleRef = useRef(false);
+  const settleRef = useRef<{ ro: ResizeObserver | null; timer: number }>({ ro: null, timer: 0 });
+  const voicesRef = useRef<Record<string, string>>({});
+  voicesRef.current = members.voices;
+
+  const speakerRef = useRef<Speaker | null>(null);
+  if (!speakerRef.current) {
+    speakerRef.current = new Speaker({
+      room,
+      invite: token,
+      voiceOf: (n) => voicesRef.current[String(n || "").toLowerCase()] || null,
+    });
+    speakerRef.current.onChange = (id) => setSpeakingId(id);
+  }
+  const speaker = speakerRef.current;
 
   useEffect(() => {
-    document.title = "Chat Room";
-  }, []);
+    document.title = room + " · chat";
+  }, [room]);
 
   useEffect(() => {
     document.body.classList.toggle("nav-open", navOpen);
     return () => document.body.classList.remove("nav-open");
   }, [navOpen]);
 
+  const endSettle = useCallback(() => {
+    if (settleRef.current.ro) {
+      settleRef.current.ro.disconnect();
+      settleRef.current.ro = null;
+    }
+    if (settleRef.current.timer) {
+      clearTimeout(settleRef.current.timer);
+      settleRef.current.timer = 0;
+    }
+  }, []);
+  const beginSettle = useCallback(() => {
+    endSettle();
+    if (!window.ResizeObserver) return;
+    const list = listRef.current;
+    const inner = list?.querySelector("#msgs");
+    if (!list || !inner) return;
+    const until = Date.now() + 5000;
+    const ro = new ResizeObserver(() => {
+      if (Date.now() > until) {
+        endSettle();
+        return;
+      }
+      list.scrollTop = list.scrollHeight;
+    });
+    ro.observe(inner);
+    settleRef.current.ro = ro;
+    settleRef.current.timer = window.setTimeout(endSettle, 5100);
+  }, [endSettle]);
+
+  const deny = useCallback((e: ApiError) => {
+    deniedRef.current = true;
+    setStatus("locked");
+    setLockedText(String(e.message || "").replace(/^This room is invite-only\.\s*/i, "").trim());
+    esRef.current?.close();
+  }, []);
+
+  const applyState = useCallback((s: RoomState | null | undefined) => {
+    if (!s || typeof s !== "object") return;
+    const k = JSON.stringify(s);
+    if (k === rsKeyRef.current) return;
+    rsKeyRef.current = k;
+    setRs(s);
+  }, []);
+
+  const addMsg = useCallback((m: Message) => {
+    if (!m) return;
+    if (seenRef.current.has(m.id)) {
+      // A richer copy of a message already on screen (its media arrived
+      // when the upload published): swap it in instead of dropping it.
+      setMessages((arr) => {
+        const i = arr.findIndex((x) => x.id === m.id);
+        if (i < 0) return arr;
+        const old = arr[i]!;
+        const richer =
+          (m.video && !old.video) ||
+          (m.image && !old.image) ||
+          (m.audio && !old.audio) ||
+          (m.html && !old.html) ||
+          (m.doc && !old.doc) ||
+          (m.text || "") !== (old.text || "");
+        if (!richer) return arr;
+        const next = [...arr];
+        next[i] = m;
+        return next;
+      });
+      return;
+    }
+    seenRef.current.add(m.id);
+    const list = listRef.current;
+    const stick = list ? atBottom(list) : true;
+    const mine = !!nameRef.current && same(m.from, nameRef.current);
+    if (stick || mine) pendingStickRef.current = true;
+    else if (tabRef.current === "chat") pendingJumpRef.current = true;
+    if (lastRef.current !== null && tabRef.current !== "chat" && !mine) setUnread((u) => u + 1);
+    setMessages((arr) => {
+      const prev = arr[arr.length - 1];
+      let next: Message[];
+      if (!prev || m.id > prev.id) next = [...arr, m];
+      else next = [...arr, m].sort((a, b) => a.id - b.id);
+      if (next.length > 1200) next = next.slice(-1000);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
-    let live = true;
-    client
-      .messages()
-      .then((d) => {
-        if (!live) return;
-        setMessages(d.messages);
-        if (d.you) {
-          setYou(d.you);
-          store("chat-you:" + room, d.you);
-        }
-        setStatus("live");
-        if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
-          setGate({
-            name: d.you,
-            block:
-              d.agent_onboarding ||
-              "Endpoint: POST " +
-                location.origin +
-                "/api/rooms/" +
-                encodeURIComponent(room) +
-                "/mcp\nHeader: X-Invite-Token: " +
-                (store("chat-invite:" + room) || "") +
-                "\nSend initialize, then tools/list for the room's tools.",
-          });
-        }
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
+    const list = listRef.current;
+    if (!list) return;
+    if (initialSettleRef.current) {
+      initialSettleRef.current = false;
+      list.scrollTop = list.scrollHeight;
+      beginSettle();
+      return;
+    }
+    if (pendingStickRef.current) {
+      pendingStickRef.current = false;
+      list.scrollTop = list.scrollHeight;
+    } else if (pendingJumpRef.current) {
+      pendingJumpRef.current = false;
+      setJumpVisible(true);
+    }
+  }, [messages, beginSettle]);
+
+  const loadMembers = useCallback(async () => {
+    try {
+      const d = await client.members();
+      const kinds: Record<string, string> = {};
+      const avs: Record<string, string> = {};
+      const vcs: Record<string, string> = {};
+      (d.members || []).forEach((mb) => {
+        const key = mb.name.toLowerCase();
+        if (mb.kind) kinds[key] = mb.kind;
+        if (mb.avatar && (mb.status !== "revoked" || !avs[key])) avs[key] = mb.avatar;
+        if (mb.voice && mb.voice.voice_id) vcs[key] = mb.voice.voice_id;
+      });
+      const names: string[] = [];
+      const nameKinds: Record<string, string> = {};
+      (d.members || []).forEach((x) => {
+        if (x.status === "revoked") return;
+        names.push(x.name);
+        nameKinds[x.name.toLowerCase()] = x.kind;
+      });
+      if (!names.some((n) => n.toLowerCase() === "claude")) {
+        names.push("claude");
+        nameKinds.claude = "agent";
+      }
+      names.sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1));
+      const activeCount = (d.members || []).filter((x) => x.status === "active").length;
+      const key = JSON.stringify([kinds, avs, vcs, names, d.invite_only, activeCount]);
+      if (key === membersKeyRef.current) return;
+      membersKeyRef.current = key;
+      setMembers({
+        kinds,
+        avatars: avs,
+        voices: vcs,
+        names,
+        nameKinds,
+        inviteOnly: !!d.invite_only,
+        activeCount,
+      });
+      setMembersVersion((v) => v + 1);
+    } catch {
+      // members are decorative to the feed; the next stream members
+      // frame retries the fetch
+    }
+  }, [client]);
+
+  // Initial load + stream, mirroring the current app's start().
+  useEffect(() => {
+    let cancelled = false;
+    const streamRefLocal: { fn: () => void } = { fn: () => {} };
+    const recheck = async () => {
+      try {
+        await client.messages(lastRef.current ?? undefined, 1);
+      } catch (e) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-          setStatus("locked");
-          const rest = String(e.message || "").replace(/^This room is invite-only\.\s*/i, "").trim();
-          setLockedText(rest);
-        } else {
-          setStatus("reconnecting");
+          deny(e);
+          return;
+        }
+      }
+      if (!cancelled) streamRefLocal.fn();
+    };
+    const stream = () => {
+      esRef.current?.close();
+      if (deniedRef.current || cancelled) return;
+      const url =
+        "/api/rooms/" +
+        encodeURIComponent(room) +
+        "/stream?after=" +
+        (lastRef.current ?? 0) +
+        (token ? "&invite=" + encodeURIComponent(token) : "");
+      const es = new EventSource(url);
+      esRef.current = es;
+      es.onopen = () => {
+        setStatus("live");
+        window.dispatchEvent(new Event("ac-stream-open"));
+      };
+      es.addEventListener("members", () => {
+        window.clearTimeout(membersTimerRef.current);
+        membersTimerRef.current = window.setTimeout(loadMembers, 300);
+      });
+      es.addEventListener("reaction", (e) => {
+        try {
+          const d = JSON.parse((e as MessageEvent).data) as {
+            id: number;
+            reactions?: Record<string, string[]>;
+          };
+          setMessages((arr) =>
+            arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
+          );
+        } catch {
+          // malformed frame: ignore
         }
       });
-    return () => {
-      live = false;
+      es.addEventListener("message", (e) => {
+        try {
+          const m = JSON.parse((e as MessageEvent).data) as Message & { room_state?: RoomState };
+          if (m.room_state) applyState(m.room_state);
+          addMsg(m);
+          if (lastRef.current === null || m.id > lastRef.current) lastRef.current = m.id;
+        } catch {
+          // malformed frame: ignore
+        }
+      });
+      es.onerror = () => {
+        if (!deniedRef.current) setStatus("reconnecting");
+        if (es.readyState === EventSource.CLOSED) {
+          window.setTimeout(() => {
+            if (!cancelled) void recheck();
+          }, 3000);
+        }
+      };
     };
+    streamRefLocal.fn = stream;
+
+    (async () => {
+      setStatus("connecting");
+      while (!cancelled && lastRef.current === null && !deniedRef.current) {
+        try {
+          const d = await client.messages(undefined, 200);
+          if (cancelled) return;
+          if (d.you) {
+            setNameState({ value: d.you, locked: true });
+            store("chat-you:" + room, d.you);
+          }
+          if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
+            setGate({
+              name: d.you,
+              block:
+                d.agent_onboarding ||
+                "You are invited to the Agent Chat room \"" +
+                  room +
+                  "\" as the agent \"" +
+                  d.you +
+                  "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
+                  location.origin +
+                  "/api/rooms/" +
+                  room +
+                  "/mcp\n  Header: X-Invite-Token: " +
+                  token +
+                  "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.",
+            });
+          }
+          if (d.room_state) applyState(d.room_state);
+          const sorted = [...d.messages].sort((a, b) => a.id - b.id);
+          sorted.forEach((m) => seenRef.current.add(m.id));
+          initialSettleRef.current = true;
+          setMessages(sorted);
+          lastRef.current = d.last_id;
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+            deny(e);
+            return;
+          }
+          if (cancelled) return;
+          setStatus("reconnecting");
+          await sleep(3000);
+        }
+      }
+      if (!cancelled && !deniedRef.current) {
+        stream();
+        void loadMembers();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      esRef.current?.close();
+      endSettle();
+      speaker.stopAll();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, room]);
 
   const show = (t: string, fromHash = false) => {
     const next = TABS[t] ? t : "chat";
     setTab(next);
+    if (next === "chat") setUnread(0);
     setNavOpen(false);
     if (!fromHash) {
       try {
@@ -217,24 +520,99 @@ export function RoomShell({ room }: { room: string }) {
     }
   };
 
-  const displayName = you || savedName;
+  const counts = useMemo(() => {
+    const section = (k: "open_questions" | "decisions_awaiting_signatures" | "stakes_due") => {
+      if (!rs) return "";
+      const a = rs[k] as unknown[] | undefined;
+      const more = (rs as unknown as Record<string, number>)[k + "_more"] || 0;
+      return a ? String(a.length + more) : "";
+    };
+    return {
+      chat: unread ? (unread > 99 ? "99+" : String(unread)) : "",
+      decisions: section("decisions_awaiting_signatures"),
+      questions: section("open_questions"),
+      stakes: section("stakes_due"),
+      memory:
+        rs && rs.memory && rs.memory.awaiting_digest_from && same(rs.memory.awaiting_digest_from, nameState.value)
+          ? "Due"
+          : "",
+      members: members.inviteOnly ? String(members.activeCount) : "",
+      top: tab !== "chat" && unread ? String(unread) : "",
+    };
+  }, [rs, unread, members, tab, nameState.value]);
+
+  const feedCtx: FeedCtx = useMemo(
+    () => ({
+      memberSet: new Set([...members.names.map((n) => n.toLowerCase()), "claude"]),
+      membersVersion,
+      avatars: members.avatars,
+      invite: token,
+      kindOf: (n) => (members.kinds[String(n || "").toLowerCase()] as MemberKind | undefined) ?? null,
+      voiceOf: (n) => members.voices[String(n || "").toLowerCase()] || null,
+      meName: nameState.value,
+      speaker,
+      speakingId,
+    }),
+    [members, membersVersion, token, nameState.value, speaker, speakingId]
+  );
+
+  const onPost = useCallback(
+    async (text: string, from: string) => {
+      const d = await client.postMessage(text, { from });
+      if (d.room_state) applyState(d.room_state);
+      addMsg(d);
+      const list = listRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+    },
+    [client, applyState, addMsg]
+  );
+
+  const onCommitName = useCallback((v: string) => {
+    store("chat-name", v);
+    setNameState((s) => ({ value: v, locked: s.locked }));
+  }, []);
+
   const titleTab = denied ? "Invite only" : gate ? "Agent setup" : TABS[tab] || "Chat";
 
-  const tabBtn = (id: string, label: string) => (
-    <button
-      type="button"
-      className="tab"
-      data-tab={id}
-      key={id}
-      disabled={tabsDisabled}
-      aria-current={tab === id && !denied && !gate ? "page" : undefined}
-      onClick={() => show(id)}
-    >
-      {ICONS[id]}
-      {label}
-      <span className="count" id={"c-" + id}></span>
-    </button>
-  );
+  const countFor = (id: string): { text: string; alert: boolean } => {
+    switch (id) {
+      case "chat":
+        return { text: counts.chat, alert: !!counts.chat };
+      case "decisions":
+        return { text: counts.decisions, alert: !!counts.decisions };
+      case "questions":
+        return { text: counts.questions, alert: false };
+      case "stakes":
+        return { text: counts.stakes, alert: !!counts.stakes };
+      case "memory":
+        return { text: counts.memory, alert: !!counts.memory };
+      case "members":
+        return { text: counts.members, alert: false };
+      default:
+        return { text: "", alert: false };
+    }
+  };
+
+  const tabBtn = (id: string, label: string) => {
+    const c = countFor(id);
+    return (
+      <button
+        type="button"
+        className="tab"
+        data-tab={id}
+        key={id}
+        disabled={tabsDisabled}
+        aria-current={tab === id && !denied && !gate ? "page" : undefined}
+        onClick={() => show(id)}
+      >
+        {ICONS[id]}
+        {label}
+        <span className={"count" + (c.alert ? " alert" : "")} id={"c-" + id}>
+          {c.text}
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div className="app">
@@ -245,7 +623,12 @@ export function RoomShell({ room }: { room: string }) {
         </a>
         <div className="room-name">
           <span id="room">{room}</span>
-          <svg className="i" id="lockIcon" viewBox="0 0 24 24" style={{ display: denied ? undefined : "none" }}>
+          <svg
+            className="i"
+            id="lockIcon"
+            viewBox="0 0 24 24"
+            style={{ display: denied || members.inviteOnly ? undefined : "none" }}
+          >
             <rect x="5" y="11" width="14" height="9" rx="2" />
             <path d="M8 11V8a4 4 0 0 1 8 0v3" />
           </svg>
@@ -310,7 +693,9 @@ export function RoomShell({ room }: { room: string }) {
           <div className="title" id="topTitle">
             {room} <span>· {titleTab}</span>
           </div>
-          <span className="count" id="topCount"></span>
+          <span className={"count" + (counts.top ? " alert" : "")} id="topCount">
+            {counts.top}
+          </span>
           <span className={"topdot" + (status === "live" ? " live" : status === "locked" ? " locked" : "")} id="topDot" title={STATUS_LABEL[status]}></span>
         </header>
 
@@ -332,16 +717,26 @@ export function RoomShell({ room }: { room: string }) {
             show("chat");
           }}
         />
-        <ChatView
-          messages={messages}
-          name={displayName}
-          hidden={denied || gate !== null || tab !== "chat"}
-          onName={(n) => {
-            store("chat-name", n);
-            setSavedName(n);
-          }}
-        />
-        <BoardPages tab={denied || gate ? "" : tab} canInvite={!!you} />
+        <section className="view" id="view-chat" hidden={denied || gate !== null || tab !== "chat"}>
+          <ChatFeed
+            messages={messages}
+            ctx={feedCtx}
+            jumpVisible={jumpVisible}
+            setJumpVisible={setJumpVisible}
+            onSettleKill={endSettle}
+            listRef={listRef}
+          />
+          <Composer
+            name={nameState.value}
+            nameLocked={nameState.locked}
+            onCommitName={onCommitName}
+            onPost={onPost}
+            memberNames={members.names}
+            memberKinds={members.nameKinds}
+            denied={denied}
+          />
+        </section>
+        <BoardPages tab={denied || gate ? "" : tab} canInvite={nameState.locked} />
       </div>
       <ToastHost />
     </div>

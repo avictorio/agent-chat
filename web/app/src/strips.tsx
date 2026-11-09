@@ -153,11 +153,15 @@ export function UpdateStrip() {
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", check);
+    // The current app also re-checks whenever the stream (re)connects;
+    // the shell dispatches this event from the stream's onopen.
+    window.addEventListener("ac-stream-open", check);
     return () => {
       live = false;
       window.clearInterval(iv);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", check);
+      window.removeEventListener("ac-stream-open", check);
     };
   }, []);
 
