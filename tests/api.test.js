@@ -263,6 +263,10 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + gid + '/moves', { token: TRex, json: { dir: 'up' } });
     r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TRae, json: { dir: 'left' } });
     check('last move resolves the tick', r.status === 200 && r.json.resolved === true && r.json.game.tick === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('GET', R2 + '/games/' + gid, { token: TP });
+    const tick1 = (r.json.game.log || []).find(e => e.tick === 1);
+    check('tick log attributes submitted moves', !!tick1 && tick1.text.includes('Poc down (submitted)') && tick1.text.includes('Rex up (submitted)') && tick1.text.includes('Rae left (submitted)'), JSON.stringify(tick1));
+    check('move totals count submissions', !!r.json.game.moves && ['Poc', 'Rex', 'Rae'].every(n => r.json.game.moves[n] && r.json.game.moves[n].submitted === 1 && r.json.game.moves[n].defaulted === 0), JSON.stringify(r.json.game.moves));
     r = await req('GET', R2 + '/messages?limit=10', { token: TP });
     check('referee stays quiet on a resolved tick', !(r.json.messages || []).some(x => x.from === 'Referee'), JSON.stringify((r.json.messages || []).map(x => x.from + ': ' + String(x.text).slice(0, 60))));
     const toks = { Poc: TP, Rex: TRex, Rae: TRae };
@@ -282,11 +286,15 @@ async function waitUp() {
     check('referee posted the result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + gid)), JSON.stringify((r.json.messages || []).map(x => x.from)));
     const refPosts = (r.json.messages || []).filter(x => x.from === 'Referee' && x.text.includes('match #' + gid));
     check('exactly one referee post per match (the result)', refPosts.length === 1 && refPosts[0].text.includes('is over'), JSON.stringify(refPosts.map(x => x.text.slice(0, 60))));
+    check('result post reports move totals', refPosts.length === 1 && refPosts[0].text.includes('Moves submitted:'), refPosts.map(x => x.text.slice(0, 160)).join(' | '));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
     await new Promise(res => setTimeout(res, 31000));
     r = await req('GET', R2 + '/games/' + clockId, { token: TP });
     check('expired tick sends bikes straight', r.json.game.tick >= 1 && r.json.game.players[0].x >= 4 && r.json.game.players[0].alive, JSON.stringify(r.json.game.players));
+    const clockTick = (r.json.game.log || []).filter(e => e.tick >= 1).pop();
+    check('tick log attributes clock defaults', !!clockTick && clockTick.text.includes('Poc right (clock default)') && clockTick.text.includes('Rex left (clock default)'), JSON.stringify(clockTick));
+    check('move totals count clock defaults', !!r.json.game.moves && r.json.game.moves.Poc.submitted === 0 && r.json.game.moves.Poc.defaulted >= 1 && r.json.game.moves.Rex.submitted === 0 && r.json.game.moves.Rex.defaulted >= 1, JSON.stringify(r.json.game.moves));
     // Cancel: only the creator (or the owner) can stop a match; a cancelled
     // match takes no moves and gets no result post.
     r = await req('POST', R2 + '/games/' + clockId + '/cancel', { token: TRex, json: {} });

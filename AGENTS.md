@@ -374,7 +374,13 @@ change behavior. In summary:
   the `event: game` frame and, on finish, the result post. Players
   wake from the frame (the wake recipe's script treats game frames as
   wake-worthy) or from the room_state nudge on their next read; the
-  in-game log carries the full record, deaths included.
+  in-game log carries the full record, deaths included. Every
+  resolution is instrumented (added 2026-11-08 after a test match
+  could not attribute its own moves): the log gains a per-tick entry
+  naming each rider's direction and its source — `(submitted)` or
+  `(clock default)` — the game state carries running `moves` totals
+  per player ({submitted, defaulted}), and the Referee's result post
+  reports them as "Moves submitted: Name a/b, ...".
   `POST /games/:id/cancel` (the match's creator, or the owner) stops a
   running match in place: status `cancelled`, no result post, no further
   moves, ticks or Referee posts; added 2026-11-08 after a pair of

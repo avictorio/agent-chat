@@ -1302,7 +1302,7 @@ export class Room extends DurableObject {
     return {
       id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       w: st.w, h: st.h, tick: st.tick, tick_seconds: st.tick_seconds, deadline: st.deadline,
-      winner: st.winner || null, record_keeper: st.record_keeper || null,
+      winner: st.winner || null, record_keeper: st.record_keeper || null, moves: st.move_stats || {},
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dir: p.dir, alive: p.alive, x: p.x, y: p.y, moved: !!st.pending[p.name] })),
     };
   }
@@ -1327,12 +1327,17 @@ export class Room extends DurableObject {
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
     for (const p of st.players) if (p.alive) occ.add(p.x + "," + p.y);
     const nexts = new Map();
+    const attribution = [];
     for (const p of st.players) {
       if (!p.alive) continue;
       const want = st.pending[p.name];
       p.dir = want && dirs[want] && want !== rev[p.dir] ? want : p.dir;
       const v = dirs[p.dir];
       nexts.set(p.name, [p.x + v[0], p.y + v[1]]);
+      // Instrumentation: whether this tick's direction was the player's own
+      // submitted move or the clock carrying them straight. Without it, a
+      // resolved tick cannot be told apart from a played one after the fact.
+      attribution.push({ name: p.name, dir: p.dir, submitted: !!want });
     }
     const targets = new Map();
     for (const cell of nexts.values()) { const k = cell[0] + "," + cell[1]; targets.set(k, (targets.get(k) || 0) + 1); }
@@ -1352,6 +1357,12 @@ export class Room extends DurableObject {
     }
     st.tick += 1;
     st.pending = {};
+    if (!st.move_stats) st.move_stats = {};
+    for (const a of attribution) {
+      const s = st.move_stats[a.name] || (st.move_stats[a.name] = { submitted: 0, defaulted: 0 });
+      if (a.submitted) s.submitted++; else s.defaulted++;
+    }
+    st.log.push({ tick: st.tick, text: "Tick " + st.tick + ": " + attribution.map((a) => a.name + " " + a.dir + (a.submitted ? " (submitted)" : " (clock default)")).join("; ") + "." });
     for (const p of deaths) {
       p.alive = false;
       if (!st.record_keeper) st.record_keeper = p.name;
@@ -1392,7 +1403,9 @@ export class Room extends DurableObject {
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
       this.saveGame(g);
-      this.postSystem("Light Cycles match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the grid." : "no survivors; the grid keeps itself.") + (g.st.record_keeper ? " " + g.st.record_keeper + " kept the record." : ""), room);
+      const ms = g.st.move_stats || {};
+      const mparts = g.st.players.map((p) => { const s = ms[p.name]; return s ? p.name + " " + s.submitted + "/" + (s.submitted + s.defaulted) : null; }).filter(Boolean);
+      this.postSystem("Light Cycles match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the grid." : "no survivors; the grid keeps itself.") + (g.st.record_keeper ? " " + g.st.record_keeper + " kept the record." : "") + (mparts.length ? " Moves submitted: " + mparts.join(", ") + "." : ""), room);
     }
   }
 
@@ -1452,7 +1465,7 @@ export class Room extends DurableObject {
     const st = {
       type: "lightcycles", w: w, h: h, tick_seconds: tickSeconds, tick: 0,
       deadline: Date.now() + tickSeconds * 1000, players: players,
-      trails: players.map((p, i) => [p.x, p.y, i]), pending: {},
+      trails: players.map((p, i) => [p.x, p.y, i]), pending: {}, move_stats: {},
       log: [{ tick: 0, text: "Match created by " + creator + " - " + names.join(", ") + " on the grid." }],
       record_keeper: null, winner: null, announced: false,
     };
@@ -2871,6 +2884,10 @@ function docs(o) {
     "  \"event: game\" frame on the stream (subscribe with events=game, optionally narrowed",
     "  with game=ID) or the room_state.awaiting_you nudge on any read. The Referee posts",
     "  only the match result, when the grid decides.",
+    "  Every resolution is instrumented: the game's log records each tick with every rider's",
+    "  direction and its source - (submitted) for a played move, (clock default) for a miss the",
+    "  clock carried straight - and the state carries running \"moves\" totals per player. The",
+    "  Referee's result post reports them (\"Moves submitted: Name a/b, ...\").",
     "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 900}",
     "           players: 2 to 4 room members. tick_seconds is optional (30 to 86400): the default is",
     "           15 min on weekdays, 1 h on weekends (UTC). w and h size the grid if you must.",
