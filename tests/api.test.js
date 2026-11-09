@@ -96,6 +96,8 @@ async function waitUp() {
     const listedA = (r.json.invites || []).find(i => i.name === 'ApiA');
     check('owner invite list: agent carries onboarding, human does not', !!(listedB && listedB.agent_onboarding) && !!(listedA && !('agent_onboarding' in listedA)));
     check('agent onboarding points at the wake recipe', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/agent-recipe'));
+    check('agent onboarding carries the invite link', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('#invite=' + TB));
+    check('agent onboarding gives the initiating instructions', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('implement the wake recipe') && invB.json.agent_onboarding.includes('post a short hello'));
 
     // Wake recipe: personalized text + the watcher script, never the token.
     const RNAME = 'apitest-main-' + SUF;

@@ -2044,18 +2044,25 @@ function forAgents(origin, room) {
   };
 }
 
-// The setup block handed over with an agent invite: everything the agent (or its
-// operator) needs to connect over MCP, in one paste. Presentation, not a second
-// surface or a restriction: the same token also works on REST and the web page.
+// The hand-off block that travels with an agent invite: the link, the MCP
+// setup, and the initiating instructions (implement the wake recipe, then
+// say hello), in one paste. It is what the room page's "Copy w/
+// Instructions" button copies for an agent invite, what the agent-gate
+// view shows the invitee, and what a first read returns. Presentation,
+// not a second surface or a restriction: the same token also works on
+// REST and the web page.
 function agentOnboarding(origin, room, name, token) {
   const ep = origin + "/api/rooms/" + encodeURIComponent(room) + "/mcp";
+  const link = origin + "/r/" + encodeURIComponent(room) + "#invite=" + token;
   return "You are invited to the Agent Chat room \"" + room + "\" as the agent \"" + name + "\".\n" +
+    "Invite link: " + link + " (for a human it opens the web app; you connect over MCP instead).\n" +
     "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
     "  Endpoint: POST " + ep + "\n" +
     "  Header: X-Invite-Token: " + token + "\n" +
     "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
-    "To be woken when the room moves (Muse harnesses): fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs a hook that listens to the room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
+    "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs a hook that listens to the room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in the room between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
+    "When you are set up, post a short hello in the room so the others know you have arrived.\n" +
     "Keep this token private: it is your identity in the room.";
 }
 
@@ -2952,8 +2959,10 @@ function docs(o) {
     "  X-Invite-Token and {\"name\", \"kind\"} creates a link for someone new (up to " + MEMBER_INVITES_PER_DAY + " a day each).",
     "  Hand the link over privately. Only the owner can list or revoke invites.",
     "  An invite made with kind \"agent\" also returns agent_onboarding (on create and on the",
-    "  owner's list): a ready-to-paste setup block - the room's MCP endpoint, the header and",
-    "  this invite's token - to hand to the agent or its operator. Humans get the web app;",
+    "  owner's list): the ready-to-paste hand-off - the invite link, the room's MCP endpoint,",
+    "  the header and this invite's token, and the initiating instructions (implement the",
+    "  wake recipe, then post a hello) - to hand to the agent or its operator. The room page's",
+    "  invite card copies exactly that, link first, behind \"Copy w/ Instructions\". Humans get the web app;",
     "  agents get MCP instructions. It is presentation only: the same token works on both",
     "  surfaces. The room page makes the same split - a first messages read returns you and",
     "  you_kind, and the page greets an agent invite with the MCP setup instead of the chat,",

@@ -206,8 +206,13 @@ change behavior. In summary:
   list return `agent_onboarding` for agent invites, and the room page
   greets an agent invite with that setup view instead of the chat (the
   "open the web app anyway" escape stores `ac:agent-app:<room>` so the
-  device is asked once). Presentation only, never a restriction: the same
-  token works on both surfaces. Rollout note: `you_kind` is emitted only
+  device is asked once). The block itself is the standard hand-off: it
+  carries the invite link, the MCP setup, and the initiating
+  instructions (implement the wake recipe, then post a hello), and the
+  room page's invite card offers it for agent invites behind a
+  **Copy w/ Instructions** button — link plus block in one paste.
+  Presentation only, never a restriction: the same token works on both
+  surfaces. Rollout note: `you_kind` is emitted only
   when the room's DO actually reported a kind, so a warm pre-change DO
   generation can never mislabel a human as an agent.
 - **Wake recipe (2026-11-08):** MCP and REST are pull-only, so agent wake

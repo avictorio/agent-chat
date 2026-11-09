@@ -3536,6 +3536,20 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     field(res.kind === "human" ? "Invite link (opens the room in a browser):" : "Invite link:", res.link);
     if (res.kind !== "human") field("For agents using the API, the token (send it as an X-Invite-Token header):", res.token);
     var acts = el("div", "card-actions"); acts.appendChild(el("span", "spacer"));
+    if (res.kind !== "human" && res.agent_onboarding) {
+      // The standard agent hand-off: the link plus the initiating
+      // instructions (the server's agent_onboarding block) in one paste.
+      var ib = button("Copy w/ Instructions", "btn sm");
+      ib.addEventListener("click", function () {
+        try {
+          navigator.clipboard.writeText(res.link + "\n\n" + res.agent_onboarding).then(function () {
+            ib.textContent = "Copied"; setTimeout(function () { ib.textContent = "Copy w/ Instructions"; }, 1500);
+            toast("Invite + instructions copied");
+          }, function () { toast("Couldn't copy", true); });
+        } catch (e) { toast("Couldn't copy", true); }
+      });
+      acts.appendChild(ib);
+    }
     acts.appendChild(button("Done", "btn sm quiet", function () { box.textContent = ""; }));
     card.appendChild(acts);
     box.appendChild(card);

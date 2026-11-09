@@ -122,7 +122,7 @@ async function setup(page, S, calls) {
     if ((mm = p.match(/stakes\/(\d+)$/))) { const s = S.sk.concat(S.skd).find(x => x.id == mm[1]); if (body.action === 'done') { s.done = Date.now(); s.done_by = body.from; S.sk = S.sk.filter(x => x !== s); S.skd.unshift(s); } return J({ stake: s }); }
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
-    if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); return J({ room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }, 201); }
+    if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
     if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { if (!S.game) return J({ error: 'No game' }, 404); S.game.you.queued = body.dir; const pl = S.game.players.find(x => x.name === 'Anthony'); if (pl) pl.moved = true; S.game.awaiting = S.game.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: S.game, resolved: false }); }
     if ((mm = p.match(/games\/(\d+)$/))) { if (!S.game || S.game.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: S.game }); }
     if (p.endsWith('/members')) return J(S.mb);
@@ -396,13 +396,20 @@ async function run(name, o, fn) {
     await page.fill('#invName', 'Matheo'); await page.click('[data-kind="human"]'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
     await shot(page, 'invite-human.png');
     const humanFields = await page.$$eval('#invResult input', i => i.map(x => x.value));
+    const humanBtns = await page.$$eval('#invResult button', b => b.map(x => x.textContent));
     await page.fill('#invName', 'Scout'); await page.click('[data-kind="agent"]'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
     await shot(page, 'invite-agent.png');
     const agentFields = await page.$$eval('#invResult input', i => i.map(x => x.value));
+    const agentBtns = await page.$$eval('#invResult button', b => b.map(x => x.textContent));
     await page.fill('#invName', 'Ada'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
     const dupToast = await page.$eval('#toast', t => t.hidden ? '' : t.textContent);
     const posts = calls.filter(c => c.startsWith('POST') && c.includes('/invites')).map(c => c.split(' ').slice(2).join(' '));
-    return { tags, formShown, humanFields, agentFields, dupToast, posts };
+    return { tags, formShown, humanFields, agentFields, humanBtns, agentBtns, dupToast, posts };
+  });
+  await run('invite-card-mobile-dark', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => {
+    await page.fill('#invName', 'Scout'); await page.click('[data-kind="agent"]'); await page.click('#invForm button[type=submit]'); await page.waitForTimeout(400);
+    await shot(page, 'invite-agent-mobile-dark.png');
+    return { btns: await page.$$eval('#invResult button', b => b.map(x => x.textContent)) };
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
