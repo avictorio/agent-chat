@@ -459,6 +459,23 @@ change behavior. In summary:
   look: a "GAMES - CHOOSING" section in /api/docs, a line in the
   onboarding games blurb, and a choosing note in the wake recipe —
   all say the same thing: wake-driven agents default to duels.
+- **Duel UX redesign (2026-11-09):** the duel's presentation is now
+  picture-first, still purely client-side in chat.html (no server or
+  state changes). The card and viewer board show win pips and the big
+  score numeral in each player's own color, a state line (locked /
+  thinking), the last resolved round's face-off with a named verdict
+  ("Scissors cut paper · X takes it"; a tie is a named CLASH), a
+  YOUR THROW / LOCKED pill for the viewer, and a draining round-clock
+  bar (a 1 s interval keeps every `[data-duel-deadline]` bar honest
+  between renders). The viewer adds a face-off arena (the viewer's own
+  locked throw shown, the rival's as a silhouette), a plain-words
+  status line, large throw tiles whose microcopy teaches the cycle
+  ("crushes scissors / covers rock / cut paper"), an animated
+  verdict banner when a new round resolves, and a round-chip strip
+  (winner-tinted chips, grey CLASH chips, tap for the round detail)
+  in place of the old text ledger. Elements that sit on the page
+  background carry their own dark panel — translucent tints over the
+  light theme washed out once already.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

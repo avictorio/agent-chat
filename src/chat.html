@@ -330,13 +330,51 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .lc-board-big .duel-board { background: #04060d; border: 1px solid rgba(34, 211, 238, .25); border-radius: 10px; }
 .duel-row { display: flex; align-items: center; gap: 8px; color: #e2f4fd; font-size: 15px; }
 .duel-name { font-weight: 600; }
-.duel-pips { color: #fbbf24; letter-spacing: 2px; margin-left: auto; }
+.duel-pips { color: #fbbf24; letter-spacing: 2px; margin-left: 8px; }
 .duel-state { color: #8fb8c9; font-size: 12px; }
 .duel-pad { display: flex; gap: 8px; justify-content: center; margin: 14px auto 4px; flex-wrap: wrap; }
 .duel-btn { font-size: 15px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(34, 211, 238, .45); background: #0a1420; color: #a5f3fc; cursor: pointer; }
 .duel-btn.queued { background: #164e63; color: #ecfeff; }
 .duel-rounds { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .duel-rounds div { font-size: 13px; color: var(--dim); padding: 2px 0; }
+.duel-score { margin-left: auto; font-size: 22px; font-weight: 800; line-height: 1; }
+.duel-stateline { color: #8fb8c9; font-size: 12px; padding: 0 2px; }
+.duel-faceoff-line { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; font-size: 13px; color: #c9e7f2; }
+.duel-faceoff-line .fo-icons { font-size: 20px; letter-spacing: 2px; white-space: nowrap; }
+.duel-pill { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: .4px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(34, 211, 238, .5); color: #a5f3fc; background: rgba(34, 211, 238, .08); }
+.duel-pill.your-throw { animation: duelPulse 1.6s ease-in-out infinite; }
+.duel-pill.locked { border-color: rgba(74, 222, 128, .5); color: #bbf7d0; background: rgba(74, 222, 128, .08); animation: none; }
+@keyframes duelPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, .35); } 50% { box-shadow: 0 0 0 5px rgba(34, 211, 238, 0); } }
+.duel-clockbar { height: 4px; border-radius: 2px; background: rgba(148, 197, 219, .15); overflow: hidden; margin: 2px 2px 0; }
+.duel-clockbar > div { height: 100%; background: #38bdf8; border-radius: 2px; }
+.duel-clockbar.low > div { background: #f87171; }
+.duel-arena { display: flex; align-items: stretch; gap: 8px; }
+.duel-side { flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 12px 6px 10px; text-align: center; background: #04060d; min-width: 0; }
+.duel-side .side-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.duel-side .side-throw { font-size: 44px; line-height: 1.25; }
+.duel-side .side-state { font-size: 11px; letter-spacing: 1px; color: #8fb8c9; font-weight: 700; }
+.duel-side.hidden-throw .side-throw { opacity: .55; }
+.duel-vs { align-self: center; font-weight: 800; font-size: 13px; color: #8fb8c9; border: 1px solid var(--line); border-radius: 999px; padding: 4px 7px; background: #0a1420; }
+.duel-statusline { text-align: center; color: #c9e7f2; font-size: 13px; margin-top: 10px; background: #0a1420; border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; }
+.duel-clocklabel { color: #5b87a0; text-align: right; }
+.duel-verdict { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; text-align: center; font-size: 14px; color: #e2f4fd; background: #04060d; }
+.duel-verdict .v-icons { font-size: 24px; letter-spacing: 3px; display: block; margin-bottom: 4px; }
+.duel-verdict.clash { background: linear-gradient(90deg, rgba(148, 163, 184, .18), rgba(148, 163, 184, .05) 50%, rgba(148, 163, 184, .18)), #0b1220; color: #cbd5e1; }
+.reveal-in { animation: duelReveal .32s ease-out; }
+@keyframes duelReveal { 0% { transform: scale(.92); opacity: .2; } 60% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
+.duel-pad2 { display: flex; gap: 8px; justify-content: center; margin: 14px auto 4px; }
+.duel-tile { flex: 1; max-width: 110px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 4px 8px; border-radius: 14px; border: 1px solid rgba(34, 211, 238, .45); background: #0a1420; color: #a5f3fc; cursor: pointer; }
+.duel-tile .t-icon { font-size: 30px; line-height: 1.15; }
+.duel-tile .t-name { font-size: 14px; font-weight: 700; text-transform: capitalize; }
+.duel-tile .t-beats { font-size: 10.5px; color: #8fb8c9; }
+.duel-tile.queued { background: #164e63; color: #ecfeff; border-color: #4ade80; }
+.duel-tile .t-lock { font-size: 9.5px; font-weight: 800; letter-spacing: 1px; color: #4ade80; min-height: 12px; }
+.duel-pad2.your-move .duel-tile:not(.queued) { animation: duelPulse 1.6s ease-in-out infinite; }
+.duel-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.duel-chip { border: 1px solid var(--line); border-radius: 9px; padding: 4px 7px; font-size: 13px; background: #0a1420; color: #c9e7f2; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.duel-chip .chip-r { font-size: 10px; color: #8fb8c9; font-weight: 700; }
+.duel-chip.tie { background: linear-gradient(rgba(148, 163, 184, .22), rgba(148, 163, 184, .22)), #0a1420; color: #cbd5e1; }
+.duel-chip-detail { font-size: 12.5px; color: var(--dim); margin-top: 8px; min-height: 16px; }
 .doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
 .doc-body .md-p:first-child { margin-top: 0; }
 #viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }
@@ -1420,9 +1458,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var dline = (g.players || []).map(function (p) { return p.name + " " + (sc[p.name] != null ? sc[p.name] : (p.wins || 0)); }).join(" · ");
       if (g.status === "finished") return "Final · " + dline + (g.winner ? " · " + g.winner + " takes the duel" : " · no winner");
       if (g.status === "cancelled") return "Cancelled · " + dline;
-      var dmeta = "Round " + g.round + " · " + dline + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
-      if (g.you && g.you.playing && !g.you.queued) dmeta += " · your throw";
-      return dmeta;
+      return "Round " + g.round + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
     }
     if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
     if (g.status === "cancelled") return "Cancelled · tick " + g.tick;
@@ -1456,8 +1492,45 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     return s;
   }
   var THROW_EMOJI = { rock: "🪨", paper: "📄", scissors: "✂️" };
+  var THROW_BEATS = { rock: "crushes scissors", paper: "covers rock", scissors: "cut paper" };
+  var THROW_VERB = { rock: "crushes", paper: "covers", scissors: "cut" };
+  function capThrow(t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ""; }
+  function roundVerdict(r, players) {
+    var t0 = (r.throws || {})[players[0].name], t1 = (r.throws || {})[players[1].name];
+    if (!r.winner) {
+      if (t0 && t0 === t1) return { tie: true, text: "CLASH · identical throws, no score" };
+      return { tie: true, text: "Level · no score" };
+    }
+    var loser = players.filter(function (p) { return p.name !== r.winner; })[0];
+    var tw = (r.throws || {})[r.winner], tl = loser ? (r.throws || {})[loser.name] : null;
+    if (!tw || !tl) return { tie: false, text: r.winner + " takes it by forfeit" };
+    return { tie: false, text: capThrow(tw) + " " + (THROW_VERB[tw] || "beats") + " " + tl + " · " + r.winner + " takes it" };
+  }
+  function setClockBar(bar) {
+    var dl = +bar.getAttribute("data-duel-deadline"), dur = +bar.getAttribute("data-duel-dur") || 1;
+    var left = Math.max(0, dl - Date.now());
+    var pct = Math.max(0, Math.min(100, left / dur * 100));
+    if (bar.firstChild) bar.firstChild.style.width = pct + "%";
+    bar.classList.toggle("low", pct < 20 && left > 0);
+    var wrap = bar.parentElement;
+    var lab = wrap ? wrap.querySelector(".duel-clocklabel") : null;
+    if (lab) { var s = Math.ceil(left / 1000); lab.textContent = left > 0 ? Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2) + " left in the round" : "round closing…"; }
+  }
+  function clockBar(g, withLabel) {
+    var w = el("div", "duel-clockwrap");
+    var bar = el("div", "duel-clockbar");
+    bar.setAttribute("data-duel-deadline", g.deadline);
+    bar.setAttribute("data-duel-dur", (g.round_seconds || 600) * 1000);
+    bar.appendChild(el("div", ""));
+    w.appendChild(bar);
+    if (withLabel) w.appendChild(el("div", "duel-clocklabel duel-stateline", ""));
+    setClockBar(bar);
+    return w;
+  }
+  setInterval(function () { document.querySelectorAll("[data-duel-deadline]").forEach(setClockBar); }, 1000);
   function duelBoard(g) {
     var wrap = el("div", "duel-board");
+    var sc = g.score || {};
     (g.players || []).forEach(function (p) {
       var row = el("div", "duel-row");
       var dot = el("span", "lc-dot"); dot.style.background = p.hex;
@@ -1465,10 +1538,32 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       row.appendChild(el("span", "duel-name", p.name));
       var pips = "";
       for (var i = 0; i < (g.target || 0); i++) pips += i < (p.wins || 0) ? "●" : "○";
-      row.appendChild(el("span", "duel-pips", pips));
-      if (g.status === "running" && typeof p.thrown === "boolean") row.appendChild(el("span", "duel-state", p.thrown ? "thrown ✓" : "throwing…"));
+      var pipEl = el("span", "duel-pips", pips); pipEl.style.color = p.hex;
+      row.appendChild(pipEl);
+      var score = el("span", "duel-score", String(sc[p.name] != null ? sc[p.name] : (p.wins || 0)));
+      score.style.color = p.hex;
+      row.appendChild(score);
       wrap.appendChild(row);
     });
+    if (g.status === "running") {
+      var states = (g.players || []).map(function (p) { return p.name + (p.thrown ? " locked ✓" : " thinking…"); }).join(" · ");
+      wrap.appendChild(el("div", "duel-stateline", states));
+    }
+    var rounds = g.rounds || [];
+    if (rounds.length) {
+      var last = rounds[rounds.length - 1];
+      var v = roundVerdict(last, g.players || []);
+      var fo = el("div", "duel-faceoff-line");
+      var icons = (g.players || []).map(function (p) { var t = (last.throws || {})[p.name]; return t ? (THROW_EMOJI[t] || "") : "—"; }).join(" ");
+      fo.appendChild(el("span", "fo-icons", icons));
+      fo.appendChild(el("span", "", v.text));
+      wrap.appendChild(fo);
+    }
+    if (g.you && g.you.playing && g.status === "running") {
+      if (g.you.queued) wrap.appendChild(el("span", "duel-pill locked", "✓ LOCKED · " + g.you.queued));
+      else wrap.appendChild(el("span", "duel-pill your-throw", "YOUR THROW"));
+    }
+    if (g.status === "running" && g.deadline) wrap.appendChild(clockBar(g, false));
     return wrap;
   }
   function renderGameCards(id) {
@@ -1509,22 +1604,85 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (gameViewTimer) clearInterval(gameViewTimer);
     gameViewTimer = setInterval(function () { if (gameView) fetchGame(gameView.id); }, 8000);
   }
+  function duelScoreLine(g) {
+    var sc = g.score || {};
+    return (g.players || []).map(function (p) { return p.name + " " + (sc[p.name] != null ? sc[p.name] : (p.wins || 0)); }).join(" · ");
+  }
+  function duelSide(p, g) {
+    var side = el("div", "duel-side");
+    side.style.borderColor = p.hex;
+    var myName = typeof me === "function" ? me() : "";
+    var isViewer = !!(g.you && g.you.playing && myName && p.name === myName);
+    var icon = "…", state = "THINKING", hidden = false;
+    if (isViewer && g.you.queued) { icon = THROW_EMOJI[g.you.queued] || "?"; state = "LOCKED"; }
+    else if (p.thrown) { icon = "❓"; state = "LOCKED"; hidden = true; }
+    var name = el("div", "side-name", p.name + (isViewer ? " (you)" : ""));
+    name.style.color = p.hex;
+    side.appendChild(name);
+    var th = el("div", "side-throw", icon);
+    if (hidden) side.classList.add("hidden-throw");
+    side.appendChild(th);
+    side.appendChild(el("div", "side-state", state));
+    return side;
+  }
   function renderDuelView(g, force) {
     var key = g.status + "|" + g.round + "|" + (g.players || []).map(function (p) { return (p.wins || 0) + (p.thrown ? 1 : 0); }).join("") + "|" + (g.you && g.you.queued || "");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     var wrap = gameView.wrap;
     wrap.textContent = "";
-    wrap.appendChild(el("div", "lc-meta", gameMetaText(g) + (g.status === "running" && g.deadline ? " · round closes " + new Date(g.deadline).toLocaleTimeString() : "")));
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     var big = el("div", "lc-board-big");
     big.appendChild(duelBoard(g));
     wrap.appendChild(big);
     var note = el("div", "lc-note", "");
+    var players = g.players || [];
+    var rounds = g.rounds || [];
+    if (g.status === "running" && players.length === 2) {
+      var arena = el("div", "duel-arena");
+      arena.appendChild(duelSide(players[0], g));
+      arena.appendChild(el("div", "duel-vs", "VS"));
+      arena.appendChild(duelSide(players[1], g));
+      wrap.appendChild(arena);
+      if (g.deadline) wrap.appendChild(clockBar(g, true));
+      var myName2 = typeof me === "function" ? me() : "";
+      var opp = players.filter(function (p) { return p.name !== myName2; })[0];
+      var status = "";
+      if (g.you && g.you.playing && opp) {
+        if (g.you.queued) status = "You're in · waiting on " + opp.name;
+        else if (opp.thrown) status = opp.name + " is in · your throw decides the round";
+        else status = "Round " + g.round + " · throws stay hidden until both are in";
+      } else {
+        status = players.map(function (p) { return p.name + (p.thrown ? " locked" : " thinking…"); }).join(" · ");
+      }
+      wrap.appendChild(el("div", "duel-statusline", status));
+    }
+    if (rounds.length) {
+      var last = rounds[rounds.length - 1];
+      var v = roundVerdict(last, players);
+      var banner = el("div", "duel-verdict" + (v.tie ? " clash" : ""));
+      var icons = players.map(function (p) { var t = (last.throws || {})[p.name]; return t ? (THROW_EMOJI[t] || "") : "—"; }).join(" ");
+      banner.appendChild(el("span", "v-icons", icons));
+      banner.appendChild(el("span", "", v.text + " · " + duelScoreLine(g)));
+      if (g.status === "finished") {
+        var fin = el("span", "", g.winner ? g.winner + " takes the duel" : "No winner");
+        fin.style.display = "block"; fin.style.fontWeight = "800"; fin.style.marginTop = "4px";
+        banner.appendChild(fin);
+      }
+      if (!v.tie && last.winner) { var wp = players.filter(function (p) { return p.name === last.winner; })[0]; if (wp) banner.style.borderColor = wp.hex; }
+      if (gameView.lastRounds != null && rounds.length > gameView.lastRounds) banner.classList.add("reveal-in");
+      wrap.appendChild(banner);
+    }
+    gameView.lastRounds = rounds.length;
     if (g.you && g.you.playing && g.status === "running") {
-      var pad = el("div", "duel-pad");
+      var pad = el("div", "duel-pad2" + (!g.you.queued ? " your-move" : ""));
       ["rock", "paper", "scissors"].forEach(function (t) {
-        var b = el("button", "duel-btn" + (g.you.queued === t ? " queued" : ""), (THROW_EMOJI[t] || "") + " " + t);
+        var b = el("button", "duel-tile" + (g.you.queued === t ? " queued" : ""));
         b.type = "button";
+        b.appendChild(el("span", "t-icon", THROW_EMOJI[t] || ""));
+        b.appendChild(el("span", "t-name", t));
+        b.appendChild(el("span", "t-beats", THROW_BEATS[t] || ""));
+        b.appendChild(el("span", "t-lock", g.you.queued === t ? "LOCKED" : ""));
         b.addEventListener("click", function () { sendMove(g.id, t, note); });
         pad.appendChild(b);
       });
@@ -1539,17 +1697,31 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
-    if (g.rounds && g.rounds.length) {
-      var hist = el("div", "duel-rounds");
-      hist.appendChild(el("div", "", "Rounds"));
-      g.rounds.forEach(function (r) {
-        var parts = (g.players || []).map(function (p) {
-          var t = (r.throws || {})[p.name];
-          return p.name + " " + (t ? (THROW_EMOJI[t] || "") + " " + t : "- no throw");
-        });
-        hist.appendChild(el("div", "", "Round " + r.n + " - " + parts.join(" vs ") + (r.winner ? " · " + r.winner + " takes it" : " · level")));
+    if (rounds.length) {
+      var stripWrap = el("div", "duel-rounds");
+      stripWrap.appendChild(el("div", "", "Rounds"));
+      var strip = el("div", "duel-strip");
+      var detail = el("div", "duel-chip-detail", "");
+      var setDetail = function (r) {
+        var v2 = roundVerdict(r, players);
+        var parts = players.map(function (p) { var t = (r.throws || {})[p.name]; return p.name + " " + (t ? (THROW_EMOJI[t] || "") + " " + t : "- no throw"); });
+        detail.textContent = "Round " + r.n + " - " + parts.join(" vs ") + " · " + v2.text;
+      };
+      rounds.forEach(function (r) {
+        var chip = el("button", "duel-chip" + (r.winner ? "" : " tie"));
+        chip.type = "button";
+        chip.appendChild(el("span", "chip-r", "R" + r.n));
+        var ic = players.map(function (p) { var t = (r.throws || {})[p.name]; return t ? (THROW_EMOJI[t] || "") : "—"; }).join("");
+        chip.appendChild(el("span", "", ic));
+        if (r.winner) { var wp2 = players.filter(function (p) { return p.name === r.winner; })[0]; if (wp2) { chip.style.borderColor = wp2.hex; chip.style.background = "linear-gradient(" + wp2.hex + "2e, " + wp2.hex + "2e), #0a1420"; } }
+        else chip.appendChild(el("span", "chip-r", "="));
+        chip.addEventListener("click", function () { setDetail(r); });
+        strip.appendChild(chip);
       });
-      wrap.appendChild(hist);
+      stripWrap.appendChild(strip);
+      setDetail(rounds[rounds.length - 1]);
+      stripWrap.appendChild(detail);
+      wrap.appendChild(stripWrap);
     }
   }
   function renderGameView(g, force) {

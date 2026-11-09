@@ -18,6 +18,7 @@ function fresh(opts) {
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
       ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
+      ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -52,6 +53,26 @@ function fresh(opts) {
       log: [{ tick: 0, text: 'Match created by Henry - Ada, Henry, Anthony on the grid.' }],
       awaiting: ['Henry', 'Anthony'],
       you: { playing: true, alive: true, dir: 'down', queued: null, legal_moves: ['down', 'left', 'right'] } } : null,
+    duel: (opts.duel || opts.duelDone) ? { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', created_by: 'Ada', card_msg: 10, round: opts.duelDone ? 7 : 4, best_of: 5, target: 3, round_seconds: 600, deadline: now + 400e3, winner: opts.duelDone ? 'Anthony' : null,
+      score: opts.duelDone ? { Ada: 2, Anthony: 3 } : { Ada: 1, Anthony: 0 },
+      players: [
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone },
+        { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false },
+      ],
+      rounds: opts.duelDone ? [
+        { n: 1, throws: { Ada: 'scissors', Anthony: 'paper' }, winner: 'Ada', at: now - 40e3, throws_at: { Ada: now - 41e3, Anthony: now - 40e3 } },
+        { n: 2, throws: { Ada: 'rock', Anthony: 'rock' }, winner: null, at: now - 35e3, throws_at: { Ada: now - 36e3, Anthony: now - 35e3 } },
+        { n: 3, throws: { Ada: 'paper', Anthony: 'paper' }, winner: null, at: now - 30e3, throws_at: { Ada: now - 31e3, Anthony: now - 30e3 } },
+        { n: 4, throws: { Ada: 'rock', Anthony: 'scissors' }, winner: 'Ada', at: now - 25e3, throws_at: { Ada: now - 26e3, Anthony: now - 25e3 } },
+        { n: 5, throws: { Ada: 'paper', Anthony: 'scissors' }, winner: 'Anthony', at: now - 20e3, throws_at: { Ada: now - 21e3, Anthony: now - 20e3 } },
+        { n: 6, throws: { Ada: 'scissors', Anthony: 'scissors' }, winner: null, at: now - 15e3, throws_at: { Ada: now - 16e3, Anthony: now - 15e3 } },
+        { n: 7, throws: { Ada: 'paper', Anthony: 'scissors' }, winner: 'Anthony', at: now - 10e3, throws_at: { Ada: now - 11e3, Anthony: now - 10e3 } },
+      ] : [
+        { n: 1, throws: { Ada: 'scissors', Anthony: 'paper' }, winner: 'Ada', at: now - 30e3, throws_at: { Ada: now - 31e3, Anthony: now - 30e3 } },
+        { n: 2, throws: { Ada: 'rock', Anthony: 'rock' }, winner: null, at: now - 25e3, throws_at: { Ada: now - 26e3, Anthony: now - 25e3 } },
+        { n: 3, throws: { Ada: 'paper', Anthony: 'paper' }, winner: null, at: now - 20e3, throws_at: { Ada: now - 21e3, Anthony: now - 20e3 } },
+      ],
+      you: { playing: true, queued: null } } : null,
     mb: { invite_only: true, members: [
       { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Anthony' },
       { name: 'Henry', kind: 'agent', avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Henry', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Henry".\nThen implement the wake recipe and post a short hello.' },
@@ -123,8 +144,8 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
-    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { if (!S.game) return J({ error: 'No game' }, 404); S.game.you.queued = body.dir; const pl = S.game.players.find(x => x.name === 'Anthony'); if (pl) pl.moved = true; S.game.awaiting = S.game.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: S.game, resolved: false }); }
-    if ((mm = p.match(/games\/(\d+)$/))) { if (!S.game || S.game.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: S.game }); }
+    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
+    if ((mm = p.match(/games\/(\d+)$/))) { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -253,6 +274,70 @@ async function run(name, o, fn) {
     await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
     await page.waitForTimeout(300);
     await shot(page, 'game-mobile-arena.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
+  });
+  // Duel UX: the card carries identity-colored pips and score numerals, the
+  // last round's face-off with its verdict, a YOUR THROW pill and the round
+  // clock bar; the viewer is a face-off arena with big throw tiles (beats
+  // microcopy), a plain-words status line, the last-round verdict banner and
+  // a round-chip strip. A tile tap queues the throw through the API.
+  await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    out.pill = await page.$eval('.game-card .duel-pill', e => e.textContent);
+    out.pipColor = await page.$eval('.game-card .duel-row .duel-pips', e => getComputedStyle(e).color);
+    out.faceoff = await page.$eval('.game-card .duel-faceoff-line', e => e.textContent);
+    out.clockbar = await page.$$eval('.game-card .duel-clockbar', els => els.length);
+    if (!/YOUR THROW/.test(out.pill)) throw new Error('card pill wrong: ' + out.pill);
+    if (out.pipColor !== 'rgb(34, 211, 238)') throw new Error('Ada pips should be her cyan, got ' + out.pipColor);
+    if (!/CLASH/.test(out.faceoff)) throw new Error('card face-off should name the clash: ' + out.faceoff);
+    if (out.clockbar !== 1) throw new Error('card should carry one round clock bar, got ' + out.clockbar);
+    await shot(page, 'duel-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    out.tiles = await page.$$eval('#viewer .duel-tile .t-beats', els => els.map(e => e.textContent));
+    out.status = await page.$eval('#viewer .duel-statusline', e => e.textContent);
+    out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
+    if (JSON.stringify(out.tiles) !== JSON.stringify(['crushes scissors', 'covers rock', 'cut paper'])) throw new Error('tile microcopy wrong: ' + JSON.stringify(out.tiles));
+    if (!/your throw decides the round/.test(out.status)) throw new Error('status line wrong: ' + out.status);
+    if (!/CLASH/.test(out.verdict)) throw new Error('verdict banner should name the clash: ' + out.verdict);
+    await shot(page, 'duel-arena.png');
+    await page.click('#viewer .duel-tile:nth-child(3)');
+    await page.waitForFunction(() => document.querySelector('#viewer .duel-tile.queued'), null, { timeout: 4000 });
+    out.moveCall = calls.filter(c => c.includes('/games/2/moves')).pop() || '';
+    if (!/"dir":"scissors"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
+    await shot(page, 'duel-arena-queued.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('duel-finished', { state: { duelDone: true } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
+    if (!/Final/.test(out.cardMeta)) throw new Error('finished card meta wrong: ' + out.cardMeta);
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-verdict', { timeout: 4000 });
+    out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
+    out.chips = await page.$$eval('#viewer .duel-chip', els => els.length);
+    out.rematch = await page.$$eval('#viewer button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
+    if (!/takes the duel/.test(out.verdict)) throw new Error('finished verdict wrong: ' + out.verdict);
+    if (out.chips !== 7) throw new Error('strip should carry 7 round chips, got ' + out.chips);
+    if (out.rematch !== 1) throw new Error('finished duel should offer one Rematch, got ' + out.rematch);
+    await shot(page, 'duel-finished.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('duel-mobile', { state: { duel: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await shot(page, 'duel-mobile-card.png');
+    await page.tap('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'duel-mobile-arena.png');
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };
