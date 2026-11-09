@@ -91,6 +91,33 @@ export class RoomClient {
     return this.call("/members");
   }
 
+  // The board's call(): any room endpoint with a JSON body, ApiError on
+  // failure carrying the server's error text.
+  api<T>(path: string, method?: string, body?: unknown): Promise<T> {
+    const init: RequestInit = { method: method || "GET" };
+    if (body !== undefined) {
+      init.headers = { "Content-Type": "application/json" };
+      init.body = JSON.stringify(body);
+    }
+    return this.call(path, init);
+  }
+
+  // Avatar upload sends raw image bytes, not JSON.
+  async putAvatar(blob: Blob): Promise<unknown> {
+    const headers: Record<string, string> = {
+      "Content-Type": blob.type || "application/octet-stream",
+    };
+    if (this.token) headers["X-Invite-Token"] = this.token;
+    const res = await fetch("/api/rooms/" + encodeURIComponent(this.room) + "/avatar", {
+      method: "PUT",
+      headers,
+      body: blob,
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new ApiError(res.status, data.error || "HTTP " + res.status);
+    return data;
+  }
+
   game(id: number): Promise<GameResponse> {
     return this.call<GameResponse>("/games/" + id);
   }

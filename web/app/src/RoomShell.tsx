@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, RoomClient, type MemberKind, type Message, type RoomState } from "@chat/shared";
+import {
+  ApiError,
+  RoomClient,
+  type BoardData,
+  type Constitution,
+  type Decision,
+  type Digest,
+  type MemberKind,
+  type MembersResponse,
+  type Message,
+  type Question,
+  type RoomState,
+  type Stake,
+} from "@chat/shared";
 import { onToast, store, toast } from "./lib";
 import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "./strips";
-import { AgentGateView, BoardPages, LockedView } from "./views";
+import { AgentGateView, LockedView } from "./views";
 import { ChatFeed, atBottom, same, type FeedCtx } from "./feed";
 import { Composer } from "./composer";
 import { Speaker } from "./speak";
+import { AvatarDialog, BoardSections, usePhotoUpload, type BoardApi } from "./board";
+import { useReactions } from "./reactions";
+import { daysAway } from "./dates";
 
 // The room shell, ported from the current app (PARITY.md sections A
 // and B/C/D): fixed layout, sidebar/drawer, top bar, identity, themes,
@@ -144,6 +160,9 @@ export function RoomShell({ room }: { room: string }) {
     locked: !!store("chat-you:" + room),
   }));
   const [lockedText, setLockedText] = useState<string | null>(null);
+  const [boardData, setBoardData] = useState<BoardData | null>(null);
+  const [boardView, setBoardView] = useState<BoardData | null>(null);
+  const [avatarName, setAvatarName] = useState<string | null>(null);
   const [gate, setGate] = useState<{ name: string; block: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const inst = useInstall();
@@ -174,6 +193,12 @@ export function RoomShell({ room }: { room: string }) {
   const settleRef = useRef<{ ro: ResizeObserver | null; timer: number }>({ ro: null, timer: 0 });
   const voicesRef = useRef<Record<string, string>>({});
   voicesRef.current = members.voices;
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
+  const boardDataRef = useRef<BoardData | null>(null);
+  const editingCountRef = useRef(0);
+  const pendingBoardRef = useRef(false);
+  const boardTimerRef = useRef<number>(0);
 
   const speakerRef = useRef<Speaker | null>(null);
   if (!speakerRef.current) {
@@ -235,8 +260,13 @@ export function RoomShell({ room }: { room: string }) {
     if (!s || typeof s !== "object") return;
     const k = JSON.stringify(s);
     if (k === rsKeyRef.current) return;
+    const first = rsKeyRef.current === "";
     rsKeyRef.current = k;
     setRs(s);
+    if (!first && tabRef.current !== "chat") {
+      window.clearTimeout(boardTimerRef.current);
+      boardTimerRef.current = window.setTimeout(() => void loadAllRef.current(), 700);
+    }
   }, []);
 
   const addMsg = useCallback((m: Message) => {
@@ -297,10 +327,30 @@ export function RoomShell({ room }: { room: string }) {
     }
   }, [messages, beginSettle]);
 
-  const loadMembers = useCallback(async () => {
-    try {
-      const d = await client.members();
-      const kinds: Record<string, string> = {};
+  const who = useCallback((): string | null => {
+    const n = (nameRef.current || "").trim();
+    if (n) return n;
+    const v = window.prompt("What name should others see for you in this room?") || "";
+    const t = v.trim();
+    if (!t) return null;
+    store("chat-name", t);
+    setNameState((st) => ({ value: t, locked: st.locked }));
+    return t;
+  }, []);
+
+  const editingDelta = useCallback((d: number) => {
+    editingCountRef.current += d;
+    if (editingCountRef.current <= 0) {
+      editingCountRef.current = 0;
+      if (pendingBoardRef.current) {
+        pendingBoardRef.current = false;
+        setBoardView(boardDataRef.current);
+      }
+    }
+  }, []);
+
+  const applyMembersData = useCallback((d: MembersResponse) => {
+    const kinds: Record<string, string> = {};
       const avs: Record<string, string> = {};
       const vcs: Record<string, string> = {};
       (d.members || []).forEach((mb) => {
@@ -334,12 +384,44 @@ export function RoomShell({ room }: { room: string }) {
         inviteOnly: !!d.invite_only,
         activeCount,
       });
-      setMembersVersion((v) => v + 1);
+    setMembersVersion((v) => v + 1);
+  }, []);
+
+  const loadMembers = useCallback(async () => {
+    try {
+      applyMembersData(await client.members());
     } catch {
       // members are decorative to the feed; the next stream members
       // frame retries the fetch
     }
-  }, [client]);
+  }, [client, applyMembersData]);
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [con, dc, q, sk, dg, mb] = await Promise.all([
+        client.api<{ constitution: Constitution | null; history: Constitution[] }>("/constitution?history=1"),
+        client.api<{ decisions: Decision[] }>("/decisions"),
+        client.api<{ questions: Question[]; resolved: Question[] }>("/questions"),
+        client.api<{ stakes: Stake[]; done: Stake[] }>("/stakes"),
+        client.api<{ digests: Digest[] }>("/digests?limit=20"),
+        client.api<MembersResponse>("/members"),
+      ]);
+      const data: BoardData = { con, dc: dc.decisions, q, sk, dg: dg.digests, mb };
+      boardDataRef.current = data;
+      setBoardData(data);
+      applyMembersData(mb);
+      if (editingCountRef.current > 0) pendingBoardRef.current = true;
+      else setBoardView(data);
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        deny(e);
+        return;
+      }
+      if (!deniedRef.current) toast("Couldn't load the room board: " + (e as Error).message, true);
+    }
+  }, [client, deny, applyMembersData]);
+  const loadAllRef = useRef(loadAll);
+  loadAllRef.current = loadAll;
 
   // Initial load + stream, mirroring the current app's start().
   useEffect(() => {
@@ -373,7 +455,7 @@ export function RoomShell({ room }: { room: string }) {
       };
       es.addEventListener("members", () => {
         window.clearTimeout(membersTimerRef.current);
-        membersTimerRef.current = window.setTimeout(loadMembers, 300);
+        membersTimerRef.current = window.setTimeout(() => void loadAllRef.current(), 300);
       });
       es.addEventListener("reaction", (e) => {
         try {
@@ -456,6 +538,7 @@ export function RoomShell({ room }: { room: string }) {
       if (!cancelled && !deniedRef.current) {
         stream();
         void loadMembers();
+        void loadAllRef.current();
       }
     })();
 
@@ -520,7 +603,52 @@ export function RoomShell({ room }: { room: string }) {
     }
   };
 
+  const rx = useReactions({
+    client,
+    who,
+    meName: nameState.value,
+    getMessage: (id) => messagesRef.current.find((m) => m.id === id),
+    setMessages: (fn) => setMessages(fn),
+    listRef,
+    denied,
+  });
+
+  const photo = usePhotoUpload({
+    putAvatar: (blob) => client.putAvatar(blob),
+    loadAll,
+  });
+
   const counts = useMemo(() => {
+    const chat = unread ? (unread > 99 ? "99+" : String(unread)) : "";
+    const top = tab !== "chat" && unread ? String(unread) : "";
+    if (boardData) {
+      const active = boardData.mb.members.filter((x) => x.status === "active").map((x) => x.name);
+      const dcN = boardData.dc.filter((x) => {
+        const signers = x.signers || [];
+        const missing = active.filter((a) => !signers.some((sg) => same(sg, a)));
+        return !signers.length || missing.length > 0;
+      }).length;
+      const soon = boardData.sk.stakes.filter((x) => {
+        const n = daysAway(x.date);
+        return n !== null && n <= 30;
+      }).length;
+      const overdue = boardData.sk.stakes.some((x) => {
+        const n = daysAway(x.date);
+        return n !== null && n < 0;
+      });
+      return {
+        chat,
+        decisions: dcN ? String(dcN) : "",
+        questions: boardData.q.questions.length ? String(boardData.q.questions.length) : "",
+        stakes: soon ? String(soon) + (overdue ? "!" : "") : "",
+        memory:
+          rs && rs.memory && rs.memory.awaiting_digest_from && same(rs.memory.awaiting_digest_from, nameState.value)
+            ? "Due"
+            : "",
+        members: boardData.mb.invite_only ? String(active.length) : "",
+        top,
+      };
+    }
     const section = (k: "open_questions" | "decisions_awaiting_signatures" | "stakes_due") => {
       if (!rs) return "";
       const a = rs[k] as unknown[] | undefined;
@@ -528,7 +656,7 @@ export function RoomShell({ room }: { room: string }) {
       return a ? String(a.length + more) : "";
     };
     return {
-      chat: unread ? (unread > 99 ? "99+" : String(unread)) : "",
+      chat,
       decisions: section("decisions_awaiting_signatures"),
       questions: section("open_questions"),
       stakes: section("stakes_due"),
@@ -537,13 +665,17 @@ export function RoomShell({ room }: { room: string }) {
           ? "Due"
           : "",
       members: members.inviteOnly ? String(members.activeCount) : "",
-      top: tab !== "chat" && unread ? String(unread) : "",
+      top,
     };
-  }, [rs, unread, members, tab, nameState.value]);
+  }, [boardData, rs, unread, members, tab, nameState.value]);
 
+  const memberSet = useMemo(
+    () => new Set([...members.names.map((n) => n.toLowerCase()), "claude"]),
+    [members]
+  );
   const feedCtx: FeedCtx = useMemo(
     () => ({
-      memberSet: new Set([...members.names.map((n) => n.toLowerCase()), "claude"]),
+      memberSet,
       membersVersion,
       avatars: members.avatars,
       invite: token,
@@ -552,8 +684,28 @@ export function RoomShell({ room }: { room: string }) {
       meName: nameState.value,
       speaker,
       speakingId,
+      rx: rx.api,
+      rxTargetId: rx.targetId,
+      onAvatar: (n) => setAvatarName(n),
     }),
-    [members, membersVersion, token, nameState.value, speaker, speakingId]
+    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId]
+  );
+
+  const boardApi: BoardApi = useMemo(
+    () => ({
+      board: boardView,
+      api: (path, method, body) => client.api(path, method, body),
+      putAvatar: (blob) => client.putAvatar(blob),
+      who,
+      loadAll,
+      meName: nameState.value,
+      isMember: nameState.locked,
+      editingDelta,
+      openAvatar: (n) => setAvatarName(n),
+      invite: token,
+      rs,
+    }),
+    [boardView, client, who, loadAll, nameState.value, nameState.locked, editingDelta, token, rs]
   );
 
   const onPost = useCallback(
@@ -725,6 +877,7 @@ export function RoomShell({ room }: { room: string }) {
             setJumpVisible={setJumpVisible}
             onSettleKill={endSettle}
             listRef={listRef}
+            holdProps={rx.holdProps}
           />
           <Composer
             name={nameState.value}
@@ -736,8 +889,11 @@ export function RoomShell({ room }: { room: string }) {
             denied={denied}
           />
         </section>
-        <BoardPages tab={denied || gate ? "" : tab} canInvite={nameState.locked} />
+        <BoardSections tab={denied || gate ? "" : tab} api={boardApi} photo={photo} />
       </div>
+      <AvatarDialog name={avatarName} mb={boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
+      {rx.popovers}
+      {photo.el}
       <ToastHost />
     </div>
   );

@@ -120,9 +120,82 @@ export interface Member {
   invited: number;
   joined: number | null;
   last_seen: number | null;
+  invited_by?: string;
+  revoked?: number | null;
   avatar?: string;
   voice?: { provider: string; voice_id: string | null; sample: boolean };
   invite_link?: string;
+  agent_onboarding?: string;
+}
+
+export interface Constitution {
+  version: number;
+  ts: number;
+  editor: string;
+  text: string;
+}
+
+export interface Decision {
+  id: number;
+  ts: number;
+  added_by: string;
+  title: string;
+  note: string | null;
+  signers: string[];
+}
+
+export type QuestionStatus = "open" | "claimed" | "resolved";
+
+export interface Question {
+  id: number;
+  ts: number;
+  added_by: string;
+  text: string;
+  status: QuestionStatus;
+  claimed_by: string | null;
+  resolved_by?: string | null;
+  resolution?: string | null;
+}
+
+export interface Stake {
+  id: number;
+  ts: number;
+  added_by: string;
+  title: string;
+  date: string | null;
+  note: string | null;
+  done_by?: string | null;
+}
+
+export interface Digest {
+  id: number;
+  ts: number;
+  day: string;
+  author: string;
+  text: string;
+}
+
+export interface MembersResponse {
+  room: string;
+  invite_only: boolean;
+  members: Member[];
+}
+
+export interface BoardData {
+  con: { constitution: Constitution | null; history: Constitution[] };
+  dc: Decision[];
+  q: { questions: Question[]; resolved: Question[] };
+  sk: { stakes: Stake[]; done: Stake[] };
+  dg: Digest[];
+  mb: MembersResponse;
+}
+
+export interface InviteResult {
+  room: string;
+  name: string;
+  kind: MemberKind;
+  token: string;
+  link: string;
   agent_onboarding?: string;
 }
 

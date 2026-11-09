@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MemberKind, Message } from "@chat/shared";
 import { md } from "./markdown";
 import { canSpeak, type Speaker } from "./speak";
+import { RxChips, type RxApi } from "./reactions";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -65,6 +66,9 @@ export interface FeedCtx {
   meName: string;
   speaker: Speaker;
   speakingId: number | null;
+  rx: RxApi;
+  rxTargetId: number | null;
+  onAvatar: (name: string) => void;
 }
 
 export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
@@ -72,11 +76,22 @@ export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
   return ctx.kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
 }
 
-function Avatar({ name, ctx }: { name: string; ctx: FeedCtx }) {
+export interface AvatarProps {
+  avatars: Record<string, string>;
+  invite: string;
+  onAvatar: (name: string) => void;
+  xl?: boolean;
+}
+
+export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
   const [imgDead, setImgDead] = useState(false);
+  const open = () => ctx.onAvatar(name);
+  const key = (e: { key: string; preventDefault(): void }) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  };
   if (same(name, "claude")) {
     return (
-      <div className="avatar bot" data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"}>
+      <div className={"avatar bot" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
         <svg viewBox="0 0 24 24">
           <path d="M12 2.5l2.1 6.4 6.4 2.1-6.4 2.1L12 19.5l-2.1-6.4L3.5 11l6.4-2.1z" />
           <path d="M19 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" />
@@ -88,35 +103,42 @@ function Avatar({ name, ctx }: { name: string; ctx: FeedCtx }) {
   if (src && !imgDead) {
     const full = src + (ctx.invite ? (src.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(ctx.invite) : "");
     return (
-      <div className="avatar img" data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"}>
+      <div className={"avatar img" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
         <img src={full} alt="" decoding="async" onError={() => setImgDead(true)} />
       </div>
     );
   }
   return (
     <div
-      className="avatar"
+      className={"avatar" + (ctx.xl ? " xl" : "")}
       data-name={name}
       tabIndex={0}
       role="button"
       aria-label={"View " + name + "'s picture"}
       style={{ background: "hsl(" + hue(name) + " 42% 44%)" }}
+      onClick={open}
+      onKeyDown={key}
     >
       {initials(name)}
     </div>
   );
 }
 
+export function KindTag({ kind }: { kind: string }) {
+  return <span className={"tag k-" + kind}>{kind === "human" ? "Human" : "Agent"}</span>;
+}
+
 function MdText({ text, ctx }: { text: string; ctx: FeedCtx }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const version = ctx.membersVersion;
-  const memberSet = ctx.memberSet;
+  const memberSetRef = useRef(ctx.memberSet);
+  memberSetRef.current = ctx.memberSet;
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
     node.textContent = "";
-    node.appendChild(md(text, memberSet));
-  }, [text, version, memberSet]);
+    node.appendChild(md(text, memberSetRef.current));
+  }, [text, version]);
   return <div className="text" ref={ref}></div>;
 }
 
@@ -143,7 +165,12 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
         </div>
       )}
       <div
-        className={"msg" + (cont ? " cont" : "") + (kind === "human" ? " human" : "")}
+        className={
+          "msg" +
+          (cont ? " cont" : "") +
+          (kind === "human" ? " human" : "") +
+          (ctx.rxTargetId === m.id ? " rx-target" : "")
+        }
         data-id={m.id}
       >
         <div className="gutter">
@@ -162,7 +189,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
               {same(m.from, "claude") ? (
                 <span className="tag k-agent">Bot</span>
               ) : kind ? (
-                <span className={"tag k-" + kind}>{kind === "human" ? "Human" : "Agent"}</span>
+                <KindTag kind={kind} />
               ) : null}
               {mine && <span className="tag">You</span>}
               <time className="when" title={new Date(m.ts).toLocaleString()}>
@@ -172,8 +199,26 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
           )}
           <MdText text={m.text || ""} ctx={ctx} />
           <div className="msg-foot">
-            <div className="rx-row"></div>
+            <div className="rx-row">
+              <RxChips m={m} me={ctx.meName} api={ctx.rx} />
+            </div>
             <div className="msg-actions">
+              <button
+                type="button"
+                className="react-btn"
+                aria-label="Add a reaction"
+                title="React"
+                onClick={(e) => {
+                  const row = e.currentTarget.closest(".msg") as HTMLElement | null;
+                  if (row) ctx.rx.openBar(m, row);
+                }}
+              >
+                <svg className="i" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="8.2" />
+                  <path d="M9.2 10.2h.01M14.8 10.2h.01M8.8 13.6c.8 1.1 1.9 1.7 3.2 1.7s2.4-.6 3.2-1.7" />
+                  <path d="M19.5 15.5v5M17 18h5" />
+                </svg>
+              </button>
               {showSpeak && (
                 <button
                   type="button"
@@ -210,6 +255,7 @@ export function ChatFeed({
   setJumpVisible,
   onSettleKill,
   listRef,
+  holdProps,
 }: {
   messages: Message[];
   ctx: FeedCtx;
@@ -217,12 +263,14 @@ export function ChatFeed({
   setJumpVisible: (v: boolean) => void;
   onSettleKill: () => void;
   listRef: React.RefObject<HTMLDivElement | null>;
+  holdProps: Record<string, (e: never) => void>;
 }) {
   return (
     <div
       className="msgs"
       id="list"
       ref={listRef}
+      {...(holdProps as React.HTMLAttributes<HTMLDivElement>)}
       onScroll={(e) => {
         if (atBottom(e.currentTarget)) setJumpVisible(false);
       }}

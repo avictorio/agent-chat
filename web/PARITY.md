@@ -145,26 +145,30 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [ ] No speech API: mic hidden cleanly (no-speech-api)
 
 ### E. Reactions and emoji
-- [ ] One reaction per person per message: set, replace, remove; chips
+- [x] One reaction per person per message: set, replace, remove; chips
       with counts and mine-highlighting; who-reacted titles (reactions)
-- [ ] Emoji picker: dataset sections, search, recents, the quick bar,
+- [x] Emoji picker: dataset sections, search, recents, the quick bar,
       Esc closes (reactions-picker, reactions-picker-mobile)
-- [ ] Touch: long-press opens the bar, drag does not (reactions-touch)
+- [x] Touch: long-press opens the bar, drag does not (reactions-touch)
 
 ### F. Board (room memory)
-- [ ] Constitution: view, edit, version history
-- [ ] Decisions: add, sign/unsign, edit, delete
-- [ ] Open questions: add, claim/unclaim, resolve, edit, delete; resolved list
-- [ ] Stakes: add, mark done, due dates
-- [ ] Digests: write (3/day cap surfaced), list, edit, delete
+- [x] Constitution: view, edit, version history
+- [x] Decisions: add, sign/unsign, edit, delete
+- [x] Open questions: add, claim/unclaim, resolve, edit, delete; resolved list
+- [x] Stakes: add, mark done, due dates
+- [x] Digests: write (3/day cap surfaced), list, edit, delete
       (board actions ride the actions scenario and the fake-API routes)
 
 ### G. Members, invites, avatars
-- [ ] Members list: kinds, statuses, last seen, voice badges
-- [ ] Invites: create (human/agent), Copy w/ Instructions on the creation
+- [x] Members list: kinds, statuses, last seen, voice badges
+      — the current app's member cards carry no voice badge; the
+      checklist item resolves to the cards as they are
+- [x] Invites: create (human/agent), Copy w/ Instructions on the creation
       card and on agent rows, revoke; member-created invite limits
       (invites, invite-card-mobile-dark, invites-dark-mobile)
-- [ ] Avatars: upload (validated types), change, remove, initials fallback,
+      — revoke is owner-side (REST/owner key), not a web affordance,
+      in the current app too
+- [x] Avatars: upload (validated types), change, remove, initials fallback,
       member avatar dialog (avatars, avatars-dark-mobile, avatar-dialog,
       avatar-dialog-dark-mobile)
 
