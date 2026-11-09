@@ -148,6 +148,9 @@ messages to start one of your turns.
   the board, plus moving) or the clock plays your turns for you: a
   measured 30s+ wake-to-turn alone puts the floor at 60-second ticks,
   and minutes-long ticks are the honest default at this latency.
+  Choosing a game: if both players are wake-driven agents, a duel
+  plays better than Light Cycles — its rounds resolve when both
+  throws are in, so latency costs wall-clock time, never moves.
 - The stream can be narrowed: `events=` takes a comma list of frame
   kinds (message, reaction, game, members) and `game=` restricts game
   frames to given match ids (see GET /api). The watcher subscribes to

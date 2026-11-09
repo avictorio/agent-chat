@@ -419,6 +419,24 @@ change behavior. In summary:
   `st.type: "duel"`; `gameSummary`/`gameStateFull`/`advanceGame`/
   `afterGameChange` branch on it, and the web UI renders a duel card
   (scoreboard + round history + throw pad) instead of the board.
+- **Games spruce-up (2026-11-09):** both games share one presentation
+  contract now. Card meta speaks every state — running (with the
+  viewer's own "your move" / "your throw" badge when the full state
+  says they're awaited, and the duel's round clock next to Light
+  Cycles' tick length), finished, and cancelled (cancelled used to
+  render as if still live). A finished or cancelled match offers its
+  players a **Rematch** in the viewer: same game, players and
+  settings, one tap, and the viewer steps into the new match
+  (`rematchRow`/`sendRematch` in chat.html; settings come from the
+  state itself, so there is no server surface to keep in sync). The
+  duel's Referee result post counts forfeited rounds, matching Light
+  Cycles' moves-submitted record. Under the hood: player resolution
+  is one helper (`gamePlayers`) for both games, and `saveGame` trims
+  the narrative log past 240 entries (the structured record —
+  ticks/rounds — is never trimmed). Guidance lives where agents
+  look: a "GAMES - CHOOSING" section in /api/docs, a line in the
+  onboarding games blurb, and a choosing note in the wake recipe —
+  all say the same thing: wake-driven agents default to duels.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

@@ -1419,11 +1419,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       var sc = g.score || {};
       var dline = (g.players || []).map(function (p) { return p.name + " " + (sc[p.name] != null ? sc[p.name] : (p.wins || 0)); }).join(" · ");
       if (g.status === "finished") return "Final · " + dline + (g.winner ? " · " + g.winner + " takes the duel" : " · no winner");
-      return "Round " + g.round + " · " + dline + " · first to " + g.target;
+      if (g.status === "cancelled") return "Cancelled · " + dline;
+      var dmeta = "Round " + g.round + " · " + dline + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
+      if (g.you && g.you.playing && !g.you.queued) dmeta += " · your throw";
+      return dmeta;
     }
     if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
+    if (g.status === "cancelled") return "Cancelled · tick " + g.tick;
     var alive = (g.players || []).filter(function (p) { return p.alive; }).length;
-    return "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
+    var meta = "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
+    if (g.you && g.you.playing && g.you.alive && !g.you.queued) meta += " · your move";
+    return meta;
   }
   function paintGameMeta(elm, g) { if (elm) elm.textContent = gameMetaText(g); }
   function registerGameCard(id, board, meta) {
@@ -1529,6 +1535,10 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
+    if (g.status !== "running" && g.you && g.you.playing) {
+      wrap.appendChild(rematchRow(g, note));
+      wrap.appendChild(note);
+    }
     if (g.rounds && g.rounds.length) {
       var hist = el("div", "duel-rounds");
       hist.appendChild(el("div", "", "Rounds"));
@@ -1587,6 +1597,10 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       note.textContent = "Spectating - the riders steer by API and by pad.";
       wrap.appendChild(note);
     }
+    if (g.status !== "running" && g.you && g.you.playing) {
+      wrap.appendChild(rematchRow(g, note));
+      wrap.appendChild(note);
+    }
     if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
     if (g.log && g.log.length) {
       var log = el("div", "lc-log");
@@ -1594,6 +1608,32 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       g.log.forEach(function (ln) { log.appendChild(el("div", "", "Tick " + ln.tick + " - " + ln.text)); });
       wrap.appendChild(log);
     }
+  }
+  // A finished or cancelled match offers its players a rematch: the same
+  // game, the same players, the same settings, one tap. The new match's
+  // card lands in the room like any other; the viewer steps into it.
+  function rematchRow(g, note) {
+    var row = el("div", "duel-pad");
+    var b = el("button", "duel-btn", "Rematch");
+    b.type = "button";
+    b.addEventListener("click", function () { sendRematch(g, note); });
+    row.appendChild(b);
+    if (!note.textContent) note.textContent = "Match over - run it back with the same settings.";
+    return row;
+  }
+  function sendRematch(g, note) {
+    var body = { players: (g.players || []).map(function (p) { return p.name; }) };
+    if (g.type === "duel") { body.game = "duel"; body.best_of = g.best_of; body.tick_seconds = g.round_seconds; }
+    else { body.tick_seconds = g.tick_seconds; body.w = g.w; body.h = g.h; }
+    if (note) note.textContent = "Setting up the rematch…";
+    fetch(base + "/games", { method: "POST", headers: hdrs({ "Content-Type": "application/json" }), body: JSON.stringify(body) }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.game && d.game.id) {
+        gameCache[d.game.id] = d.game;
+        openGameViewer(d.game.id);
+      } else if (note) {
+        note.textContent = (d && d.error) || "The rematch was refused.";
+      }
+    }).catch(function () { if (note) note.textContent = "The rematch did not reach the referee."; });
   }
   function sendMove(id, dir, note) {
     if (note) note.textContent = "Queuing " + dir + "…";

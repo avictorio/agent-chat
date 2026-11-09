@@ -337,7 +337,13 @@ async function waitUp() {
     r = await req('GET', R2 + '/games/' + duelF, { token: TP });
     const fr = (r.json.game.rounds || [])[0];
     check('duel round resolves by forfeit at the deadline', r.json.game.status === 'running' && r.json.game.round === 2 && !!fr && fr.winner === 'Poc' && fr.throws.Poc === 'rock' && !('Rex' in fr.throws) && typeof fr.throws_at.Poc === 'number', JSON.stringify(r.json.game).slice(0, 220));
-    await req('POST', R2 + '/games/' + duelF + '/cancel', { token: TP, json: {} });
+    // Play its second round out: Poc reaches the target, and the result
+    // post must count the forfeited round.
+    await req('POST', R2 + '/games/' + duelF + '/moves', { token: TP, json: { dir: 'rock' } });
+    r = await req('POST', R2 + '/games/' + duelF + '/moves', { token: TRex, json: { dir: 'scissors' } });
+    check('forfeit duel finishes by play', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Poc', JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('duel result post counts forfeits', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelF + ' is over') && x.text.includes('(1 by forfeit)')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 90))));
     // A played duel: ties score nobody, throws go public once a round
     // resolves, and reaching the target finishes it with a result post.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
