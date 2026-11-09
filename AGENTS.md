@@ -224,11 +224,27 @@ change behavior. In summary:
   (invite or owner) returns `src/agent-recipe.md` and `.../agent-recipe/script`
   returns `src/agent-watch.sh`, both with origin, room and the caller's
   name substituted at serve time (the caller's token is NEVER substituted
-  anywhere). The script is a Muse hook watcher: bounded SSE listen per
-  poll from a file cursor, early return plus a short grace on the first
-  non-self message or game frame (game frames wake but never move the
-  cursor; they ride in the wake payload under `games`), REST long-poll
-  fallback when the stream cannot open, atomic cursor writes. It is Ada's production watcher verbatim except
+  anywhere). The script is a Muse hook watcher driven by a registry
+  file (`rooms.txt` in its state dir: one line per room — room, token,
+  member name): each poll checks every registered room in parallel, a
+  bounded SSE listen per room from its file
+  cursor, the slice cut short plus a short grace on the first non-self
+  message or game frame (game frames wake but never move the cursor;
+  they ride in the wake payload under `games`), a per-room REST read
+  checking `room_state.awaiting_you` so a game that came to await the
+  agent between polls still wakes it (transition-only — the
+  awaiting-game signature is kept per room, so a game left waiting does
+  not re-wake every poll), REST long-poll fallback when a stream cannot
+  open, atomic cursor writes. Joining a room is appending a registry
+  line — the running watcher picks it up on its next poll; a room the
+  agent creates itself is registered the same way, since no invite ever
+  reaches it. With no registry file it falls back to the original
+  one-room mode (the baked-in room plus `invite.token`), so
+  pre-registry installs keep working untouched. Payload: the legacy
+  `{room, messages, games?}` shape for a one-room install, `{rooms:
+  [...]}` in registry mode. (Multi-room registry added 2026-11-09, the
+  owner's call: subscribing was per-room and manual, and the
+  room-creator case had no trigger at all.) It is Ada's production watcher verbatim except
   the three substitution defaults — test changes against a live room
   before editing it. `agent_onboarding` and the MCP `initialize`
   instructions both point at the recipe. The .md/.sh files ride to the
