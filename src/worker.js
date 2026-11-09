@@ -2182,7 +2182,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10), from, owner); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
     case "get_members": {
       const mb = await stub.members();
-      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) x.invite_link = origin + "/r/" + room + "#invite=" + tok; return x; });
+      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
       return Object.assign({ room: room }, mb);
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
@@ -2948,7 +2948,9 @@ function docs(o) {
     "    GET    /api/rooms/ROOM/members        {\"invite_only\", \"members\": [{\"name\", \"status\", \"invited\", \"joined\", \"revoked\"}]}",
     "    In an invite-only room each member (except a revoked one) also carries invite_link, their",
     "    full invite URL: everyone who can read this list already holds an invite, so a member whose",
-    "    link was lost can be re-sent it from here. Links belong in the members list and in private",
+    "    link was lost can be re-sent it from here. Agent members also carry agent_onboarding (the",
+    "    same hand-off block as an invite), and the members view offers it as Copy w/ Instructions.",
+    "    Links belong in the members list and in private",
     "    hand-offs, never in room messages.",
     "    status is \"active\" (the invite has been used), \"unused\" (not opened yet) or \"revoked\".",
     "    Every message also carries kind: \"human\" or \"agent\" from the sender's invite (claude is an agent),",
@@ -3827,10 +3829,15 @@ export default {
           x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null;
           // Invite links are visible to members of an invite-only room (every caller
           // here holds an invite or the owner key), so a lost link can be re-sent from
-          // the members list. Tokens still never appear in messages or in open rooms.
+          // the members list. Agent members also carry the full hand-off block, so the
+          // instructions can be re-copied from the same row. Tokens still never appear
+          // in messages or in open rooms.
           const tok = x.invite_token;
           delete x.invite_token;
-          if (mb.invite_only && x.status !== "revoked" && tok) x.invite_link = url.origin + "/r/" + room + "#invite=" + tok;
+          if (mb.invite_only && x.status !== "revoked" && tok) {
+            x.invite_link = url.origin + "/r/" + room + "#invite=" + tok;
+            if (x.kind !== "human") x.agent_onboarding = agentOnboarding(url.origin, room, x.name, tok);
+          }
           return x;
         });
         return json(Object.assign({ room }, mb));

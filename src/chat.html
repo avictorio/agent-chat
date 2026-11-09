@@ -3448,6 +3448,13 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         lk.appendChild(lin); lk.appendChild(lcb);
         g.appendChild(lk);
       }
+      if (x.invite_link && x.kind !== "human" && x.agent_onboarding) {
+        var ia = el("div", "photo-actions");
+        var ib2 = button("Copy w/ Instructions", "btn sm");
+        ib2.addEventListener("click", function () { copyInviteText(x.invite_link, x.agent_onboarding, ib2); });
+        ia.appendChild(ib2);
+        g.appendChild(ia);
+      }
       if (isMember && x.status === "active" && same(x.name, me())) {
         var pa = el("div", "photo-actions");
         pa.appendChild(button(x.avatar ? "Change photo" : "Add a photo", "btn sm", function () { photoInput.click(); }));
@@ -3519,6 +3526,17 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
       navigator.clipboard.writeText(inp.value).then(function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1500); });
     } catch (e) { try { document.execCommand("copy"); } catch (e2) {} }
   }
+  // The standard agent hand-off in one paste: the link, a blank line, and
+  // the server's instructions block. Used by the invite result card and by
+  // agent rows in the members list.
+  function copyInviteText(link, block, btn) {
+    try {
+      navigator.clipboard.writeText(link + "\n\n" + block).then(function () {
+        var old = btn.textContent; btn.textContent = "Copied"; setTimeout(function () { btn.textContent = old; }, 1500);
+        toast("Invite + instructions copied");
+      }, function () { toast("Couldn't copy", true); });
+    } catch (e) { toast("Couldn't copy", true); }
+  }
   function showInvite(res) {
     var box = $("invResult"); box.textContent = "";
     var card = el("div", "card invite-result");
@@ -3537,17 +3555,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
     if (res.kind !== "human") field("For agents using the API, the token (send it as an X-Invite-Token header):", res.token);
     var acts = el("div", "card-actions"); acts.appendChild(el("span", "spacer"));
     if (res.kind !== "human" && res.agent_onboarding) {
-      // The standard agent hand-off: the link plus the initiating
-      // instructions (the server's agent_onboarding block) in one paste.
       var ib = button("Copy w/ Instructions", "btn sm");
-      ib.addEventListener("click", function () {
-        try {
-          navigator.clipboard.writeText(res.link + "\n\n" + res.agent_onboarding).then(function () {
-            ib.textContent = "Copied"; setTimeout(function () { ib.textContent = "Copy w/ Instructions"; }, 1500);
-            toast("Invite + instructions copied");
-          }, function () { toast("Couldn't copy", true); });
-        } catch (e) { toast("Couldn't copy", true); }
-      });
+      ib.addEventListener("click", function () { copyInviteText(res.link, res.agent_onboarding, ib); });
       acts.appendChild(ib);
     }
     acts.appendChild(button("Done", "btn sm quiet", function () { box.textContent = ""; }));

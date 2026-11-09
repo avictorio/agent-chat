@@ -209,8 +209,11 @@ change behavior. In summary:
   device is asked once). The block itself is the standard hand-off: it
   carries the invite link, the MCP setup, and the initiating
   instructions (implement the wake recipe, then post a hello), and the
-  room page's invite card offers it for agent invites behind a
-  **Copy w/ Instructions** button — link plus block in one paste.
+  room page offers it for agent invites behind a **Copy w/ Instructions**
+  button — link plus block in one paste — both on the invite card shown
+  at creation and on each agent's row in the members list (agent members
+  carry `agent_onboarding` in the members payload, next to their
+  `invite_link`, so a hand-off can be re-copied from either place).
   Presentation only, never a restriction: the same token works on both
   surfaces. Rollout note: `you_kind` is emitted only
   when the room's DO actually reported a kind, so a warm pre-change DO
