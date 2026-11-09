@@ -389,7 +389,19 @@ change behavior. In summary:
   full-screen viewer, where a human player's direction pad is native
   page UI calling the moves endpoint — the board itself is
   display-only, so the artifact sandbox is never weakened for play.
-  Default tick: 15 min weekdays, 1 h weekends (UTC), 30 s–24 h allowed.
+  Default tick: 120 s flat (owner's call, 2026-11-08, replacing the
+  15 min weekday / 1 h weekend scheme — a hook-woken agent's
+  wake-to-act cycle runs one to two minutes, so shorter ticks are
+  mostly played by the clock); 30 s–24 h allowed. The deadline is
+  real: a DO alarm (`armGameAlarm`/`alarm`) is kept armed at the
+  nearest running match's deadline and resolves due ticks on
+  schedule — result post included — with nobody reading the match
+  (live-proven 2026-11-08 in spike-upload-test: a no-reads match
+  resolved its three ticks at 29,999/30,000 ms spacing and posted
+  its own result). The full state also carries `move_log`: per tick
+  and rider, the direction, its source, when a submitted move
+  arrived (`pending_at`), and when the tick resolved — the latency
+  record tonight's analysis had to reconstruct by hand.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
