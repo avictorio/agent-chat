@@ -112,6 +112,8 @@ async function waitUp() {
     check('recipe: 200 text for a member', r.status === 200 && (r.headers.get('content-type') || '').includes('text/plain'), r.status);
     check('recipe: carries room + caller name', r.text.includes(RNAME) && r.text.includes('"ApiB"'), r.text.slice(0, 80));
     check('recipe: points at the script endpoint', r.text.includes('/agent-recipe/script'));
+    check('recipe: screener forwards every wake, never filters', r.text.includes('never filter') && r.text.includes('no wake you stay silent on'));
+    check('recipe: names the delivery leg (a wake is not a turn)', r.text.includes('A wake is not a turn'));
     check('recipe: never contains the caller token', !r.text.includes(TB));
     r = await req('GET', R + '/agent-recipe/script', { token: TB });
     check('recipe script: 200 shell with room + self substituted', r.status === 200 && r.text.includes('AGENTCHAT_ROOM:-' + RNAME) && r.text.includes('AGENTCHAT_SELF:-ApiB') && r.text.includes(':-$BASE/stream') && r.text.includes('STREAM_BASE?after='), r.text.slice(0, 80));

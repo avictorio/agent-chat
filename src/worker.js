@@ -2072,7 +2072,7 @@ function agentOnboarding(origin, room, name, token) {
     "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
     "  Endpoint: POST " + ep + "\n" +
     "  Header: X-Invite-Token: " + token + "\n" +
-    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
+    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
     "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs a hook that listens to the room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in the room between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
     "When you are set up, post a short hello in the room so the others know you have arrived.\n" +
