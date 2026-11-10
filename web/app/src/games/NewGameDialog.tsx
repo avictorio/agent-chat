@@ -1,0 +1,192 @@
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { useFeed, useMembers, useSession } from "../room/ctx";
+
+// The New game dialog: pick a game (Light Cycles or Duel), pick its
+// players from the room roster — that pick is the invitation — set
+// the one option that matters, and start. The server posts the game
+// card to the feed and wakes the players; on success the arena opens
+// on the new match, like a rematch does.
+
+export interface NewGameDialogHandle {
+  open(): void;
+}
+
+type GameType = "duel" | "lightcycles";
+
+const BEST_OF = [3, 5, 7, 9];
+const TICKS: { secs: number; label: string }[] = [
+  { secs: 30, label: "30 sec" },
+  { secs: 60, label: "1 min" },
+  { secs: 120, label: "2 min" },
+  { secs: 300, label: "5 min" },
+];
+
+export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDialog(_, ref) {
+  const session = useSession();
+  const members = useMembers();
+  const feed = useFeed();
+  const dlgRef = useRef<HTMLDialogElement | null>(null);
+  const [type, setType] = useState<GameType>("duel");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [bestOf, setBestOf] = useState(5);
+  const [tick, setTick] = useState(120);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const me = session.meName;
+  const max = type === "duel" ? 2 : 4;
+  const valid = type === "duel" ? picked.length === 2 : picked.length >= 2 && picked.length <= 4;
+
+  useImperativeHandle(ref, () => ({
+    open() {
+      setType("duel");
+      setPicked(me && members.memberSet.has(me.toLowerCase()) ? [me] : []);
+      setBestOf(5);
+      setTick(120);
+      setNote("");
+      setBusy(false);
+      if (dlgRef.current && !dlgRef.current.open) dlgRef.current.showModal();
+    },
+  }));
+
+  const close = () => dlgRef.current?.close();
+
+  const toggle = (name: string) => {
+    setNote("");
+    setPicked((cur) => {
+      if (cur.includes(name)) return cur.filter((n) => n !== name);
+      if (cur.length >= max) return cur;
+      return [...cur, name];
+    });
+  };
+
+  const switchType = (t: GameType) => {
+    setType(t);
+    setNote("");
+    setPicked((cur) => cur.slice(0, t === "duel" ? 2 : 4));
+  };
+
+  const start = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setNote("");
+    const body: Record<string, unknown> = { players: picked };
+    if (type === "duel") {
+      body.game = "duel";
+      body.best_of = bestOf;
+    } else {
+      body.tick_seconds = tick;
+    }
+    try {
+      const d = await session.client.createGame(body);
+      if (d.game && d.game.id) {
+        feed.games.onFrame(d.game);
+        close();
+        feed.games.openGame(d.game.id, d.game.type);
+      } else {
+        setNote((d as { error?: string }).error || "The game was refused.");
+        setBusy(false);
+      }
+    } catch {
+      setNote("The game did not reach the referee.");
+      setBusy(false);
+    }
+  };
+
+  const hint = !valid
+    ? type === "duel"
+      ? picked.length < 2
+        ? "Pick one more player — a duel is exactly 2."
+        : "A duel is exactly 2 players."
+      : "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
+    : type === "duel"
+      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Rounds resolve as soon as both throws are in."
+      : "Every rider moves each tick; miss a tick and the clock rides straight for you.";
+
+  // The roster list carries the room's bot identity ("claude") for
+  // mentions and rendering; it holds no invite and cannot play, so
+  // the picker leaves it out.
+  const roster = members.names.filter((n) => n.toLowerCase() !== "claude");
+  const ordered = me && roster.includes(me) ? [me, ...roster.filter((n) => n !== me)] : roster;
+
+  return (
+    <dialog className="av-dlg ng-dlg" id="newGameDlg" aria-labelledby="ngTitle" ref={dlgRef}>
+      <div className="vd-head">
+        <span className="av-name" id="ngTitle">
+          New game
+        </span>
+        <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
+          ✕
+        </button>
+      </div>
+      <div className="seg full" role="group" aria-label="Game type">
+        <button type="button" aria-pressed={type === "duel"} onClick={() => switchType("duel")}>
+          ⚔️ Duel
+        </button>
+        <button type="button" aria-pressed={type === "lightcycles"} onClick={() => switchType("lightcycles")}>
+          🏍️ Light Cycles
+        </button>
+      </div>
+      <div className="ng-label">
+        Players
+        <span className="ng-count">
+          {picked.length} of {type === "duel" ? "2" : "2–4"}
+        </span>
+      </div>
+      <div className="ng-players">
+        {ordered.map((name) => {
+          const sel = picked.includes(name);
+          return (
+            <button
+              type="button"
+              key={name}
+              className={"ng-player" + (sel ? " on" : "")}
+              aria-pressed={sel}
+              data-player={name}
+              onClick={() => toggle(name)}
+            >
+              <span className="ng-check">{sel ? "✓" : ""}</span>
+              <span className="ng-name">{name}</span>
+              {name === me ? <span className="ng-you">you</span> : null}
+              <span className="ng-kind">{members.kindOf(name) || ""}</span>
+            </button>
+          );
+        })}
+      </div>
+      {type === "duel" ? (
+        <>
+          <div className="ng-label">Best of</div>
+          <div className="seg full" role="group" aria-label="Best of">
+            {BEST_OF.map((n) => (
+              <button key={n} type="button" aria-pressed={bestOf === n} onClick={() => setBestOf(n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="ng-label">Tick — how long each rider gets per move</div>
+          <div className="seg full" role="group" aria-label="Tick length">
+            {TICKS.map((t) => (
+              <button key={t.secs} type="button" aria-pressed={tick === t.secs} onClick={() => setTick(t.secs)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="ng-note" role="status">
+        {note || hint}
+      </div>
+      <div className="actions">
+        <button type="button" className="btn" onClick={close}>
+          Cancel
+        </button>
+        <button type="button" className="btn primary" id="ngStart" disabled={!valid || busy} onClick={start}>
+          {busy ? "Starting…" : "Start game"}
+        </button>
+      </div>
+    </dialog>
+  );
+});

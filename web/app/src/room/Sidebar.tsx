@@ -56,6 +56,7 @@ export interface SidebarProps {
   push: { visible: boolean; on: boolean; label: string; bellClick: (btn: HTMLButtonElement) => void };
   voiceHidden: boolean;
   onVoice: () => void;
+  onNewGame: () => void;
   install: { buttonVisible: boolean; runInstall: () => void };
 }
 
@@ -134,6 +135,12 @@ export function Sidebar(p: SidebarProps) {
           {tabBtn("members", "Members")}
         </nav>
         <div className="side-foot">
+          <div className="foot-row">
+            <button type="button" className="btn sm" id="newGameBtn" hidden={p.denied || p.gate} onClick={p.onNewGame}>
+              <I d={["M12 5v14M5 12h14"]} extra={<circle cx="12" cy="12" r="9" />} />
+              <span>New game</span>
+            </button>
+          </div>
           <div className="foot-row">
             <div className="seg full" role="group" aria-label="Color theme">
               <button type="button" data-theme-set="light" aria-pressed={p.theme === "light"} onClick={() => p.applyTheme("light")}>

@@ -155,6 +155,7 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
+    if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false }); const g = isDuel ? { id: 7, type: 'duel', status: 'running', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, winner: null, players, rounds: [], you: { playing: true, queued: null } } : { id: 7, type: 'lightcycles', status: 'running', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: Date.now() + (body.tick_seconds || 120) * 1000, winner: null, players, trails: [], log: [], you: { playing: true, queued: null } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
     if ((mm = p.match(/games\/(\d+)$/))) { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/members')) return J(S.mb);
@@ -373,6 +374,50 @@ let FAILURES = 0;
     await page.waitForTimeout(800);
     out.vis = await page.$$eval('.pushBtn', bs => bs.map(b => !b.hidden));
     if (!out.vis.some(Boolean)) throw new Error('push bell never became visible: ' + JSON.stringify(out));
+    return out;
+  });
+  // New game dialog (post-cutover feature, 2026-11-09): the sidebar
+  // button opens it; a duel needs exactly 2 players (you are picked
+  // by default), Light Cycles 2-4; starting posts the create call
+  // with the picked players and closes the dialog.
+  await run('new-game', {}, async (page, S, calls) => {
+    const out = {};
+    await page.click('#newGameBtn');
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
+    out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
+    await page.click('[data-player="Ada"]');
+    out.startEnabledAtTwo = await page.$eval('#ngStart', e => !e.disabled);
+    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(2)');
+    out.tickSegShown = await page.$('[aria-label="Tick length"]') !== null;
+    await page.click('[data-player="Henry"]');
+    out.lcCount = await page.$eval('.ng-count', e => e.textContent.trim());
+    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(1)');
+    out.duelCount = await page.$eval('.ng-count', e => e.textContent.trim());
+    await shot(page, 'new-game.png');
+    await page.click('#ngStart');
+    await page.waitForTimeout(600);
+    out.dlgClosed = await page.$eval('#newGameDlg', e => !e.open);
+    const cc = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
+    out.createCall = cc;
+    const body = JSON.parse(cc.slice(cc.indexOf('{')));
+    if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');
+    if (!out.startEnabledAtTwo) throw new Error('duel must start with 2 players');
+    if (!out.tickSegShown) throw new Error('Light Cycles must show the tick options');
+    if (out.lcCount !== '3 of 2\u20134') throw new Error('LC count wrong: ' + out.lcCount);
+    if (out.duelCount !== '2 of 2') throw new Error('switching back to duel must trim to 2 players, got: ' + out.duelCount);
+    if (!out.dlgClosed) throw new Error('dialog must close after a successful start');
+    if (body.game !== 'duel' || body.best_of !== 5 || JSON.stringify(body.players) !== '["Anthony","Ada"]') throw new Error('create body wrong: ' + cc);
+    return out;
+  });
+  await run('new-game-mobile', { w: 390, h: 844, touch: true }, async (page) => {
+    const out = {};
+    await page.click('#menu'); await page.waitForTimeout(350);
+    await page.click('#newGameBtn');
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'new-game-mobile.png');
+    out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
+    if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');
     return out;
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });

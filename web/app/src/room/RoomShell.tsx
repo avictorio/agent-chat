@@ -32,6 +32,7 @@ import type { BoardApi } from "../board/shared";
 import { AvatarDialog, usePhotoUpload } from "../board/avatar";
 import { useViewerHost } from "../shell/viewer";
 import { VoiceDialog, type VoiceDialogHandle } from "./voice";
+import { NewGameDialog, type NewGameDialogHandle } from "../games/NewGameDialog";
 import { createGameStore, type GameStore } from "../games/games";
 import { usePush } from "../shell/push";
 import { initShellCommon } from "../shell/shell";
@@ -333,6 +334,7 @@ export function RoomShell({ room }: { room: string }) {
   );
 
   const voiceRef = useRef<VoiceDialogHandle | null>(null);
+  const newGameRef = useRef<NewGameDialogHandle | null>(null);
 
   const onCommitName = useCallback((v: string) => {
     store("chat-name", v);
@@ -364,6 +366,10 @@ export function RoomShell({ room }: { room: string }) {
         push={push}
         voiceHidden={!token}
         onVoice={() => voiceRef.current?.open()}
+        onNewGame={() => {
+          setNavOpen(false);
+          newGameRef.current?.open();
+        }}
         install={inst}
       />
       <div className="scrim" id="scrim" onClick={() => setNavOpen(false)}></div>
@@ -434,6 +440,7 @@ export function RoomShell({ room }: { room: string }) {
       {viewerHost.node}
       <AvatarDialog name={avatarName} mb={board.boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
       <VoiceDialog ref={voiceRef} />
+      <NewGameDialog ref={newGameRef} />
       {rx.popovers}
       {photo.el}
       {push.menuNode}
