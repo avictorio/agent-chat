@@ -12,7 +12,7 @@ export const REACTIONS: [string, string][] = [
   ["😂", "Haha"],
   ["😮", "Wow"],
   ["😢", "Sad"],
-  ["🙏", "Thanks"],
+  ["😡", "Angry"],
 ];
 export const NAME2EMOJI: Record<string, string> = {};
 export const EMOJI2NAME: Record<string, string> = {};

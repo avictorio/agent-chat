@@ -17,15 +17,16 @@ export function daysAway(s: string | null | undefined): number | null {
 }
 
 export function rel(ts: number | null | undefined): string {
-  if (!ts) return "never";
-  const min = Math.max(1, Math.round((Date.now() - ts) / 60000));
-  if (min < 60) return min + " min ago";
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return hr + (hr === 1 ? " hr ago" : " hrs ago");
-  const day = Math.floor(hr / 24);
-  if (day === 1) return "yesterday";
-  if (day < 30) return day + " days ago";
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  if (!ts) return "";
+  const sec = Math.round((Date.now() - ts) / 1000);
+  if (sec < 60) return "just now";
+  if (sec < 3600) return Math.round(sec / 60) + " min ago";
+  if (sec < 86400) return Math.round(sec / 3600) + " hr ago";
+  if (sec < 7 * 86400) {
+    const d = Math.round(sec / 86400);
+    return d + (d === 1 ? " day ago" : " days ago");
+  }
+  return shortDate(ts);
 }
 
 export function shortDate(ts: number | null | undefined): string {

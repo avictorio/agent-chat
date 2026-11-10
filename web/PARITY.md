@@ -118,6 +118,32 @@ is not modified by this project, and every behavior it has today is the spec.
       decomposition); the owner drives real rooms on
       next.chat.victorio.cloud and reports defects, each of which
       gets a fix plus a parity case.
+      Pre-soak inspection (2026-11-09): all 82 shared screenshot pairs
+      reviewed against production. Nine findings, eight of them real
+      divergences, all fixed with a parity assertion each:
+      F1 sidebar counts (stakes window is 7 days, not 30; the "!"
+      suffix and the decisions edge case matched production only by
+      accident — the old counts probe was log-only and never compared;
+      the desktop scenario now asserts the exact counts);
+      F3 board Delete is the borderless quiet variant and its confirm
+      text matches production's wording;
+      F4 rel() rewritten to production semantics ("5 hr ago", never
+      pluralized; no "never"/"yesterday"; short-date fallback);
+      F5 reaction bar (sixth quick reaction is 😡 Angry; your current
+      reaction rides as an extra highlighted button when it is not
+      one of the six; plus is a plain-plus "More reactions"; Copy is
+      text-only and closes immediately; focus behavior matches);
+      F6 the picker highlights your current reaction's cell wherever
+      it renders (Recent row and home category both);
+      F7 avatar lightbox puts name and kind pill on one title row;
+      F8 board edit forms use .field columns with full-width controls
+      and the shared actions row (a bare label left textareas at
+      intrinsic width, floating over their labels);
+      F9 home.css carried three doubled scope selectors from the
+      scoping pass, which silently unstyled the brand block, a view
+      and the install strip. F2 (sidebar lock glyph) was investigated
+      and cleared as code-equivalent. Suite green at 48 scenarios with
+      all assertions in force; post-fix pairs re-reviewed.
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
 

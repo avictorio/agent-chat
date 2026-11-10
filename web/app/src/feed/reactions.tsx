@@ -277,7 +277,7 @@ export function useReactions(opts: {
     const cur = getMessage(pop.msg.id) || pop.msg;
     const mine = myReaction(cur, meRef.current);
     popovers = (
-      <Placed row={pop.row} className="rx-bar" role="toolbar" label="Reactions">
+      <Placed row={pop.row} className="rx-bar" role="toolbar" label="Reactions" focusRx>
         {REACTIONS.map(([emoji, label]) => (
           <button
             key={emoji}
@@ -293,62 +293,52 @@ export function useReactions(opts: {
             {emoji}
           </button>
         ))}
+        {mine && !REACTIONS.some(([e]) => e === mine) ? (
+          <button
+            type="button"
+            className="rx on"
+            title="Your reaction (click to remove)"
+            onClick={(e) => {
+              e.stopPropagation();
+              react(cur, mine);
+            }}
+          >
+            {mine}
+          </button>
+        ) : null}
         <button
           type="button"
-          className="rx-copy"
-          aria-label="Copy message text"
-          onClick={(e) => {
-            e.stopPropagation();
-            const text = cur.text || "";
-            const done = () => {
-              toast("Copied");
-              setPop(null);
-            };
-            const failCopy = () => toast("Couldn't copy", true);
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(() => {
-                done();
-              }, failCopy);
-            } else {
-              const ta = document.createElement("textarea");
-              ta.value = text;
-              ta.style.position = "fixed";
-              ta.style.opacity = "0";
-              document.body.appendChild(ta);
-              ta.focus();
-              ta.select();
-              let ok = false;
-              try {
-                ok = document.execCommand("copy");
-              } catch {
-                // ignored below
-              }
-              ta.remove();
-              if (ok) done();
-              else failCopy();
-            }
-          }}
-        >
-          <svg className="i" viewBox="0 0 24 24">
-            <path d="M9 9.5A2.5 2.5 0 0 1 11.5 7h7A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 9 16.5z" />
-            <path d="M5 15.5h-.01M5.8 19A2.3 2.3 0 0 1 3.5 16.7V7.8A2.3 2.3 0 0 1 5.8 5.5h6" />
-          </svg>
-          Copy
-        </button>
-        <button
-          type="button"
-          className="rx-plus"
-          title="More emoji"
-          aria-label="More emoji"
+          className="rx rx-plus"
+          title="More reactions"
+          aria-label="More reactions"
           onClick={(e) => {
             e.stopPropagation();
             void loadEmoji().then(() => setPop({ kind: "picker", msg: cur, row: pop.row }));
           }}
         >
           <svg className="i" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="8.2" />
-            <path d="M9.2 10.2h.01M14.8 10.2h.01M8.8 13.6c.8 1.1 1.9 1.7 3.2 1.7s2.4-.6 3.2-1.7M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2" />
+            <path d="M12 5v14M5 12h14" />
           </svg>
+        </button>
+        <button
+          type="button"
+          className="rx-copy"
+          title="Copy the message text"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPop(null);
+            const text = cur.text || "";
+            try {
+              navigator.clipboard.writeText(text).then(
+                () => toast("Copied"),
+                () => toast("Couldn't copy", true)
+              );
+            } catch {
+              toast("Couldn't copy", true);
+            }
+          }}
+        >
+          Copy
         </button>
       </Placed>
     );
@@ -358,6 +348,7 @@ export function useReactions(opts: {
         row={pop.row}
         onPick={(emoji) => react(pop.msg, emoji)}
         onClose={closeAll}
+        mine={myReaction(pop.msg, meRef.current)}
       />
     );
   } else if (pop && pop.kind === "who") {

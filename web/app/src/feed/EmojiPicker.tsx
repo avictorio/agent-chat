@@ -19,12 +19,14 @@ export function Placed({
   className,
   role,
   label,
+  focusRx,
   children,
 }: {
   row: HTMLElement | null;
   className: string;
   role: string;
   label: string;
+  focusRx?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -32,7 +34,13 @@ export function Placed({
   useEffect(() => {
     const el = ref.current;
     if (el && row) setPos(placeCalc(el, row));
-  }, [row]);
+    if (el && focusRx) {
+      const t =
+        el.querySelector<HTMLButtonElement>("button.rx.on") ||
+        el.querySelector<HTMLButtonElement>("button.rx");
+      if (t) t.focus({ preventScroll: true });
+    }
+  }, [row, focusRx]);
   return (
     <div
       ref={ref}
@@ -50,10 +58,12 @@ export function Picker({
   row,
   onPick,
   onClose,
+  mine,
 }: {
   row: HTMLElement;
   onPick: (emoji: string) => void;
   onClose: () => void;
+  mine?: string | null;
 }) {
   const [data, setData] = useState<EmojiData | null>(emojiCache);
   const [q, setQ] = useState("");
@@ -106,7 +116,7 @@ export function Picker({
     <button
       key={c[0] + "|" + c[1]}
       type="button"
-      className="rx-cell"
+      className={"rx-cell" + (mine === c[0] ? " on" : "")}
       title={c[1]}
       aria-label={c[1] || c[0]}
       onClick={() => onPick(c[0])}
@@ -115,8 +125,13 @@ export function Picker({
     </button>
   );
   return (
-    <Placed row={row} className="rx-picker" role="dialog" label="Pick an emoji">
+    <Placed row={row} className="rx-picker" role="dialog" label="Choose a reaction">
       <input
+        ref={(el) => {
+          if (el && window.matchMedia && window.matchMedia("(hover: hover)").matches) {
+            el.focus({ preventScroll: true });
+          }
+        }}
         className="rx-search"
         type="search"
         placeholder="Search emoji"

@@ -230,21 +230,17 @@ export function RoomShell({ room }: { room: string }) {
       const dcN = board.boardData.dc.filter((x) => {
         const signers = x.signers || [];
         const missing = active.filter((a) => !signers.some((sg) => same(sg, a)));
-        return !signers.length || missing.length > 0;
+        return !active.length || missing.length > 0;
       }).length;
       const soon = board.boardData.sk.stakes.filter((x) => {
         const n = daysAway(x.date);
-        return n !== null && n <= 30;
+        return n !== null && n <= 7;
       }).length;
-      const overdue = board.boardData.sk.stakes.some((x) => {
-        const n = daysAway(x.date);
-        return n !== null && n < 0;
-      });
       return {
         chat,
         decisions: dcN ? String(dcN) : "",
         questions: board.boardData.q.questions.length ? String(board.boardData.q.questions.length) : "",
-        stakes: soon ? String(soon) + (overdue ? "!" : "") : "",
+        stakes: soon ? String(soon) : "",
         memory:
           board.rs && board.rs.memory && board.rs.memory.awaiting_digest_from && same(board.rs.memory.awaiting_digest_from, nameState.value)
             ? "Due"

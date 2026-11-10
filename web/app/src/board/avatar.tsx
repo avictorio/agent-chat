@@ -132,15 +132,17 @@ export function AvatarDialog({
               ctx={{ avatars, invite, onAvatar: () => {}, xl: true }}
             />
           </div>
-          <div className="av-name" id="avName">
-            {name}
-          </div>
-          <div className="av-kind" id="avKind">
-            {isClaude ? (
-              <span className="tag k-agent">Bot</span>
-            ) : kind ? (
-              <KindTag kind={kind} />
-            ) : null}
+          <div className="title-row">
+            <span className="av-name" id="avName">
+              {name}
+            </span>
+            <span id="avKind">
+              {isClaude ? (
+                <span className="tag k-agent">Bot</span>
+              ) : kind ? (
+                <KindTag kind={kind} />
+              ) : null}
+            </span>
           </div>
           <button type="button" className="btn sm" id="avClose" ref={closeRef} onClick={() => dlgRef.current?.close()}>
             Close

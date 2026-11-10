@@ -280,6 +280,13 @@ let FAILURES = 0;
       await shot(page, scheme + '-chat.png');
       for (const t of ['constitution', 'decisions', 'questions', 'stakes', 'memory', 'members']) { await page.click('.tab[data-tab="' + t + '"]'); await page.waitForTimeout(200); await shot(page, scheme + '-' + t + '.png'); }
       const counts = await page.$$eval('.tab .count', els => els.map(e => e.parentElement.dataset.tab + '=' + e.textContent + (e.classList.contains('alert') ? '!' : '')));
+      // Sidebar counts are production-derived for this fixture (the
+      // root suite only logs them; assert them here so a counts
+      // divergence cannot pass silently — stakes is due within
+      // SEVEN days in the current app, decisions count when an
+      // active member has not signed).
+      const wantCounts = ['chat=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
+      if (JSON.stringify(counts) !== JSON.stringify(wantCounts)) throw new Error('sidebar counts diverge from production: got ' + JSON.stringify(counts));
       return { counts, hash: await page.evaluate(() => location.hash) };
     });
   }
@@ -730,11 +737,24 @@ let FAILURES = 0;
     await page.fill('#text', 'Hello from the test'); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
     out.lastMsg = await page.$eval('#msgs .msg:last-child .text', e => e.textContent);
     await page.click('.tab[data-tab="questions"]'); await page.waitForTimeout(200);
+    // Board parity guards: Delete is a borderless quiet button in the
+    // current app, and relative times never pluralize ("5 hr ago").
+    const qMeta = await page.$eval('#qList', e => e.textContent);
+    if (qMeta.includes('hrs ago')) throw new Error('rel() pluralized hours: ' + qMeta.slice(0, 200));
+    if (!qMeta.includes('5 hr ago')) throw new Error('question meta missing "5 hr ago": ' + qMeta.slice(0, 200));
+    const delCls = await page.$eval('#qList .btn.danger', b => b.className);
+    if (!delCls.includes('quiet')) throw new Error('board Delete is not the quiet variant: ' + delCls);
     await page.fill('#qInput', 'New question from UI'); await page.click('#qForm button[type=submit]'); await page.waitForTimeout(400);
     out.qAfterAdd = await page.$$eval('#qList .card-title', e => e.map(x => x.textContent));
     await page.click('#qList .card:first-child button:has-text("Claim")'); await page.waitForTimeout(300);
     await page.click('#qList .card:first-child button:has-text("Resolve")'); await page.waitForTimeout(200);
     await shot(page, 'action-resolve-form.png');
+    // Edit forms: fields are .field columns and the control spans the
+    // card (a bare <label> left the textarea at intrinsic width,
+    // floating over its label).
+    const rfShape = await page.$eval('#qList form.edit', f => { const ta = f.querySelector('textarea'); const lab = ta.closest('label'); return { field: !!lab && lab.classList.contains('field'), ratio: ta.getBoundingClientRect().width / f.getBoundingClientRect().width, cancel: Array.from(f.querySelectorAll('button')).map(b => b.textContent + ':' + b.className).join('|') }; });
+    if (!rfShape.field || rfShape.ratio < 0.8) throw new Error('resolve edit-form layout diverges: ' + JSON.stringify(rfShape));
+    if (!rfShape.cancel.includes('Cancel:btn sm')) throw new Error('edit-form Cancel is not plain btn sm: ' + rfShape.cancel);
     await page.fill('#qList .card:first-child textarea', 'Henry will book it.'); await page.click('#qList .card:first-child button:has-text("Mark resolved")'); await page.waitForTimeout(400);
     await page.click('[data-qf="resolved"]'); await page.waitForTimeout(200);
     out.resolved = await page.$$eval('#qList .card-title', e => e.map(x => x.textContent));
@@ -744,6 +764,8 @@ let FAILURES = 0;
     await page.click('.tab[data-tab="constitution"]'); await page.waitForTimeout(200);
     await page.click('#conBody button:has-text("Edit")'); await page.waitForTimeout(200);
     await shot(page, 'action-const-edit.png');
+    const ceShape = await page.$eval('#conBody form.edit', f => { const ta = f.querySelector('textarea'); const lab = ta.closest('label'); return { field: !!lab && lab.classList.contains('field'), ratio: ta.getBoundingClientRect().width / f.getBoundingClientRect().width }; });
+    if (!ceShape.field || ceShape.ratio < 0.8) throw new Error('constitution edit-form layout diverges: ' + JSON.stringify(ceShape));
     await page.fill('#conBody textarea', 'Purpose v3'); await page.click('#conBody button:has-text("Save as version 3")'); await page.waitForTimeout(400);
     out.conVersion = S.con.version;
     await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);
@@ -819,6 +841,10 @@ let FAILURES = 0;
       const out = {};
       await page.click('#msgs .msg[data-id="1"] .avatar'); await page.waitForTimeout(400);
       out.henry = await page.evaluate(() => ({ open: document.getElementById('avDlg').open, name: document.getElementById('avName').textContent, kind: document.getElementById('avKind').textContent, img: (document.querySelector('#avBig img') || {}).naturalWidth, size: document.querySelector('#avBig .avatar').getBoundingClientRect().width }));
+      // Name and kind pill sit on one .title-row line in the current
+      // app; stacked block divs are a divergence.
+      const avRow = await page.evaluate(() => { const n = document.getElementById('avName'), k = document.getElementById('avKind'); return !!(n && k && n.parentElement && n.parentElement.classList.contains('title-row') && k.parentElement === n.parentElement); });
+      if (!avRow) throw new Error('avatar dialog name/kind are not on one title-row');
       await shot(page, label + '-gif.png');
       await page.keyboard.press('Escape'); await page.waitForTimeout(150);
       out.closedByEsc = await page.evaluate(() => !document.getElementById('avDlg').open);
@@ -844,6 +870,14 @@ let FAILURES = 0;
     const box = await page.$eval('.msg[data-id="1"] .text', e => { const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
     await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.waitForTimeout(600); await page.mouse.up(); await page.waitForTimeout(100);
     out.barOpen = await page.$$eval('.rx-bar button.rx', b => b.map(x => x.textContent).join(''));
+    // The quick bar is production-shaped: six reactions ending in
+    // Angry, a plain-plus "More reactions" button, and a text-only
+    // Copy (an icon Copy once wrapped the mobile bar to two rows).
+    const barShape = await page.$$eval('.rx-bar button', bs => bs.map(b => ({ t: b.title || '', txt: b.textContent, cls: b.className, svg: !!b.querySelector('svg') })));
+    if (!barShape.some(b => b.t === 'Angry')) throw new Error('reaction bar lacks the Angry quick reaction: ' + JSON.stringify(barShape));
+    if (!barShape.some(b => b.cls.includes('rx-plus') && b.t === 'More reactions')) throw new Error('reaction bar plus button diverges: ' + JSON.stringify(barShape));
+    const copyBtn = barShape.find(b => b.txt === 'Copy');
+    if (!copyBtn || copyBtn.svg) throw new Error('reaction bar Copy must be text-only: ' + JSON.stringify(barShape));
     await shot(page, 'reactions-bar.png');
     await page.click('.rx-bar button[title="Love"]'); await page.waitForTimeout(300);
     out.afterLove = await chips(1); out.barClosed = !(await page.$('.rx-bar'));
@@ -880,6 +914,12 @@ let FAILURES = 0;
     out.barMine = await page.$$eval('.rx-bar button.rx.on', b => b.map(x => x.textContent));
     await page.click('.rx-bar .rx-plus'); await page.waitForTimeout(300);
     out.recent = await page.$eval('.rx-picker .rx-sec', s => s.textContent + ':' + s.nextElementSibling.textContent);
+    // The picker highlights your current reaction's cell (.on), like
+    // the current app — the unicorn just picked on this message.
+    const pickerOn = await page.$$eval('.rx-picker .rx-cell.on', cs => cs.map(c => c.textContent));
+    // Production marks the mine emoji wherever it renders (Recent
+    // row AND its home category), so: at least one, all the unicorn.
+    if (!pickerOn.length || pickerOn.some(e => e !== '\u{1F984}')) throw new Error('picker mine-highlight diverges: ' + JSON.stringify(pickerOn));
     await page.click('.rx-picker .rx-tab[title="Food & Drink"]'); await page.waitForTimeout(150);
     out.tabScrolled = await page.$eval('.rx-picker .rx-grid', g => g.scrollTop > 100);
     await page.keyboard.press('Escape'); out.escClosed = !(await page.$('.rx-picker'));
@@ -952,6 +992,8 @@ let FAILURES = 0;
       await page.goto('https://chat.victorio.cloud/');
       await page.waitForTimeout(900);
       out.rows = await page.$$eval('.roomrow', (rs) => rs.length);
+      const brandDisplay = await page.$eval('.brand-block', (e) => getComputedStyle(e).display);
+      if (brandDisplay !== 'flex') throw new Error('home brand-block is not flex (display=' + brandDisplay + ')');
       out.forgetInsideLink = await page.$eval('body', () => !!document.querySelector('.roomrow a .forget'));
       out.forgetIsSibling = await page.$eval('body', () => !!document.querySelector('.roomrow > .forget'));
       out.asYou = await page.$$eval('.roomrow .who', (ws) => ws.map((w) => w.textContent));

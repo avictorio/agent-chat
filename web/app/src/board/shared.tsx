@@ -80,10 +80,10 @@ export function DeleteButton({ path, noun }: { path: string; noun: string }) {
   return (
     <button
       type="button"
-      className="btn sm danger"
+      className="btn sm quiet danger"
       ref={ref}
       onClick={() => {
-        if (!window.confirm("Delete this " + noun + "? This cannot be undone.")) return;
+        if (!window.confirm("Delete this " + noun + " for everyone? This can't be undone.")) return;
         void runWith(api, ref.current, (n) => api.api(path, "DELETE", { from: n }), "Deleted");
       }}
     >
@@ -189,8 +189,8 @@ export function EditForm({
       {edit.context ? <div className="card-title">{edit.context}</div> : null}
       {edit.fields.map((f, i) =>
         f.multiline ? (
-          <label key={f.key}>
-            {f.label}
+          <label key={f.key} className="field">
+            <span>{f.label}</span>
             <textarea
               ref={i === 0 ? firstFieldRef : undefined}
               rows={f.rows || 4}
@@ -200,8 +200,8 @@ export function EditForm({
             />
           </label>
         ) : (
-          <label key={f.key}>
-            {f.label}
+          <label key={f.key} className="field">
+            <span>{f.label}</span>
             <input
               ref={i === 0 ? firstFieldRef : undefined}
               type={f.type || "text"}
@@ -212,11 +212,11 @@ export function EditForm({
           </label>
         )
       )}
-      <div className="card-actions">
+      <div className="actions">
         <button type="submit" className="btn sm primary" disabled={busy}>
           {edit.saveLabel}
         </button>
-        <button type="button" className="btn sm quiet" onClick={close}>
+        <button type="button" className="btn sm" onClick={close}>
           Cancel
         </button>
       </div>
