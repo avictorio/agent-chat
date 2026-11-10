@@ -29,12 +29,21 @@ function fresh(opts) {
       ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
       ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
+      ...(opts.duelLobby ? [{ id: 11, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'Duel match #3 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Lobby open - the match starts when both players accept; tap the card to take your seat.', game: { id: 3, type: 'duel', status: 'lobby', round: 1, target: 3, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false }] } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
         { id: 9, ts: now - 30e3, from: 'Anthony', kind: 'human', text: 'Second line from me, **bold**.' },
       ] : []),
     ],
+    duelLobby: opts.duelLobby ? { id: 3, type: 'duel', status: 'lobby', created_by: 'Ada', card_msg: 11, round: 1, best_of: 5, target: 3, round_seconds: 60, deadline: null, lobby_deadline: now + 3500e3, winner: null, declined_by: null,
+      score: { Ada: 0, Anthony: 0 },
+      players: [
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true },
+        { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false },
+      ],
+      rounds: [], log: [], awaiting: [], awaiting_accept: ['Anthony'],
+      you: { playing: true, queued: null, accepted: false } } : null,
     con: { version: 2, ts: now - 3 * H, editor: 'Ada', text: 'Purpose: a shared room where Henry, Hank, Ada and SHA help Anthony plan.\n\nNorms:\n- Be concise and credit ideas.\n- Settle things on the board, not only in chat.' },
     hist: [ { version: 1, ts: now - 2 * D, editor: 'Henry', text: 'First draft.' } ],
     dc: [
@@ -108,6 +117,7 @@ async function setup(page, S, calls) {
     calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
     const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
     S.av = S.av || {};
+    const findGame = (id) => [S.duel, S.game, S.duelLobby].find(g => g && g.id == id) || null;
     let am;
     if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
     if (p.endsWith('/avatar')) {
@@ -155,9 +165,10 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
-    if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false }); const g = isDuel ? { id: 7, type: 'duel', status: 'running', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, winner: null, players, rounds: [], you: { playing: true, queued: null } } : { id: 7, type: 'lightcycles', status: 'running', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: Date.now() + (body.tick_seconds || 120) * 1000, winner: null, players, trails: [], log: [], you: { playing: true, queued: null } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
-    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
-    if ((mm = p.match(/games\/(\d+)$/))) { const gm = S.duel && S.duel.id == mm[1] ? S.duel : S.game; if (!gm || gm.id != mm[1]) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
+    if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
+    if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
+    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
+    if ((mm = p.match(/games\/(\d+)$/))) { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -560,6 +571,43 @@ let FAILURES = 0;
     await page.goBack();
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return out;
+  });
+  // The lobby: a duel card waits on the viewer's accept, with the
+  // buttons right on the card; accepting starts the match in place
+  // (no arena trip), and the arena then offers throws as usual.
+  await run('duel-lobby', { state: { duelLobby: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
+    if (!/Lobby/.test(out.cardMeta) || !/waiting on Anthony/.test(out.cardMeta)) throw new Error('lobby card meta wrong: ' + out.cardMeta);
+    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 4000 });
+    await shot(page, 'duel-lobby-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lobby-panel .duel-btn', { timeout: 4000 });
+    out.arenaLine = await page.$eval('#viewer .lobby-panel .duel-statusline', e => e.textContent);
+    if (!/Accept to take your seat/.test(out.arenaLine)) throw new Error('arena lobby line wrong: ' + out.arenaLine);
+    await shot(page, 'duel-lobby-arena-panel.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.click('.game-card .game-lobby-actions .duel-btn:first-child');
+    await page.waitForFunction(() => document.querySelector('.game-card .art-size').textContent.includes('Round 1'), null, { timeout: 4000 });
+    out.acceptCall = calls.filter(c => c.includes('/games/3/accept')).pop() || '';
+    if (!out.acceptCall) throw new Error('accept call missing: ' + JSON.stringify(calls.slice(-4)));
+    out.viewerHidden = await page.$eval('#viewer', e => e.hidden);
+    if (!out.viewerHidden) throw new Error('accept on the card must not open the arena');
+    await shot(page, 'duel-lobby-accepted.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await shot(page, 'duel-lobby-arena.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('duel-lobby-mobile', { state: { duelLobby: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'duel-lobby-mobile-card.png');
+    return { ok: true };
   });
   await run('duel-finished', { state: { duelDone: true } }, async (page) => {
     const out = {};

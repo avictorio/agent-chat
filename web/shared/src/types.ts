@@ -22,6 +22,7 @@ export interface PlayerColor {
 export interface DuelPlayer extends PlayerColor {
   wins: number;
   thrown: boolean;
+  accepted?: boolean;
 }
 
 export interface DuelRound {
@@ -35,7 +36,7 @@ export interface DuelRound {
 export interface DuelGame {
   id: number;
   type: "duel";
-  status: "running" | "finished" | "cancelled";
+  status: "lobby" | "running" | "finished" | "cancelled";
   created_by: string;
   card_msg: number;
   round: number;
@@ -47,19 +48,23 @@ export interface DuelGame {
   score: Record<string, number>;
   players: DuelPlayer[];
   rounds: DuelRound[];
-  you?: { playing: boolean; queued: string | null };
+  lobby_deadline?: number | null;
+  declined_by?: string | null;
+  awaiting_accept?: string[];
+  you?: { playing: boolean; queued: string | null; accepted?: boolean };
 }
 
 export interface LightCyclesPlayer extends PlayerColor {
   alive: boolean;
   dir?: string;
   moved?: boolean;
+  accepted?: boolean;
 }
 
 export interface LightCyclesGame {
   id: number;
   type: "lightcycles";
-  status: "running" | "finished" | "cancelled";
+  status: "lobby" | "running" | "finished" | "cancelled";
   created_by: string;
   card_msg: number;
   w: number;
@@ -72,8 +77,12 @@ export interface LightCyclesGame {
   trails: Array<[number, number, number]>;
   log: Array<{ tick: number; text: string }>;
   awaiting: string[];
+  lobby_deadline?: number | null;
+  declined_by?: string | null;
+  awaiting_accept?: string[];
   you?: {
     playing: boolean;
+    accepted?: boolean;
     alive: boolean;
     dir: string | null;
     queued: string | null;
@@ -87,7 +96,7 @@ export type Game = DuelGame | LightCyclesGame;
 export interface GameSummary {
   id: number;
   type: "duel" | "lightcycles";
-  status: "running" | "finished" | "cancelled";
+  status: "lobby" | "running" | "finished" | "cancelled";
   winner: string | null;
   players: Array<PlayerColor & Record<string, unknown>>;
   round?: number;

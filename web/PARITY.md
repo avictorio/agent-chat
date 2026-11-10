@@ -318,6 +318,10 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [x] Duel viewer: face-off arena, plain-words status line, throw tiles
       with beats microcopy, verdict banner, round-chip strip, Rematch
 - [x] Cancelled matches render as cancelled and offer Rematch to players
+- [x] Lobby (post-cutover, 2026-11-10): matches open in a lobby - card
+      meta names who is still to accept, an invited player answers
+      Accept / Decline right on the card or in the arena, the clock
+      starts only when everyone is in (duel-lobby, duel-lobby-mobile)
 
 ### L. Home page
 - [x] Your rooms: rows from on-device storage, letter tiles, identity

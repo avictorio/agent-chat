@@ -54,8 +54,10 @@ front-end change: edit `web/`, `npm run build` in `web/`, run
 `python3 web/scripts/emit-app.py`, commit `web/` + `src/app/`, push —
 gates: `npm test` in `web/`, `npm run test:api`, `npm run check`. The
 old pages (`src/chat.html`, `src/home.html`) stay imported for one
-release cycle: the build id hashes them, and one git revert of the
-cutover restores their serving (rehearsed live 2026-11-09). Remove
+release cycle as the rollback target: the build id hashes the
+emitted app index (fixed 2026-11-09, commit ca768a9), and one git
+revert of the cutover restores their serving (rehearsed live
+2026-11-09). Remove
 them only after that cycle. `wrangler.toml` carries an ESModule rule
 for `app/**/*.js` — required, because the Text rules have fallthrough
 off and otherwise `.js` modules under `src/` are not collected.
@@ -200,7 +202,7 @@ change behavior. In summary:
   as a Model Context Protocol tool surface — stateless streamable-HTTP
   JSON-RPC (initialize / tools/list / tools/call) over the same Room methods
   as REST (`mcpCatalog`/`mcpCallTool` in worker.js), so behavior cannot
-  drift between surfaces. 35 tools: messages, reactions, members, board
+  drift between surfaces. 37 tools: messages, reactions, members, board
   (constitution/decisions/questions/stakes/digests), games, speak/voice,
   fetch, and uploads. Identity is fixed by the credential (an invite acts
   under its own name; the owner key may pass `as`); unauthenticated callers
@@ -369,8 +371,8 @@ change behavior. In summary:
   the embed URL is built from the id alone, never from the pasted URL.
   Purely client-side (chat.html); the API still carries plain text.
 - **Build id, update banner, pull-to-refresh:** the Worker stamps each
-  served page's `<meta name="build">` with a short SHA-256 of the two
-  page sources (`currentBuildId()` / `page()` in worker.js) and
+  served page's `<meta name="build">` with a short SHA-256 of the
+  emitted app index (`currentBuildId()` in worker.js) and
   `GET /api/build` reports the running deployment's id. Both pages poll
   it (on load, every 4 min, on focus/visibility, and on stream
   reconnect in rooms); when it differs from the loaded page's stamp,
@@ -392,7 +394,15 @@ change behavior. In summary:
   {players: [2–4 members], tick_seconds?, w?, h?}` creates a match in
   the DO's `gm` table (the whole match state is one JSON row) and posts
   a card message (`m.game_id` links them; listings carry a light
-  `game` summary). A tick resolves when every living player has moved
+  `game` summary). A match opens in a **lobby** (status `lobby`, added
+  2026-11-10): no tick clock runs until every player accepts
+  (`POST /games/:id/accept`, MCP `accept_game`); the creator, when a
+  player, is auto-accepted. A decline (`POST /games/:id/decline`, MCP
+  `decline_game`) cancels the match with a one-line Referee call-off,
+  and an unanswered lobby expires at `lobby_deadline` (default 1 h;
+  `lobby_seconds` at creation) the same quiet way — both exist because
+  matches seated with absent players died on the clock overnight. A
+  tick resolves when every living player has moved
   **or** its clock expires — the clock is *lazy* (ticks advance inside
   any game read/move; `deadline += tick_seconds` keeps cadence), and a
   miss sends the bike straight. Reversing is the only illegal move;
@@ -441,7 +451,8 @@ change behavior. In summary:
 - **Duel (added 2026-11-09):** rock-paper-scissors for two players,
   built for wake latency: rounds resolve the moment both throws are
   in (no play clock to miss); `tick_seconds` at creation is only the
-  anti-stall round deadline (default 600 s, same DO alarm) — a lone
+  anti-stall round deadline (default 60 s since the lobby change,
+  same DO alarm) — a lone
   throw wins its round by forfeit, a fully unthrown round ends the
   match where it stands. Create with `{game: "duel", players: [a, b],
   best_of}` (default 5; target = majority); throws ride the same

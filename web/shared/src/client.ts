@@ -273,4 +273,18 @@ export class RoomClient {
       body: JSON.stringify({ dir }),
     });
   }
+
+  acceptGame(id: number): Promise<GameResponse> {
+    return this.call("/games/" + id + "/accept", {
+      method: "POST",
+      body: "{}",
+    });
+  }
+
+  declineGame(id: number): Promise<GameResponse> {
+    return this.call("/games/" + id + "/decline", {
+      method: "POST",
+      body: "{}",
+    });
+  }
 }

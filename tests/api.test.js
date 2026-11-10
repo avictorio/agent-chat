@@ -245,9 +245,24 @@ async function waitUp() {
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex', 'Ghost'] } });
     check('game with a non-member -> 400', r.status === 400, r.status);
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 3600, w: 12, h: 10 } });
-    check('game created', r.status === 201 && r.json.game && r.json.game.status === 'running', r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    check('game created into its lobby', r.status === 201 && r.json.game && r.json.game.status === 'lobby', r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
     const G = r.json.game; const gid = G.id;
-    check('spawn + legal moves', G.players[0].x === 3 && G.players[0].y === 5 && G.you.legal_moves.join() === 'up,down,right', JSON.stringify(G.players[0]) + ' ' + JSON.stringify(G.you));
+    check('lobby seats: creator in, invitees waiting', G.you.accepted === true && (G.awaiting_accept || []).join() === 'Rex,Rae' && G.players.find(p => p.name === 'Rex').accepted === false && typeof G.lobby_deadline === 'number', JSON.stringify(G).slice(0, 220));
+    r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'down' } });
+    check('move in the lobby -> 409', r.status === 409 && String(r.json.error).includes('lobby'), r.status + ' ' + JSON.stringify(r.json));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TRex });
+    const rexNudge = ((r.json.room_state && r.json.room_state.awaiting_you) || []).find(x => x.type === 'game' && x.id === gid);
+    check('room_state nudges the lobby accept', !!rexNudge && rexNudge.action === 'accept' && rexNudge.turn === 'lobby' && rexNudge.call.path.endsWith('/games/' + gid + '/accept'), JSON.stringify(rexNudge));
+    const invPip = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Pip', kind: 'agent' } });
+    await req('GET', R2 + '/members', { token: invPip.json.token });
+    r = await req('POST', R2 + '/games/' + gid + '/accept', { token: invPip.json.token, json: {} });
+    check('accept by a non-player -> 403', r.status === 403, r.status);
+    r = await req('POST', R2 + '/games/' + gid + '/accept', { token: TRex, json: {} });
+    check('first accept keeps the lobby open', r.status === 200 && r.json.game.status === 'lobby' && (r.json.game.awaiting_accept || []).join() === 'Rae', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + gid + '/accept', { token: TRae, json: {} });
+    check('last accept starts the match', r.status === 200 && r.json.game.status === 'running' && typeof r.json.game.deadline === 'number', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    r = await req('GET', R2 + '/games/' + gid, { token: TP });
+    check('spawn + legal moves', r.json.game.players[0].x === 3 && r.json.game.players[0].y === 5 && r.json.game.you.legal_moves.join() === 'up,down,right', JSON.stringify(r.json.game.players[0]) + ' ' + JSON.stringify(r.json.game.you));
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'] } });
     check('default tick_seconds is 120', r.status === 201 && r.json.game.tick_seconds === 120, r.status + ' tick=' + (r.json.game && r.json.game.tick_seconds));
     const defId = r.json.game.id;
@@ -268,6 +283,8 @@ async function waitUp() {
     // must show its expired tick resolved with everyone sent straight.
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30, w: 12, h: 10 } });
     const clockId = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + clockId + '/accept', { token: TRex, json: {} });
+    check('clock match starts on accept', r.status === 200 && r.json.game.status === 'running', r.status);
     r = await req('POST', R2 + '/games/' + gid + '/moves', { token: TP, json: { dir: 'down' } });
     check('queue a move', r.status === 200 && r.json.game.you.queued === 'down' && r.json.resolved === false, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     await req('POST', R2 + '/games/' + gid + '/moves', { token: TRex, json: { dir: 'up' } });
@@ -309,6 +326,8 @@ async function waitUp() {
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 30 } });
     check('duel created', r.status === 201 && r.json.game.type === 'duel' && r.json.game.target === 2 && r.json.game.round === 1, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
     const duelF = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + duelF + '/accept', { token: TRex, json: {} });
+    check('duel starts when both accept', r.status === 200 && r.json.game.status === 'running' && r.json.game.round_seconds === 30, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 140));
     r = await req('POST', R2 + '/games/' + duelF + '/moves', { token: TP, json: { dir: 'rock' } });
     check('duel throw queues without resolving', r.status === 200 && r.json.resolved === false && r.json.game.you.queued === 'rock', r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     r = await req('GET', R2 + '/games/' + duelF, { token: TRex });
@@ -351,6 +370,7 @@ async function waitUp() {
     // resolves, and reaching the target finishes it with a result post.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
     const duelP = r.json.game.id;
+    await req('POST', R2 + '/games/' + duelP + '/accept', { token: TRex, json: {} });
     r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'spock' } });
     check('duel bogus throw -> 400', r.status === 400 && Array.isArray(r.json.legal_moves), r.status + ' ' + JSON.stringify(r.json));
     await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'rock' } });
@@ -368,6 +388,26 @@ async function waitUp() {
     check('referee posted the duel result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelP + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
     check('duel with 3 players -> 400', r.status === 400, r.status);
+    // The lobby's endings: a decline calls the match off with a Referee
+    // post naming the player, and a lobby nobody completes expires on
+    // its join window and is called off the same way.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3 } });
+    check('duel default round clock is 60', r.status === 201 && r.json.game.round_seconds === 60 && r.json.game.status === 'lobby', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const duelD = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + duelD + '/decline', { token: TRex, json: {} });
+    check('decline calls the match off', r.status === 200 && r.json.game.status === 'cancelled' && r.json.game.declined_by === 'Rex', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + duelD + '/moves', { token: TP, json: { dir: 'rock' } });
+    check('throw after a decline -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('referee posts the decline', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelD + ' is off') && x.text.includes('Rex declined')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 80))));
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600, lobby_seconds: 5, w: 12, h: 10 } });
+    const expId = r.json.game.id;
+    check('short lobby created', r.status === 201 && r.json.game.status === 'lobby' && typeof r.json.game.lobby_deadline === 'number', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    await new Promise(res => setTimeout(res, 6000));
+    r = await req('GET', R2 + '/games/' + expId, { token: TP });
+    check('expired lobby is called off', r.status === 200 && r.json.game.status === 'cancelled', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('referee posts the expiry', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + expId + ' never started') && x.text.includes('Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 80))));
 
     // Stream subscriptions: events= narrows the frame kinds, game=
     // restricts game frames to given matches, and a malformed
@@ -403,6 +443,7 @@ async function waitUp() {
     s.close();
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30, w: 12, h: 10 } });
     const gid2 = r.json.game.id;
+    await req('POST', R2 + '/games/' + gid2 + '/accept', { token: TRex, json: {} });
     s = await openStream(R2 + '/stream?events=game', TP);
     await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'stream filter probe' } });
     await new Promise(res => setTimeout(res, 1500));
@@ -464,7 +505,9 @@ async function waitUp() {
     check('mcp unknown tool -> isError', !!(r.json && r.json.result && r.json.result.isError === true), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { players: ['Poc', 'Rex'], tick_seconds: 3600, w: 12, h: 10 } }, { token: TP });
     const mcpGame = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
-    check('mcp game created', !!mcpGame && mcpGame.status === 'running', JSON.stringify(r.json).slice(0, 200));
+    check('mcp game created into its lobby', !!mcpGame && mcpGame.status === 'lobby', JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'accept_game', arguments: { id: mcpGame.id } }, { token: TRex });
+    check('mcp accept starts the match', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game.status === 'running'), JSON.stringify(r.json).slice(0, 200));
     await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpGame.id, dir: 'down' } }, { token: TP });
     r = await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpGame.id, dir: 'up' } }, { token: TRex });
     check('mcp moves resolve a tick', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.resolved === true && r.json.result.structuredContent.game.tick === 1), JSON.stringify(r.json).slice(0, 200));
@@ -473,6 +516,7 @@ async function waitUp() {
     r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { game: 'duel', players: ['Poc', 'Rex'], best_of: 1, tick_seconds: 3600 } }, { token: TP });
     const mcpDuel = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
     check('mcp duel created', !!mcpDuel && mcpDuel.type === 'duel' && mcpDuel.target === 1, JSON.stringify(r.json).slice(0, 200));
+    await mcp(R2, 'tools/call', { name: 'accept_game', arguments: { id: mcpDuel.id } }, { token: TRex });
     await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpDuel.id, dir: 'scissors' } }, { token: TP });
     r = await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpDuel.id, dir: 'paper' } }, { token: TRex });
     const mcpDuelEnd = r.json && r.json.result && r.json.result.structuredContent;

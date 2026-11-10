@@ -23,10 +23,18 @@ export function gameMetaText(g: GL): string {
       .join(" · ");
     if (g.status === "finished") return "Final · " + dline + (g.winner ? " · " + g.winner + " takes the duel" : " · no winner");
     if (g.status === "cancelled") return "Cancelled · " + dline;
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
+    }
     return "Round " + g.round + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
   }
   if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
   if (g.status === "cancelled") return "Cancelled · tick " + g.tick;
+  if (g.status === "lobby") {
+    const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+    return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · tick " + tickLen(g.tick_seconds || 120);
+  }
   const alive = (g.players || []).filter((p: GL) => p.alive).length;
   let meta = "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
   if (g.you && g.you.playing && g.you.alive && !g.you.queued) meta += " · your move";
@@ -129,6 +137,9 @@ export function duelBoard(g: GL): HTMLElement {
   });
   if (g.status === "running") {
     const states = (g.players || []).map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
+    wrap.appendChild(el("div", "duel-stateline", states));
+  } else if (g.status === "lobby") {
+    const states = (g.players || []).map((p: GL) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
     wrap.appendChild(el("div", "duel-stateline", states));
   }
   const rounds = g.rounds || [];

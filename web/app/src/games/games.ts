@@ -34,6 +34,7 @@ export interface GameStore {
   onFrame(game: GL): void;
   openGame(id: number, type?: string): void;
   viewerClosed(): void;
+  respond(id: number, accept: boolean): Promise<void>;
 }
 
 export function createGameStore(opts: {
@@ -118,6 +119,59 @@ export function createGameStore(opts: {
     }
   }
 
+  // Lobby answers: accept takes your seat (the last accept starts the
+  // match), decline calls the match off for everyone. The response is
+  // the new state, so the card and the arena repaint from it directly.
+  async function respond(id: number, accept: boolean, note: HTMLElement | null) {
+    if (note) note.textContent = accept ? "Taking your seat…" : "Declining…";
+    try {
+      const d = accept ? await client.acceptGame(id) : await client.declineGame(id);
+      if (d.game) {
+        cache.set(id, d.game);
+        notify();
+        renderGameView(d.game, true);
+      } else if (note) {
+        note.textContent = "The referee refused that.";
+      }
+    } catch (e) {
+      if (note) note.textContent = e instanceof Error ? e.message : "That did not reach the referee.";
+    }
+  }
+
+  // The lobby panel, shared by both arenas: who is in, who is still
+  // owed an answer, and - for an invited player who has not answered -
+  // the Accept / Decline buttons. The clock has not started; nothing
+  // here is urgent except honesty about who is actually at the table.
+  function lobbyPanel(g: GL, note: HTMLElement): HTMLElement {
+    const wrap = el("div", "lobby-panel");
+    const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+    const mine = !!(g.you && g.you.playing);
+    let line: string;
+    if (mine && !g.you.accepted)
+      line = "You've been invited to this match. Accept to take your seat - the clock starts when everyone is in.";
+    else if (mine) line = "You're in. Waiting on " + waiting.join(", ") + ".";
+    else line = "Lobby - waiting on " + waiting.join(", ") + " to accept.";
+    if (g.lobby_deadline) line += " The lobby closes at " + new Date(g.lobby_deadline).toLocaleTimeString() + ".";
+    wrap.appendChild(el("div", "duel-statusline", line));
+    if (mine && !g.you.accepted) {
+      const row = el("div", "duel-pad");
+      const acc = el("button", "duel-btn", "Accept");
+      acc.type = "button";
+      acc.addEventListener("click", () => {
+        void respond(g.id, true, note);
+      });
+      const dec = el("button", "duel-btn quiet", "Decline");
+      dec.type = "button";
+      dec.addEventListener("click", () => {
+        void respond(g.id, false, note);
+      });
+      row.appendChild(acc);
+      row.appendChild(dec);
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
   async function sendMove(id: number, dir: string, note: HTMLElement | null) {
     if (note) note.textContent = "Queuing " + dir + "…";
     try {
@@ -141,7 +195,7 @@ export function createGameStore(opts: {
       "|" +
       g.round +
       "|" +
-      (g.players || []).map((p: GL) => (p.wins || 0) + (p.thrown ? 1 : 0)).join("") +
+      (g.players || []).map((p: GL) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
       "|" +
       ((g.you && g.you.queued) || "");
     if (!force && key === gameRenderKey) return;
@@ -155,6 +209,10 @@ export function createGameStore(opts: {
     const note = el("div", "lc-note", "");
     const players = g.players || [];
     const rounds = g.rounds || [];
+    if (g.status === "lobby") {
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+    }
     if (g.status === "running" && players.length === 2) {
       const arena = el("div", "duel-arena");
       arena.appendChild(duelSide(players[0], g));
@@ -224,7 +282,7 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
-    if (g.status !== "running" && g.you && g.you.playing) {
+    if ((g.status === "finished" || g.status === "cancelled") && g.you && g.you.playing) {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
@@ -282,7 +340,7 @@ export function createGameStore(opts: {
       "|" +
       ((g.you && g.you.queued) || "") +
       "|" +
-      (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0)).join("");
+      (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     const wrap = gameView.wrap;
@@ -303,13 +361,25 @@ export function createGameStore(opts: {
       const dot = el("span", "lc-dot");
       dot.style.background = p.hex;
       chip.appendChild(dot);
-      chip.appendChild(
-        document.createTextNode(p.name + (p.alive ? (g.status === "running" ? (p.moved ? " · moved ✓" : " · deciding…") : "") : " · out"))
-      );
+      const state =
+        g.status === "lobby"
+          ? p.accepted
+            ? " · in ✓"
+            : " · invited…"
+          : g.status === "running"
+            ? p.moved
+              ? " · moved ✓"
+              : " · deciding…"
+            : "";
+      chip.appendChild(document.createTextNode(p.name + (p.alive ? state : " · out")));
       chips.appendChild(chip);
     });
     wrap.appendChild(chips);
     const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+    }
     if (g.you && g.you.playing && g.status === "running" && g.you.alive) {
       const pad = el("div", "lc-pad");
       const dirs: [string, string, number, number][] = [
@@ -342,7 +412,7 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - the riders steer by API and by pad.";
       wrap.appendChild(note);
     }
-    if (g.status !== "running" && g.you && g.you.playing) {
+    if ((g.status === "finished" || g.status === "cancelled") && g.you && g.you.playing) {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
@@ -420,6 +490,7 @@ export function createGameStore(opts: {
       if (gameView && gameView.id === game.id) void fetchGame(game.id);
     },
     openGame,
+    respond: (id: number, accept: boolean) => respond(id, accept, null),
     viewerClosed() {
       if (gameViewTimer) {
         clearInterval(gameViewTimer);

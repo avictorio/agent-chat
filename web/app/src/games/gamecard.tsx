@@ -46,6 +46,30 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       <div className="game-board" ref={boardRef}>
         {!g && <p className="md-p">Loading the grid…</p>}
       </div>
+      {g && g.status === "lobby" && g.you && g.you.playing && !g.you.accepted ? (
+        <div className="game-lobby-actions">
+          <button
+            type="button"
+            className="duel-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              void store.respond(id, true);
+            }}
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            className="duel-btn quiet"
+            onClick={(e) => {
+              e.stopPropagation();
+              void store.respond(id, false);
+            }}
+          >
+            Decline
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

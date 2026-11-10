@@ -100,8 +100,8 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         : "A duel is exactly 2 players."
       : "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
     : type === "duel"
-      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Rounds resolve as soon as both throws are in."
-      : "Every rider moves each tick; miss a tick and the clock rides straight for you.";
+      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; rounds are a minute once under way."
+      : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
 
   // The roster list carries the room's bot identity ("claude") for
   // mentions and rendering; it holds no invite and cannot play, so
