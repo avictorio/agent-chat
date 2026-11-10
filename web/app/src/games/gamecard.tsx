@@ -1,4 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useFeed } from "../room/ctx";
 import type { GameSummary } from "@chat/shared";
 import { boardSvg, duelBoard, gameMetaText } from "./render";
 import type { GameStore } from "./games";
@@ -8,7 +9,8 @@ import type { GameStore } from "./games";
 // from the store's cached game, fetching it on first sight like the
 // current app. Tapping opens the arena in the viewer.
 
-export function GameCardBlock({ summary, store }: { summary: GameSummary; store: GameStore }) {
+export function GameCardBlock({ summary }: { summary: GameSummary }) {
+  const store = useFeed().games;
   const version = useSyncExternalStore(store.subscribe, store.getVersion);
   const id = summary.id;
   const g = store.cache.get(id) || null;

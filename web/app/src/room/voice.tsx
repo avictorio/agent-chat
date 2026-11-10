@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { RoomClient, VoiceState } from "@chat/shared";
 import { toast } from "../lib";
+import { useSession } from "./ctx";
 
 // The "Your voice" dialog, ported from the current app: record the
 // script (or upload a sample file), the server clones it, and the
@@ -34,8 +35,10 @@ function voiceText(v: VoiceState | null | undefined): string {
 const SCRIPT =
   "“Hey, this is my voice — the real one, not the announcer one. Last Tuesday I drove to the coast with the windows down, singing along badly and thinking about coffee. Do you know how the first cup decides the whole morning? This year I planted twelve tomatoes, which is eleven more than anybody needs. So call me when you land, bring the blue charger, and don’t worry — I saved you the good seat by the window.”";
 
-export const VoiceDialog = forwardRef<VoiceDialogHandle, { client: RoomClient; hasToken: boolean }>(
-  function VoiceDialog(p, ref) {
+export const VoiceDialog = forwardRef<VoiceDialogHandle>(
+  function VoiceDialog(_props, ref) {
+    const session = useSession();
+    const p = { client: session.client, hasToken: !!session.token };
     const dlgRef = useRef<HTMLDialogElement | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const [status, setStatus] = useState("Checking…");

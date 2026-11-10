@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useFeed, useMembers, useSession } from "../room/ctx";
 import type { Message } from "@chat/shared";
 import { md } from "./markdown";
 import type { ViewerApi } from "../shell/viewer";
@@ -155,19 +156,10 @@ function DocBody({ id, url, memberSet }: { id: number; url: string; memberSet: S
 
 /* ---------- the media block under a message's text ---------- */
 
-export function MediaBlocks({
-  m,
-  token,
-  memberSet,
-  openViewer,
-  games,
-}: {
-  m: Message;
-  token: string;
-  memberSet: Set<string>;
-  openViewer: ViewerApi["open"];
-  games: GameStore;
-}) {
+export function MediaBlocks({ m }: { m: Message }) {
+  const { token } = useSession();
+  const { memberSet } = useMembers();
+  const { openViewer, games } = useFeed();
   const yts = ytLinks(m.text || "");
   if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.game) return null;
   const memberSetRef = useRef(memberSet);
@@ -265,7 +257,7 @@ export function MediaBlocks({
           <DocBody id={m.id} url={withInvite(m.doc.url, token)} memberSet={memberSet} />
         </div>
       )}
-      {m.game && m.game.id ? <GameCardBlock summary={m.game} store={games} /> : null}
+      {m.game && m.game.id ? <GameCardBlock summary={m.game} /> : null}
     </>
   );
 }

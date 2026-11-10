@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { useBoardApi } from "../room/ctx";
 import type { Decision, Digest, Question, Stake } from "@chat/shared";
 import { Avatar } from "../feed/feed";
 import { daysAway, parseDay, rel, shortDate } from "../dates";
@@ -17,9 +18,10 @@ import {
 
 // The board's five content sections, ported from the current app.
 
-export function ConstitutionView({ api }: { api: BoardApi }) {
+export function ConstitutionView() {
+  const api = useBoardApi();
   const board = api.board;
-  const ed = useEditing(api);
+  const ed = useEditing();
   if (!board) return <div id="conBody"></div>;
   const c = board.con.constitution;
   const older = (board.con.history || [])
@@ -30,7 +32,7 @@ export function ConstitutionView({ api }: { api: BoardApi }) {
       <div id="conBody">
         <div className="card">
           {ed.edit ? (
-            <EditForm api={api} edit={ed.edit} close={ed.close} />
+            <EditForm edit={ed.edit} close={ed.close} />
           ) : !c ? (
             <>
               <div className="card-title">No constitution yet</div>
@@ -95,7 +97,6 @@ export function ConstitutionView({ api }: { api: BoardApi }) {
                 <div className="card-text">{h.text}</div>
                 <div className="card-actions">
                   <ActionButton
-                    api={api}
                     className="btn sm"
                     label="Restore this version"
                     okText="Restored"
@@ -116,8 +117,9 @@ export function ConstitutionView({ api }: { api: BoardApi }) {
 
 /* ---------- Decisions ---------- */
 
-function DecisionCard({ api, x, avatars }: { api: BoardApi; x: Decision; avatars: Record<string, string> }) {
-  const ed = useEditing(api);
+function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, string> }) {
+  const api = useBoardApi();
+  const ed = useEditing();
   const signers = x.signers || [];
   const mine = !!api.meName && signers.some((s) => same(s, api.meName));
   const active = (api.board?.mb.members || []).filter((m) => m.status === "active").map((m) => m.name);
@@ -125,7 +127,7 @@ function DecisionCard({ api, x, avatars }: { api: BoardApi; x: Decision; avatars
   return (
     <div className="card">
       {ed.edit ? (
-        <EditForm api={api} edit={ed.edit} close={ed.close} />
+        <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
           <div className="card-title">{x.title}</div>
@@ -159,7 +161,6 @@ function DecisionCard({ api, x, avatars }: { api: BoardApi; x: Decision; avatars
           )}
           <div className="card-actions">
             <ActionButton
-              api={api}
               className={mine ? "btn sm" : "btn sm primary"}
               label={mine ? "Remove my signature" : "Sign"}
               okText={mine ? "Signature removed" : "Signed"}
@@ -185,7 +186,7 @@ function DecisionCard({ api, x, avatars }: { api: BoardApi; x: Decision; avatars
             >
               Edit
             </button>
-            <DeleteButton api={api} path={"/decisions/" + x.id} noun="decision" />
+            <DeleteButton path={"/decisions/" + x.id} noun="decision" />
           </div>
         </>
       )}
@@ -193,7 +194,8 @@ function DecisionCard({ api, x, avatars }: { api: BoardApi; x: Decision; avatars
   );
 }
 
-export function DecisionsView({ api, avatars }: { api: BoardApi; avatars: Record<string, string> }) {
+export function DecisionsView({ avatars }: { avatars: Record<string, string> }) {
+  const api = useBoardApi();
   const titleRef = useRef<HTMLInputElement | null>(null);
   const noteRef = useRef<HTMLInputElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -227,7 +229,7 @@ export function DecisionsView({ api, avatars }: { api: BoardApi; avatars: Record
           (list.length === 0 ? (
             <EmptyState text="No decisions recorded yet. When the room settles something, add it here." />
           ) : (
-            list.map((x) => <DecisionCard key={x.id} api={api} x={x} avatars={avatars} />)
+            list.map((x) => <DecisionCard key={x.id} x={x} avatars={avatars} />)
           ))}
       </div>
     </>
@@ -236,13 +238,14 @@ export function DecisionsView({ api, avatars }: { api: BoardApi; avatars: Record
 
 /* ---------- Questions ---------- */
 
-function QuestionCard({ api, x }: { api: BoardApi; x: Question }) {
-  const ed = useEditing(api);
+function QuestionCard({ x }: { x: Question }) {
+  const api = useBoardApi();
+  const ed = useEditing();
   const resolved = x.status === "resolved";
   return (
     <div className={"card" + (resolved ? " subtle" : "")}>
       {ed.edit ? (
-        <EditForm api={api} edit={ed.edit} close={ed.close} />
+        <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
           <div className="card-title">
@@ -267,10 +270,10 @@ function QuestionCard({ api, x }: { api: BoardApi; x: Question }) {
           ) : null}
           <div className="card-actions">
             {x.status === "open" && (
-              <ActionButton api={api} className="btn sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
+              <ActionButton className="btn sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
             )}
             {x.status === "claimed" && (
-              <ActionButton api={api} className="btn sm" label="Unclaim" okText="Unclaimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "unclaim" })} />
+              <ActionButton className="btn sm" label="Unclaim" okText="Unclaimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "unclaim" })} />
             )}
             {!resolved ? (
               <button
@@ -288,7 +291,7 @@ function QuestionCard({ api, x }: { api: BoardApi; x: Question }) {
                 Resolve
               </button>
             ) : (
-              <ActionButton api={api} className="btn sm" label="Reopen" okText="Reopened" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "reopen" })} />
+              <ActionButton className="btn sm" label="Reopen" okText="Reopened" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "reopen" })} />
             )}
             <span className="spacer"></span>
             <button
@@ -304,7 +307,7 @@ function QuestionCard({ api, x }: { api: BoardApi; x: Question }) {
             >
               Edit
             </button>
-            <DeleteButton api={api} path={"/questions/" + x.id} noun="question" />
+            <DeleteButton path={"/questions/" + x.id} noun="question" />
           </div>
         </>
       )}
@@ -312,7 +315,8 @@ function QuestionCard({ api, x }: { api: BoardApi; x: Question }) {
   );
 }
 
-export function QuestionsView({ api }: { api: BoardApi }) {
+export function QuestionsView() {
+  const api = useBoardApi();
   const [filter, setFilter] = useState<"open" | "resolved">("open");
   const inputRef = useRef<HTMLInputElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -354,7 +358,7 @@ export function QuestionsView({ api }: { api: BoardApi }) {
           (items.length === 0 ? (
             <EmptyState text={filter === "open" ? "No open questions. Nice." : "Nothing resolved yet."} />
           ) : (
-            items.map((x) => <QuestionCard key={x.id} api={api} x={x} />)
+            items.map((x) => <QuestionCard key={x.id} x={x} />)
           ))}
       </div>
     </>
@@ -376,12 +380,13 @@ function whenLabel(date: string): { text: string; rel: string; cls: string } {
   return { text: txt, rel: "In " + n + " days", cls: n <= 7 ? "pill warn" : "pill muted" };
 }
 
-function StakeCard({ api, x, isDone }: { api: BoardApi; x: Stake; isDone: boolean }) {
-  const ed = useEditing(api);
+function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
+  const api = useBoardApi();
+  const ed = useEditing();
   return (
     <div className={"card" + (isDone ? " subtle" : "")}>
       {ed.edit ? (
-        <EditForm api={api} edit={ed.edit} close={ed.close} />
+        <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
           <div className="card-title">{x.title}</div>
@@ -409,7 +414,6 @@ function StakeCard({ api, x, isDone }: { api: BoardApi; x: Stake; isDone: boolea
           </div>
           <div className="card-actions">
             <ActionButton
-              api={api}
               className="btn sm"
               label={isDone ? "Reopen" : "Mark done"}
               okText={isDone ? "Reopened" : "Marked done"}
@@ -434,7 +438,7 @@ function StakeCard({ api, x, isDone }: { api: BoardApi; x: Stake; isDone: boolea
             >
               Edit
             </button>
-            <DeleteButton api={api} path={"/stakes/" + x.id} noun="stake" />
+            <DeleteButton path={"/stakes/" + x.id} noun="stake" />
           </div>
         </>
       )}
@@ -442,7 +446,8 @@ function StakeCard({ api, x, isDone }: { api: BoardApi; x: Stake; isDone: boolea
   );
 }
 
-export function StakesView({ api }: { api: BoardApi }) {
+export function StakesView() {
+  const api = useBoardApi();
   const titleRef = useRef<HTMLInputElement | null>(null);
   const dateRef = useRef<HTMLInputElement | null>(null);
   const noteRef = useRef<HTMLInputElement | null>(null);
@@ -492,7 +497,7 @@ export function StakesView({ api }: { api: BoardApi }) {
               <>
                 <div className="section-label">Coming up</div>
                 {dated.map((x) => (
-                  <StakeCard key={x.id} api={api} x={x} isDone={false} />
+                  <StakeCard key={x.id} x={x} isDone={false} />
                 ))}
               </>
             )}
@@ -500,7 +505,7 @@ export function StakesView({ api }: { api: BoardApi }) {
               <>
                 <div className="section-label">No date</div>
                 {undated.map((x) => (
-                  <StakeCard key={x.id} api={api} x={x} isDone={false} />
+                  <StakeCard key={x.id} x={x} isDone={false} />
                 ))}
               </>
             )}
@@ -510,7 +515,7 @@ export function StakesView({ api }: { api: BoardApi }) {
                   Done ({done.length})
                 </summary>
                 {done.map((x) => (
-                  <StakeCard key={x.id} api={api} x={x} isDone={true} />
+                  <StakeCard key={x.id} x={x} isDone={true} />
                 ))}
               </details>
             )}
@@ -523,13 +528,14 @@ export function StakesView({ api }: { api: BoardApi }) {
 
 /* ---------- Memory (digests) ---------- */
 
-function DigestCard({ api, x, avatars }: { api: BoardApi; x: Digest; avatars: Record<string, string> }) {
-  const ed = useEditing(api);
+function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string> }) {
+  const api = useBoardApi();
+  const ed = useEditing();
   const d = parseDay(x.day);
   return (
     <div className="card">
       {ed.edit ? (
-        <EditForm api={api} edit={ed.edit} close={ed.close} />
+        <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
           <div className="card-meta" style={{ marginTop: 0, marginBottom: 8 }}>
@@ -557,7 +563,7 @@ function DigestCard({ api, x, avatars }: { api: BoardApi; x: Digest; avatars: Re
             >
               Edit
             </button>
-            <DeleteButton api={api} path={"/digests/" + x.id} noun="digest" />
+            <DeleteButton path={"/digests/" + x.id} noun="digest" />
           </div>
         </>
       )}
@@ -565,7 +571,8 @@ function DigestCard({ api, x, avatars }: { api: BoardApi; x: Digest; avatars: Re
   );
 }
 
-export function MemoryView({ api, avatars }: { api: BoardApi; avatars: Record<string, string> }) {
+export function MemoryView({ avatars }: { avatars: Record<string, string> }) {
+  const api = useBoardApi();
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const submit = (e: FormEvent) => {
@@ -616,7 +623,7 @@ export function MemoryView({ api, avatars }: { api: BoardApi; avatars: Record<st
           (api.board.dg.length === 0 ? (
             <EmptyState text="No digests yet." />
           ) : (
-            api.board.dg.map((x) => <DigestCard key={x.id} api={api} x={x} avatars={avatars} />)
+            api.board.dg.map((x) => <DigestCard key={x.id} x={x} avatars={avatars} />)
           ))}
       </div>
     </>

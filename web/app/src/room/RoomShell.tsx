@@ -18,7 +18,16 @@ import { onToast, same, store, toast } from "../lib";
 import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
 import { AgentGateView, LockedView } from "./views";
 import { Sidebar, STATUS_LABEL, type Status } from "./Sidebar";
-import { ChatFeed, atBottom, type FeedCtx } from "../feed/feed";
+import {
+  BoardApiContext,
+  FeedContext,
+  MembersContext,
+  SessionContext,
+  type FeedValue,
+  type MembersValue,
+  type SessionValue,
+} from "./ctx";
+import { ChatFeed, atBottom } from "../feed/feed";
 import { Composer } from "../composer/composer";
 import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
@@ -665,15 +674,37 @@ export function RoomShell({ room }: { room: string }) {
     () => new Set([...members.names.map((n) => n.toLowerCase()), "claude"]),
     [members]
   );
-  const feedCtx: FeedCtx = useMemo(
+  // Context values (room/ctx.tsx): session, members, feed. Each is
+  // memoized on its own inputs so consumers re-render with the
+  // slice they read, not with every shell state change.
+  const sessionValue: SessionValue = useMemo(
     () => ({
+      client,
+      room,
+      token,
+      meName: nameState.value,
+      nameLocked: nameState.locked,
+      status,
+    }),
+    [client, room, token, nameState, status]
+  );
+  const membersValue: MembersValue = useMemo(
+    () => ({
+      names: members.names,
+      kinds: members.kinds,
+      nameKinds: members.nameKinds,
+      voices: members.voices,
+      avatars: members.avatars,
+      inviteOnly: members.inviteOnly,
       memberSet,
       membersVersion,
-      avatars: members.avatars,
-      invite: token,
       kindOf: (n) => (members.kinds[String(n || "").toLowerCase()] as MemberKind | undefined) ?? null,
       voiceOf: (n) => members.voices[String(n || "").toLowerCase()] || null,
-      meName: nameState.value,
+    }),
+    [members, memberSet, membersVersion]
+  );
+  const feedValue: FeedValue = useMemo(
+    () => ({
       speaker,
       speakingId,
       rx: rx.api,
@@ -682,7 +713,7 @@ export function RoomShell({ room }: { room: string }) {
       openViewer: viewerHost.api.open,
       games,
     }),
-    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games]
+    [speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games]
   );
 
   const boardApi: BoardApi = useMemo(
@@ -721,6 +752,10 @@ export function RoomShell({ room }: { room: string }) {
   const titleTab = denied ? "Invite only" : gate ? "Agent setup" : TABS[tab] || "Chat";
 
   return (
+    <SessionContext.Provider value={sessionValue}>
+    <MembersContext.Provider value={membersValue}>
+    <FeedContext.Provider value={feedValue}>
+    <BoardApiContext.Provider value={boardApi}>
     <div className="app">
       <Sidebar
         room={room}
@@ -796,34 +831,27 @@ export function RoomShell({ room }: { room: string }) {
         <section className="view" id="view-chat" hidden={denied || gate !== null || tab !== "chat"}>
           <ChatFeed
             messages={messages}
-            ctx={feedCtx}
             jumpVisible={jumpVisible}
             setJumpVisible={setJumpVisible}
             onSettleKill={endSettle}
             listRef={listRef}
             holdProps={rx.holdProps}
           />
-          <Composer
-            name={nameState.value}
-            nameLocked={nameState.locked}
-            onCommitName={onCommitName}
-            client={client}
-            room={room}
-            onPosted={onPosted}
-            memberNames={members.names}
-            memberKinds={members.nameKinds}
-            denied={denied}
-          />
+          <Composer onCommitName={onCommitName} onPosted={onPosted} denied={denied} />
         </section>
-        <BoardSections tab={denied || gate ? "" : tab} api={boardApi} photo={photo} />
+        <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
       </div>
       {viewerHost.node}
       <AvatarDialog name={avatarName} mb={boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
-      <VoiceDialog ref={voiceRef} client={client} hasToken={!!token} />
+      <VoiceDialog ref={voiceRef} />
       {rx.popovers}
       {photo.el}
       {push.menuNode}
       <ToastHost />
     </div>
+    </BoardApiContext.Provider>
+    </FeedContext.Provider>
+    </MembersContext.Provider>
+    </SessionContext.Provider>
   );
 }

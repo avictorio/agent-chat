@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
+import { useBoardApi } from "../room/ctx";
 import type { InviteResult, Member, MembersResponse } from "@chat/shared";
 import { same, toast } from "../lib";
 import { Avatar, KindTag } from "../feed/feed";
@@ -102,14 +103,13 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
 }
 
 function MembersView({
-  api,
   avatars,
   photo,
 }: {
-  api: BoardApi;
   avatars: Record<string, string>;
   photo: { openPicker: () => void };
 }) {
+  const api = useBoardApi();
   const [kind, setKind] = useState<"human" | "agent">("agent");
   const [result, setResult] = useState<InviteResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -163,7 +163,7 @@ function MembersView({
           ) : null
         ) : (
           sorted.map((x) => (
-            <MemberCard key={x.name} api={api} x={x} avatars={avatars} photo={photo} />
+            <MemberCard key={x.name} x={x} avatars={avatars} photo={photo} />
           ))
         )}
       </div>
@@ -172,16 +172,15 @@ function MembersView({
 }
 
 function MemberCard({
-  api,
   x,
   avatars,
   photo,
 }: {
-  api: BoardApi;
   x: Member;
   avatars: Record<string, string>;
   photo: { openPicker: () => void };
 }) {
+  const api = useBoardApi();
   const by = x.invited_by ? " by " + x.invited_by : "";
   const sub =
     x.status === "active"
@@ -239,7 +238,6 @@ function MemberCard({
             </button>
             {x.avatar && (
               <ActionButton
-                api={api}
                 className="btn sm quiet"
                 label="Remove photo"
                 okText="Photo removed"
@@ -262,13 +260,12 @@ function MemberCard({
 
 export function BoardSections({
   tab,
-  api,
   photo,
 }: {
   tab: string;
-  api: BoardApi;
   photo: { openPicker: () => void };
 }) {
+  const api = useBoardApi();
   const avatars: Record<string, string> = {};
   (api.board?.mb.members || []).forEach((m) => {
     const key = m.name.toLowerCase();
@@ -283,7 +280,7 @@ export function BoardSections({
               <h2>Constitution</h2>
               <p>The room's purpose, norms and standing invitations. Every edit is saved as a new version.</p>
             </header>
-            <ConstitutionView api={api} />
+            <ConstitutionView />
           </div>
         </div>
       </section>
@@ -294,7 +291,7 @@ export function BoardSections({
               <h2>Decisions</h2>
               <p>Settled decisions and votes. Sign the ones you agree with so nobody has to re-argue them.</p>
             </header>
-            <DecisionsView api={api} avatars={avatars} />
+            <DecisionsView avatars={avatars} />
           </div>
         </div>
       </section>
@@ -305,7 +302,7 @@ export function BoardSections({
               <h2>Open questions</h2>
               <p>Things the room still needs to answer. Claim one to take it on, then resolve it with what you found.</p>
             </header>
-            <QuestionsView api={api} />
+            <QuestionsView />
           </div>
         </div>
       </section>
@@ -316,7 +313,7 @@ export function BoardSections({
               <h2>Stakes</h2>
               <p>Upcoming events and open loops, so the conversation stays grounded in what's coming.</p>
             </header>
-            <StakesView api={api} />
+            <StakesView />
           </div>
         </div>
       </section>
@@ -327,7 +324,7 @@ export function BoardSections({
               <h2>Memory</h2>
               <p>Digests summarize what the room argued, decided and learned, so anyone can catch up without reading everything.</p>
             </header>
-            <MemoryView api={api} avatars={avatars} />
+            <MemoryView avatars={avatars} />
           </div>
         </div>
       </section>
@@ -343,7 +340,7 @@ export function BoardSections({
                     (api.isMember ? " You can invite someone new below." : "")}
               </p>
             </header>
-            <MembersView api={api} avatars={avatars} photo={photo} />
+            <MembersView avatars={avatars} photo={photo} />
           </div>
         </div>
       </section>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon as I } from "../ui/Icon";
 import { useDictation } from "./useDictation";
 import { useAttachments } from "./useAttachments";
+import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
 import { flushSync } from "react-dom";
 import type { Message, RoomClient, RoomState } from "@chat/shared";
@@ -23,14 +24,8 @@ import {
 // not officially post until its media upload completes.
 
 export interface ComposerProps {
-  name: string;
-  nameLocked: boolean;
   onCommitName: (v: string) => void;
-  client: RoomClient;
-  room: string;
   onPosted: (m: Message & { room_state?: RoomState }) => void;
-  memberNames: string[];
-  memberKinds: Record<string, string>;
   denied: boolean;
 }
 
@@ -40,11 +35,19 @@ function escHTML(t: string): string {
 
 
 export function Composer(p: ComposerProps) {
+  const session = useSession();
+  const membersCtx = useMembers();
+  const name = session.meName;
+  const nameLocked = session.nameLocked;
+  const client = session.client;
+  const room = session.room;
+  const memberNames = membersCtx.names;
+  const memberKinds = membersCtx.nameKinds;
   const formRef = useRef<HTMLFormElement | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   const hlRef = useRef<HTMLDivElement | null>(null);
-  const [draft, setDraft] = useState(p.name);
+  const [draft, setDraft] = useState(name);
   const [changing, setChanging] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -52,17 +55,17 @@ export function Composer(p: ComposerProps) {
   const mmRef = useRef(mm);
   mmRef.current = mm;
 
-  const committed = p.name;
-  const showInput = !p.nameLocked && (changing || !committed);
-  const showAsLine = !!committed && !(changing && !p.nameLocked);
+  const committed = name;
+  const showInput = !nameLocked && (changing || !committed);
+  const showAsLine = !!committed && !(changing && !nameLocked);
 
   useEffect(() => {
-    setDraft(p.name);
-  }, [p.name]);
+    setDraft(name);
+  }, [name]);
 
   // ---- mention highlight overlay ----
   const mentionRegex = () => {
-    const alts = [...p.memberNames]
+    const alts = [...memberNames]
       .sort((a, b) => b.length - a.length)
       .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     return new RegExp("(^|[^A-Za-z0-9_])@(" + alts.join("|") + ")(?![A-Za-z0-9_])", "gi");
@@ -72,7 +75,7 @@ export function Composer(p: ComposerProps) {
     const hlInner = hlRef.current;
     if (!textEl || !hlInner) return;
     const text = textEl.value;
-    if (p.memberNames.length) {
+    if (memberNames.length) {
       const re = mentionRegex();
       let out = "";
       let last = 0;
@@ -111,7 +114,7 @@ export function Composer(p: ComposerProps) {
     const query = (q || "").toLowerCase();
     const starts: string[] = [];
     const incl: string[] = [];
-    p.memberNames.forEach((n) => {
+    memberNames.forEach((n) => {
       const ln = n.toLowerCase();
       if (!query || ln.indexOf(query) === 0) starts.push(n);
       else if (ln.indexOf(query) >= 0) incl.push(n);
@@ -184,7 +187,7 @@ export function Composer(p: ComposerProps) {
     e.preventDefault();
     stopDictation(true);
     const textEl = textRef.current;
-    const from = p.nameLocked ? committed : draft.trim() || committed;
+    const from = nameLocked ? committed : draft.trim() || committed;
     if (!from) {
       setChanging(true);
       setErr("Add your name first, so people know who's talking.");
@@ -219,10 +222,10 @@ export function Composer(p: ComposerProps) {
         const bigChunked = video.nativeChunked || null;
         try {
           const live = bigChunked
-            ? await sendBigVideoChunkedNative(p.client, from, text, bigChunked, (label) => setVidProgress(label))
+            ? await sendBigVideoChunkedNative(client, from, text, bigChunked, (label) => setVidProgress(label))
             : bigNative
-              ? await sendBigVideoNative(p.client, from, text, bigNative, (label) => setVidProgress(label))
-              : await sendBigVideo(p.client, p.room, from, text, bigFile!, (label) => setVidProgress(label));
+              ? await sendBigVideoNative(client, from, text, bigNative, (label) => setVidProgress(label))
+              : await sendBigVideo(client, room, from, text, bigFile!, (label) => setVidProgress(label));
           if (textEl) textEl.value = "";
           grow();
           setVideo(null);
@@ -259,7 +262,7 @@ export function Composer(p: ComposerProps) {
         payload.doc = art.content;
         payload.doc_name = art.name;
       }
-      const d = await p.client.postPayload(payload);
+      const d = await client.postPayload(payload);
       if (textEl) textEl.value = "";
       grow();
       setClip(null);
@@ -289,8 +292,8 @@ export function Composer(p: ComposerProps) {
             aria-label="Your name"
             ref={nameRef}
             hidden={!showInput}
-            readOnly={p.nameLocked}
-            title={p.nameLocked ? "Set by your invite link" : undefined}
+            readOnly={nameLocked}
+            title={nameLocked ? "Set by your invite link" : undefined}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -469,13 +472,13 @@ export function Composer(p: ComposerProps) {
           </div>
         </div>
         <div className="composer-meta">
-          <span id="asLine" hidden={!showAsLine} title={p.nameLocked ? "Set by your invite link" : undefined}>
+          <span id="asLine" hidden={!showAsLine} title={nameLocked ? "Set by your invite link" : undefined}>
             Posting as <strong id="asName">{committed}</strong>{" "}
             <button
               type="button"
               className="linkbtn"
               id="asChange"
-              hidden={p.nameLocked}
+              hidden={nameLocked}
               onClick={() => {
                 setDraft(committed);
                 setChanging(true);
@@ -541,7 +544,7 @@ export function Composer(p: ComposerProps) {
               }}
             >
               <span>@{n}</span>
-              <span className="mmKind">{p.memberKinds[n.toLowerCase()] || ""}</span>
+              <span className="mmKind">{memberKinds[n.toLowerCase()] || ""}</span>
             </button>
           ))}
         </div>

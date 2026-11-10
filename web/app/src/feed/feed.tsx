@@ -6,6 +6,7 @@ import { RxChips, type RxApi } from "./reactions";
 import { MediaBlocks } from "./media";
 import type { GameStore } from "../games/games";
 import { same } from "../lib";
+import { useFeed, useMembers, useSession } from "../room/ctx";
 import type { ViewerApi } from "../shell/viewer";
 
 // The message feed, ported from the current app's msgNode/renderAll:
@@ -57,26 +58,9 @@ export function dayLabel(ts: number): string {
   return d.toLocaleDateString([], o);
 }
 
-export interface FeedCtx {
-  memberSet: Set<string>;
-  membersVersion: number;
-  avatars: Record<string, string>;
-  invite: string;
-  kindOf: (name: string) => MemberKind | null;
-  voiceOf: (name: string) => string | null;
-  meName: string;
-  speaker: Speaker;
-  speakingId: number | null;
-  rx: RxApi;
-  rxTargetId: number | null;
-  onAvatar: (name: string) => void;
-  openViewer: ViewerApi["open"];
-  games: GameStore;
-}
-
-export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
+export function senderKind(m: Message, kindOf: (name: string) => MemberKind | null): MemberKind | null {
   if (same(m.from, "claude")) return "agent";
-  return ctx.kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
+  return kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
 }
 
 export interface AvatarProps {
@@ -131,11 +115,12 @@ export function KindTag({ kind }: { kind: string }) {
   return <span className={"tag k-" + kind}>{kind === "human" ? "Human" : "Agent"}</span>;
 }
 
-function MdText({ text, ctx }: { text: string; ctx: FeedCtx }) {
+function MdText({ text }: { text: string }) {
+  const { memberSet, membersVersion } = useMembers();
   const ref = useRef<HTMLDivElement | null>(null);
-  const version = ctx.membersVersion;
-  const memberSetRef = useRef(ctx.memberSet);
-  memberSetRef.current = ctx.memberSet;
+  const version = membersVersion;
+  const memberSetRef = useRef(memberSet);
+  memberSetRef.current = memberSet;
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
@@ -153,13 +138,16 @@ const SPEAK_PATHS = (
 );
 const STOP_PATHS = <rect x="7" y="7" width="10" height="10" rx="1.5" />;
 
-export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx: FeedCtx }) {
+export function MsgRow({ m, prev }: { m: Message; prev: Message | null }) {
+  const session = useSession();
+  const members = useMembers();
+  const feed = useFeed();
   const newDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
   const cont = !newDay && !!prev && same(prev.from, m.from) && m.ts - prev.ts < 5 * 60000;
-  const kind = senderKind(m, ctx);
-  const mine = !!ctx.meName && same(m.from, ctx.meName);
-  const speaking = ctx.speakingId === m.id;
-  const showSpeak = canSpeak || !!ctx.voiceOf(m.from);
+  const kind = senderKind(m, members.kindOf);
+  const mine = !!session.meName && same(m.from, session.meName);
+  const speaking = feed.speakingId === m.id;
+  const showSpeak = canSpeak || !!members.voiceOf(m.from);
   return (
     <>
       {newDay && (
@@ -172,7 +160,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
           "msg" +
           (cont ? " cont" : "") +
           (kind === "human" ? " human" : "") +
-          (ctx.rxTargetId === m.id ? " rx-target" : "")
+          (feed.rxTargetId === m.id ? " rx-target" : "")
         }
         data-id={m.id}
       >
@@ -180,7 +168,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
           {cont ? (
             <time title={new Date(m.ts).toLocaleString()}>{clock(m.ts)}</time>
           ) : (
-            <Avatar name={m.from} ctx={ctx} />
+            <Avatar name={m.from} ctx={{ avatars: members.avatars, invite: session.token, onAvatar: feed.onAvatar }} />
           )}
         </div>
         <div className="msg-body">
@@ -200,11 +188,11 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
               </time>
             </div>
           )}
-          <MdText text={m.text || ""} ctx={ctx} />
-          <MediaBlocks m={m} token={ctx.invite} memberSet={ctx.memberSet} openViewer={ctx.openViewer} games={ctx.games} />
+          <MdText text={m.text || ""} />
+          <MediaBlocks m={m} />
           <div className="msg-foot">
             <div className="rx-row">
-              <RxChips m={m} me={ctx.meName} api={ctx.rx} />
+              <RxChips m={m} me={session.meName} api={feed.rx} />
             </div>
             <div className="msg-actions">
               <button
@@ -214,7 +202,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
                 title="React"
                 onClick={(e) => {
                   const row = e.currentTarget.closest(".msg") as HTMLElement | null;
-                  if (row) ctx.rx.openBar(m, row);
+                  if (row) feed.rx.openBar(m, row);
                 }}
               >
                 <svg className="i" viewBox="0 0 24 24">
@@ -230,7 +218,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
                   data-id={m.id}
                   aria-label={speaking ? "Stop reading aloud" : "Read this message aloud"}
                   title={speaking ? "Stop" : "Listen"}
-                  onClick={() => ctx.speaker.speak(m)}
+                  onClick={() => feed.speaker.speak(m)}
                 >
                   <svg className="i" viewBox="0 0 24 24">
                     {speaking ? STOP_PATHS : SPEAK_PATHS}
@@ -254,7 +242,6 @@ export function atBottom(list: HTMLElement): boolean {
 // stream); this component owns the list element and its handlers.
 export function ChatFeed({
   messages,
-  ctx,
   jumpVisible,
   setJumpVisible,
   onSettleKill,
@@ -262,7 +249,6 @@ export function ChatFeed({
   holdProps,
 }: {
   messages: Message[];
-  ctx: FeedCtx;
   jumpVisible: boolean;
   setJumpVisible: (v: boolean) => void;
   onSettleKill: () => void;
@@ -286,7 +272,7 @@ export function ChatFeed({
           <div className="chat-empty">No messages yet. Start the conversation below.</div>
         ) : (
           messages.map((m, i) => (
-            <MsgRow key={m.id} m={m} prev={i > 0 ? messages[i - 1]! : null} ctx={ctx} />
+            <MsgRow key={m.id} m={m} prev={i > 0 ? messages[i - 1]! : null} />
           ))
         )}
       </div>

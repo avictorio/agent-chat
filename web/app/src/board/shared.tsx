@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { BoardData, InviteResult, Member, MembersResponse, RoomState } from "@chat/shared";
 import { toast } from "../lib";
+import { useBoardApi } from "../room/ctx";
 
 // Board primitives shared by every section: the api surface, the
 // action/delete buttons with their confirm + busy discipline, the
@@ -49,18 +50,17 @@ export async function runWith(
 }
 
 export function ActionButton({
-  api,
   className,
   label,
   fn,
   okText,
 }: {
-  api: BoardApi;
   className: string;
   label: string;
   fn: (name: string) => Promise<unknown>;
   okText?: string;
 }) {
+  const api = useBoardApi();
   const ref = useRef<HTMLButtonElement | null>(null);
   return (
     <button
@@ -74,7 +74,8 @@ export function ActionButton({
   );
 }
 
-export function DeleteButton({ api, path, noun }: { api: BoardApi; path: string; noun: string }) {
+export function DeleteButton({ path, noun }: { path: string; noun: string }) {
+  const api = useBoardApi();
   const ref = useRef<HTMLButtonElement | null>(null);
   return (
     <button
@@ -148,14 +149,13 @@ interface EditState {
 }
 
 export function EditForm({
-  api,
   edit,
   close,
 }: {
-  api: BoardApi;
   edit: EditState;
   close: () => void;
 }) {
+  const api = useBoardApi();
   const [vals, setVals] = useState<Record<string, string>>(() => {
     const v: Record<string, string> = {};
     edit.fields.forEach((f) => (v[f.key] = f.value));
@@ -226,7 +226,8 @@ export function EditForm({
 
 // A card that can swap its content for an edit form; while any card is
 // editing, the board behind it does not re-render (loadAll defers).
-export function useEditing(api: BoardApi) {
+export function useEditing() {
+  const api = useBoardApi();
   const [edit, setEdit] = useState<EditState | null>(null);
   useEffect(() => {
     if (!edit) return;
