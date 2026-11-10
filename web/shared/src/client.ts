@@ -44,6 +44,11 @@ export class RoomClient {
     this.token = token;
   }
 
+  /** The current invite token (the native uploaders send it as a header). */
+  inviteToken(): string | null {
+    return this.token;
+  }
+
   setToken(token: string | null): void {
     this.token = token;
   }
@@ -219,6 +224,39 @@ export class RoomClient {
 
   game(id: number): Promise<GameResponse> {
     return this.call<GameResponse>("/games/" + id);
+  }
+
+  /** The room API base path (the native uploaders need absolute URLs). */
+  basePath(): string {
+    return "/api/rooms/" + this.room;
+  }
+
+  pushStatus(endpoint: string): Promise<{ registered?: boolean; mode?: string }> {
+    return this.call("/push/status?endpoint=" + encodeURIComponent(endpoint));
+  }
+
+  pushSubscribe(subscription: unknown, mode: string): Promise<unknown> {
+    return this.call("/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subscription, mode }),
+    });
+  }
+
+  pushUnsubscribe(endpoint: string): Promise<unknown> {
+    return this.call("/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
+  }
+
+  pushDevice(action: string, body: Record<string, unknown>): Promise<{ registered?: boolean; mode?: string }> {
+    return this.call("/push/device/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
   }
 
   createGame(body: Record<string, unknown>): Promise<GameResponse> {

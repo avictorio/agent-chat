@@ -23,6 +23,8 @@ import { AvatarDialog, BoardSections, usePhotoUpload, type BoardApi } from "./bo
 import { useViewerHost } from "./viewer";
 import { VoiceDialog, type VoiceDialogHandle } from "./voice";
 import { createGameStore, type GameStore } from "./games";
+import { usePush } from "./push";
+import { initShellCommon } from "./shell";
 import { useReactions } from "./reactions";
 import { daysAway } from "./dates";
 
@@ -628,6 +630,10 @@ export function RoomShell({ room }: { room: string }) {
     viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
   }
   const games = gamesRef.current;
+  const push = usePush(client, toast);
+  useEffect(() => {
+    initShellCommon();
+  }, []);
   const rx = useReactions({
     client,
     who,
@@ -847,6 +853,19 @@ export function RoomShell({ room }: { room: string }) {
             </button>
           </div>
           <div className="foot-row">
+            <button
+              type="button"
+              className={"btn sm pushBtn" + (push.on ? " on" : "")}
+              hidden={!push.visible}
+              title={push.label}
+              aria-label={push.label}
+              onClick={(e) => push.bellClick(e.currentTarget)}
+            >
+              <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
+              <span className="pushLabel">{push.label}</span>
+            </button>
+          </div>
+          <div className="foot-row">
             <button type="button" className="btn sm" id="voiceBtn" hidden={!token} onClick={() => voiceRef.current?.open()}>
               <I d={["M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0", "M12 18v3"]} />
               <span>Your voice</span>
@@ -881,6 +900,16 @@ export function RoomShell({ room }: { room: string }) {
           <span className={"count" + (counts.top ? " alert" : "")} id="topCount">
             {counts.top}
           </span>
+          <button
+            type="button"
+            className={"btn quiet icon-btn pushBtn" + (push.on ? " on" : "")}
+            aria-label={push.label}
+            title={push.label}
+            hidden={!push.visible}
+            onClick={(e) => push.bellClick(e.currentTarget)}
+          >
+            <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
+          </button>
           <span className={"topdot" + (status === "live" ? " live" : status === "locked" ? " locked" : "")} id="topDot" title={STATUS_LABEL[status]}></span>
         </header>
 
@@ -931,6 +960,7 @@ export function RoomShell({ room }: { room: string }) {
       <VoiceDialog ref={voiceRef} client={client} hasToken={!!token} />
       {rx.popovers}
       {photo.el}
+      {push.menuNode}
       <ToastHost />
     </div>
   );

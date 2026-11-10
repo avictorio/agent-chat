@@ -918,6 +918,82 @@ let FAILURES = 0;
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     return out;
   });
+
+  // The home page runs on its own fake (like the original suite's
+  // runHome): "/" serves the app, /api/build is always ahead, and
+  // any room's messages answer you: "Tester" for identity checks.
+  async function runHome() {
+    const name = 'home-page';
+    const b = await chromium.launch({});
+    const ctx = await b.newContext({ viewport: { width: 1280, height: 860 } });
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on('pageerror', (e) => errs.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
+    await page.route('https://chat.victorio.cloud/**', async (route) => {
+      const u = new URL(route.request().url());
+      const pth = u.pathname;
+      const J = (o, st) => route.fulfill({ status: st || 200, contentType: 'application/json', body: JSON.stringify(o) });
+      if (pth === '/' || pth === '/index.html' || pth.startsWith('/r/')) return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
+      if (pth === '/api/build') return J({ build: 'uitestbuild2' });
+      if (pth.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
+      if (pth.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
+      if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch (e) { return route.fulfill({ status: 404, body: 'nf' }); } }
+      return route.fulfill({ status: 404, body: 'nf' });
+    });
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('chat-invite:demo-room', 'tok_demo');
+        localStorage.setItem('chat-invite:second-room', 'tok_second');
+      } catch (e) {}
+    });
+    const out = {};
+    try {
+      await page.goto('https://chat.victorio.cloud/');
+      await page.waitForTimeout(900);
+      out.rows = await page.$$eval('.roomrow', (rs) => rs.length);
+      out.forgetInsideLink = await page.$eval('body', () => !!document.querySelector('.roomrow a .forget'));
+      out.forgetIsSibling = await page.$eval('body', () => !!document.querySelector('.roomrow > .forget'));
+      out.asYou = await page.$$eval('.roomrow .who', (ws) => ws.map((w) => w.textContent));
+      await page.click('.tab[data-view="create"]');
+      await page.waitForTimeout(200);
+      await page.fill('#cRoom', 'My Room');
+      out.preview = await page.$eval('#cRoomUrl', (e) => e.textContent);
+      await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 4000 });
+      out.updateBanner = true;
+      await page.screenshot({ path: OUT + 'home-update-banner.png' });
+      await page.evaluate(() => {
+        const bar = document.querySelector('.topbar');
+        const mk = (t, y) => new PointerEvent(t, { clientY: y, bubbles: true, pointerId: 7, isPrimary: true });
+        bar.dispatchEvent(mk('pointerdown', 40));
+        bar.dispatchEvent(mk('pointermove', 170));
+      });
+      out.pullHint = await page.$eval('#pullHintText', (e) => e.textContent);
+      await page.screenshot({ path: OUT + 'home-pull.png' });
+      await Promise.all([
+        page.waitForNavigation({ timeout: 5000 }),
+        page.evaluate(() => document.querySelector('.topbar').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, isPrimary: true }))),
+      ]);
+      out.pullReloaded = true;
+    } catch (e) {
+      FAILURES++;
+      console.log('FAIL ' + name + ': harness error: ' + e.message);
+    }
+    await b.close();
+    const fatal = errs.filter((e) => !e.startsWith('console:'));
+    if (fatal.length) {
+      FAILURES++;
+      console.log('FAIL ' + name + ': ' + JSON.stringify(fatal));
+    }
+    if (out.rows !== 2 || out.forgetInsideLink || !out.forgetIsSibling || (out.preview || '').indexOf('/r/my-room') < 0 || !out.updateBanner || out.pullHint !== 'Release to refresh' || !out.pullReloaded) {
+      FAILURES++;
+      console.log('FAIL ' + name + ': assertions: ' + JSON.stringify(out));
+    } else {
+      console.log('PASS ' + name + ' ' + JSON.stringify(out));
+    }
+    if (errs.length) console.log(name + ' ERRORS: ' + JSON.stringify(errs));
+  }
+  await runHome();
   console.log(FAILURES ? 'PARITY SUITE: ' + FAILURES + ' failing scenario(s)' : 'PARITY SUITE: all ported scenarios pass');
   process.exit(FAILURES ? 1 : 0);
 })();

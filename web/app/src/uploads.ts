@@ -198,3 +198,228 @@ export async function sendBigVideo(
     throw new Error("Publish failed");
   }
 }
+
+/* ---------- native shell legs (Capacitor) ----------
+   In the app shell the video picker is native, so the uploader
+   gets a real file path, not a Blob. Small picks are read back
+   through the Filesystem plugin and ride the normal inline path;
+   25-100 MB rides ONE background PUT to the streaming ingest under
+   a publish_on_complete draft; over 100 MB the in-app chunked
+   uploader drives the same chunked API as the web flow, with the
+   fingerprint computed natively. Both native legs settle through
+   an event listener backed by a liveness poll, so an early or lost
+   event can never wedge the composer. */
+
+import { inShell, nativePlugins } from "./shell";
+import type { RoomState } from "@chat/shared";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export interface NativePickedFile {
+  path?: string;
+  name?: string;
+  size: number;
+  mimeType?: string;
+}
+
+export type NativePick =
+  | { kind: "inline"; data: string; name: string }
+  | { kind: "stream"; file: NativePickedFile; name: string }
+  | { kind: "chunked"; file: NativePickedFile; name: string };
+
+export function tryNativeVideoPick(opts: {
+  onPicked: (v: NativePick) => void;
+  toast: (msg: string, err?: boolean) => void;
+  fallback: () => void;
+}): boolean {
+  const P = nativePlugins();
+  if (!inShell() || !P || !P.FilePicker) return false;
+  void P.FilePicker.pickFiles({ types: ["video/mp4", "video/webm", "video/quicktime"], limit: 1 })
+    .then(async (res: any) => {
+      const f: NativePickedFile | undefined = res && res.files && res.files[0];
+      if (!f) return;
+      if (!f.path) {
+        opts.fallback();
+        return;
+      }
+      if (f.size > 5000000000) {
+        opts.toast("Videos can be up to 5 GB", true);
+        return;
+      }
+      const label =
+        "🎬 " + (f.name || "video") + " (" + Math.max(1, Math.round(f.size / 1024)) + " KB) - attaches to your next message";
+      if (f.size > 100000000 && P.ChunkedUploader) {
+        opts.onPicked({ kind: "chunked", file: f, name: label });
+        return;
+      }
+      if (f.size > 25000000 && P.Uploader) {
+        opts.onPicked({ kind: "stream", file: f, name: label });
+        return;
+      }
+      if (f.size > 25000000) {
+        opts.toast("That video is too large for the in-page uploader in this build", true);
+        return;
+      }
+      try {
+        const rf = await P.Filesystem.readFile({ path: f.path });
+        opts.onPicked({ kind: "inline", data: "data:" + (f.mimeType || "video/mp4") + ";base64," + rf.data, name: label });
+      } catch {
+        opts.toast("Couldn't read that file", true);
+      }
+    })
+    .catch(() => {});
+  return true;
+}
+
+type PostedMessage = Message & { room_state?: RoomState };
+
+async function fetchIfLive(client: RoomClient, id: number): Promise<PostedMessage | null> {
+  const ld = await client.messages(id - 1, 1);
+  return (ld.messages || []).filter((x) => x.id === id)[0] || null;
+}
+
+async function fetchLiveOrPublish(client: RoomClient, id: number, text: string): Promise<PostedMessage> {
+  const got = await fetchIfLive(client, id);
+  if (got) return got;
+  return client.publishMessage(id, text);
+}
+
+export async function sendBigVideoNative(
+  client: RoomClient,
+  from: string,
+  text: string,
+  f: NativePickedFile,
+  onLabel: (label: string) => void
+): Promise<PostedMessage> {
+  const pd = await client.createDraft(from, text, true);
+  const id = pd.id;
+  const P = nativePlugins();
+  const done = new Promise<PostedMessage>((resolve, reject) => {
+    let settled = false;
+    let sub: any = null;
+    let poll: number | null = null;
+    const settle = (fn: (v: any) => void, val: any) => {
+      if (settled) return;
+      settled = true;
+      if (poll) clearInterval(poll);
+      Promise.resolve(sub)
+        .then((h: any) => {
+          if (h && h.remove) h.remove();
+        })
+        .catch(() => {});
+      fn(val);
+    };
+    sub = P.Uploader.addListener("events", (ev: any) => {
+      if (settled || !ev) return;
+      if (ev.name === "uploading" && ev.payload && typeof ev.payload.percent === "number" && ev.payload.percent >= 0) {
+        onLabel("🎬 Uploading " + (f.name || "video") + " - " + Math.round(ev.payload.percent) + "%");
+        return;
+      }
+      if (ev.name === "completed") {
+        fetchLiveOrPublish(client, id, text)
+          .then((m) => settle(resolve, m))
+          .catch((e) => settle(reject, e));
+        return;
+      }
+      if (ev.name === "failed") settle(reject, new Error((ev.payload && ev.payload.error) || "the upload failed"));
+    });
+    poll = window.setInterval(() => {
+      fetchIfLive(client, id)
+        .then((mm) => {
+          if (mm) settle(resolve, mm);
+        })
+        .catch(() => {});
+    }, 5000);
+    window.setTimeout(() => settle(reject, new Error("the upload timed out")), 600000);
+  });
+  await P.Uploader.startUpload({
+    filePath: f.path,
+    serverUrl: location.origin + client.basePath() + "/messages/" + id + "/video/stream",
+    method: "PUT",
+    headers: { "X-Invite-Token": client.inviteToken() || "", "Content-Type": f.mimeType || "video/mp4" },
+    notificationTitle: "Agent Chat",
+    notificationBody: "Uploading " + (f.name || "video"),
+  });
+  return done;
+}
+
+export async function sendBigVideoChunkedNative(
+  client: RoomClient,
+  from: string,
+  text: string,
+  f: NativePickedFile,
+  onLabel: (label: string) => void
+): Promise<PostedMessage> {
+  const P = nativePlugins();
+  let fp: string | null = null;
+  try {
+    const fres = await P.ChunkedUploader.fingerprint({ filePath: f.path, size: f.size });
+    fp = fres && fres.fingerprint;
+  } catch {
+    // no fingerprint: no resume, a fresh draft below
+  }
+  let id: number | null = null;
+  if (fp) {
+    try {
+      const rj = await client.videoResume(f.size, fp);
+      if (rj.found && rj.id) id = rj.id;
+    } catch {
+      // resume is best-effort
+    }
+  }
+  if (!id) {
+    const pd = await client.createDraft(from, text, true);
+    id = pd.id;
+  }
+  const mid = id;
+  const done = new Promise<PostedMessage>((resolve, reject) => {
+    let settled = false;
+    let sub: any = null;
+    let poll: number | null = null;
+    const settle = (fn: (v: any) => void, val: any) => {
+      if (settled) return;
+      settled = true;
+      if (poll) clearInterval(poll);
+      Promise.resolve(sub)
+        .then((h: any) => {
+          if (h && h.remove) h.remove();
+        })
+        .catch(() => {});
+      fn(val);
+    };
+    sub = P.ChunkedUploader.addListener("chunkedEvents", (ev: any) => {
+      if (settled || !ev || String(ev.key) !== String(mid)) return;
+      if (ev.name === "progress" && typeof ev.percent === "number" && ev.percent >= 0) {
+        onLabel("🎬 Uploading " + (f.name || "video") + " - " + Math.round(ev.percent) + "% (background-safe: you can switch apps)");
+        return;
+      }
+      if (ev.name === "completed") {
+        fetchLiveOrPublish(client, mid, text)
+          .then((m) => settle(resolve, m))
+          .catch((e) => settle(reject, e));
+        return;
+      }
+      if (ev.name === "failed") settle(reject, new Error(ev.error || "the upload failed"));
+    });
+    poll = window.setInterval(() => {
+      fetchIfLive(client, mid)
+        .then((mm) => {
+          if (mm) settle(resolve, mm);
+        })
+        .catch(() => {});
+    }, 5000);
+    window.setTimeout(() => settle(reject, new Error("the upload timed out")), 900000);
+  });
+  await P.ChunkedUploader.start({
+    key: String(mid),
+    apiBase: location.origin + client.basePath() + "/messages",
+    id: mid,
+    token: client.inviteToken() || "",
+    filePath: f.path,
+    type: f.mimeType || "video/mp4",
+    size: f.size,
+    fingerprint: fp || "",
+    name: f.name || "video",
+  });
+  return done;
+}

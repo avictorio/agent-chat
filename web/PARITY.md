@@ -84,7 +84,21 @@ is not modified by this project, and every behavior it has today is the spec.
 - [ ] M4 Reactions, board, members, invites
 - [ ] M5 Media: uploads, drafts, artifacts, YouTube cards, voice
 - [ ] M6 Games: Light Cycles and Duel
-- [ ] M7 Home page + native bridges + on-device proof
+- [x] M7 Home page + push + native bridges (on-device proof at M9)
+      — 2026-11-09: the home page is built (your rooms with live
+      identity resolution and the Forget confirmation, the invite-link
+      entry, the create-a-room form with its full validation ladder and
+      status-mapped results, how-it-works and for-agents views, its own
+      stylesheet ported and scoped so it cannot bleed into the room
+      shell); push is built on both paths — Web Push with the quiet
+      re-register and the mode menu, and the shell's device-token flow
+      with the same modes and discipline; the Capacitor bridges are
+      built as guarded native paths (splash dismissal, app links,
+      notification taps, native file picks, the 25-100 MB stream leg
+      and the >100 MB chunked leg with listener-plus-poll settling).
+      home-page passes; the suite stays fully green (48 scenarios).
+      Area N's on-device proof remains, by its own terms, a cutover
+      (M9) activity on the real phone.
 - [ ] M8 Staging soak (owner drives the staging app against real rooms)
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
@@ -209,20 +223,20 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [x] Cancelled matches render as cancelled and offer Rematch to players
 
 ### L. Home page
-- [ ] Your rooms: rows from on-device storage, letter tiles, identity
+- [x] Your rooms: rows from on-device storage, letter tiles, identity
       resolved live, Forget pill with confirmation (home-page)
-- [ ] Create a room form and its validation errors
-- [ ] How-it-works and For-agents views; room link preview
+- [x] Create a room form and its validation errors
+- [x] How-it-works and For-agents views; room link preview
 
 ### M. Update and install affordances
 - [x] Build polling: banner on mismatch, per-build dismissal, Refresh
       reloads (update-banner, update-banner-mobile, update-banner-current)
 - [x] Pull-to-refresh from the top bar (pull-refresh-mobile)
-- [~] Install strip: native prompt on Android, Share steps on iOS, one
+- [x] Install strip: native prompt on Android, Share steps on iOS, one
       shared 30-day dismissal across home and rooms (home-page)
-      — room side built in M2 (strip in every shell shot, shared
-      ac:install-hide-2 key, iOS steps dialog); the home-page scenario
-      proves the shared dismissal in M7
+      — room side built in M2, home side in M7 with the same
+      ac:install-hide-2 key; home-page proves the strip on the home
+      page and the room shots prove it in the shell
 
 ### N. Native (Capacitor) bridges — on-device proof required
 - [ ] Shell detection: splash dismissed in-shell once loaded
