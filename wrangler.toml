@@ -12,7 +12,7 @@ compatibility_date = "2025-04-01"
 no_bundle = true
 find_additional_modules = true
 base_dir = "src"
-rules = [{ type = "Text", globs = ["**/*.html", "**/*.txt", "**/*.md", "**/*.sh"], fallthrough = false }, { type = "ESModule", globs = ["app/**/*.js"] }]
+rules = [{ type = "Text", globs = ["**/*.html", "**/*.txt", "**/*.md", "**/*.sh"], fallthrough = false }]
 
 # Served only on the custom domain; no *.workers.dev URL and no preview URLs.
 workers_dev = false
