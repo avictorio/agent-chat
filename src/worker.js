@@ -2979,16 +2979,21 @@ function html(body) {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// Build id: a short hash of the two client pages, computed once per
+// Build id: a short hash of the served client, computed once per
 // isolate. Pages are served with it stamped over the __BUILD_ID__
 // placeholder, and GET /api/build reports the running deployment's id,
 // so a long-lived page can tell it is behind the latest deploy and offer
 // a refresh. Worker-only changes do not move the id - the client is not
-// stale then, and no banner is the correct outcome.
+// stale then, and no banner is the correct outcome. Since the M9
+// cutover the client is the emitted React build: its index names the
+// bundle files by content hash, so hashing the index alone moves the
+// id exactly when the shipped client changes. (It hashed the two old
+// pages before the cutover; they are rollback copies now, not the
+// version signal.)
 let buildIdPromise = null;
 function currentBuildId() {
   if (!buildIdPromise) {
-    const data = new TextEncoder().encode(CHAT_HTML + "\n" + HOME_HTML);
+    const data = new TextEncoder().encode(APP_INDEX);
     buildIdPromise = crypto.subtle.digest("SHA-256", data).then(function (buf) {
       return Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
     });
