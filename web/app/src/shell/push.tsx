@@ -285,6 +285,11 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   useEffect(() => {
     if ("serviceWorker" in navigator && !inShell()) {
       void navigator.serviceWorker.register("/sw.js").catch(() => {});
+      // Visibility is painted from the support rule up front, like
+      // the current app; the async pass below only refines the state.
+      // Gating the bell on serviceWorker.ready leaves it missing
+      // forever when registration fails (staging soak, 2026-11-09).
+      paint(iosNeedsInstall() ? "install" : "off", modeRef.current);
       void paintPushState();
       const onVis = () => {
         if (!document.hidden) void paintPushState();

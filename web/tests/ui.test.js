@@ -358,6 +358,23 @@ let FAILURES = 0;
     if (out.fullHint !== 'Release to refresh') throw new Error('full drag hint wrong: ' + out.fullHint);
     return out;
   });
+  await run('push-bell', { init: () => { try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch (e) {} } }, async (page) => {
+    // Soak defect S2 (2026-11-09): on the owner's phone (Chrome,
+    // permission undecided) the staging app showed no bell at all.
+    // Two causes stacked: staging served /sw.js as HTML, so
+    // registration failed and serviceWorker.ready never resolved -
+    // and the port only painted the bell at the end of that async
+    // check, while production paints visibility from the support
+    // rule. Here the harness 404s /sw.js the same way; with the
+    // permission stubbed to "default" the bell must still appear.
+    const out = {};
+    out.perm = await page.evaluate(() => Notification.permission);
+    if (out.perm !== 'default') throw new Error('permission stub did not take: ' + out.perm);
+    await page.waitForTimeout(800);
+    out.vis = await page.$$eval('.pushBtn', bs => bs.map(b => !b.hidden));
+    if (!out.vis.some(Boolean)) throw new Error('push bell never became visible: ' + JSON.stringify(out));
+    return out;
+  });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
   await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });

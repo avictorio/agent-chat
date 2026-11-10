@@ -39,7 +39,9 @@ export default {
       url.pathname === "/api" ||
       url.pathname.startsWith("/api/") ||
       url.pathname.startsWith("/icons/") ||
-      url.pathname === "/manifest.webmanifest";
+      url.pathname === "/manifest.webmanifest" ||
+      url.pathname === "/sw.js" ||
+      url.pathname === "/emoji.json";
     if (proxied) {
       const init = {
         method: request.method,

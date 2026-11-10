@@ -156,6 +156,22 @@ is not modified by this project, and every behavior it has today is the spec.
       reactions-hold-noclick scenario models the no-click release
       with synthetic pointer events and fails on the pre-fix code,
       passes after. Suite green at 49 scenarios.
+      Soak defect S2 (owner screenshots, 2026-11-09): no notification
+      bell anywhere on staging. Two stacked causes: the staging
+      Worker SPA-fell-back /sw.js and /emoji.json to index.html -
+      a text/html service worker is rejected, so registration failed
+      (and the emoji picker would have failed the same way) - and
+      the port only painted the bell at the end of the async
+      subscription check, which waits on serviceWorker.ready and so
+      never completed; production paints visibility from the support
+      rule, independently of that check. Fixes: the staging proxy
+      now passes /sw.js and /emoji.json to production, and usePush
+      paints the support-based state at boot before refining it.
+      The new push-bell scenario (permission stubbed to "default",
+      the harness's /sw.js broken like staging's was) fails on the
+      pre-fix port and passes after. Suite green at 50 scenarios.
+      Note the suites missed S2 because headless Chromium's denied
+      permission takes the early paint branch.
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
 
