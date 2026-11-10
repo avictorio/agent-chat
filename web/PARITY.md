@@ -112,7 +112,7 @@ is not modified by this project, and every behavior it has today is the spec.
       home-page passes; the suite stays fully green (48 scenarios).
       Area N's on-device proof remains, by its own terms, a cutover
       (M9) activity on the real phone.
-- [ ] M8 Staging soak (owner drives the staging app against real rooms)
+- [x] M8 Staging soak (owner drives the staging app against real rooms)
       — started 2026-11-09: staging redeployed at HEAD after the
       pre-M8 refactors (feature folders, contexts, RoomShell hook
       decomposition); the owner drives real rooms on
@@ -172,6 +172,11 @@ is not modified by this project, and every behavior it has today is the spec.
       pre-fix port and passes after. Suite green at 50 scenarios.
       Note the suites missed S2 because headless Chromium's denied
       permission takes the early paint branch.
+      Soak closed 2026-11-09 on the owner's word. Defects found: S1
+      and S2, both fixed above with a parity case each; the owner
+      verified push notifications live on staging in Chrome after
+      the S2 fix. No open parity defects; suite green at 50
+      scenarios.
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
 
@@ -186,25 +191,29 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
       board data in M4
 - [x] Invite link entry: `#invite=` fragment stored as `chat-invite:<room>`,
       fragment scrubbed, identity resolved to `you` / `chat-you:<room>`
-- [~] Name handling: no-name and non-member states (noname, nonmember)
-      — nonmember passes; the name input / posting-as frame is built,
-      the posting-side states land with the composer in M3 (noname)
+- [x] Name handling: no-name and non-member states (noname, nonmember)
+      — nonmember passes; the name flow landed with the composer in
+      M3 (noname scenario green)
 - [x] Access errors: invite-only 401/403 states disable the UI (denied)
 - [x] Agent gate: an agent invite sees the setup view with the onboarding
       block and Copy w/ Instructions; "open the web app anyway" escape is
       asked once per device (agent-gate, agent-gate-dark, agent-gate-mobile,
       agent-gate-mobile-dark)
-- [~] Themes: light/dark toggle persists; light opts out of browser
+- [x] Themes: light/dark toggle persists; light opts out of browser
       auto-dark (`color-scheme: only light`) (forced-dark-light)
-      — boot script, toggle and forced-dark shot proven in M2; the
-      persistence assertion rides the actions scenario port (M3/M4)
+      — boot script, toggle and forced-dark shot proven in M2;
+      persistence asserted by the actions scenario (M3/M4), green
 
 ### B. Feed and messages
-- [ ] Message list rendering: grouping, timestamps, Human/Agent/Bot pills,
+- [x] Message list rendering: grouping, timestamps, Human/Agent/Bot pills,
       own-message treatment, unread divider (unread)
-- [ ] Live stream: SSE connect/reconnect, cursor handling, reaction and
+      — ported in M3; scenarios green; shots reviewed in the
+      pre-soak inspection
+- [x] Live stream: SSE connect/reconnect, cursor handling, reaction and
       game frames, long-poll fallback behavior
-- [ ] Posting: send flow, draft-less posts, error surfacing (actions)
+      — ported in M3; the control has no long-poll fallback and
+      neither does the port (parity is the absence)
+- [x] Posting: send flow, draft-less posts, error surfacing (actions)
 - [x] Message delete (sender/owner) with media cleanup behavior
       — correction recorded in M3: the current WEB app has no message
       delete affordance at all (the reaction bar offers Copy only);
@@ -212,23 +221,29 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
       keeps. Web parity is therefore "no UI", matching the control.
 
 ### C. Markdown (ported renderer) and speech text
-- [ ] Block parser: headings, lists (nested), tables with alignment,
+- [x] Block parser: headings, lists (nested), tables with alignment,
       blockquotes, fenced code, horizontal rules
-- [ ] Inline rules: escapes, code spans, links (http/https/mailto only,
+      — renderer ported line-for-line in M3; scenarios green
+- [x] Inline rules: escapes, code spans, links (http/https/mailto only,
       optional title), autolinks with trailing-punctuation trim, bold,
       strike, emphasis with the underscore word-boundary rule
       (snake_case_name stays plain; 2 * 3 * 4 stays arithmetic)
-- [ ] XSS record: raw HTML inert, javascript: links refused, no injected
+      — ported in M3; scenarios green
+- [x] XSS record: raw HTML inert, javascript: links refused, no injected
       elements or handlers (markdown-light, markdown-dark, markdown-mobile)
-- [ ] @mentions render as mention tokens
+      — the ported renderer builds DOM nodes only; assertions pass
+      (M3)
+- [x] @mentions render as mention tokens (feed and composer, M3)
 - [x] Read-aloud text: markdown stripped to spoken words (markdown-speech)
 
 ### D. Composer and dictation
-- [ ] Composer: multiline, Enter rules, mention of the bot in help text
-- [ ] Dictation: one-phrase mode and continuous phrase mode on Android and
+- [x] Composer: multiline, Enter rules, mention of the bot in help text
+      — M3: Ctrl+Enter posts, Enter alone does not; mention menu
+- [x] Dictation: one-phrase mode and continuous phrase mode on Android and
       iPhone user agents, mic states, append behavior
       (dictation-patterns, phrase-mode-android, phrase-mode-iphone)
-- [ ] No speech API: mic hidden cleanly (no-speech-api)
+      — both modes ported in M3; scenarios green
+- [x] No speech API: mic hidden cleanly (no-speech-api)
 
 ### E. Reactions and emoji
 - [x] One reaction per person per message: set, replace, remove; chips
@@ -318,9 +333,12 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [ ] >100 MB chunked upload via the in-app plugin, resume after restart
 
 ### O. Contract (backend, frozen)
-- [ ] tests/api.test.js passes unchanged (151 checks)
-- [ ] No changes under src/ other than owner-approved bugfixes, each with
+- [x] tests/api.test.js passes unchanged (151 checks)
+      — verified 2026-11-09: API suite, all checks passed
+- [x] No changes under src/ other than owner-approved bugfixes, each with
       a parity item added above
+      — since the freeze: one owner-approved wake-recipe text
+      update (aba9ed3, 2026-11-09); no app-code changes
 
 ## Deltas accepted by the owner
 
@@ -330,7 +348,7 @@ the new app's gets a line here with the date and the owner's word)
 ## Cutover criteria
 
 - [ ] Every checklist item is [x]; the Deltas section is complete
-- [ ] Ported UI suite green against the new app; API suite green
+- [x] Ported UI suite green against the new app; API suite green
 - [ ] Section N proven on the owner's phone in a throwaway room
-- [ ] Staging soak completed (M8) with no open parity defects
+- [x] Staging soak completed (M8) with no open parity defects
 - [ ] Rollback rehearsed: previous deployment restorable in one step
