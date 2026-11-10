@@ -15,7 +15,6 @@ import type { ViewerApi } from "../shell/viewer";
 // button. Media, YouTube and game cards join in M5/M6; reaction chips
 // in M4 (the rx-row ships empty until then, as the frame did in M2).
 
-
 const HUES = [212, 152, 24, 276, 340, 44, 188, 112, 0, 248, 300, 168];
 export function hue(s: string): number {
   let h = 2166136261;

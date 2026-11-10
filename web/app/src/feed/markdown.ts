@@ -9,7 +9,6 @@ import { el } from "../lib";
 
 type Parent = HTMLElement | DocumentFragment;
 
-
 function safeUrl(u: string): string | null {
   return /^(https?:\/\/|mailto:)/i.test(u) ? u : null;
 }

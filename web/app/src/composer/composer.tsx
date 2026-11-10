@@ -33,7 +33,6 @@ function escHTML(t: string): string {
   return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-
 export function Composer(p: ComposerProps) {
   const session = useSession();
   const membersCtx = useMembers();

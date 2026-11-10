@@ -16,7 +16,6 @@ import "./home.css";
 // how-it-works / for-agents pages. Same shell, same install and
 // update treatment as the rooms.
 
-
 const VIEWS: Record<string, string> = {
   rooms: "Your rooms",
   create: "Create a room",

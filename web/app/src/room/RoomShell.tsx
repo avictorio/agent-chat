@@ -46,7 +46,6 @@ import { daysAway } from "../dates";
 // room_state counts, and the members fetch behind kinds, avatars,
 // voices and mentions.
 
-
 export function takeInvite(room: string): string {
   const invKey = "chat-invite:" + room;
   const hm = location.hash.match(/(?:^#|&)invite=([A-Za-z0-9_-]+)/);
@@ -61,8 +60,6 @@ export function takeInvite(room: string): string {
   }
   return store(invKey) || "";
 }
-
-
 
 export function RoomShell({ room }: { room: string }) {
   const clearUnreadRef = useRef<() => void>(() => {});
@@ -103,8 +100,6 @@ export function RoomShell({ room }: { room: string }) {
   const deniedRef = useRef(false);
   const streamCloseRef = useRef<() => void>(() => {});
 
-
-
   useEffect(() => {
     document.title = room + " · chat";
   }, [room]);
@@ -122,8 +117,6 @@ export function RoomShell({ room }: { room: string }) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-
-
   const deny = useCallback((e: ApiError) => {
     deniedRef.current = true;
     setStatus("locked");
@@ -131,13 +124,6 @@ export function RoomShell({ room }: { room: string }) {
     streamCloseRef.current();
   }, []);
   const board = useBoardData({ client, tabRef, deny, deniedRef });
-
-
-
-
-
-
-
 
   const feed = useMessages({ tabRef, nameRef, applyState: board.applyState });
   clearUnreadRef.current = feed.clearUnread;
@@ -164,15 +150,6 @@ export function RoomShell({ room }: { room: string }) {
     setNameState((st) => ({ value: t, locked: st.locked }));
     return t;
   }, []);
-
-
-
-
-
-
-
-
-
 
   const applyTheme = (t: string) => {
     store("chat-theme", t);
@@ -360,7 +337,6 @@ export function RoomShell({ room }: { room: string }) {
   );
 
   const voiceRef = useRef<VoiceDialogHandle | null>(null);
-
 
   const onCommitName = useCallback((v: string) => {
     store("chat-name", v);

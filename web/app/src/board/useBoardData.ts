@@ -72,7 +72,6 @@ export function useBoardData(opts: {
     }
   }, []);
 
-
   const editingDelta = useCallback((d: number) => {
     editingCountRef.current += d;
     if (editingCountRef.current <= 0) {
