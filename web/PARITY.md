@@ -326,6 +326,16 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
       page and the room shots prove it in the shell
 
 ### N. Native (Capacitor) bridges — on-device proof required
+      DEFERRED 2026-11-09 on the owner's word: the native app
+      concept is paused and the web app is the sole focus. These
+      items are not a cutover gate. The guarded bridge code stays
+      in the port, inert on the web. (The owner's 2026-11-09 upload
+      tests ran in the installed staging PWA, which has no native
+      bridges — they exercised the web upload engine instead: an
+      87 MB and a 135 MB video both completed byte-exact in the
+      foreground; a lock-screen freeze aborts a page-driven upload
+      silently, as on production. Real-world Area H evidence, not
+      Area N proof.)
 - [ ] Shell detection: splash dismissed in-shell once loaded
 - [ ] Deep links: app links route into rooms
 - [ ] Push: device registration from the page, notification taps route
@@ -348,7 +358,10 @@ the new app's gets a line here with the date and the owner's word)
 ## Cutover criteria
 
 - [ ] Every checklist item is [x]; the Deltas section is complete
+      — all areas except N (deferred, above) are [x]
 - [x] Ported UI suite green against the new app; API suite green
 - [ ] Section N proven on the owner's phone in a throwaway room
+      — DEFERRED with the native pause (owner's word, 2026-11-09);
+      waived as a cutover gate
 - [x] Staging soak completed (M8) with no open parity defects
 - [ ] Rollback rehearsed: previous deployment restorable in one step
