@@ -22,6 +22,7 @@ import { Speaker } from "./speak";
 import { AvatarDialog, BoardSections, usePhotoUpload, type BoardApi } from "./board";
 import { useViewerHost } from "./viewer";
 import { VoiceDialog, type VoiceDialogHandle } from "./voice";
+import { createGameStore, type GameStore } from "./games";
 import { useReactions } from "./reactions";
 import { daysAway } from "./dates";
 
@@ -161,6 +162,8 @@ export function RoomShell({ room }: { room: string }) {
     value: store("chat-you:" + room) || store("chat-name") || "",
     locked: !!store("chat-you:" + room),
   }));
+  const nameStateRef = useRef(nameState.value);
+  nameStateRef.current = nameState.value;
   const [lockedText, setLockedText] = useState<string | null>(null);
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [boardView, setBoardView] = useState<BoardData | null>(null);
@@ -472,6 +475,14 @@ export function RoomShell({ room }: { room: string }) {
           // malformed frame: ignore
         }
       });
+      es.addEventListener("game", (e) => {
+        try {
+          const d = JSON.parse((e as MessageEvent).data) as { game?: unknown };
+          if (d.game) gamesRef.current?.onFrame(d.game);
+        } catch {
+          // malformed frame: ignore
+        }
+      });
       es.addEventListener("message", (e) => {
         try {
           const m = JSON.parse((e as MessageEvent).data) as Message & { room_state?: RoomState };
@@ -605,7 +616,18 @@ export function RoomShell({ room }: { room: string }) {
     }
   };
 
-  const viewerHost = useViewerHost();
+  const viewerCloseRef = useRef<(() => void) | null>(null);
+  const viewerHost = useViewerHost({ onCloseRef: viewerCloseRef });
+  const gamesRef = useRef<GameStore | null>(null);
+  if (!gamesRef.current) {
+    gamesRef.current = createGameStore({
+      client,
+      meName: () => nameStateRef.current,
+      openViewer: viewerHost.api.open,
+    });
+    viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
+  }
+  const games = gamesRef.current;
   const rx = useReactions({
     client,
     who,
@@ -691,8 +713,9 @@ export function RoomShell({ room }: { room: string }) {
       rxTargetId: rx.targetId,
       onAvatar: (n) => setAvatarName(n),
       openViewer: viewerHost.api.open,
+      games,
     }),
-    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId, viewerHost.api]
+    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games]
   );
 
   const boardApi: BoardApi = useMemo(

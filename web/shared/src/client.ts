@@ -221,6 +221,14 @@ export class RoomClient {
     return this.call<GameResponse>("/games/" + id);
   }
 
+  createGame(body: Record<string, unknown>): Promise<GameResponse> {
+    return this.call<GameResponse>("/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
   submitMove(id: number, dir: string): Promise<GameResponse & { resolved: boolean }> {
     return this.call("/games/" + id + "/moves", {
       method: "POST",

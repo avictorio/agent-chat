@@ -4,6 +4,7 @@ import { md } from "./markdown";
 import { canSpeak, type Speaker } from "./speak";
 import { RxChips, type RxApi } from "./reactions";
 import { MediaBlocks } from "./media";
+import type { GameStore } from "./games";
 import type { ViewerApi } from "./viewer";
 
 // The message feed, ported from the current app's msgNode/renderAll:
@@ -72,6 +73,7 @@ export interface FeedCtx {
   rxTargetId: number | null;
   onAvatar: (name: string) => void;
   openViewer: ViewerApi["open"];
+  games: GameStore;
 }
 
 export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
@@ -201,7 +203,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
             </div>
           )}
           <MdText text={m.text || ""} ctx={ctx} />
-          <MediaBlocks m={m} token={ctx.invite} memberSet={ctx.memberSet} openViewer={ctx.openViewer} />
+          <MediaBlocks m={m} token={ctx.invite} memberSet={ctx.memberSet} openViewer={ctx.openViewer} games={ctx.games} />
           <div className="msg-foot">
             <div className="rx-row">
               <RxChips m={m} me={ctx.meName} api={ctx.rx} />

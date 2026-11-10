@@ -198,15 +198,15 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
 - [x] Speak playback caching behavior (voice, voice-mobile-dark)
 
 ### K. Games
-- [ ] Light Cycles: card with live SVG board, arena viewer, direction pad
+- [x] Light Cycles: card with live SVG board, arena viewer, direction pad
       (reverse disabled), queued move through the API, awaiting badges,
       move log, Rematch (game-card, game-card-mobile)
-- [ ] Duel: own-color pips and score numerals, locked/thinking state line,
+- [x] Duel: own-color pips and score numerals, locked/thinking state line,
       last-round face-off with named verdict (tie = CLASH), YOUR THROW /
       LOCKED pill, round-clock bar (duel-card, duel-finished, duel-mobile)
-- [ ] Duel viewer: face-off arena, plain-words status line, throw tiles
+- [x] Duel viewer: face-off arena, plain-words status line, throw tiles
       with beats microcopy, verdict banner, round-chip strip, Rematch
-- [ ] Cancelled matches render as cancelled and offer Rematch to players
+- [x] Cancelled matches render as cancelled and offer Rematch to players
 
 ### L. Home page
 - [ ] Your rooms: rows from on-device storage, letter tiles, identity

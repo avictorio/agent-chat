@@ -421,6 +421,107 @@ let FAILURES = 0;
     return { ok: true };
   });
 
+  await run('game-card', { state: { game: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    out.trailCells = await page.$$eval('.game-card .lc-svg rect', els => els.length);
+    out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
+    if (out.trailCells < 10) throw new Error('board should render trails and heads, got ' + out.trailCells + ' rects');
+    if (!/Tick 3/.test(out.cardMeta)) throw new Error('card meta wrong: ' + out.cardMeta);
+    await shot(page, 'game-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
+    out.padBtns = await page.$$eval('#viewer .lc-btn', els => els.map(b => b.getAttribute('aria-label') + ':' + (b.disabled ? 'off' : 'on')));
+    if (!/Light Cycles #1/.test(out.viewerTitle)) throw new Error('viewer title wrong: ' + out.viewerTitle);
+    if (!out.padBtns.includes('Steer up:off')) throw new Error('reverse (up, heading down) must be disabled: ' + JSON.stringify(out.padBtns));
+    if (!out.padBtns.includes('Steer left:on')) throw new Error('left must be playable: ' + JSON.stringify(out.padBtns));
+    await shot(page, 'game-arena.png');
+    await page.click('#viewer .lc-btn[aria-label="Steer left"]');
+    await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 4000 });
+    out.moveCall = calls.filter(c => c.includes('/games/1/moves')).pop() || '';
+    if (!/"dir":"left"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
+    await shot(page, 'game-arena-queued.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('game-card-mobile', { state: { game: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await shot(page, 'game-mobile-card.png');
+    await page.tap('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'game-mobile-arena.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
+  });
+  // Duel UX: the card carries identity-colored pips and score numerals, the
+  // last round's face-off with its verdict, a YOUR THROW pill and the round
+  // clock bar; the viewer is a face-off arena with big throw tiles (beats
+  // microcopy), a plain-words status line, the last-round verdict banner and
+  // a round-chip strip. A tile tap queues the throw through the API.
+  await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    out.pill = await page.$eval('.game-card .duel-pill', e => e.textContent);
+    out.pipColor = await page.$eval('.game-card .duel-row .duel-pips', e => getComputedStyle(e).color);
+    out.faceoff = await page.$eval('.game-card .duel-faceoff-line', e => e.textContent);
+    out.clockbar = await page.$$eval('.game-card .duel-clockbar', els => els.length);
+    if (!/YOUR THROW/.test(out.pill)) throw new Error('card pill wrong: ' + out.pill);
+    if (out.pipColor !== 'rgb(34, 211, 238)') throw new Error('Ada pips should be her cyan, got ' + out.pipColor);
+    if (!/CLASH/.test(out.faceoff)) throw new Error('card face-off should name the clash: ' + out.faceoff);
+    if (out.clockbar !== 1) throw new Error('card should carry one round clock bar, got ' + out.clockbar);
+    await shot(page, 'duel-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    out.tiles = await page.$$eval('#viewer .duel-tile .t-beats', els => els.map(e => e.textContent));
+    out.status = await page.$eval('#viewer .duel-statusline', e => e.textContent);
+    out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
+    if (JSON.stringify(out.tiles) !== JSON.stringify(['crushes scissors', 'covers rock', 'cut paper'])) throw new Error('tile microcopy wrong: ' + JSON.stringify(out.tiles));
+    if (!/your throw decides the round/.test(out.status)) throw new Error('status line wrong: ' + out.status);
+    if (!/CLASH/.test(out.verdict)) throw new Error('verdict banner should name the clash: ' + out.verdict);
+    await shot(page, 'duel-arena.png');
+    await page.click('#viewer .duel-tile:nth-child(3)');
+    await page.waitForFunction(() => document.querySelector('#viewer .duel-tile.queued'), null, { timeout: 4000 });
+    out.moveCall = calls.filter(c => c.includes('/games/2/moves')).pop() || '';
+    if (!/"dir":"scissors"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
+    await shot(page, 'duel-arena-queued.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('duel-finished', { state: { duelDone: true } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
+    if (!/Final/.test(out.cardMeta)) throw new Error('finished card meta wrong: ' + out.cardMeta);
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-verdict', { timeout: 4000 });
+    out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
+    out.chips = await page.$$eval('#viewer .duel-chip', els => els.length);
+    out.rematch = await page.$$eval('#viewer button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
+    if (!/takes the duel/.test(out.verdict)) throw new Error('finished verdict wrong: ' + out.verdict);
+    if (out.chips !== 7) throw new Error('strip should carry 7 round chips, got ' + out.chips);
+    if (out.rematch !== 1) throw new Error('finished duel should offer one Rematch, got ' + out.rematch);
+    await shot(page, 'duel-finished.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('duel-mobile', { state: { duel: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await shot(page, 'duel-mobile-card.png');
+    await page.tap('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'duel-mobile-arena.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
+  });
+
   // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
   await run('unread', {}, async (page, S) => {
     await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);

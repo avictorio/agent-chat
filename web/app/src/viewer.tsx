@@ -12,7 +12,9 @@ export interface ViewerApi {
   open(title: string, build: ViewerBuild, dlUrl: string | null): void;
 }
 
-export function useViewerHost(): { api: ViewerApi; node: React.ReactNode } {
+export function useViewerHost(opts?: {
+  onCloseRef?: React.MutableRefObject<(() => void) | null>;
+}): { api: ViewerApi; node: React.ReactNode } {
   const [v, setV] = useState<{ title: string; dl: string | null } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const buildRef = useRef<ViewerBuild | null>(null);
@@ -22,6 +24,7 @@ export function useViewerHost(): { api: ViewerApi; node: React.ReactNode } {
   const close = useCallback((fromPop: boolean) => {
     if (!openRef.current) return;
     openRef.current = false;
+    if (opts && opts.onCloseRef && opts.onCloseRef.current) opts.onCloseRef.current();
     if (bodyRef.current) bodyRef.current.textContent = "";
     setV(null);
     if (!fromPop && pushedRef.current) {
@@ -32,6 +35,7 @@ export function useViewerHost(): { api: ViewerApi; node: React.ReactNode } {
         // no history to go back to
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const api = useMemo<ViewerApi>(

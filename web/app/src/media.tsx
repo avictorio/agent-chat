@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Message } from "@chat/shared";
 import { md } from "./markdown";
 import type { ViewerApi } from "./viewer";
+import { GameCardBlock } from "./gamecard";
+import type { GameStore } from "./games";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card
@@ -158,14 +160,16 @@ export function MediaBlocks({
   token,
   memberSet,
   openViewer,
+  games,
 }: {
   m: Message;
   token: string;
   memberSet: Set<string>;
   openViewer: ViewerApi["open"];
+  games: GameStore;
 }) {
   const yts = ytLinks(m.text || "");
-  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc) return null;
+  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.game) return null;
   const memberSetRef = useRef(memberSet);
   memberSetRef.current = memberSet;
   return (
@@ -261,6 +265,7 @@ export function MediaBlocks({
           <DocBody id={m.id} url={withInvite(m.doc.url, token)} memberSet={memberSet} />
         </div>
       )}
+      {m.game && m.game.id ? <GameCardBlock summary={m.game} store={games} /> : null}
     </>
   );
 }
