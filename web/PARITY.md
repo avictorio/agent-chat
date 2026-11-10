@@ -80,10 +80,23 @@ is not modified by this project, and every behavior it has today is the spec.
       Staging redeployed: the deploy now stamps production's current
       build id into the page (so the banner stays quiet until
       production next deploys) and proxies /icons/* and the manifest.
-- [ ] M3 Message core: feed, stream, composer, markdown, speech text
-- [ ] M4 Reactions, board, members, invites
-- [ ] M5 Media: uploads, drafts, artifacts, YouTube cards, voice
-- [ ] M6 Games: Light Cycles and Duel
+- [x] M3 Message core: feed, stream, composer, markdown, speech text
+      — 2026-11-09 (commit b71ca1d): feed with the control's msgNode
+      logic, SSE stream with recheck-on-close and add() semantics,
+      the markdown renderer ported line-for-line to TS, composer
+      (name flow, mention highlight + menu, Ctrl+Enter), read-aloud.
+- [x] M4 Reactions, board, members, invites
+      — 2026-11-09 (commit 0918bfd): reactions with the hold-open
+      discipline, the full board (constitution, decisions, questions,
+      stakes, memory), members, invites, avatars.
+- [x] M5 Media: uploads, drafts, artifacts, YouTube cards, voice
+      — 2026-11-09 (commit 4dccb06): feed media (YouTube cards,
+      image/video/audio, HTML page cards, doc cards), the viewer,
+      composer uploads with the draft-first big-video engine, the
+      voice recorder and Your voice dialog.
+- [x] M6 Games: Light Cycles and Duel
+      — 2026-11-09 (commit 803b9ff): the games store, cards and the
+      duel arena; duel-card verified pixel-identical to production.
 - [x] M7 Home page + push + native bridges (on-device proof at M9)
       — 2026-11-09: the home page is built (your rooms with live
       identity resolution and the Forget confirmation, the invite-link
@@ -100,6 +113,11 @@ is not modified by this project, and every behavior it has today is the spec.
       Area N's on-device proof remains, by its own terms, a cutover
       (M9) activity on the real phone.
 - [ ] M8 Staging soak (owner drives the staging app against real rooms)
+      — started 2026-11-09: staging redeployed at HEAD after the
+      pre-M8 refactors (feature folders, contexts, RoomShell hook
+      decomposition); the owner drives real rooms on
+      next.chat.victorio.cloud and reports defects, each of which
+      gets a fix plus a parity case.
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
 
