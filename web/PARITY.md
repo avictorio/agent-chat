@@ -22,7 +22,8 @@ is not modified by this project, and every behavior it has today is the spec.
    proof that the client-visible contract did not move.
 4. **On-device pass.** The Capacitor bridge behaviors (section N) are
    proven on the owner's phone in a throwaway room before cutover, not
-   inferred from desktop tests.
+   inferred from desktop tests. (Deferred with the native pause,
+   owner's word 2026-11-09 — see section N.)
 
 ## Ground rules
 
@@ -177,8 +178,17 @@ is not modified by this project, and every behavior it has today is the spec.
       verified push notifications live on staging in Chrome after
       the S2 fix. No open parity defects; suite green at 50
       scenarios.
-- [ ] M9 Cutover: domain serves the new build; old pages stay one revert
+- [x] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
+      — 2026-11-09: DONE. The build is emitted into src/app/ as text
+      modules (web/scripts/emit-app.py) and the Worker serves it at /
+      and /r/:room with /assets/* from the emitted map; old pages stay
+      imported, so the build id never moved (a5e6053f9e98b6f8 before,
+      during and after). Commits: cutover a144653, rollback rehearsal
+      revert 4447aac (old app verified live), reapply 7ce9c83 (new app
+      verified live). All gates green pre-push: web suite (50), API
+      suite, src UI suite, check, check:config. Old-page removal is a
+      later cleanup, after one release cycle.
 
 ## Checklist by area
 
@@ -357,11 +367,14 @@ the new app's gets a line here with the date and the owner's word)
 
 ## Cutover criteria
 
-- [ ] Every checklist item is [x]; the Deltas section is complete
+- [x] Every checklist item is [x]; the Deltas section is complete
       — all areas except N (deferred, above) are [x]
 - [x] Ported UI suite green against the new app; API suite green
 - [ ] Section N proven on the owner's phone in a throwaway room
       — DEFERRED with the native pause (owner's word, 2026-11-09);
       waived as a cutover gate
 - [x] Staging soak completed (M8) with no open parity defects
-- [ ] Rollback rehearsed: previous deployment restorable in one step
+- [x] Rollback rehearsed: previous deployment restorable in one step
+      — 2026-11-09: cutover a144653 reverted in one step (4447aac);
+      the old app verified live (old home markup, build id unchanged),
+      then the cutover was reapplied (7ce9c83) and re-verified.

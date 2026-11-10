@@ -46,12 +46,19 @@ Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the KV `REQUESTS` content or the `__vapid` Durable
 Object; the change queue and Web Push live there.
 
-**Front-end rewrite in progress (2026-11-09):** a React + TypeScript
-replacement for the two pages is being built in parallel under `web/`
-(see `web/README.md` and the parity checklist in `web/PARITY.md`). The
-backend is frozen and untouched by that project, and `src/` stays the
-live app under a feature freeze — bugfixes only, and every bugfix adds
-a parity item in `web/PARITY.md`.
+**Front-end rewrite COMPLETE (cutover 2026-11-09):** the React +
+TypeScript app under `web/` is the live front end (see `web/README.md`
+and `web/PARITY.md`). The Worker serves the emitted build from
+`src/app/` at `/` and `/r/:room` (assets under `/assets/*`). To ship a
+front-end change: edit `web/`, `npm run build` in `web/`, run
+`python3 web/scripts/emit-app.py`, commit `web/` + `src/app/`, push —
+gates: `npm test` in `web/`, `npm run test:api`, `npm run check`. The
+old pages (`src/chat.html`, `src/home.html`) stay imported for one
+release cycle: the build id hashes them, and one git revert of the
+cutover restores their serving (rehearsed live 2026-11-09). Remove
+them only after that cycle. `wrangler.toml` carries an ESModule rule
+for `app/**/*.js` — required, because the Text rules have fallthrough
+off and otherwise `.js` modules under `src/` are not collected.
 
 ---
 
