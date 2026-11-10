@@ -3,6 +3,8 @@ import type { MemberKind, Message } from "@chat/shared";
 import { md } from "./markdown";
 import { canSpeak, type Speaker } from "./speak";
 import { RxChips, type RxApi } from "./reactions";
+import { MediaBlocks } from "./media";
+import type { ViewerApi } from "./viewer";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -69,6 +71,7 @@ export interface FeedCtx {
   rx: RxApi;
   rxTargetId: number | null;
   onAvatar: (name: string) => void;
+  openViewer: ViewerApi["open"];
 }
 
 export function senderKind(m: Message, ctx: FeedCtx): MemberKind | null {
@@ -198,6 +201,7 @@ export function MsgRow({ m, prev, ctx }: { m: Message; prev: Message | null; ctx
             </div>
           )}
           <MdText text={m.text || ""} ctx={ctx} />
+          <MediaBlocks m={m} token={ctx.invite} memberSet={ctx.memberSet} openViewer={ctx.openViewer} />
           <div className="msg-foot">
             <div className="rx-row">
               <RxChips m={m} me={ctx.meName} api={ctx.rx} />

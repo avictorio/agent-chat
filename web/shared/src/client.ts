@@ -1,7 +1,10 @@
 import type {
   GameResponse,
   Member,
+  Message,
   MessagesResponse,
+  VoiceState,
+  VoiceUploadResult,
 } from "./types";
 
 // A thin typed client over the room API. Same-origin only: the app is
@@ -100,6 +103,102 @@ export class RoomClient {
       init.body = JSON.stringify(body);
     }
     return this.call(path, init);
+  }
+
+  /** Post a message with an arbitrary payload (media fields included). */
+  async postPayload(
+    payload: Record<string, unknown>
+  ): Promise<Message & { room_state?: import("./types").RoomState }> {
+    return this.call("/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Create an unpublished draft message (media attaches to it). */
+  async createDraft(
+    from: string,
+    text: string,
+    publishOnComplete = false
+  ): Promise<Message & { room_state?: import("./types").RoomState }> {
+    const body: Record<string, unknown> = { from, text, draft: true };
+    if (publishOnComplete) body.publish_on_complete = true;
+    return this.postPayload(body);
+  }
+
+  /** Find a resumable chunked-video draft by file size + fingerprint. */
+  async videoResume(size: number, fingerprint: string): Promise<{ found?: boolean; id?: number }> {
+    return this.call("/video/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size, fingerprint }),
+    });
+  }
+
+  async videoStatus(id: number): Promise<{ uploading?: boolean; received?: number[] }> {
+    return this.call("/messages/" + id + "/video/status");
+  }
+
+  async videoStart(
+    id: number,
+    body: { type: string; size: number; fingerprint?: string }
+  ): Promise<{ part_size: number; parts: number }> {
+    return this.call("/messages/" + id + "/video/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async videoPart(id: number, n: number, blob: Blob): Promise<void> {
+    await this.call("/messages/" + id + "/video/part?n=" + n, {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: blob,
+    });
+  }
+
+  async videoFinish(id: number): Promise<void> {
+    await this.call("/messages/" + id + "/video/finish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  }
+
+  async publishMessage(
+    id: number,
+    text: string
+  ): Promise<Message & { room_state?: import("./types").RoomState }> {
+    return this.call("/messages/" + id + "/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+  }
+
+  /** My cloned-voice status. */
+  async getVoice(): Promise<{ voice?: VoiceState | null }> {
+    return this.call("/voice");
+  }
+
+  async deleteVoice(): Promise<{ error?: string }> {
+    return this.call("/voice", { method: "DELETE" });
+  }
+
+  /** Upload a voice sample (raw audio bytes) for cloning. */
+  async putVoiceSample(blob: Blob): Promise<VoiceUploadResult> {
+    const headers: Record<string, string> = { "Content-Type": blob.type || "audio/mpeg" };
+    if (this.token) headers["X-Invite-Token"] = this.token;
+    const res = await fetch("/api/rooms/" + encodeURIComponent(this.room) + "/voice/sample", {
+      method: "PUT",
+      headers,
+      body: blob,
+    });
+    const data = (await res.json().catch(() => ({}))) as VoiceUploadResult;
+    if (!res.ok) throw new ApiError(res.status, data.error || "HTTP " + res.status);
+    return data;
   }
 
   // Avatar upload sends raw image bytes, not JSON.

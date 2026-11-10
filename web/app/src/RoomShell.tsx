@@ -20,6 +20,8 @@ import { ChatFeed, atBottom, same, type FeedCtx } from "./feed";
 import { Composer } from "./composer";
 import { Speaker } from "./speak";
 import { AvatarDialog, BoardSections, usePhotoUpload, type BoardApi } from "./board";
+import { useViewerHost } from "./viewer";
+import { VoiceDialog, type VoiceDialogHandle } from "./voice";
 import { useReactions } from "./reactions";
 import { daysAway } from "./dates";
 
@@ -603,6 +605,7 @@ export function RoomShell({ room }: { room: string }) {
     }
   };
 
+  const viewerHost = useViewerHost();
   const rx = useReactions({
     client,
     who,
@@ -687,8 +690,9 @@ export function RoomShell({ room }: { room: string }) {
       rx: rx.api,
       rxTargetId: rx.targetId,
       onAvatar: (n) => setAvatarName(n),
+      openViewer: viewerHost.api.open,
     }),
-    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId]
+    [memberSet, members, membersVersion, token, nameState.value, speaker, speakingId, rx.api, rx.targetId, viewerHost.api]
   );
 
   const boardApi: BoardApi = useMemo(
@@ -708,15 +712,15 @@ export function RoomShell({ room }: { room: string }) {
     [boardView, client, who, loadAll, nameState.value, nameState.locked, editingDelta, token, rs]
   );
 
-  const onPost = useCallback(
-    async (text: string, from: string) => {
-      const d = await client.postMessage(text, { from });
-      if (d.room_state) applyState(d.room_state);
-      addMsg(d);
+  const voiceRef = useRef<VoiceDialogHandle | null>(null);
+  const onPosted = useCallback(
+    (m: Message & { room_state?: RoomState }) => {
+      if (m.room_state) applyState(m.room_state);
+      addMsg(m);
       const list = listRef.current;
       if (list) list.scrollTop = list.scrollHeight;
     },
-    [client, applyState, addMsg]
+    [applyState, addMsg]
   );
 
   const onCommitName = useCallback((v: string) => {
@@ -820,6 +824,12 @@ export function RoomShell({ room }: { room: string }) {
             </button>
           </div>
           <div className="foot-row">
+            <button type="button" className="btn sm" id="voiceBtn" hidden={!token} onClick={() => voiceRef.current?.open()}>
+              <I d={["M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0", "M12 18v3"]} />
+              <span>Your voice</span>
+            </button>
+          </div>
+          <div className="foot-row">
             <button type="button" className="btn sm" id="installBtn" hidden={!inst.buttonVisible} onClick={inst.runInstall}>
               <I d={["M12 3v10m0 0l-4-4m4 4l4-4", "M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"]} />
               <span>Install app</span>
@@ -883,7 +893,9 @@ export function RoomShell({ room }: { room: string }) {
             name={nameState.value}
             nameLocked={nameState.locked}
             onCommitName={onCommitName}
-            onPost={onPost}
+            client={client}
+            room={room}
+            onPosted={onPosted}
             memberNames={members.names}
             memberKinds={members.nameKinds}
             denied={denied}
@@ -891,7 +903,9 @@ export function RoomShell({ room }: { room: string }) {
         </section>
         <BoardSections tab={denied || gate ? "" : tab} api={boardApi} photo={photo} />
       </div>
+      {viewerHost.node}
       <AvatarDialog name={avatarName} mb={boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
+      <VoiceDialog ref={voiceRef} client={client} hasToken={!!token} />
       {rx.popovers}
       {photo.el}
       <ToastHost />

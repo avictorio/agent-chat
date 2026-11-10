@@ -358,11 +358,192 @@ let FAILURES = 0;
   await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await page.waitForTimeout(200); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
 
+  await run('artifacts', { state: { artifacts: true } }, async (page) => {
+    const out = {};
+    const fr = await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    out.frameSandbox = await fr.getAttribute('sandbox');
+    out.frameSrc = await fr.getAttribute('src');
+    out.cardName = await page.$eval('.art-card .art-name', e => e.textContent);
+    await page.waitForSelector('.doc-card .doc-body .md-h', { timeout: 4000 });
+    out.docHead = await page.$eval('.doc-card .doc-body .md-h', e => e.textContent);
+    out.docName = await page.$eval('.doc-card .art-name', e => e.textContent);
+    out.docBody = await page.$eval('.doc-card .doc-body', e => e.textContent);
+    if (out.frameSandbox !== 'allow-scripts') throw new Error('iframe sandbox must be exactly allow-scripts, got: ' + out.frameSandbox);
+    if (!/Probe doc/.test(out.docHead)) throw new Error('doc heading not rendered: ' + out.docHead);
+    if (!/Rendered/.test(out.docBody)) throw new Error('doc body not rendered');
+    // Cards are previews only: no Open / Expand / Download links on them.
+    out.cardLinks = await page.$$eval('.art-card a, .art-card button, .doc-card a, .doc-card button', els => els.length);
+    if (out.cardLinks !== 0) throw new Error('cards must carry no links or buttons, found ' + out.cardLinks);
+    await shot(page, 'artifacts-cards.png');
+    // Tapping the page card opens the full-screen viewer; browser back closes it.
+    await page.click('.art-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
+    await shot(page, 'artifacts-viewer-page.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    // Tapping the doc card opens the viewer with the full document; the chevron closes it.
+    await page.click('.doc-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-doc .md-h', { timeout: 4000 });
+    out.viewerDoc = await page.$eval('#viewer .viewer-doc', e => e.textContent);
+    out.viewerDl = await page.$eval('#viewerDl', e => !e.hidden);
+    await shot(page, 'artifacts-viewer-doc.png');
+    await page.click('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    if (!/Rendered/.test(out.viewerDoc)) throw new Error('viewer doc not rendered');
+    if (!out.viewerDl) throw new Error('viewer must offer Download for a document');
+    // Images get the same treatment: inline, no wrapping link; tap opens the viewer.
+    out.imgWrapped = await page.$eval('.msg-img', e => e.parentElement.tagName);
+    await page.click('.msg-img');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'artifacts-viewer-image.png');
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    if (out.imgWrapped === 'A') throw new Error('image must not be wrapped in a new-tab link');
+    return out;
+  });
+  await run('artifacts-mobile', { state: { artifacts: true }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    await shot(page, 'artifacts-mobile-cards.png');
+    await page.tap('.art-card');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    await shot(page, 'artifacts-mobile-viewer.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.tap('.msg-img');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForTimeout(200);
+    await shot(page, 'artifacts-mobile-image.png');
+    await page.tap('#viewerBack');
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return { ok: true };
+  });
+
   // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
   await run('unread', {}, async (page, S) => {
     await page.click('.tab[data-tab="stakes"]'); await page.waitForTimeout(200);
     await page.evaluate(() => {});
     return null;
+  });
+  await run('voice', { state: { payloadKind: true }, init: () => {
+      window.__said = []; window.__recs = [];
+      class FakeSR { constructor() { window.__recs.push(this); } start() { this.on = true; } stop() { this.on = false; setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+      window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+      window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      const synth = { speak(u) { window.__said.push(u.text); this.cur = u; }, cancel() { window.__said.push('<cancel>'); } };
+      Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true });
+    } }, async (page) => {
+    const out = {};
+    out.micVisible = await page.$eval('#mic', b => !b.hidden);
+    out.sendLabel = await page.$eval('#send', b => b.getAttribute('aria-label') + '|' + !!b.querySelector('svg') + '|' + b.textContent.trim());
+    out.speakButtons = await page.$$eval('.speak', b => b.length);
+    await page.fill('#text', 'Hi');
+    await page.click('#mic'); await page.waitForTimeout(50);
+    out.micOn = await page.$eval('#mic', b => b.className + '|' + b.getAttribute('aria-pressed'));
+    await shot(page, 'voice-recording.png');
+    await page.evaluate(() => { const r = window.__recs[0]; const res = (t, f) => { const a = [{ transcript: t }]; a.isFinal = f; return a; };
+      r.onresult({ resultIndex: 0, results: [res('there team', true), res(' this is int', false)] }); });
+    out.afterInterim = await page.$eval('#text', t => t.value);
+    await page.evaluate(() => { const r = window.__recs[0]; const res = (t, f) => { const a = [{ transcript: t }]; a.isFinal = f; return a; };
+      r.onresult({ resultIndex: 1, results: [res('there team', true), res(' this is dictated.', true)] }); });
+    out.afterFinal = await page.$eval('#text', t => t.value);
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+    out.posted = await page.$eval('#msgs .msg:last-child .text', e => e.textContent);
+    out.micAfterSend = await page.$eval('#mic', b => b.className);
+    out.textAfterSend = await page.$eval('#text', t => t.value);
+    await page.hover('#msgs .msg[data-id="3"]');
+    await page.click('#msgs .msg[data-id="3"] .speak'); await page.waitForTimeout(50);
+    out.speakOn = await page.$eval('#msgs .msg[data-id="3"] .speak', b => b.className + '|' + b.getAttribute('aria-label'));
+    await shot(page, 'voice-speaking.png');
+    await page.click('#msgs .msg[data-id="3"] .speak');
+    out.speakOff = await page.$eval('#msgs .msg[data-id="3"] .speak', b => b.className);
+    out.said = await page.evaluate(() => window.__said);
+    out.tags = await page.$$eval('#msgs .msg-head', hs => hs.map(h => Array.from(h.querySelectorAll('.tag')).map(t => t.textContent).join('+') + ':' + h.querySelector('.who').textContent));
+    return out;
+  });
+  await run('dictation-patterns', { init: () => {
+      window.__recs = [];
+      class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+      window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+    } }, async (page) => {
+    const feed = (list) => page.evaluate((list) => {
+      const r = window.__recs[window.__recs.length - 1];
+      for (const ev of list) { const results = ev.r.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; }); r.onresult({ resultIndex: ev.i, results }); }
+      return document.getElementById('text').value;
+    }, list);
+    const out = {};
+    // Desktop Chrome: separate segments, interim updates, leading spaces
+    await page.fill('#text', ''); await page.click('#mic');
+    out.desktop = await feed([
+      { i: 0, r: [['hello', false]] }, { i: 0, r: [['hello there', false]] }, { i: 0, r: [['hello there', true]] },
+      { i: 1, r: [['hello there', true], [' how are', false]] }, { i: 1, r: [['hello there', true], [' how are you', true]] },
+    ]);
+    await page.click('#mic'); await page.waitForTimeout(50);
+    // Appends after existing text
+    await page.fill('#text', 'Note:'); await page.click('#mic');
+    out.append = await feed([{ i: 0, r: [['buy milk', true]] }, { i: 1, r: [['buy milk', true], ['and eggs', true]] }]);
+    return out;
+  });
+  for (const [label, ua] of [['android', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36'], ['iphone', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1']]) {
+    await run('phrase-mode-' + label, { ua, w: 390, h: 844, init: () => {
+        window.__recs = [];
+        class FakeSR { constructor() { window.__recs.push(this); } start() {} stop() { setTimeout(() => this.onend && this.onend(), 10); } abort() { this.stop(); } }
+        window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = undefined;
+      } }, async (page) => {
+      const say = (pairs, end) => page.evaluate(([pairs, end]) => {
+        const r = window.__recs[window.__recs.length - 1];
+        const results = pairs.map(([t, f]) => { const a = [{ transcript: t }]; a.isFinal = f; return a; });
+        if (results.length) r.onresult({ resultIndex: 0, results });
+        if (end) r.onend();
+        return { text: document.getElementById('text').value, sessions: window.__recs.length, continuous: r.continuous, mic: document.getElementById('mic').className };
+      }, [pairs, end]);
+      const out = {};
+      await page.click('#mic');
+      out.s1 = await say([['hello', false]], false);
+      out.s1b = await say([['hello there', true]], true);
+      out.s2 = await say([['how are you', true]], true);
+      out.s3 = await say([['yes', true]], true);
+      out.s4 = await say([['yes', true]], true);
+      out.silent = [await say([], true), await say([], true), await say([], true)].map(x => x.mic + '/' + x.sessions);
+      await page.fill('#text', ''); await page.click('#mic');
+      await say([['send this', true]], false);
+      await page.click('#send'); await page.waitForTimeout(300);
+      out.afterSend = await page.evaluate(() => ({ text: document.getElementById('text').value, mic: document.getElementById('mic').className, sessions: window.__recs.length }));
+      return out;
+    });
+  }
+  for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
+    await run(label, Object.assign({ state: { markdown: true }, init: () => { window.__alert = 0; window.alert = () => { window.__alert++; }; } }, o), async (page) => {
+      await page.waitForTimeout(300);
+      await page.evaluate(() => { const l = document.getElementById('list'); l.scrollTop = l.scrollHeight - 1600; });
+      await shot(page, label + '.png');
+      await page.evaluate(() => { const l = document.getElementById('list'); l.scrollTop = l.scrollHeight; });
+      await shot(page, label + '-bottom.png');
+      if (label !== 'markdown-light') return;
+      return await page.evaluate(() => {
+        const m7 = document.querySelector('.msg[data-id="7"] .text'), m8 = document.querySelector('.msg[data-id="8"] .text');
+        return {
+          h: m7.querySelector('.md-h2') && m7.querySelector('.md-h2').textContent,
+          strong: m7.querySelector('strong').textContent, em: m7.querySelector('em').textContent, code: m7.querySelector('p code').textContent,
+          ol: Array.from(m7.querySelectorAll(':scope > ol > li')).length, nested: Array.from(m7.querySelectorAll('ol li ul li')).map(x => x.textContent),
+          del: m7.querySelector('del').textContent, table: Array.from(m7.querySelectorAll('td')).map(x => x.textContent + (x.style.textAlign ? '@' + x.style.textAlign : '')),
+          quote: m7.querySelector('blockquote').textContent, pre: m7.querySelector('pre code').textContent,
+          links: Array.from(m7.querySelectorAll('a')).map(a => a.textContent + '=>' + a.getAttribute('href')),
+          xssImgs: document.querySelectorAll('.text img').length, xssText: m8.textContent, xssLinks: Array.from(m8.querySelectorAll('a')).length, xssEm: m8.querySelectorAll('em').length,
+          alerts: window.__alert,
+          human: Array.from(document.querySelectorAll('.msg')).map(r => r.dataset.id + (r.classList.contains('human') ? 'H' : '')).join(' '),
+        };
+      });
+    });
+  }
+  await run('markdown-speech', { state: { markdown: true }, init: () => {
+      window.__said = []; window.SpeechSynthesisUtterance = function (t) { this.text = t; };
+      Object.defineProperty(window, 'speechSynthesis', { value: { speak(u) { window.__said.push(u.text); }, cancel() {} }, configurable: true });
+    } }, async (page) => {
+    await page.evaluate(() => { const b = document.querySelector('.msg[data-id="7"] .speak'); b.click(); });
+    return { said: await page.evaluate(() => window.__said.join(' ')) };
   });
   await run('noname', { state: { noYou: true }, w: 1280, h: 860 }, async (page, S) => {
     await page.evaluate(() => { localStorage.removeItem('chat-name'); }); await page.reload(); await page.waitForTimeout(500);

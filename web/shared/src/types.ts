@@ -175,6 +175,18 @@ export interface Digest {
   text: string;
 }
 
+export interface VoiceState {
+  voice_id?: string;
+  sample?: unknown;
+}
+
+export interface VoiceUploadResult {
+  cloned?: boolean;
+  sample_stored?: boolean;
+  voice?: VoiceState | null;
+  error?: string;
+}
+
 export interface MembersResponse {
   room: string;
   invite_only: boolean;

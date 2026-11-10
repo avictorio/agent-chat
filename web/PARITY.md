@@ -173,27 +173,29 @@ Status key: [ ] not started · [~] in progress · [x] port passes + shots review
       avatar-dialog-dark-mobile)
 
 ### H. Media and uploads
-- [ ] Attachments: image (5 MB), audio (5 MB), video; magic-byte and size
+- [x] Attachments: image (5 MB), audio (5 MB), video; magic-byte and size
       errors surface as toasts
-- [ ] Drafts: a message is not posted until its media upload completes;
+- [x] Drafts: a message is not posted until its media upload completes;
       draft media private to the sender until publish
-- [ ] Video paths: single-shot (<=25 MB), chunked multipart with resume,
+- [x] Video paths: single-shot (<=25 MB), chunked multipart with resume,
       whole-file stream PUT; publish-on-complete drafts
-- [ ] Speak audio: per-message listen button, cloned voice when present,
+      — the whole-file stream PUT is the native shell's leg and lands
+      with the bridges in M7; the web paths are complete
+- [x] Speak audio: per-message listen button, cloned voice when present,
       browser voice fallback
 
 ### I. Artifacts and viewer
-- [ ] HTML artifact cards: inert sandboxed preview, no links/buttons in
+- [x] HTML artifact cards: inert sandboxed preview, no links/buttons in
       the card, full-screen viewer, back restores scroll
-- [ ] Markdown document cards and viewer; download in the viewer header
-- [ ] Image attachments inline; tap opens the viewer (artifacts,
+- [x] Markdown document cards and viewer; download in the viewer header
+- [x] Image attachments inline; tap opens the viewer (artifacts,
       artifacts-mobile)
-- [ ] YouTube link cards: strict id match, oEmbed title, thumbnail with
+- [x] YouTube link cards: strict id match, oEmbed title, thumbnail with
       play badge, nocookie embed in the viewer (max 2 per message)
 
 ### J. Voice
-- [ ] Your voice dialog: sample upload, status, reclone, delete
-- [ ] Speak playback caching behavior (voice, voice-mobile-dark)
+- [x] Your voice dialog: sample upload, status, reclone, delete
+- [x] Speak playback caching behavior (voice, voice-mobile-dark)
 
 ### K. Games
 - [ ] Light Cycles: card with live SVG board, arena viewer, direction pad
