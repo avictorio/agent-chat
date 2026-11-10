@@ -16,6 +16,17 @@ export function tickLen(ts: number): string {
 
 export function gameMetaText(g: GL): string {
   if (!g) return "";
+  if (g.type === "battleship") {
+    const line = (g.players || []).map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
+    if (g.status === "finished") return "Final · " + line + (g.winner ? " · " + g.winner + " takes the sea" : " · no winner");
+    if (g.status === "cancelled") return "Cancelled · " + line;
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · turn " + tickLen(g.turn_seconds || 3600);
+    }
+    if (g.phase === "setup") return "Placing fleets · turn " + tickLen(g.turn_seconds || 3600);
+    return "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "") + " · " + line;
+  }
   if (g.type === "duel") {
     const sc = g.score || {};
     const dline = (g.players || [])
@@ -163,6 +174,66 @@ export function duelBoard(g: GL): HTMLElement {
   }
   if (g.status === "running" && g.deadline) wrap.appendChild(clockBar(g, false));
   return wrap;
+}
+
+export function bsLabel(x: number, y: number): string {
+  return String.fromCharCode(65 + x) + (y + 1);
+}
+
+// The battleship card body: a scoreboard, not the boards themselves -
+// fleet positions are secret, so the feed shows counts and whose
+// turn it is. The boards live in the arena, and only for the player
+// they belong to.
+export function battleshipBoard(g: GL): HTMLElement {
+  const wrap = el("div", "duel-board");
+  (g.players || []).forEach((p: GL) => {
+    const row = el("div", "duel-row");
+    const dot = el("span", "lc-dot");
+    dot.style.background = p.hex;
+    row.appendChild(dot);
+    row.appendChild(el("span", "duel-name", p.name));
+    const stats = el("span", "duel-state", (p.afloat != null ? p.afloat : 5) + " afloat · " + (p.hits || 0) + " hits · " + (p.sunk || 0) + " sunk");
+    stats.style.marginLeft = "8px";
+    row.appendChild(stats);
+    wrap.appendChild(row);
+  });
+  let state = "";
+  if (g.status === "lobby") state = (g.players || []).map((p: GL) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
+  else if (g.status === "running" && g.phase === "setup") state = (g.players || []).map((p: GL) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
+  else if (g.status === "running") state = "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "");
+  else if (g.status === "finished") state = g.winner ? g.winner + " takes the sea" : "No winner";
+  if (state) wrap.appendChild(el("div", "duel-stateline", state));
+  if (g.you && g.you.playing && g.status === "running") {
+    if (g.phase === "setup" && !(g.you.fleet && g.you.fleet.length)) wrap.appendChild(el("span", "duel-pill your-throw", "PLACE YOUR FLEET"));
+    else if (g.phase === "play" && g.you.your_turn) wrap.appendChild(el("span", "duel-pill your-throw", "YOUR SHOT"));
+  }
+  return wrap;
+}
+
+// One 10x10 board as a DOM grid. states maps a cell label ("C5") to
+// "ship" | "hit" | "miss" | "sunk"; shipHex colors ship cells. When
+// onFire is given, unfired cells are buttons that report their label.
+export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null): HTMLElement {
+  const grid = el("div", "bs-grid");
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      const label = bsLabel(x, y);
+      const st = states[label] || "";
+      const cell = el(onFire && !st ? "button" : "div", "bs-cell " + st) as HTMLElement;
+      if (st === "ship" || st === "hit") cell.style.background = shipHex;
+      if (st === "hit") cell.textContent = "✕";
+      if (st === "sunk") cell.textContent = "✕";
+      if (st === "miss") cell.textContent = "·";
+      if (onFire && !st) {
+        const b = cell as HTMLButtonElement;
+        b.type = "button";
+        b.setAttribute("aria-label", "Fire at " + label);
+        b.addEventListener("click", () => onFire(label));
+      }
+      grid.appendChild(cell);
+    }
+  }
+  return grid;
 }
 
 export function duelScoreLine(g: GL): string {

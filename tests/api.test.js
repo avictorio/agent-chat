@@ -409,6 +409,79 @@ async function waitUp() {
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posts the expiry', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + expId + ' never started') && x.text.includes('Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 80))));
 
+    // Battleship: lobby, placement (explicit fleets both sides),
+    // secrecy, turn order, a sinking, the win, and the result post.
+    // Poc's fleet hugs rows 10/5-8/6/2-4/2, Rex's rows 1/3-6/5/7-9, so
+    // every scripted shot's outcome is known in advance.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    check('battleship with 3 players -> 400', r.status === 400, r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
+    check('battleship created in its lobby', r.status === 201 && r.json.game.type === 'battleship' && r.json.game.status === 'lobby' && r.json.game.turn_seconds === 3600, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const bsId = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'random' } });
+    check('battleship move in the lobby -> 409', r.status === 409, r.status);
+    r = await req('POST', R2 + '/games/' + bsId + '/accept', { token: TRex, json: {} });
+    check('battleship starts into placement when both accept', r.status === 200 && r.json.game.status === 'running' && r.json.game.phase === 'setup', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'C5' } });
+    check('a shot before placement -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A1H,A1V,C3H,E5H,G7H' } });
+    check('overlapping placement -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A10H,C5V,E6H,G2V,I2H' } });
+    check('explicit placement lands', r.status === 200 && r.json.game.you.fleet.length === 5 && r.json.game.you.fleet.reduce((n, s) => n + s.cells.length, 0) === 17, r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'A1H,C3V,E5H,G7V,I9H' } });
+    check('second placement opens play, creator fires first', r.status === 200 && r.json.resolved === true && r.json.game.phase === 'play' && r.json.game.turn_of === 'Poc', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    // Secrecy: neither captain's view carries the rival's unhit cells
+    // (quoted labels appear only as cell values), and a spectator
+    // gets counts, never a fleet.
+    r = await req('GET', R2 + '/games/' + bsId, { token: TRex });
+    const rexView = JSON.stringify(r.json.game);
+    check('rival fleet stays secret from Rex', r.status === 200 && !rexView.includes('"A10"') && !rexView.includes('"J2"'), rexView.slice(0, 220));
+    r = await req('GET', R2 + '/games/' + bsId, { token: TP });
+    check('rival fleet stays secret from Poc', r.status === 200 && !JSON.stringify(r.json.game).includes('"J9"'), JSON.stringify(r.json.game).slice(0, 220));
+    r = await req('GET', R2 + '/games/' + bsId, { token: TRae });
+    check('spectator sees no fleet at all', r.status === 200 && r.json.game.you.playing === false && !('fleet' in r.json.game) && (r.json.game.players || []).every(p => p.placed === true), JSON.stringify(r.json.game).slice(0, 220));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'J10' } });
+    check('firing out of turn -> 409', r.status === 409, r.status);
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A1' } });
+    check('first shot hits and passes the turn', r.status === 200 && r.json.game.you.shots.A1 === 'hit' && r.json.game.turn_of === 'Rex' && (r.json.game.players.find(p => p.name === 'Poc') || {}).hits === 1, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('GET', R2 + '/messages?limit=50', { token: TRex });
+    const bsNudge = ((r.json.room_state && r.json.room_state.awaiting_you) || []).find(x => x.type === 'game' && x.id === bsId);
+    check('room_state nudges the captain to fire', !!bsNudge && typeof bsNudge.turn === 'number', JSON.stringify(bsNudge));
+    await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'J10' } });
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A1' } });
+    check('firing the same cell twice -> 400', r.status === 400, r.status);
+    // Play it out: Poc works Rex's fleet down; Rex answers with water.
+    const pocShots = ['B1', 'C1', 'D1', 'E1', 'C3', 'C4', 'C5', 'C6', 'E5', 'F5', 'G5', 'G7', 'G8', 'G9', 'I9', 'J9'];
+    const rexMisses = ['J8', 'J6', 'J4', 'H10', 'H1', 'F10', 'F8', 'F4', 'F2', 'D8', 'D4', 'B8', 'B6', 'H6', 'H4', 'B4'];
+    let sunkSeen = false;
+    let finalBs = null;
+    for (let i = 0; i < pocShots.length; i++) {
+      const mv = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: pocShots[i] } });
+      if (pocShots[i] === 'E1') {
+        const chk = await req('GET', R2 + '/games/' + bsId, { token: TP });
+        sunkSeen = (chk.json.game.you.sunk_ships || []).some(s => s.size === 5) && (chk.json.game.players.find(p => p.name === 'Rex') || {}).afloat === 4;
+      }
+      if (mv.json.game.status === 'finished') { finalBs = mv.json.game; break; }
+      await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: rexMisses[i] } });
+    }
+    check('a sunk ship is public and counted', sunkSeen, '');
+    check('battleship finishes when the fleet is gone', !!finalBs && finalBs.winner === 'Poc' && (finalBs.players.find(p => p.name === 'Rex') || {}).afloat === 0, JSON.stringify(finalBs).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'A10' } });
+    check('shot after the finish -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('referee posted the battleship result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Battleship match #' + bsId + ' is over') && x.text.includes('Poc takes the sea')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 90))));
+    // The turn clock: a captain who never fires loses the turn (and
+    // the log says so) - three in a row would forfeit the match.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30 } });
+    const bsClock = r.json.game.id;
+    await req('POST', R2 + '/games/' + bsClock + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + bsClock + '/moves', { token: TP, json: { dir: 'random' } });
+    r = await req('POST', R2 + '/games/' + bsClock + '/moves', { token: TRex, json: { dir: 'random' } });
+    check('random placements open play', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    await new Promise(res => setTimeout(res, 32000));
+    r = await req('GET', R2 + '/games/' + bsClock, { token: TP });
+    check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === 'Rex' && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')), JSON.stringify(r.json.game).slice(0, 240));
+
     // Stream subscriptions: events= narrows the frame kinds, game=
     // restricts game frames to given matches, and a malformed
     // subscription answers 400 before the stream opens. The default

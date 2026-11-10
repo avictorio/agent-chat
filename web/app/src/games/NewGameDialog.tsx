@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 
-// The New game dialog: pick a game (Light Cycles or Duel), pick its
+// The New game dialog: pick a game (Duel, Light Cycles, Battleship), pick its
 // players from the room roster — that pick is the invitation — set
 // the one option that matters, and start. The server posts the game
 // card to the feed and wakes the players; on success the arena opens
@@ -11,7 +11,7 @@ export interface NewGameDialogHandle {
   open(): void;
 }
 
-type GameType = "duel" | "lightcycles";
+type GameType = "duel" | "lightcycles" | "battleship";
 
 const BEST_OF = [3, 5, 7, 9];
 const TICKS: { secs: number; label: string }[] = [
@@ -19,6 +19,13 @@ const TICKS: { secs: number; label: string }[] = [
   { secs: 60, label: "1 min" },
   { secs: 120, label: "2 min" },
   { secs: 300, label: "5 min" },
+];
+const TURNS: { secs: number; label: string }[] = [
+  { secs: 300, label: "5 min" },
+  { secs: 900, label: "15 min" },
+  { secs: 3600, label: "1 hour" },
+  { secs: 21600, label: "6 hours" },
+  { secs: 86400, label: "24 hours" },
 ];
 
 export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDialog(_, ref) {
@@ -30,12 +37,13 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const [picked, setPicked] = useState<string[]>([]);
   const [bestOf, setBestOf] = useState(5);
   const [tick, setTick] = useState(120);
+  const [turn, setTurn] = useState(3600);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
   const me = session.meName;
-  const max = type === "duel" ? 2 : 4;
-  const valid = type === "duel" ? picked.length === 2 : picked.length >= 2 && picked.length <= 4;
+  const max = type === "lightcycles" ? 4 : 2;
+  const valid = type === "lightcycles" ? picked.length >= 2 && picked.length <= 4 : picked.length === 2;
 
   useImperativeHandle(ref, () => ({
     open() {
@@ -43,6 +51,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       setPicked(me && members.memberSet.has(me.toLowerCase()) ? [me] : []);
       setBestOf(5);
       setTick(120);
+      setTurn(3600);
       setNote("");
       setBusy(false);
       if (dlgRef.current && !dlgRef.current.open) dlgRef.current.showModal();
@@ -63,7 +72,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const switchType = (t: GameType) => {
     setType(t);
     setNote("");
-    setPicked((cur) => cur.slice(0, t === "duel" ? 2 : 4));
+    setPicked((cur) => cur.slice(0, t === "lightcycles" ? 4 : 2));
   };
 
   const start = async () => {
@@ -74,6 +83,9 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     if (type === "duel") {
       body.game = "duel";
       body.best_of = bestOf;
+    } else if (type === "battleship") {
+      body.game = "battleship";
+      body.tick_seconds = turn;
     } else {
       body.tick_seconds = tick;
     }
@@ -94,14 +106,16 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   };
 
   const hint = !valid
-    ? type === "duel"
-      ? picked.length < 2
-        ? "Pick one more player — a duel is exactly 2."
-        : "A duel is exactly 2 players."
-      : "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
+    ? type === "lightcycles"
+      ? "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
+      : picked.length < 2
+        ? "Pick one more player — this game is exactly 2."
+        : "This game is exactly 2 players."
     : type === "duel"
       ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; rounds are a minute once under way."
-      : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
+      : type === "battleship"
+        ? "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
+        : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
 
   // The roster list carries the room's bot identity ("claude") for
   // mentions and rendering; it holds no invite and cannot play, so
@@ -126,11 +140,14 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         <button type="button" aria-pressed={type === "lightcycles"} onClick={() => switchType("lightcycles")}>
           🏍️ Light Cycles
         </button>
+        <button type="button" aria-pressed={type === "battleship"} onClick={() => switchType("battleship")}>
+          🚢 Battleship
+        </button>
       </div>
       <div className="ng-label">
         Players
         <span className="ng-count">
-          {picked.length} of {type === "duel" ? "2" : "2–4"}
+          {picked.length} of {type === "lightcycles" ? "2–4" : "2"}
         </span>
       </div>
       <div className="ng-players">
@@ -160,6 +177,17 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
             {BEST_OF.map((n) => (
               <button key={n} type="button" aria-pressed={bestOf === n} onClick={() => setBestOf(n)}>
                 {n}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : type === "battleship" ? (
+        <>
+          <div className="ng-label">Turn clock — how long each captain gets per shot</div>
+          <div className="seg full" role="group" aria-label="Turn clock">
+            {TURNS.map((t) => (
+              <button key={t.secs} type="button" aria-pressed={turn === t.secs} onClick={() => setTurn(t.secs)}>
+                {t.label}
               </button>
             ))}
           </div>

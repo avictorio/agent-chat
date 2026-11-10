@@ -1,7 +1,9 @@
 import type { RoomClient } from "@chat/shared";
 import { el } from "../lib";
 import {
+  battleshipBoard,
   boardSvg,
+  bsGrid,
   clockBar,
   duelBoard,
   duelScoreLine,
@@ -99,6 +101,9 @@ export function createGameStore(opts: {
       body.game = "duel";
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
+    } else if (g.type === "battleship") {
+      body.game = "battleship";
+      body.tick_seconds = g.turn_seconds;
     } else {
       body.tick_seconds = g.tick_seconds;
       body.w = g.w;
@@ -327,10 +332,121 @@ export function createGameStore(opts: {
     }
   }
 
+  function renderBattleshipView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const you = g.you || { playing: false };
+    const key =
+      g.status +
+      "|" +
+      (g.phase || "") +
+      "|" +
+      g.turn +
+      "|" +
+      (g.turn_of || "") +
+      "|" +
+      (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.placed ? 1 : 0) + "" + (p.shots || 0) + "" + (p.afloat || 0)).join("") +
+      "|" +
+      (you.fleet ? "fleet" : "") +
+      "|" +
+      (you.shots ? Object.keys(you.shots).length : 0);
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gameView.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const players = g.players || [];
+    const myName = opts.meName();
+    const me = players.filter((p: GL) => p.name === myName)[0];
+    const opp = players.filter((p: GL) => p.name !== myName)[0];
+    if (!you.playing || !me || !opp) {
+      const big = el("div", "lc-board-big");
+      big.appendChild(battleshipBoard(g));
+      wrap.appendChild(big);
+      note.textContent = "Spectating - fleets stay hidden; the boards are for their captains.";
+      wrap.appendChild(note);
+    } else if (g.phase === "setup" && !you.fleet) {
+      const big = el("div", "lc-board-big");
+      big.appendChild(battleshipBoard(g));
+      wrap.appendChild(big);
+      const row = el("div", "duel-pad");
+      const b = el("button", "duel-btn", "Place my fleet (random)");
+      b.type = "button";
+      b.addEventListener("click", () => {
+        void sendMove(g.id, "random", note);
+      });
+      row.appendChild(b);
+      wrap.appendChild(row);
+      note.textContent = "The referee scatters your five ships (5, 4, 3, 3, 2). Agents can place exact layouts by API instead.";
+      wrap.appendChild(note);
+    } else {
+      const boards = el("div", "bs-boards");
+      const ownStates: Record<string, string> = {};
+      (you.fleet || []).forEach((s: GL) => {
+        s.cells.forEach((c: string) => {
+          ownStates[c] = s.hits.indexOf(c) >= 0 ? (s.sunk ? "sunk" : "hit") : "ship";
+        });
+      });
+      Object.keys(you.incoming || {}).forEach((c) => {
+        if (!ownStates[c]) ownStates[c] = "miss";
+      });
+      const ownWrap = el("div", "bs-side");
+      ownWrap.appendChild(el("div", "bs-title", "Your waters"));
+      ownWrap.appendChild(bsGrid(ownStates, me.hex, null));
+      boards.appendChild(ownWrap);
+      const oppStates: Record<string, string> = {};
+      Object.keys(you.shots || {}).forEach((c) => {
+        oppStates[c] = you.shots[c];
+      });
+      (you.sunk_ships || []).forEach((s: GL) => {
+        s.cells.forEach((c: string) => {
+          oppStates[c] = "sunk";
+        });
+      });
+      const canFire = g.status === "running" && g.phase === "play" && you.your_turn;
+      const oppWrap = el("div", "bs-side");
+      oppWrap.appendChild(el("div", "bs-title", opp.name + "'s waters" + (canFire ? " - tap a cell to fire" : "")));
+      oppWrap.appendChild(
+        bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null)
+      );
+      boards.appendChild(oppWrap);
+      wrap.appendChild(boards);
+      let status = "";
+      if (g.status === "finished") status = g.winner ? (g.winner === myName ? "You take the sea." : g.winner + " takes the sea.") : "No winner.";
+      else if (g.status === "cancelled") status = "This match was called off.";
+      else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
+      else if (you.your_turn) status = "Your shot - turn " + g.turn + ".";
+      else status = "Waiting on " + opp.name + "'s shot - turn " + g.turn + ".";
+      wrap.appendChild(el("div", "duel-statusline", status));
+      wrap.appendChild(note);
+    }
+    if ((g.status === "finished" || g.status === "cancelled") && you.playing) {
+      wrap.appendChild(rematchRow(g, note));
+      wrap.appendChild(note);
+    }
+    if (g.log && g.log.length) {
+      const log = el("div", "lc-log");
+      log.appendChild(el("div", "", "The record"));
+      g.log.forEach((ln: GL) => {
+        log.appendChild(el("div", "", "Turn " + ln.tick + " - " + ln.text));
+      });
+      wrap.appendChild(log);
+    }
+  }
+
   function renderGameView(g: GL, force?: boolean) {
     if (!gameView || gameView.id !== g.id) return;
     if (g.type === "duel") {
       renderDuelView(g, force);
+      return;
+    }
+    if (g.type === "battleship") {
+      renderBattleshipView(g, force);
       return;
     }
     const key =
@@ -441,9 +557,9 @@ export function createGameStore(opts: {
 
   function openGame(id: number, type?: string) {
     gameRenderKey = "";
-    const isDuel = type ? type === "duel" : cache.get(id)?.type === "duel";
+    const kind = type || cache.get(id)?.type;
     opts.openViewer(
-      (isDuel ? "Duel #" : "Light Cycles #") + id,
+      (kind === "duel" ? "Duel #" : kind === "battleship" ? "Battleship #" : "Light Cycles #") + id,
       (vb) => {
         const wrap = el("div", "lc-arena");
         wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
@@ -483,7 +599,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel") {
+      if (game.trails || game.type === "duel" || game.type === "battleship") {
         cache.set(game.id, game);
         notify();
       }

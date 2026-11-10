@@ -1,7 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useFeed } from "../room/ctx";
 import type { GameSummary } from "@chat/shared";
-import { boardSvg, duelBoard, gameMetaText } from "./render";
+import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -17,7 +17,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -28,6 +28,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     if (g.type === "duel") {
       board.textContent = "";
       board.appendChild(duelBoard(g));
+    } else if (g.type === "battleship") {
+      board.textContent = "";
+      board.appendChild(battleshipBoard(g));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
     }
@@ -38,7 +41,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     <div className="game-card" onClick={() => store.openGame(id, summary.type)}>
       <div className="art-head">
         <span className="art-kind">Game</span>
-        <span className="art-name">{(summary.type === "duel" ? "Duel #" : "Light Cycles #") + id}</span>
+        <span className="art-name">{(summary.type === "duel" ? "Duel #" : summary.type === "battleship" ? "Battleship #" : "Light Cycles #") + id}</span>
         <span className="art-size">{meta}</span>
         <span className="sp"></span>
         <span className="art-go">›</span>
