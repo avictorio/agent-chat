@@ -154,15 +154,17 @@ export function useReactions(opts: {
      the bar and the who popover */
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
       if (swallowRef.current) {
         swallowRef.current = false;
-        e.preventDefault();
-        e.stopPropagation();
-        return;
+        if (!t.closest(".rx-bar,.rx-picker,.rx-who")) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
       }
       const p = popRef.current;
       if (!p) return;
-      const t = e.target as HTMLElement;
       if (t.closest(".rx-bar,.rx-picker,.rx-who")) return;
       const btn = t.closest(".react-btn");
       if (btn) {
@@ -244,9 +246,18 @@ export function useReactions(opts: {
       const h = holdRef.current;
       if (h && Math.abs(e.clientX - h.x) + Math.abs(e.clientY - h.y) > 10) clearHold();
     },
-    onPointerUp: clearHold,
-    onPointerCancel: clearHold,
-    onPointerLeave: clearHold,
+    onPointerUp: () => {
+      clearHold();
+      if (swallowRef.current) window.setTimeout(() => { swallowRef.current = false; }, 120);
+    },
+    onPointerCancel: () => {
+      clearHold();
+      if (swallowRef.current) window.setTimeout(() => { swallowRef.current = false; }, 120);
+    },
+    onPointerLeave: () => {
+      clearHold();
+      if (swallowRef.current) window.setTimeout(() => { swallowRef.current = false; }, 120);
+    },
     onContextMenu: (e: { target: EventTarget | null; preventDefault(): void }) => {
       const t = e.target as HTMLElement | null;
       if (!t || !t.closest) return;

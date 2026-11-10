@@ -144,6 +144,18 @@ is not modified by this project, and every behavior it has today is the spec.
       and the install strip. F2 (sidebar lock glyph) was investigated
       and cleared as code-equivalent. Suite green at 48 scenarios with
       all assertions in force; post-fix pairs re-reviewed.
+      Soak defect S1 (owner report, 2026-11-09): "hold brings up the
+      bar, but I have to click twice for the selection to take." The
+      hold's swallow flag outlived the gesture: a release that
+      produces no click (the touch long-press case) left the flag
+      set, and the port's document click guard swallowed the next
+      tap wherever it landed. Production carries two guards the port
+      missed - the swallow exempts clicks inside the popover, and
+      pointerup schedules the flag's clearing after 120ms ("don't
+      let the flag outlive it"). Both ported; the new
+      reactions-hold-noclick scenario models the no-click release
+      with synthetic pointer events and fails on the pre-fix code,
+      passes after. Suite green at 49 scenarios.
 - [ ] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
 

@@ -897,6 +897,45 @@ let FAILURES = 0;
     await page.hover('.msg[data-id="3"]'); await shot(page, 'reactions-chips.png');
     return out;
   });
+  await run('reactions-hold-noclick', {}, async (page, S, calls) => {
+    // Regression (owner soak, 2026-11-09): "hold brings up the bar,
+    // but I have to click twice for the selection to take." A real
+    // touch long-press release often produces NO click event, so the
+    // swallow flag set when the bar opens must not outlive the
+    // gesture: production clears it 120ms after pointerup and exempts
+    // clicks inside the popover. A port missing both guards eats the
+    // first deliberate tap. Synthetic pointer events model the
+    // no-click release exactly (no native click follows them).
+    const out = {};
+    const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
+    const holdOpen = async (id) => {
+      await page.$eval('.msg[data-id="' + id + '"] .text', (el) => {
+        const r = el.getBoundingClientRect();
+        const init = { bubbles: true, clientX: r.left + 20, clientY: r.top + 8, button: 0, pointerId: 9, isPrimary: true };
+        el.dispatchEvent(new PointerEvent('pointerdown', init));
+      });
+      await page.waitForTimeout(700);
+      await page.$eval('.msg[data-id="' + id + '"] .text', (el) => {
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 9, isPrimary: true }));
+      });
+    };
+    // Phase 1: slow tap after a no-click release (flag-expiry path).
+    await holdOpen(1);
+    out.bar1 = !!(await page.$('.rx-bar'));
+    await page.waitForTimeout(300);
+    await page.click('.rx-bar button[title="Love"]'); await page.waitForTimeout(300);
+    out.afterLove = await chips(1);
+    if (JSON.stringify(out.afterLove) !== JSON.stringify(['\u2764\uFE0F1*'])) throw new Error('first tap after a no-click hold-release was eaten: ' + JSON.stringify(out));
+    // Phase 2: immediate tap after a no-click release (in-popover
+    // exemption path - the tap lands before any expiry could run).
+    await holdOpen(3);
+    out.bar2 = !!(await page.$('.rx-bar'));
+    await page.click('.rx-bar button[title="Wow"]'); await page.waitForTimeout(300);
+    out.afterWow = await chips(3);
+    if (!out.afterWow.some(c => c === '\u{1F62E}1*')) throw new Error('immediate tap after a no-click hold-release was eaten: ' + JSON.stringify(out));
+    out.posts = calls.filter(c => c.includes('/reactions')).map(c => c.replace('POST /api/rooms/demo/messages/', ''));
+    return out;
+  });
   await run('reactions-picker', {}, async (page, S, calls) => {
     const out = {};
     await page.hover('.msg[data-id="1"]'); await page.click('.msg[data-id="1"] .react-btn'); await page.waitForTimeout(150);
