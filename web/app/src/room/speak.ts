@@ -1,5 +1,5 @@
-import { plainText } from "./markdown";
-import { toast } from "./lib";
+import { plainText } from "../feed/markdown";
+import { toast } from "../lib";
 import type { Message } from "@chat/shared";
 
 // Read-aloud, ported from the current app: a message plays in the

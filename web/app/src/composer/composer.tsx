@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon as I } from "../ui/Icon";
+import { useDictation } from "./useDictation";
+import { useAttachments } from "./useAttachments";
+import { useRecorder } from "./useRecorder";
 import { flushSync } from "react-dom";
 import type { Message, RoomClient, RoomState } from "@chat/shared";
-import { toast } from "./lib";
+import { toast } from "../lib";
 import {
   sendBigVideo,
   sendBigVideoChunkedNative,
@@ -30,78 +34,10 @@ export interface ComposerProps {
   denied: boolean;
 }
 
-interface PendingClip {
-  data: string;
-  name: string;
-  label: string;
-  transcript?: string | null;
-}
-interface PendingImage {
-  data: string;
-  name: string;
-}
-interface PendingArt {
-  kind: "html" | "doc";
-  name: string;
-  content: string;
-  label: string;
-}
-interface PendingVideo {
-  data?: string;
-  file?: File;
-  big?: boolean;
-  native?: NativePickedFile;
-  nativeChunked?: NativePickedFile;
-  name: string;
-}
-
-interface MRInstance {
-  mimeType: string;
-  ondataavailable: ((e: { data: Blob | null }) => void) | null;
-  onstop: (() => void) | null;
-  start(timeslice?: number): void;
-  stop(): void;
-}
-interface MRCtor {
-  new (stream: MediaStream, opts?: { mimeType?: string }): MRInstance;
-  isTypeSupported?: (t: string) => boolean;
-}
-
-interface SRAlternative {
-  transcript: string;
-}
-interface SRResultItem {
-  isFinal: boolean;
-  [index: number]: SRAlternative;
-}
-interface SREvent {
-  results: ArrayLike<SRResultItem>;
-}
-interface SRInstance {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((e: SREvent) => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-  abort(): void;
-}
-type SRCtor = new () => SRInstance;
-
 function escHTML(t: string): string {
   return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-const I = ({ d, extra }: { d: string[]; extra?: React.ReactNode }) => (
-  <svg className="i" viewBox="0 0 24 24">
-    {extra}
-    {d.map((p, i) => (
-      <path key={i} d={p} />
-    ))}
-  </svg>
-);
 
 export function Composer(p: ComposerProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -167,130 +103,8 @@ export function Composer(p: ComposerProps) {
     return () => window.removeEventListener("resize", onResize);
   });
 
-  // ---- dictation ----
-  const SRCtorRef = useRef<SRCtor | null | undefined>(undefined);
-  if (SRCtorRef.current === undefined) {
-    const w = window as unknown as { SpeechRecognition?: SRCtor; webkitSpeechRecognition?: SRCtor };
-    SRCtorRef.current = w.SpeechRecognition || w.webkitSpeechRecognition || null;
-  }
-  const SR = SRCtorRef.current;
-  const phraseModeRef = useRef<boolean | null>(null);
-  if (phraseModeRef.current === null) {
-    const ua = navigator.userAgent || "";
-    phraseModeRef.current =
-      /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
-  }
-  const PHRASE_MODE = phraseModeRef.current;
-  const [micOn, setMicOn] = useState(false);
-  const recRef = useRef<SRInstance | null>(null);
-  const listeningRef = useRef(false);
-  const dictBaseRef = useRef("");
-  const emptyRunsRef = useRef(0);
-
-  const sessionText = (e: SREvent): string => {
-    let fin = "";
-    let interim = "";
-    for (let i = 0; i < e.results.length; i++) {
-      const t = e.results[i]![0]?.transcript || "";
-      if (e.results[i]!.isFinal) fin += (fin && !/^\s/.test(t) ? " " : "") + t;
-      else interim += (interim && !/^\s/.test(t) ? " " : "") + t;
-    }
-    return (fin + (fin && interim && !/^\s/.test(interim) ? " " : "") + interim)
-      .replace(/\s+/g, " ")
-      .trim();
-  };
-  const setMic = (on: boolean) => {
-    listeningRef.current = on;
-    setMicOn(on);
-  };
-  const startSession = () => {
-    if (!SR) return;
-    const r = new SR();
-    let heard = false;
-    r.lang = navigator.language || "en-US";
-    r.continuous = !PHRASE_MODE;
-    r.interimResults = true;
-    const textEl = textRef.current;
-    dictBaseRef.current = textEl ? textEl.value : "";
-    if (dictBaseRef.current && !/\s$/.test(dictBaseRef.current)) dictBaseRef.current += " ";
-    r.onresult = (e) => {
-      const t = sessionText(e);
-      if (t) {
-        heard = true;
-        if (textRef.current) {
-          textRef.current.value = dictBaseRef.current + t;
-          grow();
-        }
-      }
-    };
-    r.onerror = (e) => {
-      if (e.error === "no-speech" || e.error === "aborted") return;
-      flushSync(() => setMic(false));
-      if (e.error === "not-allowed" || e.error === "service-not-allowed")
-        import("./lib").then(({ toast }) =>
-          toast("Microphone access is blocked. Allow it in your browser's site settings to dictate.", true)
-        );
-      else
-        import("./lib").then(({ toast }) => toast("Dictation stopped (" + e.error + ")", true));
-    };
-    r.onend = () => {
-      if (recRef.current !== r) return;
-      recRef.current = null;
-      emptyRunsRef.current = heard ? 0 : emptyRunsRef.current + 1;
-      if (listeningRef.current && PHRASE_MODE && emptyRunsRef.current < 3) {
-        try {
-          startSession();
-          return;
-        } catch {
-          // fall through to stopping
-        }
-      }
-      // flushSync: the current app toggles the mic class synchronously
-      // in onend, and anything reading the button in the same task (the
-      // parity scenarios do) must see the stopped state immediately.
-      flushSync(() => setMic(false));
-    };
-    r.start();
-    recRef.current = r;
-  };
-  const stopDictation = (discard: boolean) => {
-    setMic(false);
-    const rec = recRef.current;
-    if (!rec) return;
-    if (discard) {
-      rec.onresult = null;
-      try {
-        rec.abort();
-      } catch {
-        // already stopped
-      }
-    } else {
-      try {
-        rec.stop();
-      } catch {
-        // already stopped
-      }
-    }
-  };
-  const stopDictationRef = useRef(stopDictation);
-  stopDictationRef.current = stopDictation;
-  const micClick = () => {
-    if (listeningRef.current || recRef.current) {
-      stopDictation(false);
-      return;
-    }
-    setMic(true);
-    emptyRunsRef.current = 0;
-    try {
-      startSession();
-      if (!PHRASE_MODE) textRef.current?.focus();
-    } catch (e) {
-      setMic(false);
-      import("./lib").then(({ toast }) =>
-        toast("Couldn't start dictation: " + (e instanceof Error ? e.message : String(e)), true)
-      );
-    }
-  };
+  const dict = useDictation({ textRef, grow });
+  const { micOn, micClick, stopDictation } = dict;
 
   // ---- mention menu ----
   const mmCandidates = (q: string): string[] => {
@@ -347,290 +161,14 @@ export function Composer(p: ComposerProps) {
     textEl.focus();
   };
 
-  // ---- attachments ----
-  const imgFileRef = useRef<HTMLInputElement | null>(null);
-  const clipFileRef = useRef<HTMLInputElement | null>(null);
-  const artFileRef = useRef<HTMLInputElement | null>(null);
-  const vidFileRef = useRef<HTMLInputElement | null>(null);
-  const [clip, setClip] = useState<PendingClip | null>(null);
-  const clipRef = useRef<PendingClip | null>(null);
-  clipRef.current = clip;
-  const [image, setImage] = useState<PendingImage | null>(null);
-  const [art, setArt] = useState<PendingArt | null>(null);
-  const [video, setVideo] = useState<PendingVideo | null>(null);
-  const [vidProgress, setVidProgress] = useState<string | null>(null);
-
-  const readAs = (f: File, mode: "data" | "text"): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const rd = new FileReader();
-      rd.onload = () => resolve(String(rd.result));
-      rd.onerror = () => reject(new Error("read failed"));
-      if (mode === "data") rd.readAsDataURL(f);
-      else rd.readAsText(f);
-    });
-  const kb = (n: number) => Math.max(1, Math.round(n / 1024)) + " KB";
-
-  const onClipFile = async (f: File | null) => {
-    if (!f) return;
-    if (f.size > 5000000) {
-      toast("Audio clips can be up to 5 MB", true);
-      return;
-    }
-    try {
-      const data = await readAs(f, "data");
-      setClip({
-        data,
-        name: f.name,
-        label: "🎙 " + f.name + " (" + kb(f.size) + ") - attaches to your next message",
-      });
-    } catch {
-      toast("Couldn't read that file", true);
-    }
-  };
-  const onImgFile = async (f: File | null) => {
-    if (!f) return;
-    if (f.size > 5000000) {
-      toast("Images can be up to 5 MB", true);
-      return;
-    }
-    try {
-      const data = await readAs(f, "data");
-      setImage({ data, name: f.name + " (" + kb(f.size) + ") - attaches to your next message" });
-    } catch {
-      toast("Couldn't read that file", true);
-    }
-  };
-  const onArtFile = async (f: File | null) => {
-    if (!f) return;
-    const isHtml = /\.html?$/i.test(f.name) || f.type === "text/html";
-    const isMd = /\.md$|\.markdown$/i.test(f.name) || f.type === "text/markdown";
-    if (!isHtml && !isMd) {
-      toast("Attach an .html page or a .md document", true);
-      return;
-    }
-    const cap = isHtml ? 2000000 : 1000000;
-    if (f.size > cap) {
-      toast(isHtml ? "HTML pages can be up to 2 MB" : "Documents can be up to 1 MB", true);
-      return;
-    }
-    try {
-      const content = await readAs(f, "text");
-      setArt({
-        kind: isHtml ? "html" : "doc",
-        name: f.name,
-        content,
-        label: (isHtml ? "🗔 " : "📄 ") + f.name + " (" + kb(f.size) + ") - attaches to your next message",
-      });
-    } catch {
-      toast("Couldn't read that file", true);
-    }
-  };
-  const onVidFile = async (f: File | null) => {
-    if (!f) return;
-    if (f.size > 5000000000) {
-      toast("Videos can be up to 5 GB", true);
-      return;
-    }
-    const label = "🎬 " + f.name + " (" + kb(f.size) + ") - attaches to your next message";
-    if (f.size > 25000000) {
-      setVideo({ file: f, big: true, name: label });
-      return;
-    }
-    try {
-      const data = await readAs(f, "data");
-      setVideo({ data, name: label });
-    } catch {
-      toast("Couldn't read that file", true);
-    }
-  };
-
-  // ---- voice-message recorder ----
-  // A MediaRecorder runs alongside a speech-recognition session that
-  // collects the transcript (final results only); where recognition
-  // is unavailable or blocked, the clip simply carries none.
-  const MRCtorRef = useRef<MRCtor | null | undefined>(undefined);
-  if (MRCtorRef.current === undefined) {
-    const w = window as unknown as { MediaRecorder?: MRCtor };
-    const md = navigator.mediaDevices as { getUserMedia?: unknown } | undefined;
-    MRCtorRef.current = md && md.getUserMedia && w.MediaRecorder ? w.MediaRecorder : null;
-  }
-  const MR = MRCtorRef.current;
-  const [recActive, setRecActive] = useState(false);
-  const [recLabel, setRecLabel] = useState("");
-  const recRef2 = useRef<MRInstance | null>(null);
-  const recStreamRef = useRef<MediaStream | null>(null);
-  const recChunksRef = useRef<Blob[]>([]);
-  const recMimeRef = useRef("");
-  const recTimerRef = useRef<number | null>(null);
-  const recStartedRef = useRef(0);
-  const recStartingRef = useRef(false);
-  const recRecogRef = useRef<SRInstance | null>(null);
-  const recHeardRef = useRef("");
-  const recRestartsRef = useRef(0);
-  const recSRDeadRef = useRef(true);
-
-  const recElapsed = () => Math.max(0, Math.round((Date.now() - recStartedRef.current) / 1000));
-  const recClock = () => {
-    const t = recElapsed();
-    return Math.floor(t / 60) + ":" + ("0" + (t % 60)).slice(-2);
-  };
-  const recReset = () => {
-    if (recTimerRef.current) {
-      clearInterval(recTimerRef.current);
-      recTimerRef.current = null;
-    }
-    setRecActive(false);
-    recRef2.current = null;
-    if (recStreamRef.current) {
-      recStreamRef.current.getTracks().forEach((t) => t.stop());
-      recStreamRef.current = null;
-    }
-  };
-  const recSRStart = () => {
-    if (!SR || recRecogRef.current || recSRDeadRef.current) return;
-    try {
-      const r = new SR();
-      r.lang = navigator.language || "en-US";
-      r.continuous = !PHRASE_MODE;
-      r.interimResults = false;
-      r.onresult = (e) => {
-        for (let i = 0; i < e.results.length; i++) {
-          if (!e.results[i]!.isFinal) continue;
-          const t = (e.results[i]![0]?.transcript || "").replace(/\s+/g, " ").trim();
-          if (!t) continue;
-          if (recHeardRef.current && recHeardRef.current.slice(-t.length) === t) continue;
-          recHeardRef.current = (recHeardRef.current ? recHeardRef.current + " " : "") + t;
-        }
-      };
-      r.onerror = (e) => {
-        if (e.error === "not-allowed" || e.error === "service-not-allowed") recSRDeadRef.current = true;
-      };
-      r.onend = () => {
-        if (recRecogRef.current === r) recRecogRef.current = null;
-        if (recRef2.current && !recSRDeadRef.current && recRestartsRef.current < 10) {
-          recRestartsRef.current++;
-          recSRStart();
-        }
-      };
-      r.start();
-      recRecogRef.current = r;
-    } catch {
-      // recognition is best-effort
-    }
-  };
-  const recSRStop = () => {
-    recSRDeadRef.current = true;
-    if (recRecogRef.current) {
-      const r = recRecogRef.current;
-      recRecogRef.current = null;
-      try {
-        r.stop();
-      } catch {
-        // already stopped
-      }
-    }
-  };
-  const recFinish = (discard: boolean) => {
-    const recorder = recRef2.current;
-    if (!recorder) return;
-    recSRStop();
-    const keep = !discard;
-    recorder.onstop = () => {
-      const blob = new Blob(recChunksRef.current, { type: recMimeRef.current || "audio/webm" });
-      const secs = recClock();
-      recChunksRef.current = [];
-      recReset();
-      if (!keep) return;
-      if (blob.size > 5000000) {
-        toast("That recording is over the 5 MB cap", true);
-        return;
-      }
-      const rd = new FileReader();
-      rd.onload = () => {
-        const ext = blob.type.indexOf("mp4") >= 0 ? "m4a" : blob.type.indexOf("ogg") >= 0 ? "ogg" : "webm";
-        const heard = recHeardRef.current.replace(/\s+/g, " ").trim();
-        setClip({
-          data: String(rd.result),
-          name: "voice-message." + ext,
-          label: "🎙 Voice message (" + secs + ", " + kb(blob.size) + ") - attaches to your next message",
-          transcript: heard || null,
-        });
-        const textEl = textRef.current;
-        if (heard && textEl && !textEl.value.trim()) {
-          textEl.value = heard;
-          grow();
-        }
-        setRecLabel("");
-      };
-      rd.onerror = () => toast("Couldn't read that recording", true);
-      rd.readAsDataURL(blob);
-    };
-    try {
-      recorder.stop();
-    } catch {
-      recReset();
-    }
-  };
-  const recClick = async () => {
-    if (recRef2.current) {
-      recFinish(false);
-      return;
-    }
-    // The guard above cannot see a start still waiting on the mic
-    // prompt: without this flag a second tap runs a second
-    // getUserMedia and the first stream leaks.
-    if (recStartingRef.current) return;
-    if (clipRef.current) {
-      toast("A clip is already attached - remove it first, or send it", true);
-      return;
-    }
-    stopDictation(true);
-    recStartingRef.current = true;
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      recStartingRef.current = false;
-      toast("Microphone isn't available: " + (err instanceof Error ? err.message : String(err)), true);
-      return;
-    }
-    recStreamRef.current = stream;
-    recChunksRef.current = [];
-    recMimeRef.current = "";
-    const opts: { mimeType?: string } = {};
-    if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/webm;codecs=opus")) opts.mimeType = "audio/webm;codecs=opus";
-    else if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/mp4")) opts.mimeType = "audio/mp4";
-    let recorder: MRInstance;
-    try {
-      recorder = new MR!(stream, opts);
-    } catch {
-      try {
-        recorder = new MR!(stream);
-      } catch (e2) {
-        recStartingRef.current = false;
-        toast("Recording isn't available in this browser", true);
-        recReset();
-        return;
-      }
-    }
-    recStartingRef.current = false;
-    recMimeRef.current = recorder.mimeType || "";
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size) recChunksRef.current.push(e.data);
-    };
-    recorder.start(250);
-    recRef2.current = recorder;
-    recStartedRef.current = Date.now();
-    recHeardRef.current = "";
-    recRestartsRef.current = 0;
-    recSRDeadRef.current = false;
-    recSRStart();
-    setRecActive(true);
-    setRecLabel("● Recording… 0:00 - tap the record button again to stop");
-    recTimerRef.current = window.setInterval(() => {
-      setRecLabel("● Recording… " + recClock() + " - tap the record button again to stop");
-    }, 500);
-  };
+  const att = useAttachments();
+  const {
+    clip, clipRef, setClip, image, setImage, art, setArt, video, setVideo,
+    vidProgress, setVidProgress, imgFileRef, clipFileRef, artFileRef, vidFileRef,
+    onClipFile, onImgFile, onArtFile, onVidFile,
+  } = att;
+  const rec = useRecorder({ textRef, grow, clipRef, setClip, stopDictation });
+  const { recActive, recLabel, recClick } = rec;
   const clipChipText = recActive ? recLabel : clip ? clip.label : "";
 
   // ---- name ----
@@ -819,8 +357,7 @@ export function Composer(p: ComposerProps) {
                     e.preventDefault();
                     formRef.current?.requestSubmit();
                   }
-                  if (recRef.current && (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete"))
-                    stopDictation(false);
+                  dict.stopOnType(e.key);
                 }}
               />
             </div>
@@ -904,7 +441,7 @@ export function Composer(p: ComposerProps) {
                 type="button"
                 aria-label="Record a voice message"
                 title={recActive ? "Stop recording" : "Record a voice message"}
-                hidden={!MR}
+                hidden={!rec.supported}
                 onClick={() => void recClick()}
               >
                 <svg className="i" viewBox="0 0 24 24">
@@ -919,7 +456,7 @@ export function Composer(p: ComposerProps) {
                 aria-label={micOn ? "Stop dictation" : "Dictate a message"}
                 title={micOn ? "Listening… click to stop" : "Dictate a message"}
                 aria-pressed={micOn}
-                hidden={!SR}
+                hidden={!dict.supported}
                 onClick={micClick}
               >
                 <I d={["M5 11a7 7 0 0 0 14 0M12 18v3"]} extra={<rect x="9" y="3" width="6" height="11" rx="3" />} />
@@ -958,10 +495,7 @@ export function Composer(p: ComposerProps) {
               className="linkbtn"
               id="clipRemove"
               onClick={() => {
-                if (recRef2.current) {
-                  recFinish(true);
-                  return;
-                }
+                if (rec.discardIfRecording()) return;
                 setClip(null);
               }}
             >

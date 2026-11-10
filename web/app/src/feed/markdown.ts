@@ -1,3 +1,4 @@
+import { el } from "../lib";
 // The markdown renderer, ported from src/chat.html (PARITY.md section
 // C: ported, not replaced). It builds DOM nodes — text is never parsed
 // as HTML, which is the current app's XSS record — and the React side
@@ -8,12 +9,6 @@
 
 type Parent = HTMLElement | DocumentFragment;
 
-function el(tag: string, cls?: string, text?: string): HTMLElement {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined && text !== null) e.textContent = text;
-  return e;
-}
 
 function safeUrl(u: string): string | null {
   return /^(https?:\/\/|mailto:)/i.test(u) ? u : null;

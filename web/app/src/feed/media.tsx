@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { Message } from "@chat/shared";
 import { md } from "./markdown";
-import type { ViewerApi } from "./viewer";
-import { GameCardBlock } from "./gamecard";
-import type { GameStore } from "./games";
+import type { ViewerApi } from "../shell/viewer";
+import { GameCardBlock } from "../games/gamecard";
+import type { GameStore } from "../games/games";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card

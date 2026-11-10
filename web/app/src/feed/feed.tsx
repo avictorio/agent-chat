@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { MemberKind, Message } from "@chat/shared";
 import { md } from "./markdown";
-import { canSpeak, type Speaker } from "./speak";
+import { canSpeak, type Speaker } from "../room/speak";
 import { RxChips, type RxApi } from "./reactions";
 import { MediaBlocks } from "./media";
-import type { GameStore } from "./games";
-import type { ViewerApi } from "./viewer";
+import type { GameStore } from "../games/games";
+import { same } from "../lib";
+import type { ViewerApi } from "../shell/viewer";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -13,9 +14,6 @@ import type { ViewerApi } from "./viewer";
 // button. Media, YouTube and game cards join in M5/M6; reaction chips
 // in M4 (the rx-row ships empty until then, as the frame did in M2).
 
-export function same(a: string | null | undefined, b: string | null | undefined): boolean {
-  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
-}
 
 const HUES = [212, 152, 24, 276, 340, 44, 188, 112, 0, 248, 300, 168];
 export function hue(s: string): number {

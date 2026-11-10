@@ -46,3 +46,21 @@ export function onToast(fn: (m: ToastMsg) => void): () => void {
     if (toastListener === fn) toastListener = null;
   };
 }
+
+/** Create an element with a class and optional text (the DOM builder
+ *  the markdown renderer and the game views share). */
+export function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls?: string,
+  text?: string
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+
+/** Case-insensitive name equality (member names compare loosely). */
+export function same(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}

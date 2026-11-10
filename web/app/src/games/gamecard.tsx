@@ -1,6 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { GameSummary } from "@chat/shared";
-import { boardSvg, duelBoard, gameMetaText, type GameStore } from "./games";
+import { boardSvg, duelBoard, gameMetaText } from "./render";
+import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
 // the board — the Light Cycles SVG or the Duel scoreboard — rendered

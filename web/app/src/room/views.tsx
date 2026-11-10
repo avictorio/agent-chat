@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { toast } from "./lib";
+import { toast } from "../lib";
 
 // The room's shell-level views (locked, agent gate) and the board
 // pages as their static frames — board content lands in M4. The chat

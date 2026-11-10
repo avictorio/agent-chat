@@ -1,5 +1,5 @@
-import { RoomShell } from "./RoomShell";
-import HomeApp from "./HomeApp";
+import { RoomShell } from "./room/RoomShell";
+import HomeApp from "./home/HomeApp";
 
 // Route split, mirroring the current app's two pages: "/" is the
 // home page and "/r/<room>" is the room shell.

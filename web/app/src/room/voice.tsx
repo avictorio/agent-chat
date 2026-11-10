@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { RoomClient, VoiceState } from "@chat/shared";
-import { toast } from "./lib";
+import { toast } from "../lib";
 
 // The "Your voice" dialog, ported from the current app: record the
 // script (or upload a sample file), the server clones it, and the

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { fetchBuild } from "@chat/shared";
-import { inShell, isIOSDevice, isStandaloneApp, store } from "./lib";
+import { inShell, isIOSDevice, isStandaloneApp, store } from "../lib";
 
 // The install strip, the update strip and pull-to-refresh, ported from
 // the current app (PARITY.md sections A and M).

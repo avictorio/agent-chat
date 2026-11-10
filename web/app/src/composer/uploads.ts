@@ -210,7 +210,7 @@ export async function sendBigVideo(
    an event listener backed by a liveness poll, so an early or lost
    event can never wedge the composer. */
 
-import { inShell, nativePlugins } from "./shell";
+import { inShell, nativePlugins } from "../shell/shell";
 import type { RoomState } from "@chat/shared";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
