@@ -219,11 +219,11 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
-    if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); if (S.bs) list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81 })); return J({ room: 'demo', games: list }); }
-    if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
+    if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); if (S.bs) list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); return J({ room: 'demo', games: list }); }
+    if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; if (body.game === 'battleship') { const players = (body.players || []).map((n, i) => ({ name: n, color: cols[i][0], hex: cols[i][1], accepted: false, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 })); const g = { id: 7, type: 'battleship', status: 'lobby', created_by: 'Anthony', card_msg: null, phase: null, turn: 0, turn_of: null, turn_seconds: body.tick_seconds || 3600, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, declined_by: null, players, boards: [], last_move: null, log: [], awaiting: [], awaiting_accept: players.map(p => p.name), you: { playing: false } }; S.bs = g; return J({ room: 'demo', game: g }, 201); } const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
     if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
-    if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81 }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
+    if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -395,7 +395,7 @@ let FAILURES = 0;
     if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
     return out;
   });
-  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true } }, async (page) => {
+  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
     await page.click('.tab[data-tab="games"]');
@@ -403,14 +403,29 @@ let FAILURES = 0;
     out.rows = await page.$$eval('#view-games .gm-row', els => els.length);
     out.live = await page.$$eval('#view-games .gm-live', els => els.length);
     out.finished = await page.$eval('#view-games .gm-row:last-of-type .gm-state', e => e.textContent);
+    out.rowWinner = await page.$eval('#view-games .gm-row:last-of-type .game-winner', e => e.textContent);
     if (out.rows !== 5) throw new Error('games tab should list five matches, got ' + out.rows);
     if (out.live !== 4) throw new Error('four matches should be live, got ' + out.live);
-    if (!/takes the sea/.test(out.finished)) throw new Error('finished row should name the winner: ' + out.finished);
+    if (out.finished !== 'Final · 5–4 ships · 16–15 hits · 81 turns') throw new Error('finished row should carry the standard record line: ' + out.finished);
+    if (!/🏆/.test(out.rowWinner) || !/Ada/.test(out.rowWinner) || !/5–4/.test(out.rowWinner)) throw new Error('finished row should carry the standard winner banner: ' + out.rowWinner);
+    if (await page.$('#view-games .gm-head .btn') === null) throw new Error('the Games tab should carry the New game button');
+    if (await page.$('#newGameBtn') !== null) throw new Error('the sidebar should no longer carry a New game button');
     await shot(page, 'games-tab.png');
     await page.click('#view-games .gm-row:last-of-type');
     await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
     out.arena = await page.$$eval('#viewer .bs-grid', els => els.length);
+    out.arenaWinner = await page.$eval('#viewer .game-winner', e => e.textContent);
     if (out.arena !== 2) throw new Error('tapping a row should open its arena, got ' + out.arena);
+    if (!/Ada/.test(out.arenaWinner)) throw new Error('the arena should carry the winner banner: ' + out.arenaWinner);
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.click('#view-games .gm-row:last-of-type .gm-rematch');
+    await page.waitForSelector('#viewer:not([hidden])', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    out.rematchCall = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
+    if (!/"game":"battleship"/.test(out.rematchCall) || !/"players":\["Ada","Henry"\]/.test(out.rematchCall)) throw new Error('row rematch should re-create the same match: ' + out.rematchCall);
+    out.lobby = await page.$eval('#viewer', e => e.textContent);
+    if (!/Lobby/.test(out.lobby)) throw new Error('the rematch should open in its lobby: ' + out.lobby.slice(0, 200));
     return out;
   });
   await run('games-tab-mobile-dark', { state: { bs: true, game: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
@@ -570,13 +585,15 @@ let FAILURES = 0;
     if (!out.vis.some(Boolean)) throw new Error('push bell never became visible: ' + JSON.stringify(out));
     return out;
   });
-  // New game dialog (post-cutover feature, 2026-11-09): the sidebar
-  // button opens it; a duel needs exactly 2 players (you are picked
-  // by default), Light Cycles 2-4; starting posts the create call
-  // with the picked players and closes the dialog.
+  // New game dialog (post-cutover feature, 2026-11-09): the Games
+  // tab's button opens it; a duel needs exactly 2 players (you are
+  // picked by default), Light Cycles 2-4; starting posts the create
+  // call with the picked players and closes the dialog.
   await run('new-game', {}, async (page, S, calls) => {
     const out = {};
-    await page.click('#newGameBtn');
+    await page.click('.tab[data-tab="games"]');
+    await page.waitForSelector('.gm-head .btn', { timeout: 4000 });
+    await page.click('.gm-head .btn');
     await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
     out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
     await page.click('[data-player="Ada"]');
@@ -606,7 +623,8 @@ let FAILURES = 0;
   await run('new-game-mobile', { w: 390, h: 844, touch: true }, async (page) => {
     const out = {};
     await page.click('#menu'); await page.waitForTimeout(350);
-    await page.click('#newGameBtn');
+    await page.click('.tab[data-tab="games"]'); await page.waitForTimeout(700);
+    await page.click('.gm-head .btn');
     await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
     await page.waitForTimeout(200);
     await shot(page, 'new-game-mobile.png');
@@ -796,13 +814,18 @@ let FAILURES = 0;
     const out = {};
     await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
     out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
-    if (!/Final/.test(out.cardMeta)) throw new Error('finished card meta wrong: ' + out.cardMeta);
+    if (out.cardMeta !== 'Final · 3–2 · 7 rounds') throw new Error('finished card meta should be the standard record line: ' + out.cardMeta);
+    out.cardWinner = await page.$eval('.game-card .game-winner', e => e.textContent);
+    if (!/🏆/.test(out.cardWinner) || !/Anthony/.test(out.cardWinner) || !/3–2/.test(out.cardWinner)) throw new Error('finished card should carry the winner banner: ' + out.cardWinner);
+    out.cardRematch = await page.$$eval('.game-card button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
+    if (out.cardRematch !== 1) throw new Error('finished card should offer one Rematch, got ' + out.cardRematch);
     await page.click('.game-card');
     await page.waitForSelector('#viewer:not([hidden]) .duel-verdict', { timeout: 4000 });
     out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
+    out.arenaWinner = await page.$eval('#viewer .game-winner', e => e.textContent);
+    if (!/Anthony/.test(out.arenaWinner) || !/3–2/.test(out.arenaWinner)) throw new Error('finished arena should carry the winner banner: ' + out.arenaWinner);
     out.chips = await page.$$eval('#viewer .duel-chip', els => els.length);
     out.rematch = await page.$$eval('#viewer button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
-    if (!/takes the duel/.test(out.verdict)) throw new Error('finished verdict wrong: ' + out.verdict);
     if (out.chips !== 7) throw new Error('strip should carry 7 round chips, got ' + out.chips);
     if (out.rematch !== 1) throw new Error('finished duel should offer one Rematch, got ' + out.rematch);
     await shot(page, 'duel-finished.png');

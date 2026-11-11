@@ -14,12 +14,74 @@ export function tickLen(ts: number): string {
   return ts >= 3600 ? Math.round(ts / 3600) + " h" : Math.max(1, Math.round(ts / 60)) + " min";
 }
 
+// The standard finished-match presentation, shared by the feed
+// card, the arena and the Games tab so a result reads the same
+// everywhere: a gold winner banner (trophy + name + final score)
+// and a record line in one shape per kind.
+
+export function winnerOf(g: GL): GL | null {
+  if (!g || !g.winner) return null;
+  return (g.players || []).find((p: GL) => p.name === g.winner) || null;
+}
+
+function winnerFirst(g: GL): GL[] {
+  return (g.players || []).slice().sort((a: GL, b: GL) => (b.name === g.winner ? 1 : 0) - (a.name === g.winner ? 1 : 0));
+}
+
+// Final score, winner first: duel round wins, battleship ships sunk.
+export function finalScore(g: GL): string {
+  if (!g) return "";
+  if (g.type === "duel") {
+    const sc = g.score || {};
+    const wins = (p: GL) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);
+    return winnerFirst(g).map(wins).join("–");
+  }
+  if (g.type === "battleship") return winnerFirst(g).map((p: GL) => p.sunk || 0).join("–");
+  return "";
+}
+
+export function recordLine(g: GL): string {
+  if (!g) return "";
+  if (g.status === "cancelled") return "Called off" + (g.declined_by ? " · " + g.declined_by + " declined" : "");
+  if (g.status !== "finished") return "";
+  if (g.type === "battleship") {
+    const hits = winnerFirst(g).map((p: GL) => p.hits || 0).join("–");
+    return "Final · " + finalScore(g) + " ships · " + hits + " hits · " + (g.turn || 0) + " turns";
+  }
+  if (g.type === "duel") return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
+  return "Final · tick " + (g.tick || 0);
+}
+
+// The winner banner as a DOM node for the imperative surfaces
+// (card boards, arenas). The React surfaces (Games tab, card
+// footer) mirror this markup in WinnerBanner.tsx.
+export function winnerBanner(g: GL): HTMLElement | null {
+  if (!g || (g.status !== "finished" && g.status !== "cancelled")) return null;
+  const b = el("div", "game-winner");
+  if (g.status === "cancelled") {
+    b.classList.add("off");
+    b.appendChild(el("span", "gw-text", "Called off"));
+    return b;
+  }
+  const w = winnerOf(g);
+  if (!w) {
+    b.classList.add("off");
+    b.appendChild(el("span", "gw-text", "No winner"));
+    return b;
+  }
+  b.appendChild(el("span", "gw-trophy", "🏆"));
+  b.appendChild(el("span", "gw-name", w.name));
+  b.appendChild(el("span", "gw-text", "wins"));
+  const score = finalScore(g);
+  if (score) b.appendChild(el("span", "gw-score", score));
+  return b;
+}
+
 export function gameMetaText(g: GL): string {
   if (!g) return "";
   if (g.type === "battleship") {
     const line = (g.players || []).map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
-    if (g.status === "finished") return "Final · " + line + (g.winner ? " · " + g.winner + " takes the sea" : " · no winner");
-    if (g.status === "cancelled") return "Cancelled · " + line;
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · turn " + tickLen(g.turn_seconds || 3600);
@@ -32,16 +94,14 @@ export function gameMetaText(g: GL): string {
     const dline = (g.players || [])
       .map((p: GL) => p.name + " " + (sc[p.name] != null ? sc[p.name] : p.wins || 0))
       .join(" · ");
-    if (g.status === "finished") return "Final · " + dline + (g.winner ? " · " + g.winner + " takes the duel" : " · no winner");
-    if (g.status === "cancelled") return "Cancelled · " + dline;
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
     }
     return "Round " + g.round + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
   }
-  if (g.status === "finished") return "Final · tick " + g.tick + (g.winner ? " · " + g.winner + " takes the grid" : " · no survivors");
-  if (g.status === "cancelled") return "Cancelled · tick " + g.tick;
+  if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
     const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
     return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · tick " + tickLen(g.tick_seconds || 120);
@@ -267,7 +327,7 @@ export function battleshipBoard(g: GL): HTMLElement {
   if (g.status === "lobby") state = (g.players || []).map((p: GL) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
   else if (g.status === "running" && g.phase === "setup") state = (g.players || []).map((p: GL) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
   else if (g.status === "running") state = "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "");
-  else if (g.status === "finished") state = g.winner ? g.winner + " takes the sea" : "No winner";
+  else if (g.status === "finished") state = recordLine(g);
   if (state) wrap.appendChild(el("div", "duel-stateline", state));
   const lmText = lastMoveText(g);
   if (lmText && (g.phase === "play" || g.status === "finished")) wrap.appendChild(el("div", "duel-stateline bs-lastline", "Last shot · " + lmText));

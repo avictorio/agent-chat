@@ -12,6 +12,7 @@ import {
   lastMoveText,
   roundVerdict,
   setClockBar,
+  winnerBanner,
   THROW_BEATS,
   THROW_EMOJI,
   type GL,
@@ -121,6 +122,7 @@ export interface GameStore {
   openGame(id: number, type?: string): void;
   viewerClosed(): void;
   respond(id: number, accept: boolean): Promise<void>;
+  rematch(g: GL): Promise<void>;
 }
 
 export function createGameStore(opts: {
@@ -292,6 +294,8 @@ export function createGameStore(opts: {
     const wrap = gameView.wrap;
     wrap.textContent = "";
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
     const big = el("div", "lc-board-big");
     big.appendChild(duelBoard(g));
     wrap.appendChild(big);
@@ -333,13 +337,6 @@ export function createGameStore(opts: {
         .join(" ");
       banner.appendChild(el("span", "v-icons", icons));
       banner.appendChild(el("span", "", v.text + " · " + duelScoreLine(g)));
-      if (g.status === "finished") {
-        const fin = el("span", "", g.winner ? g.winner + " takes the duel" : "No winner");
-        fin.style.display = "block";
-        fin.style.fontWeight = "800";
-        fin.style.marginTop = "4px";
-        banner.appendChild(fin);
-      }
       if (!v.tie && last.winner) {
         const wp = players.filter((p: GL) => p.name === last.winner)[0];
         if (wp) banner.style.borderColor = wp.hex;
@@ -371,7 +368,7 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
-    if ((g.status === "finished" || g.status === "cancelled") && g.you && g.you.playing) {
+    if (g.status === "finished" || g.status === "cancelled") {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
@@ -438,6 +435,8 @@ export function createGameStore(opts: {
     const wrap = gameView.wrap;
     wrap.textContent = "";
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
     const note = el("div", "lc-note", "");
     if (g.status === "lobby") {
       wrap.appendChild(lobbyPanel(g, note));
@@ -614,15 +613,14 @@ export function createGameStore(opts: {
       if (banner) wrap.appendChild(banner);
       wrap.appendChild(boards);
       let status = "";
-      if (g.status === "finished") status = g.winner ? (g.winner === myName ? "You take the sea." : g.winner + " takes the sea.") : "No winner.";
-      else if (g.status === "cancelled") status = "This match was called off.";
+      if (g.status === "finished" || g.status === "cancelled") status = "";
       else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
       else if (you.your_turn) status = "Your shot - turn " + g.turn + ".";
       else status = "Waiting on " + opp.name + "'s shot - turn " + g.turn + ".";
-      wrap.appendChild(el("div", "duel-statusline", status));
+      if (status) wrap.appendChild(el("div", "duel-statusline", status));
       wrap.appendChild(note);
     }
-    if ((g.status === "finished" || g.status === "cancelled") && you.playing) {
+    if (g.status === "finished" || g.status === "cancelled") {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
@@ -665,6 +663,8 @@ export function createGameStore(opts: {
         gameMetaText(g) + (g.status === "running" && g.deadline ? " · tick closes " + new Date(g.deadline).toLocaleTimeString() : "")
       )
     );
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
     const big = el("div", "lc-board-big");
     big.innerHTML = boardSvg(g);
     wrap.appendChild(big);
@@ -725,7 +725,7 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - the riders steer by API and by pad.";
       wrap.appendChild(note);
     }
-    if ((g.status === "finished" || g.status === "cancelled") && g.you && g.you.playing) {
+    if (g.status === "finished" || g.status === "cancelled") {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
@@ -804,6 +804,7 @@ export function createGameStore(opts: {
     },
     openGame,
     respond: (id: number, accept: boolean) => respond(id, accept, null),
+    rematch: (g: GL) => sendRematch(g, null),
     viewerClosed() {
       if (gameViewTimer) {
         clearInterval(gameViewTimer);

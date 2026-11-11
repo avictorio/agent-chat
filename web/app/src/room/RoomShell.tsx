@@ -367,10 +367,6 @@ export function RoomShell({ room }: { room: string }) {
         push={push}
         voiceHidden={!token}
         onVoice={() => voiceRef.current?.open()}
-        onNewGame={() => {
-          setNavOpen(false);
-          newGameRef.current?.open();
-        }}
         install={inst}
       />
       <div className="scrim" id="scrim" onClick={() => setNavOpen(false)}></div>
@@ -437,7 +433,13 @@ export function RoomShell({ room }: { room: string }) {
           <Composer onCommitName={onCommitName} onPosted={feed.onPosted} denied={denied} />
         </section>
         <section className="view" id="view-games" hidden={denied || gate !== null || tab !== "games"}>
-          <GamesView active={!denied && !gate && tab === "games"} />
+          <GamesView
+            active={!denied && !gate && tab === "games"}
+            onNewGame={() => {
+              setNavOpen(false);
+              newGameRef.current?.open();
+            }}
+          />
         </section>
         <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
       </div>

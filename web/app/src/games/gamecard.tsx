@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useFeed } from "../room/ctx";
 import type { GameSummary } from "@chat/shared";
 import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
+import { WinnerBanner } from "./WinnerBanner";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -49,6 +50,23 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       <div className="game-board" ref={boardRef}>
         {!g && <p className="md-p">Loading the grid…</p>}
       </div>
+      {g && (g.status === "finished" || g.status === "cancelled") ? (
+        <div className="game-result">
+          <WinnerBanner g={g} />
+          <div className="duel-pad">
+            <button
+              type="button"
+              className="duel-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                void store.rematch(g);
+              }}
+            >
+              Rematch
+            </button>
+          </div>
+        </div>
+      ) : null}
       {g && g.status === "lobby" && g.you && g.you.playing && !g.you.accepted ? (
         <div className="game-lobby-actions">
           <button

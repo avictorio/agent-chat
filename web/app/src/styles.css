@@ -376,6 +376,20 @@ button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 .gm-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .gm-vs { color: var(--dim); }
 .gm-state { display: block; color: #8fb8c9; font-size: 12px; margin-top: 3px; }
+.gm-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gm-title { font-size: 20px; margin: 2px 0 0; }
+.gm-rematch { margin-top: 8px; background: transparent; border: 1px solid rgba(34, 211, 238, .45); color: #7ee7fc; border-radius: 999px; padding: 4px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.gm-rematch:hover { background: rgba(34, 211, 238, .12); }
+.game-winner { display: flex; align-items: center; gap: 7px; margin-top: 8px; padding: 7px 10px; border-radius: 9px; background: linear-gradient(135deg, #fcd34d, #f59e0b); border: 1px solid #d97706; color: #451a03; font-size: 13px; box-shadow: 0 1px 6px rgba(245, 158, 11, .35); }
+.game-winner.off { background: rgba(100, 116, 139, .16); border-color: rgba(100, 116, 139, .4); box-shadow: none; color: var(--dim); }
+.gw-trophy { font-size: 14px; }
+.gw-name { font-weight: 800; }
+.gw-text { color: #78350f; }
+.game-winner.off .gw-text { color: var(--dim); }
+.gw-score { margin-left: auto; font-weight: 800; color: #451a03; background: rgba(69, 26, 3, .16); border-radius: 999px; padding: 1px 9px; font-size: 12px; }
+.game-result .game-winner { margin: 0 10px; }
+.game-result { padding: 8px 0 10px; }
+.game-result .duel-pad { padding: 8px 10px 0; }
 .duel-rounds { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .duel-rounds div { font-size: 13px; color: var(--dim); padding: 2px 0; }
 .duel-score { margin-left: auto; font-size: 22px; font-weight: 800; line-height: 1; }
