@@ -541,6 +541,16 @@ change behavior. In summary:
   v1, and the begin_upload response says so. Note: Workers observability
   logs record request URLs, so spent/expired tickets exist in Cloudflare
   logs — accepted, because they are single-use and live 15 minutes.
+  Phase B (same day) drained the legacy in-DB media store. The drain
+  check covered every known room (the watcher registry, the
+  genesis-email log, and the build records — 11 rooms): each room
+  that still exists reported zero legacy rows on migrate-media and
+  purge-media, with a second migrate also zero, and the rest were
+  already deleted (404, no storage to drain). The au/im tables, the
+  getMedia fallback reads, and the migrate/purge routes themselves
+  were then removed, and ensureSchema drops the tables wherever they
+  still exist, so an unlisted room self-cleans on first touch under
+  the new code.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
   the native uploader plugin); size and magic bytes are verified at finish,

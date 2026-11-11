@@ -127,8 +127,11 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_ver INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch (e) {}
-    this.sql.exec("CREATE TABLE IF NOT EXISTS au (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS im (msg INTEGER PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL)");
+    // The legacy in-DB media stores are gone (media plan phase B, 2026-11-11):
+    // every room was drained to R2 through the owner migrate/purge runs before
+    // this shipped, so the tables are dropped wherever they still exist.
+    this.sql.exec("DROP TABLE IF EXISTS au");
+    this.sql.exec("DROP TABLE IF EXISTS im");
     this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
     try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
@@ -553,9 +556,9 @@ export class Room extends DurableObject {
 
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
-  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: still read
-  // as a fallback for anything not yet migrated, but never written any more -
-  // since phase A an R2 failure fails the request instead (see STORE_MSG).
+  // md maps (msg, kind) to an R2 key. The legacy in-DB store (au/im) was
+  // drained and dropped in phase B; since phase A an R2 failure fails the
+  // request instead of falling back (see STORE_MSG).
   mediaKey(room, id, kind) { return (room || this.roomName || "room") + "/" + id + "/" + kind; }
 
   async putMedia(id, kind, data, type, room) {
@@ -591,12 +594,8 @@ export class Room extends DurableObject {
         }
       } catch (e) {}
     }
-    const legacy = kind === "audio" ? this.sql.exec("SELECT type, data FROM au WHERE msg = ?", id).toArray()[0]
-      : kind === "image" ? this.sql.exec("SELECT type, data FROM im WHERE msg = ?", id).toArray()[0] : null;
-    if (!legacy) return null;
-    const rr2 = parseRange(range, legacy.data.byteLength);
-    if (rr2) return { data: legacy.data.slice(rr2.start, rr2.end + 1), type: legacy.type, size: legacy.data.byteLength, partial: true, start: rr2.start, end: rr2.end };
-    return { data: legacy.data, type: legacy.type, size: legacy.data.byteLength, partial: false, start: 0, end: legacy.data.byteLength - 1 };
+    // No legacy fallback any more (phase B): media lives in R2 or nowhere.
+    return null;
   }
 
   async attachAudio(id, who, data, type, owner, transcript, room) {
@@ -703,8 +702,6 @@ export class Room extends DurableObject {
       }
       this.sql.exec("DELETE FROM mdp WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM md WHERE msg = ?", d.id);
-      this.sql.exec("DELETE FROM au WHERE msg = ?", d.id);
-      this.sql.exec("DELETE FROM im WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM rx WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
     }
@@ -855,36 +852,6 @@ export class Room extends DurableObject {
     const got = new Set(this.sql.exec("SELECT n FROM mdp WHERE msg = ?", id).toArray().map((r) => r.n));
     try { for (const p of JSON.parse(row.parts || "[]")) got.add(p.partNumber); } catch (e) {}
     return { status: 200, uploading: !!row.upload_id, size: row.size, type: row.type, received: Array.from(got).sort((a, b) => a - b) };
-  }
-
-  // Owner-run backfill: copy every legacy blob that has no R2 copy into R2 and index it
-  // in md. Idempotent; safe to re-run.
-  async migrateMedia(room) {
-    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    let migrated = 0, skipped = 0, failed = 0;
-    const jobs = [];
-    for (const r of this.sql.exec("SELECT msg, type, data FROM au").toArray()) jobs.push({ id: r.msg, kind: "audio", type: r.type, data: r.data });
-    for (const r of this.sql.exec("SELECT msg, type, data FROM im").toArray()) jobs.push({ id: r.msg, kind: "image", type: r.type, data: r.data });
-    for (const j of jobs) {
-      const have = this.sql.exec("SELECT r2key FROM md WHERE msg = ? AND kind = ?", j.id, j.kind).toArray()[0];
-      if (have && have.r2key) { skipped++; continue; }
-      const key = this.mediaKey(room, j.id, j.kind);
-      try {
-        await this.env.MEDIA.put(key, j.data, { httpMetadata: { contentType: j.type } });
-        this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", j.id, j.kind, j.type, key, j.data.byteLength);
-        migrated++;
-      } catch (e) { failed++; }
-    }
-    return { status: 200, migrated: migrated, skipped: skipped, failed: failed };
-  }
-
-  // Owner-run cleanup, after a verified backfill: drop legacy blobs that have an R2 copy.
-  purgeMedia() {
-    const a = this.sql.exec("SELECT COUNT(*) AS n FROM au WHERE msg IN (SELECT msg FROM md WHERE kind = 'audio' AND r2key IS NOT NULL)").one().n;
-    this.sql.exec("DELETE FROM au WHERE msg IN (SELECT msg FROM md WHERE kind = 'audio' AND r2key IS NOT NULL)");
-    const i = this.sql.exec("SELECT COUNT(*) AS n FROM im WHERE msg IN (SELECT msg FROM md WHERE kind = 'image' AND r2key IS NOT NULL)").one().n;
-    this.sql.exec("DELETE FROM im WHERE msg IN (SELECT msg FROM md WHERE kind = 'image' AND r2key IS NOT NULL)");
-    return { status: 200, audio: a, image: i };
   }
 
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
@@ -1405,7 +1372,7 @@ export class Room extends DurableObject {
       // Drafts are exempt from the trim: a long upload can sit on an old id
       // in a busy room, and trimming it would kill the upload mid-flight.
       const staleKeys = this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray().map((r) => r.r2key);
-      this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM au WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM im WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM mdp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
+      this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM mdp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
       if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
     }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
@@ -2462,8 +2429,6 @@ export class Room extends DurableObject {
     }
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("DELETE FROM md WHERE msg = ?", id);
-    this.sql.exec("DELETE FROM au WHERE msg = ?", id);
-    this.sql.exec("DELETE FROM im WHERE msg = ?", id);
     this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
     this.sql.exec("DELETE FROM m WHERE id = ?", id);
     return { status: 200, deleted: id };
@@ -5452,20 +5417,6 @@ export default {
       const body = await readBody(request);
       const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner);
       return json({ room: room, found: !!r.found, id: r.id || null, received: r.received || [] });
-    }
-
-    // Owner-only media migration: backfill legacy in-DB blobs to R2, then purge them
-    // once the backfill verifies. See the media layer in the Room class.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/admin\/(migrate-media|purge-media)\/?$/);
-    if (m) {
-      if (!owner) return json({ error: "Owner key required" }, 403);
-      const room = decodeURIComponent(m[1]).toLowerCase();
-      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
-      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const r = m[2] === "migrate-media" ? await stub.migrateMedia(room) : await stub.purgeMedia();
-      if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json(Object.assign({ room: room }, r));
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);
