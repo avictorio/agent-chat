@@ -361,7 +361,10 @@ button.bs-cell { cursor: pointer; }
 button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 .bs-cell.ship { opacity: .92; }
 .bs-cell.hit { color: #fff; }
-.bs-cell.sunk { background: #7f1d1d; color: #fecaca; }
+.bs-cell.sunk { background: #7f1d1d; color: #fecaca; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(0, 0, 0, .22); filter: saturate(.72); }
+div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: waterDrift 5.5s ease-in-out infinite alternate; }
+@keyframes waterDrift { from { background-color: rgba(56, 189, 248, .05); } to { background-color: rgba(56, 189, 248, .12); } }
+@media (prefers-reduced-motion: reduce) { div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: none; } }
 .bs-cell.miss { color: #64748b; background: rgba(56, 189, 248, .04); }
 .bs-minis { display: flex; gap: 10px; justify-content: center; margin-top: 8px; }
 .bs-mini { width: 86px; }
