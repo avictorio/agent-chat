@@ -619,6 +619,18 @@ async function waitUp() {
     r = await mcp(R2, 'tools/call', { name: 'edit_digest', arguments: { id: dg.id, text: 'edited with an identity' } }, { token: TP });
     check('mcp edit_digest as a named member works', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
 
+    // Games list: every live match ahead of the finished tail, and
+    // no battleship boards in list payloads.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
+    const liveId = r.json && r.json.game && r.json.game.id;
+    r = await req('GET', R2 + '/games', { token: TP });
+    const gl = (r.json && r.json.games) || [];
+    const liveIdx = gl.findIndex((g) => g.id === liveId);
+    const firstDone = gl.findIndex((g) => g.status === 'finished' || g.status === 'cancelled');
+    check('games list: the live match is listed', liveIdx >= 0, JSON.stringify(gl.map((g) => g.id + ':' + g.status)));
+    check('games list: live matches come before finished ones', firstDone === -1 || liveIdx < firstDone, 'live at ' + liveIdx + ', first finished at ' + firstDone);
+    check('games list: no boards in list payloads', gl.every((g) => !('boards' in g)));
+
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
     check('room destroyed', r.json && r.json.deleted === true, JSON.stringify(r.json));
