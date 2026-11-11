@@ -419,6 +419,21 @@ button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 .gw-text { color: #78350f; }
 .game-winner.off .gw-text { color: var(--dim); }
 .gw-score { margin-left: auto; font-weight: 800; color: #451a03; background: rgba(69, 26, 3, .16); border-radius: 999px; padding: 1px 9px; font-size: 12px; }
+.game-winner.ceremony { animation: winnerIn .55s cubic-bezier(.34, 1.56, .64, 1); position: relative; }
+@keyframes winnerIn { 0% { transform: scale(.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.game-winner.ceremony .gw-trophy { display: inline-block; animation: trophyBounce .7s ease-out .1s; }
+@keyframes trophyBounce { 0% { transform: scale(1, 1); } 30% { transform: scale(1.25, .8); } 55% { transform: scale(.92, 1.12); } 100% { transform: scale(1, 1); } }
+.game-winner.ceremony .gw-score { animation: scorePunch .5s ease-out .2s; }
+@keyframes scorePunch { 0% { transform: scale(1); } 40% { transform: scale(1.22); } 100% { transform: scale(1); } }
+.gw-burst { position: absolute; inset: 0; pointer-events: none; }
+.gw-burst i { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: var(--win-c, #f59e0b); opacity: 0; animation: gwBurst .8s ease-out .12s forwards; }
+.gw-burst i:nth-child(1) { --dx: -52px; --dy: -20px; } .gw-burst i:nth-child(2) { --dx: -34px; --dy: -30px; }
+.gw-burst i:nth-child(3) { --dx: -14px; --dy: -34px; } .gw-burst i:nth-child(4) { --dx: 8px; --dy: -32px; }
+.gw-burst i:nth-child(5) { --dx: 30px; --dy: -28px; } .gw-burst i:nth-child(6) { --dx: 52px; --dy: -18px; }
+.gw-burst i:nth-child(7) { --dx: -44px; --dy: 14px; } .gw-burst i:nth-child(8) { --dx: -20px; --dy: 20px; }
+.gw-burst i:nth-child(9) { --dx: 18px; --dy: 20px; } .gw-burst i:nth-child(10) { --dx: 44px; --dy: 12px; }
+@keyframes gwBurst { 0% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(.4); } }
+@media (prefers-reduced-motion: reduce) { .game-winner.ceremony, .game-winner.ceremony .gw-trophy, .game-winner.ceremony .gw-score, .gw-burst i { animation: none; } }
 .game-result .game-winner { margin: 0 10px; }
 .game-result { padding: 8px 0 10px; }
 .game-result .duel-pad { padding: 8px 10px 0; }

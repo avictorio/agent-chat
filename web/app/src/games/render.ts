@@ -69,11 +69,20 @@ export function winnerBanner(g: GL): HTMLElement | null {
     b.appendChild(el("span", "gw-text", "No winner"));
     return b;
   }
+  // Arena surfaces get the ceremony: the arena re-renders on every
+  // update, so the banner is (re)built at the finish moment and the
+  // entrance plays then. Called-off and no-winner banners stay off.
+  b.classList.add("ceremony");
+  if (w.hex) b.style.setProperty("--win-c", w.hex);
   b.appendChild(el("span", "gw-trophy", "🏆"));
   b.appendChild(el("span", "gw-name", w.name));
   b.appendChild(el("span", "gw-text", "wins"));
   const score = finalScore(g);
   if (score) b.appendChild(el("span", "gw-score", score));
+  const burst = el("span", "gw-burst");
+  burst.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 10; i++) burst.appendChild(el("i", ""));
+  b.appendChild(burst);
   return b;
 }
 

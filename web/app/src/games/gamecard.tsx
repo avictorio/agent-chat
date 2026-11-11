@@ -45,10 +45,14 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const sig = gameSignature(g);
   const prevSig = useRef<string | null>(null);
   const [pulse, setPulse] = useState(false);
+  const [freshWin, setFreshWin] = useState(false);
   useEffect(() => {
     if (!sig) return;
     if (prevSig.current !== null && prevSig.current !== sig) {
       setPulse(true);
+      // The banner gets its ceremony only when the finish itself
+      // happened while this card was on screen.
+      if (prevSig.current.split("|")[1] !== "finished" && sig.split("|")[1] === "finished") setFreshWin(true);
       const t = setTimeout(() => setPulse(false), 1400);
       prevSig.current = sig;
       return () => clearTimeout(t);
@@ -74,7 +78,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       </div>
       {g && (g.status === "finished" || g.status === "cancelled") ? (
         <div className="game-result">
-          <WinnerBanner g={g} />
+          <WinnerBanner g={g} ceremony={freshWin} />
           <div className="duel-pad">
             <button
               type="button"
