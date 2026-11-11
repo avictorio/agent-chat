@@ -855,6 +855,8 @@ let FAILURES = 0;
     out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
     out.arenaWinner = await page.$eval('#viewer .game-winner', e => e.textContent);
     if (!/Anthony/.test(out.arenaWinner) || !/3–2/.test(out.arenaWinner)) throw new Error('finished arena should carry the winner banner: ' + out.arenaWinner);
+    out.tend = await page.$eval('#viewer .duel-tend', e => e.textContent);
+    if (!/rock \d+%/.test(out.tend) || !/paper \d+%/.test(out.tend)) throw new Error('finished duel arena should carry tendency lines: ' + out.tend);
     out.chips = await page.$$eval('#viewer .duel-chip', els => els.length);
     out.rematch = await page.$$eval('#viewer button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
     if (out.chips !== 0) throw new Error('the rounds strip should be gone from the game tab, got ' + out.chips);

@@ -1607,10 +1607,29 @@ export class Room extends DurableObject {
     };
   }
 
+  // The pair's finished-duel record in this room, this match included
+  // when it is over: the result means more next to the rivalry.
+  duelH2H(st) {
+    const pair = st.players.map((p) => p.name).sort().join("|");
+    const tally = {};
+    let total = 0;
+    for (const r of this.sql.exec("SELECT state FROM gm WHERE status = 'finished'").toArray()) {
+      try {
+        const s = JSON.parse(r.state || "{}");
+        if (s.type !== "duel" || !s.winner || !Array.isArray(s.players)) continue;
+        if (s.players.map((p) => p.name).sort().join("|") !== pair) continue;
+        tally[s.winner] = (tally[s.winner] || 0) + 1;
+        total++;
+      } catch (e) { /* a row that does not parse is not a duel */ }
+    }
+    return total ? { tally: tally, total: total } : null;
+  }
+
   duelStateFull(g, who) {
     const out = this.duelSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
+    out.h2h = this.duelH2H(st);
     out.log = st.log.slice(-24);
     out.awaiting = g.status === "running" ? st.players.filter((p) => !st.pending[p.name]).map((p) => p.name) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];

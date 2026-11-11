@@ -7,6 +7,7 @@ import {
   clockBar,
   duelBoard,
   duelScoreLine,
+  duelTendencies,
   fleetStrip,
   gameMetaText,
   lastMoveText,
@@ -434,6 +435,10 @@ export function createGameStore(opts: {
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    if (g.status === "finished" && g.h2h && g.h2h.tally) {
+      const h2hline = (g.players || []).map((p: GL) => p.name + " " + (g.h2h.tally[p.name] || 0)).join(" · ");
+      wrap.appendChild(el("div", "duel-h2h", "Head-to-head in this room — " + h2hline));
+    }
     wrap.appendChild(arenaTabs(g));
     if (gameView.tab === "history") {
       wrap.appendChild(historyList(g));
@@ -447,6 +452,19 @@ export function createGameStore(opts: {
     const big = el("div", "lc-board-big");
     big.appendChild(duelBoard(g));
     wrap.appendChild(big);
+    const tends = duelTendencies(g);
+    if (tends.length) {
+      const tw = el("div", "duel-tend");
+      tends.forEach((t) => {
+        const row = el("div", "duel-tend-row");
+        const nm = el("span", "duel-tend-name", t.name);
+        nm.style.color = t.hex;
+        row.appendChild(nm);
+        row.appendChild(el("span", "", t.line));
+        tw.appendChild(row);
+      });
+      wrap.appendChild(tw);
+    }
     const note = el("div", "lc-note", "");
     const players = g.players || [];
     const rounds = g.rounds || [];

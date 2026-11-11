@@ -488,6 +488,7 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'paper' } });
     r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TRex, json: { dir: 'rock' } });
     check('duel finishes at the target', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Poc', JSON.stringify(r.json.game).slice(0, 200));
+    check('duel state carries the pair head-to-head', !!r.json.game.h2h && r.json.game.h2h.total === 2 && r.json.game.h2h.tally.Poc === 2 && !r.json.game.h2h.tally.Rex, JSON.stringify(r.json.game.h2h || null));
     r = await req('POST', R2 + '/games/' + duelP + '/moves', { token: TP, json: { dir: 'rock' } });
     check('duel throw after finish -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });

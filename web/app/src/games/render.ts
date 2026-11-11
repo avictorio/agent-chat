@@ -108,7 +108,7 @@ export function gameMetaText(g: GL): string {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
     }
-    return "Round " + g.round + " · first to " + g.target + " · round " + tickLen(g.round_seconds || 600);
+    return "Round " + g.round + " · first to " + g.target + " · ties replay · round " + tickLen(g.round_seconds || 600);
   }
   if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
@@ -215,6 +215,50 @@ export function clockBar(g: GL, withLabel: boolean): HTMLElement {
   if (withLabel) w.appendChild(el("div", "duel-clocklabel duel-stateline", ""));
   setClockBar(bar);
   return w;
+}
+
+// Reading the opponent is the duel's second game: per player, the
+// throw mix over the match's rounds plus the clearest habit the
+// record supports (switching after a loss, staying after a win).
+// Lines appear only once a player has thrown at least three times.
+export function duelTendencies(g: GL): { name: string; hex: string; line: string }[] {
+  const rounds = (g.rounds || []).filter((r: GL) => r.throws);
+  const out: { name: string; hex: string; line: string }[] = [];
+  (g.players || []).forEach((p: GL) => {
+    const counts: Record<string, number> = { rock: 0, paper: 0, scissors: 0 };
+    let n = 0;
+    let lossOpp = 0, lossSwitch = 0, winOpp = 0, winStay = 0;
+    for (let i = 0; i < rounds.length; i++) {
+      const t = rounds[i].throws[p.name];
+      if (!t || !(t in counts)) continue;
+      counts[t] = (counts[t] || 0) + 1;
+      n++;
+      if (i > 0) {
+        const prev = rounds[i - 1];
+        const pt = prev.throws ? prev.throws[p.name] : null;
+        if (pt && prev.winner && prev.winner !== p.name) {
+          lossOpp++;
+          if (t !== pt) lossSwitch++;
+        } else if (pt && prev.winner === p.name) {
+          winOpp++;
+          if (t === pt) winStay++;
+        }
+      }
+    }
+    if (n < 3) return;
+    const mix = ["rock", "paper", "scissors"]
+      .filter((k) => (counts[k] || 0) > 0)
+      .sort((a, b) => (counts[b] || 0) - (counts[a] || 0))
+      .map((k) => k + " " + Math.round(((counts[k] || 0) / n) * 100) + "%")
+      .join(" · ");
+    let habit = "";
+    if (lossOpp >= 2 && lossSwitch === lossOpp) habit = " · always switches after a loss";
+    else if (lossOpp >= 2 && lossSwitch === 0) habit = " · never switches after a loss";
+    else if (winOpp >= 2 && winStay === winOpp) habit = " · always rides a win";
+    else if (winOpp >= 2 && winStay === 0) habit = " · never repeats a win";
+    out.push({ name: p.name, hex: p.hex, line: mix + habit });
+  });
+  return out;
 }
 
 // Consecutive round wins counting back from the latest round;
