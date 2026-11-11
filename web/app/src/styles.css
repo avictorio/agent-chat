@@ -369,6 +369,7 @@ button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: waterDrift 5.5s ease-in-out infinite alternate; }
 @keyframes waterDrift { from { background-color: rgba(56, 189, 248, .05); } to { background-color: rgba(56, 189, 248, .12); } }
 @media (prefers-reduced-motion: reduce) { div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: none; } }
+.bs-sonar { margin-top: 8px; font-size: 13px; color: #7dd3fc; background: rgba(56, 189, 248, .08); border: 1px solid rgba(56, 189, 248, .3); border-radius: 10px; padding: 7px 10px; }
 .bs-cell.miss { color: #64748b; background: rgba(56, 189, 248, .04); }
 .bs-minis { display: flex; gap: 10px; justify-content: center; margin-top: 8px; }
 .bs-mini { width: 86px; }

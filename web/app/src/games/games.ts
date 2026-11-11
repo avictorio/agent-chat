@@ -40,14 +40,14 @@ const bsDrafts = new Map<number, { placed: { start: string; dir: string; size: n
 
 // The cells a hull would occupy from a bow cell, or null when it
 // would run off the board.
-function bsShipCells(start: string, dir: string, size: number): string[] | null {
+function bsShipCells(start: string, dir: string, size: number, bw?: number, bh?: number): string[] | null {
   const x0 = start.charCodeAt(0) - 65;
   const y0 = parseInt(start.slice(1), 10) - 1;
   const cells: string[] = [];
   for (let i = 0; i < size; i++) {
     const x = dir === "H" ? x0 + i : x0;
     const y = dir === "H" ? y0 : y0 + i;
-    if (x > 9 || y > 9) return null;
+    if (x > (bw || 10) - 1 || y > (bh || 10) - 1) return null;
     cells.push(String.fromCharCode(65 + x) + (y + 1));
   }
   return cells;
@@ -190,8 +190,10 @@ export function createGameStore(opts: {
     } else if (g.type === "battleship") {
       body.game = "battleship";
       body.tick_seconds = g.turn_seconds;
+      if (g.variant && g.variant !== "classic") body.variant = g.variant;
     } else {
       body.tick_seconds = g.tick_seconds;
+      if (g.mode) body.mode = g.mode;
       body.w = g.w;
       body.h = g.h;
     }
@@ -590,8 +592,8 @@ export function createGameStore(opts: {
           });
           const side = el("div", "bs-side");
           side.appendChild(el("div", "bs-title", b.name + "'s waters"));
-          side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: GL) => s.size)));
-          const grid = bsGrid(states, b.hex, null, b.sunk_ships || []);
+          side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
+          const grid = bsGrid(states, b.hex, null, b.sunk_ships || [], undefined, g);
           markLastShot(grid, g, b.name, freshMove);
           markSinking(grid, b.sunk_ships || [], g, b.name, freshMove);
           side.appendChild(grid);
@@ -612,11 +614,11 @@ export function createGameStore(opts: {
         draft = { placed: [], orient: "H" };
         bsDrafts.set(g.id, draft);
       }
-      const FLEET = [5, 4, 3, 3, 2];
+      const FLEET: number[] = g.fleet_sizes && g.fleet_sizes.length ? g.fleet_sizes : [5, 4, 3, 3, 2];
       const placedCells = new Set<string>();
       const ships: GL[] = [];
       draft.placed.forEach((p) => {
-        const cells = bsShipCells(p.start, p.dir, p.size) || [];
+        const cells = bsShipCells(p.start, p.dir, p.size, g.w, g.h) || [];
         cells.forEach((c) => placedCells.add(c));
         ships.push({ size: p.size, cells });
       });
@@ -627,7 +629,7 @@ export function createGameStore(opts: {
       const nextSize = FLEET[draft.placed.length] || 0;
       const tryPlace = (label: string) => {
         if (!nextSize || !draft) return;
-        const cells = bsShipCells(label, draft.orient, nextSize);
+        const cells = bsShipCells(label, draft.orient, nextSize, g.w, g.h);
         if (!cells) {
           note.textContent = "That hull runs off the board from " + label + " - start it closer to the middle, or rotate it.";
           return;
@@ -643,7 +645,7 @@ export function createGameStore(opts: {
       const boards = el("div", "bs-boards");
       const side = el("div", "bs-side");
       side.appendChild(el("div", "bs-title", "Your waters - place your fleet"));
-      side.appendChild(bsGrid(states, me.hex, tryPlace, ships, "Place at "));
+      side.appendChild(bsGrid(states, me.hex, tryPlace, ships, "Place at ", g));
       boards.appendChild(side);
       wrap.appendChild(boards);
       wrap.appendChild(
@@ -706,8 +708,8 @@ export function createGameStore(opts: {
       });
       const ownWrap = el("div", "bs-side");
       ownWrap.appendChild(el("div", "bs-title", "Your waters"));
-      ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size)));
-      const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || []);
+      ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size), undefined, g.fleet_sizes));
+      const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || [], undefined, g);
       markLastShot(ownGrid, g, myName, freshMove);
       markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
       ownWrap.appendChild(ownGrid);
@@ -724,8 +726,8 @@ export function createGameStore(opts: {
       const canFire = g.status === "running" && g.phase === "play" && you.your_turn;
       const oppWrap = el("div", "bs-side");
       oppWrap.appendChild(el("div", "bs-title", opp.name + "'s waters" + (canFire ? " - tap a cell to fire" : "")));
-      oppWrap.appendChild(fleetStrip(opp.hex, (you.sunk_ships || []).map((s: GL) => s.size)));
-      const oppGrid = bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null, you.sunk_ships || []);
+      oppWrap.appendChild(fleetStrip(opp.hex, (you.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
+      const oppGrid = bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null, you.sunk_ships || [], undefined, g);
       markLastShot(oppGrid, g, opp.name, freshMove);
       markSinking(oppGrid, you.sunk_ships || [], g, opp.name, freshMove);
       oppWrap.appendChild(oppGrid);
@@ -736,9 +738,11 @@ export function createGameStore(opts: {
       let status = "";
       if (g.status === "finished" || g.status === "cancelled") status = "";
       else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
-      else if (you.your_turn) status = "Your shot - turn " + g.turn + ".";
+      else if (you.your_turn) status = g.variant === "salvo" && g.salvo_left != null ? "Your salvo - " + g.salvo_left + " shot" + (g.salvo_left === 1 ? "" : "s") + " left, turn " + g.turn + "." : "Your shot - turn " + g.turn + ".";
       else status = "Waiting on " + opp.name + "'s shot - turn " + g.turn + ".";
       if (status) wrap.appendChild(el("div", "duel-statusline", status));
+      if (g.sonar && g.phase === "play" && g.status === "running")
+        wrap.appendChild(el("div", "bs-sonar", "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."));
       wrap.appendChild(note);
     }
     if (g.status === "finished" || g.status === "cancelled") {

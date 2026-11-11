@@ -93,7 +93,7 @@ export function gameMetaText(g: GL): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · turn " + tickLen(g.turn_seconds || 3600);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · turn " + tickLen(g.turn_seconds || 3600) + (g.variant && g.variant !== "classic" ? " · " + g.variant : "");
     }
     if (g.phase === "setup") return "Placing fleets · turn " + tickLen(g.turn_seconds || 3600);
     return "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "") + " · " + line;
@@ -305,9 +305,10 @@ export function lastMoveText(g: GL): string {
 // One captain's public waters as a tiny SVG for the feed card: every
 // shot that has landed on them, sunk hulls filled dark red. The last
 // shot fired at this board wears a white ring.
-export function bsMiniSvg(board: GL, lastMove: GL): string {
-  let s = '<svg class="bs-mini-svg" viewBox="0 0 10 10" role="img" aria-label="' + board.name + ' waters">';
-  s += '<rect x="0" y="0" width="10" height="10" fill="#04060d"/>';
+export function bsMiniSvg(board: GL, lastMove: GL, w?: number, h?: number): string {
+  const bw = w || 10, bh = h || 10;
+  let s = '<svg class="bs-mini-svg" viewBox="0 0 ' + bw + " " + bh + '" role="img" aria-label="' + board.name + ' waters">';
+  s += '<rect x="0" y="0" width="' + bw + '" height="' + bh + '" fill="#04060d"/>';
   (board.sunk_ships || []).forEach((sh: GL) => {
     // The ship the last shot just sank flashes once, so a spectator
     // sees the sinking happen instead of finding it already sunk.
@@ -341,7 +342,7 @@ export function bsMiniBoards(g: GL): HTMLElement | null {
     const side = el("div", "bs-mini");
     side.appendChild(el("div", "bs-mini-name", b.name));
     const holder = el("div", "");
-    holder.innerHTML = bsMiniSvg(b, g.last_move);
+    holder.innerHTML = bsMiniSvg(b, g.last_move, g.w, g.h);
     side.appendChild(holder);
     wrap.appendChild(side);
   });
@@ -365,7 +366,7 @@ export function battleshipBoard(g: GL): HTMLElement {
     row.appendChild(stats);
     const bd = (g.boards || []).filter((b: GL) => b.name === p.name)[0];
     if (bd) {
-      const strip = fleetStrip(p.hex, (bd.sunk_ships || []).map((s: GL) => s.size), 6);
+      const strip = fleetStrip(p.hex, (bd.sunk_ships || []).map((s: GL) => s.size), 6, g.fleet_sizes);
       strip.style.marginLeft = "auto";
       row.appendChild(strip);
     }
@@ -391,10 +392,10 @@ export function battleshipBoard(g: GL): HTMLElement {
 // The fleet as a strip of hull silhouettes, longest first: an afloat
 // hull wears its captain's color, a sunk one sits dark and low.
 // sunkSizes lists the sizes already on the ocean floor.
-export function fleetStrip(hex: string, sunkSizes: number[], unit?: number): HTMLElement {
+export function fleetStrip(hex: string, sunkSizes: number[], unit?: number, sizes?: number[]): HTMLElement {
   const strip = el("div", "bs-strip");
   const left = sunkSizes.slice();
-  [5, 4, 3, 3, 2].forEach((size) => {
+  (sizes && sizes.length ? sizes : [5, 4, 3, 3, 2]).forEach((size) => {
     const i = left.indexOf(size);
     const sunk = i >= 0;
     if (sunk) left.splice(i, 1);
@@ -414,7 +415,8 @@ export function fleetStrip(hex: string, sunkSizes: number[], unit?: number): HTM
 // ships (optional) groups cells into hulls so a ship reads as one
 // tapered shape - bow at its first cell, stern at its last - instead
 // of a row of squares.
-export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null, ships?: GL[], verb?: string): HTMLElement {
+export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null, ships?: GL[], verb?: string, dims?: GL): HTMLElement {
+  const bw = (dims && dims.w) || 10, bh = (dims && dims.h) || 10;
   const seg: Record<string, string> = {};
   (ships || []).forEach((s: GL) => {
     const cells: string[] = s.cells || [];
@@ -425,8 +427,9 @@ export function bsGrid(states: Record<string, string>, shipHex: string, onFire: 
     });
   });
   const grid = el("div", "bs-grid");
-  for (let y = 0; y < 10; y++) {
-    for (let x = 0; x < 10; x++) {
+  grid.style.gridTemplateColumns = "repeat(" + bw + ", 1fr)";
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
       const label = bsLabel(x, y);
       const st = states[label] || "";
       const cell = el(onFire && !st ? "button" : "div", "bs-cell " + st + (seg[label] ? " " + seg[label] : "")) as HTMLElement;
@@ -446,10 +449,12 @@ export function bsGrid(states: Record<string, string>, shipHex: string, onFire: 
   const frame = el("div", "bs-frame");
   frame.appendChild(el("div", ""));
   const ax = el("div", "bs-axis-x");
-  for (let x = 0; x < 10; x++) ax.appendChild(el("span", "", String.fromCharCode(65 + x)));
+  ax.style.gridTemplateColumns = "repeat(" + bw + ", 1fr)";
+  for (let x = 0; x < bw; x++) ax.appendChild(el("span", "", String.fromCharCode(65 + x)));
   frame.appendChild(ax);
   const ay = el("div", "bs-axis-y");
-  for (let y = 0; y < 10; y++) ay.appendChild(el("span", "", String(y + 1)));
+  ay.style.gridTemplateRows = "repeat(" + bh + ", 1fr)";
+  for (let y = 0; y < bh; y++) ay.appendChild(el("span", "", String(y + 1)));
   frame.appendChild(ay);
   frame.appendChild(grid);
   return frame;

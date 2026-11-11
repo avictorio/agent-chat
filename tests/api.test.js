@@ -590,6 +590,36 @@ async function waitUp() {
     r = await req('GET', R2 + '/games/' + bsClock, { token: TP });
     check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === 'Rex' && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')), JSON.stringify(r.json.game).slice(0, 240));
 
+    // Variants: skirmish compresses the board and fleet; salvo holds
+    // the turn for one shot per afloat ship.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', variant: 'skirmish', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
+    check('skirmish created 8x8 with the small fleet', r.status === 201 && r.json.game.variant === 'skirmish' && r.json.game.w === 8 && (r.json.game.fleet_sizes || []).join() === '4,3,3,2' && r.json.game.sonar === null, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    const skId = r.json.game.id;
+    await req('POST', R2 + '/games/' + skId + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + skId + '/moves', { token: TP, json: { dir: 'random' } });
+    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: TRex, json: { dir: 'random' } });
+    check('skirmish fleets carry 4 ships / 12 cells', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 4 && r.json.game.you.fleet.reduce((n, s) => n + s.cells.length, 0) === 12, r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: TP, json: { dir: 'J10' } });
+    check('a shot off the skirmish board -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R2 + '/games/' + skId + '/cancel', { token: TP, json: {} });
+    check('skirmish cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', variant: 'salvo', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
+    check('salvo created with a full first salvo waiting', r.status === 201 && r.json.game.variant === 'salvo' && r.json.game.w === 10, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const svId = r.json.game.id;
+    await req('POST', R2 + '/games/' + svId + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'random' } });
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TRex, json: { dir: 'random' } });
+    check('salvo opens with 5 shots for the first captain', r.status === 200 && r.json.game.phase === 'play' && r.json.game.turn_of === 'Poc' && r.json.game.salvo_left === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'A1' } });
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'B1' } });
+    check('mid-salvo the turn holds and the count runs down', r.status === 200 && r.json.game.turn_of === 'Poc' && r.json.game.salvo_left === 3, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'C1' } });
+    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'D1' } });
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'E1' } });
+    check('the fifth shot passes the turn with a fresh salvo', r.status === 200 && r.json.game.turn_of === 'Rex' && r.json.game.salvo_left >= 3 && r.json.game.salvo_left <= 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + svId + '/cancel', { token: TP, json: {} });
+    check('salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+
     // Stream subscriptions: events= narrows the frame kinds, game=
     // restricts game frames to given matches, and a malformed
     // subscription answers 400 before the stream opens. The default

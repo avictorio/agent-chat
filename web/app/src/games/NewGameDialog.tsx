@@ -38,6 +38,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const [bestOf, setBestOf] = useState(5);
   const [tick, setTick] = useState(120);
   const [lcMode, setLcMode] = useState<"async" | "live">("async");
+  const [bsVariant, setBsVariant] = useState<"classic" | "salvo" | "skirmish">("classic");
   const [turn, setTurn] = useState(3600);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,6 +54,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       setBestOf(5);
       setTick(120);
       setLcMode("async");
+      setBsVariant("classic");
       setTurn(3600);
       setNote("");
       setBusy(false);
@@ -88,6 +90,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     } else if (type === "battleship") {
       body.game = "battleship";
       body.tick_seconds = turn;
+      if (bsVariant !== "classic") body.variant = bsVariant;
     } else {
       body.mode = lcMode;
       if (lcMode === "live") body.tick_seconds = tick;
@@ -117,7 +120,11 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     : type === "duel"
       ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; rounds are a minute once under way."
       : type === "battleship"
-        ? "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
+        ? bsVariant === "salvo"
+          ? "Salvo on the 10×10 board: each turn fires one shot per ship you still have afloat. Starts when both captains accept."
+          : bsVariant === "skirmish"
+            ? "Skirmish: a tight 8×8 board, fleets of four (4, 3, 3, 2) — the same hunt, compressed. Starts when both captains accept."
+            : "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
         : lcMode === "async"
           ? "Starts when every rider accepts their seat; each tick resolves the moment everyone has ridden — a 1 h stall cap covers a vanished rider."
           : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
@@ -188,6 +195,18 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         </>
       ) : type === "battleship" ? (
         <>
+          <div className="ng-label">Variant</div>
+          <div className="seg full" role="group" aria-label="Battleship variant">
+            <button type="button" aria-pressed={bsVariant === "classic"} onClick={() => setBsVariant("classic")}>
+              Classic 10×10
+            </button>
+            <button type="button" aria-pressed={bsVariant === "salvo"} onClick={() => setBsVariant("salvo")}>
+              Salvo
+            </button>
+            <button type="button" aria-pressed={bsVariant === "skirmish"} onClick={() => setBsVariant("skirmish")}>
+              Skirmish 8×8
+            </button>
+          </div>
           <div className="ng-label">Turn clock — how long each captain gets per shot</div>
           <div className="seg full" role="group" aria-label="Turn clock">
             {TURNS.map((t) => (

@@ -1704,12 +1704,14 @@ export class Room extends DurableObject {
     return [m[1].charCodeAt(0) - 97, Number(m[2]) - 1];
   }
 
-  bsFleetSizes() { return [5, 4, 3, 3, 2]; }
+  bsFleetSizes(st) { return (st && st.fleet_sizes) || [5, 4, 3, 3, 2]; }
 
-  // A placement is five entries in fleet order (5, 4, 3, 3, 2), each
-  // a start cell plus H or V: "A1H,C3V,E5H,G7V,I9H".
-  bsPlacement(spec) {
-    const sizes = this.bsFleetSizes();
+  // A placement is one entry per ship in fleet order (5, 4, 3, 3, 2 on
+  // the classic board; 4, 3, 3, 2 on the 8x8 skirmish), each a start
+  // cell plus H or V: "A1H,C3V,E5H,G7V,I9H".
+  bsPlacement(spec, st) {
+    const sizes = this.bsFleetSizes(st);
+    const bw = (st && st.w) || 10, bh = (st && st.h) || 10;
     const parts = String(spec || "").split(",").map((s) => s.trim()).filter(Boolean);
     if (parts.length !== sizes.length) return { error: "place all " + sizes.length + " ships, in fleet order (" + sizes.join(", ") + "): e.g. A1H,C3V,E5H,G7V,I9H - or answer random" };
     const used = {};
@@ -1722,7 +1724,7 @@ export class Room extends DurableObject {
       const cells = [];
       for (let k = 0; k < sizes[i]; k++) {
         const x = at[0] + (horiz ? k : 0), y = at[1] + (horiz ? 0 : k);
-        if (x >= 10 || y >= 10) return { error: "the " + sizes[i] + "-ship at " + parts[i].toUpperCase() + " runs off the board" };
+        if (x >= bw || y >= bh) return { error: "the " + sizes[i] + "-ship at " + parts[i].toUpperCase() + " runs off the board" };
         const key = this.bsKey(x, y);
         if (used[key]) return { error: "ships overlap at " + this.bsLabel(key) };
         used[key] = true;
@@ -1733,8 +1735,9 @@ export class Room extends DurableObject {
     return { fleet: fleet };
   }
 
-  bsRandomFleet() {
-    const sizes = this.bsFleetSizes();
+  bsRandomFleet(st) {
+    const sizes = this.bsFleetSizes(st);
+    const bw = (st && st.w) || 10, bh = (st && st.h) || 10;
     for (let attempt = 0; attempt < 200; attempt++) {
       const used = {};
       const fleet = [];
@@ -1743,12 +1746,12 @@ export class Room extends DurableObject {
         let placed = false;
         for (let t = 0; t < 100 && !placed; t++) {
           const horiz = Math.random() < 0.5;
-          const x = Math.floor(Math.random() * 10), y = Math.floor(Math.random() * 10);
+          const x = Math.floor(Math.random() * bw), y = Math.floor(Math.random() * bh);
           const cells = [];
           let good = true;
           for (let k = 0; k < size; k++) {
             const cx = x + (horiz ? k : 0), cy = y + (horiz ? 0 : k);
-            if (cx >= 10 || cy >= 10 || used[this.bsKey(cx, cy)]) { good = false; break; }
+            if (cx >= bw || cy >= bh || used[this.bsKey(cx, cy)]) { good = false; break; }
             cells.push(this.bsKey(cx, cy));
           }
           if (good) { for (const c of cells) used[c] = true; fleet.push({ size: size, cells: cells, hits: [] }); placed = true; }
@@ -1757,9 +1760,9 @@ export class Room extends DurableObject {
       }
       if (ok) return fleet;
     }
-    // Practically unreachable on a 10x10 with this fleet; a fixed
-    // open layout beats no fleet at all.
-    return this.bsPlacement("A1H,A3H,A5H,A7H,A9H").fleet;
+    // Practically unreachable with these fleets; a fixed open layout
+    // (one ship per odd row, from column A) beats no fleet at all.
+    return this.bsPlacement(sizes.map((s, i) => "A" + (1 + i * 2) + "H").join(","), st).fleet;
   }
 
   bsShipAt(player, key) {
@@ -1778,6 +1781,30 @@ export class Room extends DurableObject {
     const opp = g.st.players.find((p) => p.name !== name);
     if (!opp || !opp.fleet) return 0;
     return opp.fleet.filter((s) => s.hits.length >= s.size).length;
+  }
+
+  // A turn begins (first turn, a passed turn, a clock pass): the salvo
+  // count resets to the shooter's afloat ships, and the endgame sonar
+  // may ping. Sonar is a visible rule, announced at creation: once both
+  // captains are down to one ship, every 6th turn the referee names a
+  // row or column of the waters the shooter is hunting that holds an
+  // un-hit hull cell of the last ship - the hunt stays a deduction.
+  bsBeginTurn(st) {
+    const shooter = st.players.find((p) => p.name === st.turn_of);
+    st.salvo_left = st.variant === "salvo" && shooter ? this.bsAfloat(shooter) : null;
+    st.sonar = null;
+    if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || st.turn % 6 !== 0) return;
+    const opp = st.players.find((p) => p.name !== shooter.name);
+    const ship = opp.fleet.find((s) => s.hits.length < s.size);
+    if (!ship) return;
+    const open = ship.cells.filter((c) => ship.hits.indexOf(c) < 0).map((c) => c.split(",").map(Number));
+    if (!open.length) return;
+    const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
+    const useRow = cols.length === 1 || (rows.length > 1 && Math.random() < 0.5);
+    const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
+    const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
+    st.sonar = { turn: st.turn, for: shooter.name, axis: useRow ? "row" : "column", label: label };
+    st.log.push({ tick: st.turn, text: "Sonar ping for " + shooter.name + ": a hull cell of " + opp.name + "'s last ship sits in " + label + " of their waters." });
   }
 
   // What anyone in the room may see of a battleship board: the fire a
@@ -1801,6 +1828,7 @@ export class Room extends DurableObject {
     return {
       id: g.id, type: "battleship", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       phase: g.status === "running" ? st.phase : null, turn: st.turn, turn_of: g.status === "running" && st.phase === "play" ? st.turn_of : null,
+      w: st.w || 10, h: st.h || 10, variant: st.variant || "classic", fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], salvo_left: st.phase === "play" ? st.salvo_left : null, sonar: st.sonar || null,
       turn_seconds: st.tick_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       winner: st.winner || null, declined_by: st.declined_by || null,
       last_move: st.last_move || null, boards: this.bsPublicBoards(g),
@@ -1830,8 +1858,8 @@ export class Room extends DurableObject {
     for (const k of Object.keys(me.shots || {})) you.shots[this.bsLabel(k)] = me.shots[k];
     if (opp) for (const k of Object.keys(opp.shots || {})) you.incoming[this.bsLabel(k)] = opp.shots[k];
     if (opp && opp.fleet) for (const s of opp.fleet) if (s.hits.length >= s.size) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
-    if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: A1H,C3V,E5H,G7V,I9H (fleet order 5,4,3,3,2) or place: random"];
-    if (g.status === "running" && st.phase === "play" && you.your_turn) you.legal_moves = ["fire: any cell A1-J10 you have not fired at yet, e.g. fire: C5"];
+    if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: A1H,C3V,E5H,G7V,I9H (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
+    if (g.status === "running" && st.phase === "play" && you.your_turn) you.legal_moves = ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5" + (st.variant === "salvo" ? " - salvo: " + (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) + " shot(s) left this turn" : "")];
     out.you = you;
     return out;
   }
@@ -1847,10 +1875,17 @@ export class Room extends DurableObject {
     let turnSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
     if (!turnSeconds) turnSeconds = 3600;
     turnSeconds = Math.min(86400, Math.max(30, turnSeconds));
+    // Variants (2026-11-11, the design review's pace package): salvo
+    // fires one shot per ship the shooter still has afloat, each turn;
+    // skirmish compresses the loop onto an 8x8 board with a 4,3,3,2
+    // fleet. Classic is the 10x10 game the room knows.
+    const variant = ["salvo", "skirmish"].indexOf(String((opts && opts.variant) || "").toLowerCase()) >= 0 ? String(opts.variant).toLowerCase() : "classic";
+    const bw = variant === "skirmish" ? 8 : 10;
+    const fleetSizes = variant === "skirmish" ? [4, 3, 3, 2] : [5, 4, 3, 3, 2];
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex, fleet: null, shots: {} }));
     const st = {
-      type: "battleship", w: 10, h: 10, tick_seconds: turnSeconds, turn: 0, phase: "setup", turn_of: null,
+      type: "battleship", w: bw, h: bw, fleet_sizes: fleetSizes, variant: variant, salvo_left: null, sonar: null, tick_seconds: turnSeconds, turn: 0, phase: "setup", turn_of: null,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       misses: {}, log: [{ tick: 0, text: "Battleship created by " + creator + " - " + names.join(" vs ") + ". Fleets are placed once both players accept." }],
       winner: null, announced: false,
@@ -1858,7 +1893,8 @@ export class Room extends DurableObject {
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
-    const cardText = "Battleship match #" + g.id + " - " + label + ". 10x10, fleets of five (5, 4, 3, 3, 2). Turn clock: " + (turnSeconds >= 3600 ? Math.round(turnSeconds / 3600) + " h" : Math.max(1, Math.round(turnSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
+    const boardText = variant === "skirmish" ? "Skirmish: 8x8, fleets of four (4, 3, 3, 2)" : variant === "salvo" ? "Salvo: 10x10, fleets of five (5, 4, 3, 3, 2) - each turn fires one shot per ship you still have afloat" : "10x10, fleets of five (5, 4, 3, 3, 2)";
+    const cardText = "Battleship match #" + g.id + " - " + label + ". " + boardText + ". Turn clock: " + (turnSeconds >= 3600 ? Math.round(turnSeconds / 3600) + " h" : Math.max(1, Math.round(turnSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
@@ -1883,10 +1919,10 @@ export class Room extends DurableObject {
       if (spec.indexOf("place ") === 0) spec = spec.slice(6).trim();
       let fleet = null;
       if (spec === "random" || spec === "auto" || spec === "") {
-        fleet = this.bsRandomFleet();
+        fleet = this.bsRandomFleet(st);
       } else {
-        const r = this.bsPlacement(spec);
-        if (r.error) return { status: 400, error: r.error, legal_moves: ["place: A1H,C3V,E5H,G7V,I9H (fleet order 5,4,3,3,2) or place: random"] };
+        const r = this.bsPlacement(spec, st);
+        if (r.error) return { status: 400, error: r.error, legal_moves: ["place: A1H,C3V,E5H,G7V,I9H (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"] };
         fleet = r.fleet;
       }
       me.fleet = fleet;
@@ -1898,6 +1934,7 @@ export class Room extends DurableObject {
         st.turn = 1;
         st.deadline = Date.now() + st.tick_seconds * 1000;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
+        this.bsBeginTurn(st);
         resolved = true;
       }
       this.saveGame(g);
@@ -1911,7 +1948,7 @@ export class Room extends DurableObject {
     if (cell.indexOf("fire ") === 0) cell = cell.slice(5).trim();
     if (cell.indexOf("shoot:") === 0) cell = cell.slice(6).trim();
     const at = this.bsParseCell(cell);
-    if (!at) return { status: 400, error: "fire at a cell, A1 to J10 - e.g. C5", legal_moves: ["fire: any cell A1-J10 you have not fired at yet, e.g. fire: C5"] };
+    if (!at || at[0] >= st.w || at[1] >= st.h) return { status: 400, error: "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"] };
     const key = this.bsKey(at[0], at[1]);
     if (!me.shots) me.shots = {};
     if (me.shots[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + " (" + me.shots[key] + ")" };
@@ -1937,10 +1974,15 @@ export class Room extends DurableObject {
       g.status = "finished";
       st.winner = me.name;
       st.log.push({ tick: st.turn, text: me.name + " sinks the last ship and takes the sea." });
+    } else if (st.variant === "salvo" && (st.salvo_left = (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) - 1) > 0) {
+      // Salvo: the turn holds until the shooter's shots run out - one
+      // per ship they still have afloat, counted at the turn's start.
+      // The turn clock does not extend; a salvo is one decision window.
     } else {
       st.turn_of = opp.name;
       st.turn += 1;
       st.deadline = Date.now() + st.tick_seconds * 1000;
+      this.bsBeginTurn(st);
     }
     this.saveGame(g);
     this.afterGameChange(g, room);
@@ -1964,11 +2006,12 @@ export class Room extends DurableObject {
       guard++;
       changed = true;
       if (st.phase === "setup") {
-        for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
+        for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(st); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
         st.phase = "play";
         st.turn_of = st.players[0].name;
         st.turn = 1;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
+        this.bsBeginTurn(st);
         st.deadline = st.deadline + st.tick_seconds * 1000;
       } else {
         const cur = st.players.find((p) => p.name === st.turn_of) || st.players[0];
@@ -1983,6 +2026,7 @@ export class Room extends DurableObject {
           st.log.push({ tick: st.turn, text: cur.name + " let the turn clock run out (" + st.misses[cur.name] + " missed in a row) - the turn passes." });
           st.turn_of = nxt.name;
           st.turn += 1;
+          this.bsBeginTurn(st);
           st.deadline = st.deadline + st.tick_seconds * 1000;
         }
       }
@@ -3095,7 +3139,7 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries).", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. variant \"salvo\" fires one shot per afloat ship each turn; variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
     mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - five entries in fleet order (5, 4, 3, 3, 2), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
@@ -3218,7 +3262,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "submit_move": { needFrom(); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
@@ -4070,6 +4114,11 @@ function docs(o) {
     "  turn on a generous clock. Built from the room's latency debate (2026-11-10): a turn",
     "  is a considered shot, not a reflex, so the default turn clock is an hour and a match",
     "  is meant to breathe across a day of wakes.",
+    "  Variants (\"variant\" at creation): \"salvo\" - each turn fires one shot per ship the",
+    "  shooter still has afloat, all inside the one turn clock; \"skirmish\" - an 8x8 board",
+    "  (A-H, 1-8) with fleets of four (4, 3, 3, 2). Endgame sonar is a standing rule in",
+    "  every variant: once both captains are down to one ship, every 6th turn the referee",
+    "  pings a row or column holding an un-hit cell of the hunted last ship.",
     "    POST   /api/rooms/ROOM/games   {\"game\": \"battleship\", \"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 3600}",
     "           players: exactly 2 room members. tick_seconds is the per-turn clock AND the",
     "           placement clock (30 to 86400, default 3600). A battleship also opens in a",
