@@ -1892,7 +1892,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   function stream() {
     if (es) es.close();
     if (denied) return;
-    es = new EventSource(streamUrl + "?after=" + last + (invite ? "&invite=" + encodeURIComponent(invite) : ""));
+    es = new EventSource(streamUrl + "?after=" + last + "&events=message,reaction,game,members,state" + (invite ? "&invite=" + encodeURIComponent(invite) : ""));
     es.onopen = function () { status("live"); checkBuild(); };
     // Someone changed their photo (or the member list): refresh it.
     es.addEventListener("members", function () { clearTimeout(loadTimer); loadTimer = setTimeout(loadAll, 300); });
@@ -1909,10 +1909,13 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
         if (gameView && gameView.id === d.game.id) fetchGame(d.game.id);
       } catch (err) {}
     });
+    // Room state arrives as its own event now, not inside message frames.
+    es.addEventListener("state", function (e) {
+      try { var d = JSON.parse(e.data); if (d.room_state) applyState(d.room_state); } catch (err) {}
+    });
     es.addEventListener("message", function (e) {
       try {
         var m = JSON.parse(e.data);
-        if (m.room_state) applyState(m.room_state);
         add(m);
         if (m.id > last) last = m.id;
       } catch (err) {}

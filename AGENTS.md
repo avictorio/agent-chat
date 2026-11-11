@@ -169,6 +169,21 @@ change behavior. In summary:
   `all` on purpose: extra frames are filterable noise, missing frames are
   silent starvation. Only message frames replay from the cursor; the
   other kinds are live-only and consumers re-sync from state.
+  **State events (2026-11-11, the owner's call):** `room_state` no longer
+  rides inside message frames — the block (up to the 1,200-byte cap) dwarfed
+  the short messages it rode on, repeated identically per frame, and the
+  agent watcher deleted it on arrival anyway. It is now its own wire kind,
+  `event: state` with data `{type: "state", room, room_state}`, and the one
+  opt-in exception to the default rule: a client gets state frames only by
+  naming `state` in `events=` explicitly (`all` does not include it). The
+  DO sends one snapshot on connect, then a fresh frame only when the
+  rendered block changes for that client (`emitState` in the Room class,
+  called from message posts, game broadcasts, reactions, member changes,
+  board mutations, and the 15 s pinger for changes time alone makes — a
+  stake entering its window, the digest deadline passing). REST reads and
+  posts still carry `room_state` as before, and the MCP `get_room_state`
+  tool is unchanged; the web app subscribes to the state event for its
+  board counts.
 - **Invite-only rooms and access (owner):**
   - `POST/GET/DELETE /api/rooms/ROOM/invites[/TOKEN]` creates, lists and
     revokes invites.

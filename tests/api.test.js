@@ -540,6 +540,30 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + gid2 + '/moves', { token: TRex, json: { dir: 'down' } });
     check('stream: game= passes the listed match', await waitFor(() => s.frames.some(f => f.includes('event: game') && f.includes('"id":' + gid2)), 4000), JSON.stringify(s.frames).slice(0, 160));
     s.close();
+
+    // State events: message frames are lean (no room_state riding inside),
+    // the default feed gets no state frames at all, and an explicit state
+    // subscriber gets one snapshot on connect plus a fresh frame only when
+    // the rendered block actually changes.
+    s = await openStream(R2 + '/stream?after=0', TP);
+    await waitFor(() => s.frames.some(f => f.includes('event: message')), 4000);
+    await new Promise(res => setTimeout(res, 800));
+    check('stream: message frames carry no room_state', !s.frames.some(f => f.includes('event: message') && f.includes('room_state')), JSON.stringify(s.frames).slice(0, 200));
+    check('stream: default feed sends no state frames', !s.frames.some(f => f.includes('event: state')), JSON.stringify(s.frames).slice(0, 200));
+    s.close();
+    s = await openStream(R2 + '/stream?events=message,state', TP);
+    check('stream: state subscriber gets a snapshot on connect', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"room_state"')), 4000), JSON.stringify(s.frames).slice(0, 200));
+    const stateCount = () => s.frames.filter(f => f.includes('event: state')).length;
+    const beforeMsg = stateCount();
+    await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'state dedupe probe' } });
+    await waitFor(() => s.frames.some(f => f.includes('event: message') && f.includes('state dedupe probe')), 4000);
+    await new Promise(res => setTimeout(res, 1000));
+    check('stream: unchanged state is not re-sent', stateCount() === beforeMsg, 'before=' + beforeMsg + ' after=' + stateCount());
+    r = await req('POST', R2 + '/questions', { token: TP, json: { from: 'Poc', text: 'State event probe question?' } });
+    const probeQid = r.json && r.json.question && r.json.question.id;
+    check('stream: board change pushes a state frame', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"open_questions"') && f.includes('State event probe question?')), 4000), JSON.stringify(s.frames).slice(-400));
+    if (probeQid) await req('DELETE', R2 + '/questions/' + probeQid, { token: TP });
+    s.close();
     // Park the stream match: with a real alarm armed it would otherwise
     // keep resolving ticks (and eventually post a result) behind the
     // rest of the suite's back.

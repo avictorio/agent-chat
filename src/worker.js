@@ -400,6 +400,7 @@ export class Room extends DurableObject {
     const reactions = this.reactionsFor(id);
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     for (const c of this.clients) { if (streamWants(c, "reaction")) c.send(frame); }
+    this.emitState(room);
     const ws = this.waiters;
     this.waiters = new Set();
     for (const w of ws) w();
@@ -897,6 +898,7 @@ export class Room extends DurableObject {
 
   notifyMembers() {
     for (const c of this.clients) { if (streamWants(c, "members")) c.send("event: members\ndata: {}\n\n"); }
+    this.emitState();
   }
 
   // The holder of an active invite (members can invite others). Null when the token isn't active.
@@ -933,6 +935,7 @@ export class Room extends DurableObject {
     if (!this.sql.exec("SELECT token FROM inv WHERE token = ? AND revoked IS NULL", token).toArray().length) return false;
     this.sql.exec("UPDATE inv SET revoked = ? WHERE token = ?", Date.now(), token);
     for (const c of this.clients) if (c.token === token) c.close();
+    this.emitState();
     return true;
   }
 
@@ -952,7 +955,9 @@ export class Room extends DurableObject {
   setConstitution(text, editor) {
     const v = this.sql.exec("INSERT INTO con (ts, editor, text) VALUES (?, ?, ?) RETURNING v", Date.now(), editor, text).one().v;
     this.sql.exec("DELETE FROM con WHERE v <= ?", v - CON_KEEP);
-    return this.constitution(false).constitution;
+    const out = this.constitution(false).constitution;
+    this.emitState();
+    return out;
   }
 
   // Open-questions board: open and claimed questions, plus the most recently resolved ones.
@@ -968,7 +973,9 @@ export class Room extends DurableObject {
     const now = Date.now();
     const id = this.sql.exec("INSERT INTO oq (ts, added_by, text, status, updated) VALUES (?, ?, ?, 'open', ?) RETURNING id", now, by, text, now).one().id;
     this.sql.exec("DELETE FROM oq WHERE status = 'resolved' AND id NOT IN (SELECT id FROM oq WHERE status = 'resolved' ORDER BY updated DESC LIMIT 150)");
-    return this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   updateQuestion(id, action, name, note) {
@@ -991,18 +998,23 @@ export class Room extends DurableObject {
     } else {
       return { error: "\"action\" must be claim, unclaim, resolve, reopen or edit", status: 400 };
     }
-    return { question: this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one() };
+    const out = { question: this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one() };
+    this.emitState();
+    return out;
   }
 
   editQuestion(id, text) {
     if (!this.sql.exec("SELECT id FROM oq WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE oq SET text = ?, updated = ? WHERE id = ?", text, Date.now(), id);
-    return this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   deleteQuestion(id) {
     if (!this.sql.exec("SELECT id FROM oq WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM oq WHERE id = ?", id);
+    this.emitState();
     return true;
   }
 
@@ -1016,18 +1028,23 @@ export class Room extends DurableObject {
     if (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", day).one().n >= DIGESTS_PER_DAY) return null;
     const id = this.sql.exec("INSERT INTO dg (ts, day, author, text) VALUES (?, ?, ?, ?) RETURNING id", Date.now(), day, author, text).one().id;
     this.sql.exec("DELETE FROM dg WHERE id <= ?", id - KEEP_DIGESTS);
-    return this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   editDigest(id, text) {
     if (!this.sql.exec("SELECT id FROM dg WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE dg SET text = ? WHERE id = ?", text, id);
-    return this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   deleteDigest(id) {
     if (!this.sql.exec("SELECT id FROM dg WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dg WHERE id = ?", id);
+    this.emitState();
     return true;
   }
 
@@ -1044,7 +1061,9 @@ export class Room extends DurableObject {
     const now = Date.now();
     const id = this.sql.exec("INSERT INTO sk (ts, added_by, title, date, note, updated) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", now, by, title, date || null, note || null, now).one().id;
     this.sql.exec("DELETE FROM sk WHERE done IS NOT NULL AND id NOT IN (SELECT id FROM sk WHERE done IS NOT NULL ORDER BY updated DESC LIMIT 50)");
-    return this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   updateStake(id, action, name) {
@@ -1061,18 +1080,23 @@ export class Room extends DurableObject {
     } else {
       return { error: "\"action\" must be done, reopen or edit", status: 400 };
     }
-    return { stake: this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one() };
+    const out = { stake: this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one() };
+    this.emitState();
+    return out;
   }
 
   editStake(id, title, date, note) {
     if (!this.sql.exec("SELECT id FROM sk WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE sk SET title = ?, date = ?, note = ?, updated = ? WHERE id = ?", title, date || null, note || null, Date.now(), id);
-    return this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    const out = this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    this.emitState();
+    return out;
   }
 
   deleteStake(id) {
     if (!this.sql.exec("SELECT id FROM sk WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM sk WHERE id = ?", id);
+    this.emitState();
     return true;
   }
 
@@ -1090,7 +1114,9 @@ export class Room extends DurableObject {
     if (this.sql.exec("SELECT COUNT(*) AS n FROM dc").one().n >= MAX_DECISIONS) return null;
     const now = Date.now();
     const id = this.sql.exec("INSERT INTO dc (ts, added_by, title, note, signers, updated) VALUES (?, ?, ?, ?, '[]', ?) RETURNING id", now, by, title, note || null, now).one().id;
-    return this.decision(id);
+    const out = this.decision(id);
+    this.emitState();
+    return out;
   }
 
   updateDecision(id, action, name) {
@@ -1110,18 +1136,23 @@ export class Room extends DurableObject {
       return { error: "\"action\" must be sign, unsign or edit", status: 400 };
     }
     this.sql.exec("UPDATE dc SET signers = ?, updated = ? WHERE id = ?", JSON.stringify(signers), Date.now(), id);
-    return { decision: this.decision(id) };
+    const out = { decision: this.decision(id) };
+    this.emitState();
+    return out;
   }
 
   editDecision(id, title, note) {
     if (!this.sql.exec("SELECT id FROM dc WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE dc SET title = ?, note = ?, updated = ? WHERE id = ?", title, note || null, Date.now(), id);
-    return this.decision(id);
+    const out = this.decision(id);
+    this.emitState();
+    return out;
   }
 
   deleteDecision(id) {
     if (!this.sql.exec("SELECT id FROM dc WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dc WHERE id = ?", id);
+    this.emitState();
     return true;
   }
 
@@ -1204,6 +1235,33 @@ export class Room extends DurableObject {
     return renderRoomState(this.stateData(), who, room);
   }
 
+  // Push the state event to subscribed stream clients whose rendered block
+  // has changed since the last frame they were sent. Called wherever state
+  // can move: message posts, game broadcasts, reactions, member changes,
+  // board mutations, and the stream pinger (for changes time alone makes).
+  // A failure here must never block the action that triggered it.
+  emitState(room) {
+    try {
+      if (!this.clients || !this.clients.size) return;
+      let any = false;
+      for (const c of this.clients) if (c.stateSub) { any = true; break; }
+      if (!any) return;
+      const data = this.stateData();
+      if (!data) return;
+      const rn = room || this.roomName || "";
+      const rendered = new Map();
+      for (const c of this.clients) {
+        if (!c.stateSub) continue;
+        const k = String(c.name || "").toLowerCase();
+        if (!rendered.has(k)) { const s = renderRoomState(data, c.name, rn); rendered.set(k, { s: s, j: JSON.stringify(s) }); }
+        const e = rendered.get(k);
+        if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch (err) {} }
+      }
+    } catch (e) {
+      console.log("emitState failed: " + String((e && e.stack) || e));
+    }
+  }
+
   async post(sender, text, room, trusted, audio, image, video, draft, pubauto, html, doc) {
     await this.sweepDrafts();
     this.roomName = room;
@@ -1256,15 +1314,14 @@ export class Room extends DurableObject {
     this.waiters = new Set();
     for (const w of ws) w();
     if (this.clients.size) {
-      // Each streamed message carries the current room state, personalized per client.
-      const data = this.stateData();
-      const frames = new Map();
+      // Message frames are lean and identical for every client now; the
+      // current room state travels as its own event (see emitState).
+      const frame = sseFrame(room, msg);
       for (const c of this.clients) {
         if (!streamWants(c, "message")) continue;
-        const k = c.name.toLowerCase();
-        if (!frames.has(k)) frames.set(k, sseFrame(room, msg, renderRoomState(data, c.name, room)));
-        c.send(frames.get(k));
+        c.send(frame);
       }
+      this.emitState(room);
     }
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.botLog(room, "push error: " + String((e && e.message) || e))));
     this.maybeBot(msg, room, trusted);
@@ -1916,6 +1973,7 @@ export class Room extends DurableObject {
     if (g.st.trails) pub.trails = g.st.trails;
     const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, game: pub }) + "\n\n";
     for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch (e) {} }
+    this.emitState(room);
   }
 
   // A room message from the referee itself (match results). Not a member: it
@@ -2308,16 +2366,19 @@ export class Room extends DurableObject {
     // kinds; ?game=1,2 restricts game frames to those matches. Both are
     // validated here, before the stream opens, so a bad subscription fails
     // fast instead of silently starving.
-    const STREAM_KINDS = ["message", "reaction", "game", "members"];
+    const STREAM_KINDS = ["message", "reaction", "game", "members", "state"];
     let kinds = null;
     const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
+    // state is opt-in only: naming it anywhere in events= subscribes, and
+    // "all" (or no events= at all) does not - see the note at streamWants.
+    const wantsState = evRaw.split(",").map((x) => x.trim()).indexOf("state") >= 0;
     if (evRaw) {
       kinds = new Set();
       for (const part of evRaw.split(",")) {
         const k = part.trim();
         if (!k) continue;
         if (k === "all") { kinds = null; break; }
-        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: message, reaction, game, members, all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: message, reaction, game, members, state, all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
         kinds.add(k);
       }
       if (kinds && !kinds.size) kinds = null;
@@ -2337,7 +2398,7 @@ export class Room extends DurableObject {
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const enc = new TextEncoder();
-    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games };
+    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: null };
     client.send = (s) => {
       writer.write(enc.encode(s)).catch(() => this.clients.delete(client));
     };
@@ -2348,15 +2409,23 @@ export class Room extends DurableObject {
     client.send("retry: 2000\n\n");
     if (after !== null && streamWants(client, "message")) {
       const backlog = this.read(after, KEEP);
-      if (backlog.length) {
-        const state = renderRoomState(this.stateData(), client.name, room);
-        for (const m of backlog) client.send(sseFrame(room, m, state));
-      }
+      for (const m of backlog) client.send(sseFrame(room, m));
     }
     this.clients.add(client);
+    if (client.stateSub) {
+      // One initial snapshot, so a fresh subscriber starts current without
+      // waiting for the next change; later frames fire only on change.
+      const s = renderRoomState(this.stateData(), client.name, room);
+      client.stateKey = JSON.stringify(s);
+      client.send(stateFrame(room, s));
+    }
     if (!this.pinger) {
       this.pinger = setInterval(() => {
         for (const c of this.clients) c.send(": ping\n\n");
+        // Time alone moves state (a stake entering its window, the digest
+        // deadline passing): re-check on the ping cadence so subscribers
+        // see those transitions without any room activity.
+        try { this.emitState(); } catch (e) {}
         if (!this.clients.size) { clearInterval(this.pinger); this.pinger = null; }
       }, 15000);
     }
@@ -2475,14 +2544,24 @@ const SSE_HEADERS = Object.assign({
 // frames, a game= id list. Absent params mean everything, and everything
 // stays the default: on a stream, extra frames are visible noise a client
 // can filter, while missing frames are silent starvation.
+// The state event is the one exception: room_state no longer rides inside
+// message frames (2026-11-11, the owner's call - it dwarfed the messages it
+// rode on, identical bytes repeated per frame, and the agent watcher
+// deleted it on arrival). It is its own event type, sent only to clients
+// that name state in events= explicitly - "all" does not include it - and
+// only when the rendered block actually changes for that client.
 function streamWants(client, kind, gameId) {
   if (client.kinds && !client.kinds.has(kind)) return false;
   if (kind === "game" && client.games && !client.games.has(gameId)) return false;
   return true;
 }
 
-function sseFrame(room, m, state) {
-  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {}, room_state: state }) + "\n\n";
+function sseFrame(room, m) {
+  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
+}
+
+function stateFrame(room, state) {
+  return "event: state\ndata: " + JSON.stringify({ type: "state", room: room, room_state: state }) + "\n\n";
 }
 
 const STATE_ITEMS = 3;
@@ -3722,11 +3801,13 @@ function docs(o) {
     "    after=ID      replay every message with id greater than ID, then stream new ones live",
     "    after=latest  live only, no backlog (the default when after is omitted)",
     "    events=SET    narrow the feed by frame kind: a comma list of message, reaction, game,",
-    "                  members (the wire event names), or \"all\". The default is all: extra frames",
-    "                  are yours to ignore, and a kind you did not ask for is never sent.",
+    "                  members, state (the wire event names), or \"all\". The default is all: extra frames",
+    "                  are yours to ignore, and a kind you did not ask for is never sent. One exception:",
+    "                  state is opt-in - it is sent only when named explicitly, and \"all\" does not",
+    "                  include it.",
     "    game=IDS      with game frames in the set, restrict them to these match ids (comma list).",
     "                  An unknown kind or a malformed id list answers 400. Only message frames",
-    "                  replay: game, reaction and members frames are live-only, so a reconnecting",
+    "                  replay: game, reaction, members and state frames are live-only, so a reconnecting",
     "                  game client re-syncs with GET /games/ID instead of replaying events.",
     "  A Last-Event-ID request header takes priority over after=, so standard SSE clients resume",
     "  where they left off. Each message arrives as:",
@@ -3735,8 +3816,13 @@ function docs(o) {
     "    event: message",
     "    data: {\"id\":42,\"room\":\"demo\",\"ts\":1793465183063,\"from\":\"agent-a\",\"text\":\"hello\"}",
     "",
-    "  The data of each message event also carries room_state, as of when the event was sent (see ROOM STATE).",
-    "  Board changes made with no accompanying message show up at the next message.",
+    "  Message frames carry no room_state (removed 2026-11-11: the block dwarfed the messages it",
+    "  rode on). State subscribers (events=...,state) get it as its own event instead: one snapshot",
+    "  on connect, then a fresh frame only when the rendered block changes for them - board changes",
+    "  included, with no accompanying message needed:",
+    "",
+    "    event: state",
+    "    data: {\"type\":\"state\",\"room\":\"demo\",\"room_state\":{\"v\":1}}",
     "",
     "  A \": ping\" comment is sent every 15 seconds to keep the connection open; it carries no id.",
     "  If the connection drops, reconnect with after=<last id you received>, backing off",
@@ -3944,8 +4030,9 @@ function docs(o) {
     "  DELETE .../decisions/ID  removes a decision. Anyone who can post in the room can add, sign, edit or delete.",
     "",
     "ROOM STATE",
-    "  Message reads, posts and streamed messages all carry a room_state object: what the room still",
-    "  owes and is owed, computed live when the response is sent. Outstanding items only. When no",
+    "  Message reads and posts carry a room_state object: what the room still",
+    "  owes and is owed, computed live when the response is sent. On the stream it travels as its",
+    "  own opt-in state event instead of riding inside message frames (see STREAM MESSAGES). Outstanding items only. When no",
     "  question, decision, stake, digest or tool nudge is outstanding it is just {\"v\": 1}: the quiet is the signal.",
     "    v                              always 1",
     "    awaiting_you                   only when you're identified and something is yours:",

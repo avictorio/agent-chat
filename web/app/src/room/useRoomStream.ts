@@ -68,6 +68,10 @@ export function useRoomStream(opts: {
         encodeURIComponent(room) +
         "/stream?after=" +
         (feed.lastRef.current ?? 0) +
+        // state is opt-in on the server: naming it here is what subscribes
+        // this client to room_state as its own event (it no longer rides
+        // inside message frames).
+        "&events=message,reaction,game,members,state" +
         (token ? "&invite=" + encodeURIComponent(token) : "");
       const es = new EventSource(url);
       esRef.current = es;
@@ -100,10 +104,17 @@ export function useRoomStream(opts: {
           // malformed frame: ignore
         }
       });
+      es.addEventListener("state", (e) => {
+        try {
+          const d = JSON.parse((e as MessageEvent).data) as { room_state?: RoomState };
+          if (d.room_state) board.applyState(d.room_state);
+        } catch {
+          // malformed frame: ignore
+        }
+      });
       es.addEventListener("message", (e) => {
         try {
-          const m = JSON.parse((e as MessageEvent).data) as Message & { room_state?: RoomState };
-          if (m.room_state) board.applyState(m.room_state);
+          const m = JSON.parse((e as MessageEvent).data) as Message;
           feed.addMsg(m);
           if (feed.lastRef.current === null || m.id > feed.lastRef.current) feed.lastRef.current = m.id;
         } catch {
