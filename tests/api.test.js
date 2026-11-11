@@ -200,6 +200,36 @@ async function waitUp() {
     r = await req('PUT', R + '/messages/' + od.json.id + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
     check('same attach succeeds after the outage', r.status === 200, r.status);
 
+    // Phase D: avatars live in R2. Set -> served with the right type;
+    // replace -> new bytes served; an R2 outage on set -> 503 and the old
+    // avatar survives; clear -> 404; the owner migration pair answers and
+    // reports zeros when no legacy blobs exist.
+    const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+    r = await req('PUT', R + '/avatar', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('avatar set (R2) -> 200 with url', r.status === 200 && !!r.json.avatar, r.status + ' ' + r.text.slice(0, 100));
+    r = await req('GET', R + '/avatars/ApiA', { token: TA });
+    check('avatar served from R2', r.status === 200 && r.headers.get('content-type') === 'image/png', r.status + ' ' + r.headers.get('content-type'));
+    r = await req('PUT', R + '/avatar', { token: TA, headers: { 'Content-Type': 'image/gif' }, body: GIF });
+    check('avatar replace -> 200', r.status === 200, r.status);
+    r = await req('GET', R + '/avatars/ApiA', { token: TA });
+    check('replaced avatar served (gif)', r.status === 200 && r.headers.get('content-type') === 'image/gif', r.status + ' ' + r.headers.get('content-type'));
+    await setFail(true);
+    r = await req('PUT', R + '/avatar', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('avatar set during R2 outage -> 503 storage text', r.status === 503 && /Storage is unavailable/.test(r.text), r.status + ' ' + r.text.slice(0, 100));
+    await setFail(false);
+    r = await req('GET', R + '/avatars/ApiA', { token: TA });
+    check('old avatar still served after failed set', r.status === 200 && r.headers.get('content-type') === 'image/gif', r.status + ' ' + r.headers.get('content-type'));
+    r = await req('DELETE', R + '/avatar', { token: TA });
+    check('avatar clear -> 200', r.status === 200, r.status);
+    r = await req('GET', R + '/avatars/ApiA', { token: TA });
+    check('cleared avatar -> 404', r.status === 404, r.status);
+    r = await req('POST', R + '/admin/migrate-avatars', { owner: true });
+    check('migrate-avatars -> 200 zeros', r.status === 200 && r.json.migrated === 0 && r.json.failed === 0, r.status + ' ' + r.text.slice(0, 100));
+    r = await req('POST', R + '/admin/purge-avatars', { owner: true });
+    check('purge-avatars -> 200 zeros', r.status === 200 && r.json.purged === 0 && r.json.failed === 0, r.status + ' ' + r.text.slice(0, 100));
+    r = await req('POST', R + '/admin/migrate-avatars', { token: TA });
+    check('migrate-avatars without owner key -> 403', r.status === 403, r.status);
+
     // Revocation.
     const invC = await req('POST', R + '/invites', { owner: true, json: { name: 'ApiC', kind: 'agent' } });
     await req('DELETE', R + '/invites/' + invC.json.token, { owner: true });

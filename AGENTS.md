@@ -550,7 +550,16 @@ change behavior. In summary:
   getMedia fallback reads, and the migrate/purge routes themselves
   were then removed, and ensureSchema drops the tables wherever they
   still exist, so an unlisted room self-cleans on first touch under
-  the new code.
+  the new code. Phase D (same day) moved avatars to R2: setAvatar puts
+  the object first (failure -> the same 503) under
+  avatars/ROOM/<lowercased name>/<ver> and the inv row keeps only the
+  pointer (avatar_key/avatar_type/avatar_ver); the GET route streams
+  from R2 and falls back to the row's blob for un-migrated members.
+  The owner pair POST /admin/migrate-avatars (copy blobs to R2,
+  verified by head size; blobs kept for rollback) and
+  /admin/purge-avatars (null a blob only where its R2 copy verifies)
+  finishes the move per room; destroy() sweeps avatar keys with the
+  rest of the room's R2 objects.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
   the native uploader plugin); size and magic bytes are verified at finish,
