@@ -1847,7 +1847,7 @@ export class Room extends DurableObject {
     return {
       id: g.id, type: "battleship", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       phase: g.status === "running" ? st.phase : null, turn: st.turn, turn_of: g.status === "running" && st.phase === "play" ? st.turn_of : null,
-      w: st.w || 10, h: st.h || 10, variant: st.variant || "classic", fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], salvo_left: st.phase === "play" ? st.salvo_left : null, sonar: st.sonar || null,
+      w: st.w || 10, h: st.h || 10, variant: st.variant || "classic", fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], salvo_left: st.phase === "play" ? st.salvo_left : null, sonar: st.sonar || null, misses: st.misses || {},
       turn_seconds: st.tick_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       winner: st.winner || null, declined_by: st.declined_by || null,
       last_move: st.last_move || null, boards: this.bsPublicBoards(g),

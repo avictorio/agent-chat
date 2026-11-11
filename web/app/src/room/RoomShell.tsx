@@ -29,6 +29,7 @@ import { Composer } from "../composer/composer";
 import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
 import { GamesView } from "../games/GamesView";
+import { playYourMoveChime, unlockChime } from "../games/chime";
 import type { BoardApi } from "../board/shared";
 import { AvatarDialog, usePhotoUpload } from "../board/avatar";
 import { useViewerHost } from "../shell/viewer";
@@ -102,9 +103,26 @@ export function RoomShell({ room }: { room: string }) {
   const deniedRef = useRef(false);
   const streamCloseRef = useRef<() => void>(() => {});
 
+  const titleBaseRef = useRef(room + " · chat");
   useEffect(() => {
-    document.title = room + " · chat";
+    titleBaseRef.current = room + " · chat";
+    document.title = titleBaseRef.current;
   }, [room]);
+
+  // Your-move signal for backgrounded play: a "(N)" title badge over
+  // the matches waiting on you, plus a soft chime when that count
+  // rises (the subscription half lives below, where the games store
+  // exists). Audio unlocks on the first gesture, per browser rules.
+  const awaitingRef = useRef(0);
+  useEffect(() => {
+    const onGesture = () => unlockChime();
+    window.addEventListener("pointerdown", onGesture);
+    window.addEventListener("keydown", onGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("keydown", onGesture);
+    };
+  }, []);
 
   useEffect(() => {
     document.body.classList.toggle("nav-open", navOpen);
@@ -186,6 +204,16 @@ export function RoomShell({ room }: { room: string }) {
     viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
   }
   const games = gamesRef.current;
+  useEffect(() => {
+    const update = () => {
+      const n = games.awaitingCount();
+      document.title = (n > 0 ? "(" + n + ") " : "") + titleBaseRef.current;
+      if (n > awaitingRef.current) playYourMoveChime();
+      awaitingRef.current = n;
+    };
+    update();
+    return games.subscribe(update);
+  }, [games]);
   const push = usePush(client, toast);
   useEffect(() => {
     initShellCommon();

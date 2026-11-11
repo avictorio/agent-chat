@@ -3,6 +3,58 @@ import type { GameSummary } from "@chat/shared";
 import { useFeed, useSession } from "../room/ctx";
 import { recordLine, type GL } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
+import { chimeMuted, setChimeMuted } from "./chime";
+
+// Standings with motion, from the finished list (newest first): each
+// player's current streak, and their rank before the kind's most
+// recent match, so the panel can show ▲/▼ movement. Same comparator
+// as the server's record: wins, then fewest losses, then name.
+function standingsMotion(games: GameSummary[] | null) {
+  const streaks: Record<string, Record<string, { kind: "W" | "L"; n: number }>> = {};
+  const prevRanks: Record<string, Record<string, number>> = {};
+  if (!games) return { streaks, prevRanks };
+  const kinds = ["battleship", "duel", "lightcycles"];
+  kinds.forEach((t) => {
+    const fin = games
+      .filter((g) => g.type === t && g.status === "finished" && g.winner)
+      .sort((a, b) => (b.id || 0) - (a.id || 0));
+    if (!fin.length) return;
+    const st: Record<string, { kind: "W" | "L"; n: number }> = {};
+    fin.forEach((g) => {
+      (g.players || []).forEach((p) => {
+        if (st[p.name]) return;
+        st[p.name] = { kind: g.winner === p.name ? "W" : "L", n: 0 };
+      });
+    });
+    // Count consecutive same results from the newest match backwards.
+    const counted: Record<string, boolean> = {};
+    fin.forEach((g) => {
+      (g.players || []).forEach((p) => {
+        if (counted[p.name]) return;
+        const s = st[p.name];
+        if (!s) return;
+        if ((g.winner === p.name ? "W" : "L") === s.kind) s.n++;
+        else counted[p.name] = true;
+      });
+    });
+    streaks[t] = st;
+    const tally: Record<string, { name: string; w: number; l: number }> = {};
+    fin.slice(1).forEach((g) => {
+      (g.players || []).forEach((p) => {
+        const row = tally[p.name] || (tally[p.name] = { name: p.name, w: 0, l: 0 });
+        if (p.name === g.winner) row.w++;
+        else row.l++;
+      });
+    });
+    const sorted = Object.values(tally).sort((a, b) => b.w - a.w || a.l - b.l || (a.name < b.name ? -1 : 1));
+    const pr: Record<string, number> = {};
+    sorted.forEach((r, i) => {
+      pr[r.name] = i + 1;
+    });
+    prevRanks[t] = pr;
+  });
+  return { streaks, prevRanks };
+}
 
 // The Games tab: the room's matches without scrolling the chat -
 // live ones first, then the finished history as a standard record
@@ -41,6 +93,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const [games, setGames] = useState<GameSummary[] | null>(null);
   const [record, setRecord] = useState<RecordTable>({});
   const [err, setErr] = useState("");
+  const [muted, setMuted] = useState(() => chimeMuted());
 
   useEffect(() => {
     if (!active) return;
@@ -65,6 +118,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const all = games || [];
   const live = all.filter((g) => g.status === "lobby" || g.status === "running");
   const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
+  const { streaks, prevRanks } = standingsMotion(games);
 
   const row = (g: GameSummary) => {
     const isLive = g.status === "lobby" || g.status === "running";
@@ -109,6 +163,19 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     <div className="gm-wrap">
       <div className="gm-head">
         <h2 className="gm-title">Games</h2>
+        <button
+          type="button"
+          className="btn quiet gm-bell"
+          aria-pressed={muted}
+          title={muted ? "Your-move chime is off — tap to turn it on" : "Your-move chime is on — tap to mute it"}
+          onClick={() => {
+            const m = !muted;
+            setMuted(m);
+            setChimeMuted(m);
+          }}
+        >
+          {muted ? "🔕" : "🔔"}
+        </button>
         <button type="button" className="btn primary" onClick={onNewGame}>
           New game
         </button>
@@ -123,16 +190,33 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
               record[t] && record[t].length ? (
                 <div className="gm-rec-kind" key={t}>
                   <div className="gm-rec-title">{KIND[t]}</div>
-                  {record[t].map((r) => (
-                    <div className="gm-rec-row" key={r.name}>
-                      <span className="gm-dot" style={{ background: r.hex }} />
-                      <span className="gm-rec-name">{r.name}</span>
-                      <span className="gm-rec-wl">
-                        {r.w}–{r.l}
-                      </span>
-                      <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
-                    </div>
-                  ))}
+                  {record[t].map((r, ri) => {
+                    const st = (streaks[t] || {})[r.name];
+                    const prev = (prevRanks[t] || {})[r.name];
+                    const delta = prev ? prev - (ri + 1) : 0;
+                    return (
+                      <div className="gm-rec-row" key={r.name}>
+                        <span className="gm-dot" style={{ background: r.hex }} />
+                        <span className="gm-rec-name">{r.name}</span>
+                        <span className="gm-rec-wl">
+                          {r.w}–{r.l}
+                        </span>
+                        <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
+                        {st && st.n >= 2 ? (
+                          <span className={"gm-rec-streak" + (st.kind === "W" ? " hot" : "")}>
+                            {st.kind === "W" ? "🔥 " : ""}
+                            {st.kind}
+                            {st.n}
+                          </span>
+                        ) : null}
+                        {delta !== 0 ? (
+                          <span className={"gm-rec-move " + (delta > 0 ? "up" : "down")}>
+                            {delta > 0 ? "▲" + delta : "▼" + -delta}
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null
             )}

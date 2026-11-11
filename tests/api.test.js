@@ -589,7 +589,7 @@ async function waitUp() {
     check('random placements open play', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
     await new Promise(res => setTimeout(res, 32000));
     r = await req('GET', R2 + '/games/' + bsClock, { token: TP });
-    check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === 'Rex' && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')), JSON.stringify(r.json.game).slice(0, 240));
+    check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === 'Rex' && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')) && (r.json.game.misses || {}).Poc === 1, JSON.stringify(r.json.game).slice(0, 240));
 
     // Variants: skirmish compresses the board and fleet; salvo holds
     // the turn for one shot per afloat ship.

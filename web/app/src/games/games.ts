@@ -124,6 +124,7 @@ export interface GameStore {
   viewerClosed(): void;
   respond(id: number, accept: boolean): Promise<void>;
   rematch(g: GL): Promise<void>;
+  awaitingCount(): number;
 }
 
 export function createGameStore(opts: {
@@ -168,6 +169,31 @@ export function createGameStore(opts: {
     side.appendChild(th);
     side.appendChild(el("div", "side-state", state));
     return side;
+  }
+
+  // Teach by playing: one dismissible hint line per arena, shown on
+  // first views only (the dismissal persists per kind).
+  function arenaHint(key: string, text: string): HTMLElement | null {
+    try {
+      if (localStorage.getItem("ac-hint-" + key) === "1") return null;
+    } catch {
+      return null;
+    }
+    const h = el("div", "arena-hint");
+    h.appendChild(el("span", "", text));
+    const x = el("button", "arena-hint-x", "✕") as HTMLButtonElement;
+    x.type = "button";
+    x.setAttribute("aria-label", "Dismiss hint");
+    x.addEventListener("click", () => {
+      try {
+        localStorage.setItem("ac-hint-" + key, "1");
+      } catch {
+        // storage unavailable: the hint just comes back next time
+      }
+      h.remove();
+    });
+    h.appendChild(x);
+    return h;
   }
 
   function rematchRow(g: GL, note: HTMLElement): HTMLElement {
@@ -490,6 +516,10 @@ export function createGameStore(opts: {
         status = players.map((p: GL) => p.name + (p.thrown ? " locked" : " thinking…")).join(" · ");
       }
       wrap.appendChild(el("div", "duel-statusline", status));
+      if (g.you && g.you.playing) {
+        const hint = arenaHint("duel", "Pick a throw — it stays hidden until both lock in.");
+        if (hint) wrap.appendChild(hint);
+      }
     }
     if (rounds.length) {
       const last = rounds[rounds.length - 1];
@@ -761,6 +791,17 @@ export function createGameStore(opts: {
       if (status) wrap.appendChild(el("div", "duel-statusline", status));
       if (g.sonar && g.phase === "play" && g.status === "running")
         wrap.appendChild(el("div", "bs-sonar", "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."));
+      if (g.status === "running" && g.phase === "play") {
+        (g.players || []).forEach((p: GL) => {
+          const m = (g.misses || {})[p.name] || 0;
+          if (m >= 2) wrap.appendChild(el("div", "bs-warn", "⚠ " + p.name + " has missed " + m + " turns in a row — one more forfeits the match."));
+          else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row forfeits the match."));
+        });
+        if (you.playing) {
+          const hint = arenaHint("bs-play", "Tap a cell in their waters to fire — ✕ is a hit, · is a miss, dark hulls are sunk.");
+          if (hint) wrap.appendChild(hint);
+        }
+      }
       wrap.appendChild(note);
     }
     if (g.status === "finished" || g.status === "cancelled") {
@@ -951,6 +992,29 @@ export function createGameStore(opts: {
     openGame,
     respond: (id: number, accept: boolean) => respond(id, accept, null),
     rematch: (g: GL) => sendRematch(g, null),
+    // Matches waiting on the signed-in member right now: a lobby seat
+    // unaccepted, a duel throw unmade, a fleet unplaced, a shot
+    // untaken, a tick unridden. Drives the title badge + chime.
+    awaitingCount() {
+      const me = opts.meName();
+      if (!me) return 0;
+      let n = 0;
+      cache.forEach((g) => {
+        const mine = (g.players || []).find((p: GL) => p.name === me);
+        if (!mine) return;
+        if (g.status === "lobby") {
+          if (!mine.accepted) n++;
+          return;
+        }
+        if (g.status !== "running") return;
+        if (g.type === "duel") {
+          if (!mine.thrown) n++;
+        } else if (g.type === "battleship") {
+          if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
+        } else if (mine.alive && !mine.moved) n++;
+      });
+      return n;
+    },
     viewerClosed() {
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
