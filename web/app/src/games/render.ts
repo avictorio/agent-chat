@@ -133,14 +133,35 @@ export function boardSvg(g: GL): string {
   (g.trails || []).forEach((c: GL) => {
     (byColor[c[2]] = byColor[c[2]] || []).push(c);
   });
+  // The last trail cell per rider: the growth point, and for a dead
+  // rider the end of the wreck.
+  const lastCell: Record<number, GL> = {};
+  (g.trails || []).forEach((c: GL) => {
+    lastCell[c[2]] = c;
+  });
   (g.players || []).forEach((p: GL, i: number) => {
+    // A wreck sits dimmer than a live trail - the board remembers
+    // the crash without competing with the riders still moving.
+    const op = p.alive ? "0.45" : "0.25";
     (byColor[i] || []).forEach((c: GL) => {
-      s += '<rect x="' + c[0] + '" y="' + c[1] + '" width="1" height="1" fill="' + p.hex + '" opacity="0.45"/>';
+      s += '<rect x="' + c[0] + '" y="' + c[1] + '" width="1" height="1" fill="' + p.hex + '" opacity="' + op + '"/>';
     });
+    const lc = lastCell[i];
+    if (lc) {
+      if (p.alive) {
+        // The growth point sparks white and settles each render, so
+        // the trail visibly extends tick over tick.
+        s += '<rect class="lc-new" x="' + lc[0] + '" y="' + lc[1] + '" width="1" height="1" fill="#ffffff" opacity="0"/>';
+      } else {
+        // A permanent crash mark where the wreck ends.
+        s +=
+          '<path d="M' + (lc[0] + 0.18) + " " + (lc[1] + 0.18) + "L" + (lc[0] + 0.82) + " " + (lc[1] + 0.82) + "M" + (lc[0] + 0.82) + " " + (lc[1] + 0.18) + "L" + (lc[0] + 0.18) + " " + (lc[1] + 0.82) + '" stroke="' + p.hex + '" stroke-width="0.13" fill="none"/>';
+      }
+    }
   });
   (g.players || []).forEach((p: GL) => {
     if (p.alive && typeof p.x === "number")
-      s += '<rect x="' + p.x + '" y="' + p.y + '" width="1" height="1" fill="' + p.hex + '" stroke="#e0faff" stroke-width="0.14"/>';
+      s += '<rect class="lc-head" x="' + p.x + '" y="' + p.y + '" width="1" height="1" fill="' + p.hex + '" stroke="#e0faff" stroke-width="0.14"/>';
   });
   s += "</svg>";
   return s;

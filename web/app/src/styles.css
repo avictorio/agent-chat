@@ -302,6 +302,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .game-card .art-kind { color: #22d3ee; border-color: rgba(34, 211, 238, .5); }
 .game-card .art-go { color: #8fb8c9; }
 .lc-svg { display: block; width: 100%; height: auto; }
+.lc-svg .lc-head { animation: lcHeadPulse 1.15s ease-in-out infinite; }
+@keyframes lcHeadPulse { 50% { opacity: .45; } }
+.lc-svg .lc-new { animation: lcNewFade .55s ease-out; }
+@keyframes lcNewFade { 0% { opacity: .8; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lc-svg .lc-head, .lc-svg .lc-new { animation: none; } }
 .lc-arena { max-width: 720px; margin: 0 auto; padding: 12px 14px 20px; }
 .lc-board-big .lc-svg { max-height: 58vh; }
 .lc-meta { color: var(--dim); font-size: 13px; margin: 8px 0 2px; }
