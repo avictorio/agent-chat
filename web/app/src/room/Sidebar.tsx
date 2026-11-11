@@ -8,6 +8,17 @@ import { Icon as I } from "../ui/Icon";
 
 const ICONS: Record<string, ReactNode> = {
   chat: <I d={["M4 5h16v11H9l-5 4z"]} />,
+  games: (
+    <I
+      d={[
+        "M8 21h8",
+        "M12 17v4",
+        "M7 4h10v5a5 5 0 0 1-10 0V4z",
+        "M7 5H4.5A1.5 1.5 0 0 0 3 6.5C3 8.4 4.6 10 6.5 10H7",
+        "M17 5h2.5A1.5 1.5 0 0 1 21 6.5C21 8.4 19.4 10 17.5 10H17",
+      ]}
+    />
+  ),
   constitution: <I d={["M7 3h8l4 4v14H7z", "M15 3v4h4", "M10 12h6M10 16h6"]} />,
   decisions: (
     <I
