@@ -64,7 +64,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const cardStyle = moverHex ? ({ "--move-c": moverHex } as CSSProperties) : undefined;
   const meta = gameMetaText(g || summary);
   return (
-    <div className={"game-card" + (pulse ? " just-moved" : "")} style={cardStyle} onClick={() => store.openGame(id, summary.type)}>
+    <div className={"game-card kind-" + summary.type + (pulse ? " just-moved" : "")} style={cardStyle} onClick={() => store.openGame(id, summary.type)}>
       <div className="art-head">
         <span className="art-kind">Game</span>
         <span className="art-name">{(summary.type === "duel" ? "Duel #" : summary.type === "battleship" ? "Battleship #" : "Light Cycles #") + id}</span>

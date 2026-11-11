@@ -875,7 +875,7 @@ export function createGameStore(opts: {
     opts.openViewer(
       (kind === "duel" ? "Duel #" : kind === "battleship" ? "Battleship #" : "Light Cycles #") + id,
       (vb) => {
-        const wrap = el("div", "lc-arena");
+        const wrap = el("div", "lc-arena" + (kind ? " kind-" + kind : ""));
         wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
         vb.appendChild(wrap);
         gameView = { id, wrap };

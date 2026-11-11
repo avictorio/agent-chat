@@ -70,7 +70,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     const isLive = g.status === "lobby" || g.status === "running";
     const players = g.players || [];
     return (
-      <div className="gm-row" key={g.id} onClick={() => store.openGame(g.id, g.type)}>
+      <div className={"gm-row kind-" + g.type} key={g.id} onClick={() => store.openGame(g.id, g.type)}>
         <span className="gm-top">
           {isLive ? <span className="gm-live" /> : null}
           <span className="gm-kind">{(KIND[g.type] || g.type) + " #" + g.id}</span>
