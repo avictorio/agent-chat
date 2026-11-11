@@ -475,19 +475,22 @@ export function createGameStore(opts: {
       const last = rounds[rounds.length - 1];
       const v = roundVerdict(last, players);
       const banner = el("div", "duel-verdict" + (v.tie ? " clash" : ""));
-      const icons = players
-        .map((p: GL) => {
-          const t = (last.throws || {})[p.name];
-          return t ? THROW_EMOJI[t] || "" : "—";
-        })
-        .join(" ");
-      banner.appendChild(el("span", "v-icons", icons));
+      const iconsWrap = el("span", "v-icons");
+      players.forEach((p: GL) => {
+        const t = (last.throws || {})[p.name];
+        const cls = v.tie ? "tie" : last.winner === p.name ? "winner" : "loser";
+        iconsWrap.appendChild(el("span", "v-icon " + cls, t ? THROW_EMOJI[t] || "" : "—"));
+      });
+      banner.appendChild(iconsWrap);
       banner.appendChild(el("span", "", v.text + " · " + duelScoreLine(g)));
       if (!v.tie && last.winner) {
         const wp = players.filter((p: GL) => p.name === last.winner)[0];
         if (wp) banner.style.borderColor = wp.hex;
       }
-      if (gameView.lastRounds != null && rounds.length > gameView.lastRounds) banner.classList.add("reveal-in");
+      if (gameView.lastRounds != null && rounds.length > gameView.lastRounds) {
+        banner.classList.add("reveal-in");
+        iconsWrap.classList.add("flip");
+      }
       wrap.appendChild(banner);
     }
     gameView.lastRounds = rounds.length;

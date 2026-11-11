@@ -196,6 +196,19 @@ export function clockBar(g: GL, withLabel: boolean): HTMLElement {
   return w;
 }
 
+// Consecutive round wins counting back from the latest round;
+// a tie or a loss ends the run. Two or more is a streak worth
+// showing - streaks are the room's mythology.
+export function duelStreak(g: GL, name: string): number {
+  const rounds = g.rounds || [];
+  let n = 0;
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    if (rounds[i].winner === name) n++;
+    else break;
+  }
+  return n;
+}
+
 export function duelBoard(g: GL): HTMLElement {
   const wrap = el("div", "duel-board");
   const sc = g.score || {};
@@ -213,6 +226,8 @@ export function duelBoard(g: GL): HTMLElement {
     const score = el("span", "duel-score", String(sc[p.name] != null ? sc[p.name] : p.wins || 0));
     score.style.color = p.hex;
     row.appendChild(score);
+    const streak = duelStreak(g, p.name);
+    if (streak >= 2) row.appendChild(el("span", "duel-streak", "🔥" + streak));
     wrap.appendChild(row);
   });
   if (g.status === "running") {
