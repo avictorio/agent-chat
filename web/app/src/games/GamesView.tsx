@@ -32,11 +32,14 @@ function stateLine(g: GL): string {
   return "Tick " + (g.tick || 0) + " · " + alive + " still riding";
 }
 
+type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; l: number }>>;
+
 export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: () => void }) {
   const { client } = useSession();
   const store = useFeed().games;
   const version = useSyncExternalStore(store.subscribe, store.getVersion);
   const [games, setGames] = useState<GameSummary[] | null>(null);
+  const [record, setRecord] = useState<RecordTable>({});
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -46,6 +49,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
       (r) => {
         if (!dead) {
           setGames(r.games || []);
+          setRecord(r.record || {});
           setErr("");
         }
       },
@@ -111,6 +115,30 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
       </div>
       {games === null && !err ? <p className="gm-note">Loading the matches…</p> : null}
       {err ? <p className="gm-note">{err}</p> : null}
+      {Object.keys(record).length ? (
+        <>
+          <div className="gm-sec">Room record</div>
+          <div className="gm-rec">
+            {(["battleship", "duel", "lightcycles"] as const).map((t) =>
+              record[t] && record[t].length ? (
+                <div className="gm-rec-kind" key={t}>
+                  <div className="gm-rec-title">{KIND[t]}</div>
+                  {record[t].map((r) => (
+                    <div className="gm-rec-row" key={r.name}>
+                      <span className="gm-dot" style={{ background: r.hex }} />
+                      <span className="gm-rec-name">{r.name}</span>
+                      <span className="gm-rec-wl">
+                        {r.w}–{r.l}
+                      </span>
+                      <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null
+            )}
+          </div>
+        </>
+      ) : null}
       {games !== null && games.length === 0 ? <p className="gm-note">No matches yet. Start one with the New game button.</p> : null}
       {live.length ? (
         <>

@@ -227,8 +227,8 @@ export class RoomClient {
     return this.call<GameResponse>("/games/" + id);
   }
 
-  listGames(): Promise<{ games: GameSummary[] }> {
-    return this.call<{ games: GameSummary[] }>("/games");
+  listGames(): Promise<{ games: GameSummary[]; record?: Record<string, Array<{ name: string; hex: string; w: number; l: number }>> }> {
+    return this.call<{ games: GameSummary[]; record?: Record<string, Array<{ name: string; hex: string; w: number; l: number }>> }>("/games");
   }
 
   /** The room API base path (the native uploaders need absolute URLs). */

@@ -2205,17 +2205,35 @@ export class Room extends DurableObject {
   // however old, then the most recent finished ones - a busy room's
   // history fills the tail but never pushes a live match off it.
   // Boards are stripped (they are the arena's payload, not a list's).
+  // The same scan builds the room record: all-time wins and losses
+  // per player per game type, over every finished match (a winner
+  // takes a W, the other finishers an L; undecided finishes and
+  // called-off matches count for nothing).
   listGames() {
-    const all = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 100").toArray().map((r) => {
+    const all = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray().map((r) => {
       const g = this.gameRow(r.id);
       if (!g || !g.st) return null;
       const s = this.gameSummary(g);
       if (s && s.boards) delete s.boards;
       return s;
     }).filter(Boolean);
-    const live = all.filter((g) => g.status === "lobby" || g.status === "running");
+    const live = all.filter((g) => g.status === "lobby" || g.status === "running").slice(0, 100);
     const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
-    return { games: live.concat(done).slice(0, 40) };
+    const byType = {};
+    done.forEach((g) => {
+      if (g.status !== "finished" || !g.winner) return;
+      const table = byType[g.type] || (byType[g.type] = {});
+      (g.players || []).forEach((p) => {
+        const row = table[p.name] || (table[p.name] = { name: p.name, hex: p.hex, w: 0, l: 0 });
+        if (p.name === g.winner) row.w++;
+        else row.l++;
+      });
+    });
+    const record = {};
+    Object.keys(byType).forEach((t) => {
+      record[t] = Object.values(byType[t]).sort((a, b) => b.w - a.w || a.l - b.l || (a.name < b.name ? -1 : 1));
+    });
+    return { games: live.concat(done).slice(0, 40), record };
   }
 
   async publishMessage(id, who, owner, room, text) {
