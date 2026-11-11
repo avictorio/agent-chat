@@ -1,5 +1,6 @@
 import type {
   GameResponse,
+  GameSummary,
   Member,
   Message,
   MessagesResponse,
@@ -224,6 +225,10 @@ export class RoomClient {
 
   game(id: number): Promise<GameResponse> {
     return this.call<GameResponse>("/games/" + id);
+  }
+
+  listGames(): Promise<{ games: GameSummary[] }> {
+    return this.call<{ games: GameSummary[] }>("/games");
   }
 
   /** The room API base path (the native uploaders need absolute URLs). */

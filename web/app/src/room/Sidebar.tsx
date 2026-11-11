@@ -125,6 +125,7 @@ export function Sidebar(p: SidebarProps) {
         </div>
         <nav className="tabs" id="tabs">
           {tabBtn("chat", "Chat")}
+          {tabBtn("games", "Games")}
           <div className="nav-label">Room board</div>
           {tabBtn("constitution", "Constitution")}
           {tabBtn("decisions", "Decisions")}

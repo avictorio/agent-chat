@@ -219,10 +219,11 @@ async function setup(page, S, calls) {
     if (p.endsWith('/digests') && m === 'POST') { S.dg.unshift({ id: ++S.nid, ts: Date.now(), day: ymd(0), author: body.from, text: body.text }); return J({ ok: 1 }, 201); }
     if (p.includes('/digests')) return J({ digests: S.dg });
     if (p.endsWith('/invites') && m === 'POST') { if (S.mb.members.some(x => x.name.toLowerCase() === body.name.toLowerCase() && x.status !== 'revoked')) return J({ error: body.name + ' already has an active invite.' }, 409); S.mb.members.push({ name: body.name, kind: body.kind, invited_by: 'Anthony', status: 'unused', invited: Date.now() }); const inv = { room: 'demo', name: body.name, kind: body.kind, token: 'tok_' + body.name, link: 'https://chat.victorio.cloud/r/demo#invite=tok_' + body.name, created: Date.now() }; if (body.kind !== 'human') inv.agent_onboarding = 'You are invited to the Agent Chat room "demo" as the agent "' + body.name + '".\nInvite link: ' + inv.link + '\nThen implement the wake recipe and post a short hello.'; return J(inv, 201); }
+    if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); if (S.bs) list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81 })); return J({ room: 'demo', games: list }); }
     if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
     if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
-    if ((mm = p.match(/games\/(\d+)$/))) { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
+    if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81 }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -394,6 +395,37 @@ let FAILURES = 0;
     if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
     return out;
   });
+  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.click('.tab[data-tab="games"]');
+    await page.waitForSelector('#view-games .gm-row', { timeout: 4000 });
+    out.rows = await page.$$eval('#view-games .gm-row', els => els.length);
+    out.live = await page.$$eval('#view-games .gm-live', els => els.length);
+    out.finished = await page.$eval('#view-games .gm-row:last-of-type .gm-state', e => e.textContent);
+    if (out.rows !== 5) throw new Error('games tab should list five matches, got ' + out.rows);
+    if (out.live !== 4) throw new Error('four matches should be live, got ' + out.live);
+    if (!/takes the sea/.test(out.finished)) throw new Error('finished row should name the winner: ' + out.finished);
+    await shot(page, 'games-tab.png');
+    await page.click('#view-games .gm-row:last-of-type');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.arena = await page.$$eval('#viewer .bs-grid', els => els.length);
+    if (out.arena !== 2) throw new Error('tapping a row should open its arena, got ' + out.arena);
+    return out;
+  });
+  await run('games-tab-mobile-dark', { state: { bs: true, game: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.click('#menu');
+    await page.waitForTimeout(350);
+    await page.click('.tab[data-tab="games"]');
+    await page.waitForSelector('#view-games .gm-row', { timeout: 4000 });
+    out.rows = await page.$$eval('#view-games .gm-row', els => els.length);
+    if (out.rows !== 3) throw new Error('mobile games tab should list three matches, got ' + out.rows);
+    await page.waitForTimeout(700);
+    await shot(page, 'games-tab-mobile-dark.png');
+    return out;
+  });
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
     await run(label, Object.assign({ state: { markdown: true }, init: () => { window.__alert = 0; window.alert = () => { window.__alert++; }; } }, o), async (page) => {
       await page.waitForTimeout(300);
@@ -448,7 +480,7 @@ let FAILURES = 0;
       // divergence cannot pass silently — stakes is due within
       // SEVEN days in the current app, decisions count when an
       // active member has not signed).
-      const wantCounts = ['chat=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
+      const wantCounts = ['chat=', 'games=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
       if (JSON.stringify(counts) !== JSON.stringify(wantCounts)) throw new Error('sidebar counts diverge from production: got ' + JSON.stringify(counts));
       return { counts, hash: await page.evaluate(() => location.hash) };
     });

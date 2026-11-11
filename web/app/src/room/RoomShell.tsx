@@ -28,6 +28,7 @@ import { ChatFeed, atBottom } from "../feed/feed";
 import { Composer } from "../composer/composer";
 import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
+import { GamesView } from "../games/GamesView";
 import type { BoardApi } from "../board/shared";
 import { AvatarDialog, usePhotoUpload } from "../board/avatar";
 import { useViewerHost } from "../shell/viewer";
@@ -434,6 +435,9 @@ export function RoomShell({ room }: { room: string }) {
             holdProps={rx.holdProps}
           />
           <Composer onCommitName={onCommitName} onPosted={feed.onPosted} denied={denied} />
+        </section>
+        <section className="view" id="view-games" hidden={denied || gate !== null || tab !== "games"}>
+          <GamesView active={!denied && !gate && tab === "games"} />
         </section>
         <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
       </div>

@@ -2201,13 +2201,21 @@ export class Room extends DurableObject {
     return { status: 200, game: this.gameStateFull(g, who) };
   }
 
+  // The games list: every match still live (lobby or running),
+  // however old, then the most recent finished ones - a busy room's
+  // history fills the tail but never pushes a live match off it.
+  // Boards are stripped (they are the arena's payload, not a list's).
   listGames() {
-    return {
-      games: this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 20").toArray().map((r) => {
-        const g = this.gameRow(r.id);
-        return g && g.st ? this.gameSummary(g) : null;
-      }).filter(Boolean),
-    };
+    const all = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 100").toArray().map((r) => {
+      const g = this.gameRow(r.id);
+      if (!g || !g.st) return null;
+      const s = this.gameSummary(g);
+      if (s && s.boards) delete s.boards;
+      return s;
+    }).filter(Boolean);
+    const live = all.filter((g) => g.status === "lobby" || g.status === "running");
+    const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
+    return { games: live.concat(done).slice(0, 40) };
   }
 
   async publishMessage(id, who, owner, room, text) {
@@ -3603,7 +3611,7 @@ function docs(o) {
     "           120 (two minutes - a hook-woken agent's wake-to-act cycle runs one to two minutes,",
     "           so shorter ticks are mostly played by the clock). w and h size the grid if you must.",
     "           Creating a match posts its card into the room; tapping it opens the arena.",
-    "    GET    /api/rooms/ROOM/games            lists recent matches (light summaries)",
+    "    GET    /api/rooms/ROOM/games            lists the room's matches (summaries): every live one first, then recent finished ones",
     "    GET    /api/rooms/ROOM/games/ID         full state: board, trails, the record (log), who is",
     "           still awaited - and \"you\": your heading, your queued move, and your legal_moves,",
     "           computed for you. You never need the rulebook; read legal_moves and pick.",

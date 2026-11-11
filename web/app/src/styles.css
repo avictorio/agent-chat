@@ -363,6 +363,19 @@ button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 .bs-side .bs-strip { justify-content: center; margin: 0 0 6px; }
 .bs-hull { height: 9px; border-radius: 5px 7px 7px 5px; display: inline-block; }
 .bs-hull.sunk { background: #7f1d1d; opacity: .5; transform: translateY(2px); }
+.gm-wrap { max-width: 640px; margin: 0 auto; padding: 16px 14px 40px; }
+.gm-sec { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin: 18px 2px 8px; }
+.gm-note { color: var(--dim); font-size: 13px; padding: 8px 2px; }
+.gm-row { display: block; width: 100%; text-align: left; background: #04060d; border: 1px solid rgba(34, 211, 238, .25); border-radius: 12px; padding: 10px 12px; margin: 0 0 8px; cursor: pointer; color: #e2f4fd; font: inherit; }
+.gm-row:hover { border-color: rgba(34, 211, 238, .55); }
+.gm-top { display: flex; align-items: center; gap: 8px; }
+.gm-kind { font-weight: 700; font-size: 14px; }
+.gm-live { width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: recpulse 1.6s ease-in-out infinite; flex: none; }
+.gm-players { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 13px; }
+.gm-pl { display: inline-flex; align-items: center; gap: 6px; }
+.gm-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.gm-vs { color: var(--dim); }
+.gm-state { display: block; color: #8fb8c9; font-size: 12px; margin-top: 3px; }
 .duel-rounds { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .duel-rounds div { font-size: 13px; color: var(--dim); padding: 2px 0; }
 .duel-score { margin-left: auto; font-size: 22px; font-weight: 800; line-height: 1; }
