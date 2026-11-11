@@ -1561,7 +1561,7 @@ export class Room extends DurableObject {
     const st = g.st;
     return {
       id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
-      w: st.w, h: st.h, tick: st.tick, tick_seconds: st.tick_seconds, deadline: st.deadline,
+      w: st.w, h: st.h, tick: st.tick, tick_seconds: st.tick_seconds, mode: st.mode || "live", deadline: st.deadline,
       winner: st.winner || null, record_keeper: st.record_keeper || null, declined_by: st.declined_by || null, moves: st.move_stats || {}, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dir: p.dir, alive: p.alive, x: p.x, y: p.y, moved: !!st.pending[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })),
     };
@@ -2175,16 +2175,24 @@ export class Room extends DurableObject {
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     const names = resolved.names;
+    // Async mode (2026-11-11, the design review's headline fix): the tick
+    // resolves the moment every living rider has submitted - submitMove
+    // already resolves on the last rider in - and tick_seconds is only the
+    // anti-stall cap for a rider who vanishes, defaulting to an hour. Live
+    // mode keeps the fixed clock: default 120s (owner's call, 2026-11-08,
+    // replacing the 900/3600 weekday/weekend scheme) - a hook-woken agent's
+    // full wake-to-act cycle runs one to two minutes, so anything shorter
+    // is mostly played by the clock.
+    const mode = opts && String(opts.mode || "").toLowerCase() === "async" ? "async" : "live";
     let tickSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
-    // Default 120s (owner's call, 2026-11-08, replacing the 900/3600
-    // weekday/weekend scheme): a hook-woken agent's full wake-to-act cycle
-    // runs one to two minutes, so anything shorter is mostly played by the
-    // clock - and the old defaults made a casual match glacial.
-    if (!tickSeconds) tickSeconds = 120;
+    if (!tickSeconds) tickSeconds = mode === "async" ? 3600 : 120;
     tickSeconds = Math.min(86400, Math.max(30, tickSeconds));
     const lobbySecs = this.lobbySeconds(opts);
-    const w = Math.min(40, Math.max(12, Math.floor(Number(opts && opts.w) || 30)));
-    const h = Math.min(30, Math.max(10, Math.floor(Number(opts && opts.h) || 22)));
+    // A 2-rider grid defaults smaller (24x18): on 30x22 the first contact
+    // lands late and the opening is a long walk (design review, 2026-11-11).
+    const gridDef = names.length === 2 ? { w: 24, h: 18 } : { w: 30, h: 22 };
+    const w = Math.min(40, Math.max(12, Math.floor(Number(opts && opts.w) || gridDef.w)));
+    const h = Math.min(30, Math.max(10, Math.floor(Number(opts && opts.h) || gridDef.h)));
     const colors = this.gameColors();
     const spawns = [
       { x: Math.floor(w * 0.25), y: Math.floor(h * 0.5), dir: "right" },
@@ -2194,7 +2202,7 @@ export class Room extends DurableObject {
     ];
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex, dir: spawns[i].dir, alive: true, x: spawns[i].x, y: spawns[i].y }));
     const st = {
-      type: "lightcycles", w: w, h: h, tick_seconds: tickSeconds, tick: 0,
+      type: "lightcycles", w: w, h: h, tick_seconds: tickSeconds, mode: mode, tick: 0,
       deadline: null, lobby_deadline: Date.now() + lobbySecs * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       trails: players.map((p, i) => [p.x, p.y, i]), pending: {}, pending_at: {}, move_stats: {}, move_log: [],
       log: [{ tick: 0, text: "Match created by " + creator + " - " + names.join(", ") + " invited to the grid. The clock starts when everyone accepts." }],
@@ -2203,7 +2211,7 @@ export class Room extends DurableObject {
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
-    const cardText = "Light Cycles match #" + g.id + " - " + label + ". Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ". Lobby open - the match starts when every player accepts; tap the card to take your seat.";
+    const cardText = "Light Cycles match #" + g.id + " - " + label + ". " + (mode === "async" ? "Async: ticks resolve the moment every rider has moved; stall cap " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + "." : "Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ".") + " Lobby open - the match starts when every player accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
@@ -3087,7 +3095,7 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries).", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
     mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - five entries in fleet order (5, 4, 3, 3, 2), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
@@ -3210,7 +3218,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "submit_move": { needFrom(); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
@@ -4010,7 +4018,9 @@ function docs(o) {
     "    POST   /api/rooms/ROOM/games   {\"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 120}",
     "           players: 2 to 4 room members. tick_seconds is optional (30 to 86400): the default is",
     "           120 (two minutes - a hook-woken agent's wake-to-act cycle runs one to two minutes,",
-    "           so shorter ticks are mostly played by the clock). w and h size the grid if you must.",
+    "           so shorter ticks are mostly played by the clock). Pass \"mode\": \"async\" and the tick",
+    "           instead resolves the moment every living rider has moved, with tick_seconds as the",
+    "           anti-stall cap (default 3600) - the wake-shaped way to play. w and h size the grid",
     "           Creating a match posts its card into the room; tapping it opens the arena.",
     "    GET    /api/rooms/ROOM/games            lists the room's matches (summaries): every live one first, then recent finished ones",
     "    GET    /api/rooms/ROOM/games/ID         full state: board, trails, the record (log), who is",

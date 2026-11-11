@@ -37,6 +37,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const [picked, setPicked] = useState<string[]>([]);
   const [bestOf, setBestOf] = useState(5);
   const [tick, setTick] = useState(120);
+  const [lcMode, setLcMode] = useState<"async" | "live">("async");
   const [turn, setTurn] = useState(3600);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,6 +52,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       setPicked(me && members.memberSet.has(me.toLowerCase()) ? [me] : []);
       setBestOf(5);
       setTick(120);
+      setLcMode("async");
       setTurn(3600);
       setNote("");
       setBusy(false);
@@ -87,7 +89,8 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       body.game = "battleship";
       body.tick_seconds = turn;
     } else {
-      body.tick_seconds = tick;
+      body.mode = lcMode;
+      if (lcMode === "live") body.tick_seconds = tick;
     }
     try {
       const d = await session.client.createGame(body);
@@ -115,7 +118,9 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; rounds are a minute once under way."
       : type === "battleship"
         ? "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
-        : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
+        : lcMode === "async"
+          ? "Starts when every rider accepts their seat; each tick resolves the moment everyone has ridden — a 1 h stall cap covers a vanished rider."
+          : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
 
   // The roster list carries the room's bot identity ("claude") for
   // mentions and rendering; it holds no invite and cannot play, so
@@ -194,14 +199,27 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         </>
       ) : (
         <>
-          <div className="ng-label">Tick — how long each rider gets per move</div>
-          <div className="seg full" role="group" aria-label="Tick length">
-            {TICKS.map((t) => (
-              <button key={t.secs} type="button" aria-pressed={tick === t.secs} onClick={() => setTick(t.secs)}>
-                {t.label}
-              </button>
-            ))}
+          <div className="ng-label">Pace — how ticks resolve</div>
+          <div className="seg full" role="group" aria-label="Pace">
+            <button type="button" aria-pressed={lcMode === "async"} onClick={() => setLcMode("async")}>
+              Async · on everyone's move
+            </button>
+            <button type="button" aria-pressed={lcMode === "live"} onClick={() => setLcMode("live")}>
+              Live · fixed tick
+            </button>
           </div>
+          {lcMode === "live" ? (
+            <>
+              <div className="ng-label">Tick — how long each rider gets per move</div>
+              <div className="seg full" role="group" aria-label="Tick length">
+                {TICKS.map((t) => (
+                  <button key={t.secs} type="button" aria-pressed={tick === t.secs} onClick={() => setTick(t.secs)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </>
       )}
       <div className="ng-note" role="status">

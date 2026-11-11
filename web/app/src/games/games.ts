@@ -775,7 +775,12 @@ export function createGameStore(opts: {
       el(
         "div",
         "lc-meta",
-        gameMetaText(g) + (g.status === "running" && g.deadline ? " · tick closes " + new Date(g.deadline).toLocaleTimeString() : "")
+        gameMetaText(g) +
+          (g.status === "running" && g.deadline
+            ? g.mode === "async"
+              ? " · async — the tick resolves when everyone rides · stall cap " + new Date(g.deadline).toLocaleTimeString()
+              : " · tick closes " + new Date(g.deadline).toLocaleTimeString()
+            : "")
       )
     );
     const wb = winnerBanner(g);
@@ -841,7 +846,9 @@ export function createGameStore(opts: {
       wrap.appendChild(pad);
       note.textContent = g.you.queued
         ? "Queued: " + g.you.queued + " - tap another direction to change it before the tick resolves."
-        : "Your move: pick a direction before the tick closes.";
+        : g.mode === "async"
+          ? "Your move: pick a direction — the tick resolves the moment every rider has one in."
+          : "Your move: pick a direction before the tick closes.";
       wrap.appendChild(note);
     } else if (g.you && g.you.playing && g.status === "running") {
       note.textContent = "You are out - the record is yours to keep.";

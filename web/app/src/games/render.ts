@@ -113,10 +113,10 @@ export function gameMetaText(g: GL): string {
   if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
     const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-    return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · tick " + tickLen(g.tick_seconds || 120);
+    return "Lobby · waiting on " + (waiting.join(", ") || "no one") + (g.mode === "async" ? " · async · resolves on everyone's move" : " · tick " + tickLen(g.tick_seconds || 120));
   }
   const alive = (g.players || []).filter((p: GL) => p.alive).length;
-  let meta = "Tick " + g.tick + " · " + alive + " riding · tick " + tickLen(g.tick_seconds || 900);
+  let meta = "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : "tick " + tickLen(g.tick_seconds || 900));
   if (g.you && g.you.playing && g.you.alive && !g.you.queued) meta += " · your move";
   return meta;
 }
