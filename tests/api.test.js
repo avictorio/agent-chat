@@ -230,6 +230,38 @@ async function waitUp() {
     r = await req('POST', R + '/admin/migrate-avatars', { token: TA });
     check('migrate-avatars without owner key -> 403', r.status === 403, r.status);
 
+    // Phase E: signed media URLs. Listings mint them (and carry no
+    // invite= anywhere); a signed URL reads with no credential at all;
+    // a tampered signature, a signature replayed against another kind,
+    // and a past expiry all answer 403; header auth keeps working.
+    r = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'signed pic', image: PNG.toString('base64') } });
+    check('post for sig tests -> 201 with signed url', r.status === 201 && r.json && /[?&]exp=\d+&sig=/.test(r.json.image.url) && !/invite=/.test(r.json.image.url), r.status + ' ' + (r.json && r.json.image && r.json.image.url));
+    const sigPath = new URL(r.json.image.url, BASE).pathname + new URL(r.json.image.url, BASE).search;
+    const barePath = new URL(r.json.image.url, BASE).pathname;
+    r = await req('GET', sigPath, {});
+    check('signed url reads with no credential -> 200', r.status === 200 && r.headers.get('content-type') === 'image/png', r.status);
+    const tampered = sigPath.replace(/sig=([A-Za-z0-9_-]+)/, (m, g) => 'sig=' + (g.charAt(0) === 'A' ? 'B' : 'A') + g.slice(1));
+    r = await req('GET', tampered, {});
+    check('tampered sig -> 403', r.status === 403, r.status);
+    r = await req('GET', sigPath.replace('/image', '/video'), {});
+    check('sig replayed on another kind -> 403', r.status === 403, r.status);
+    r = await req('GET', sigPath.replace(/exp=\d+/, 'exp=1'), {});
+    check('past exp -> 403', r.status === 403, r.status);
+    r = await req('GET', barePath, { token: TA });
+    check('bare url with header auth still -> 200', r.status === 200, r.status);
+    r = await req('GET', R + '/messages?limit=1000', { token: TA });
+    const withImg = (r.json.messages || []).filter((x) => x.image);
+    check('listing urls are signed, no invite= anywhere', withImg.length > 0 && withImg.every((x) => /[?&]exp=\d+&sig=/.test(x.image.url)) && !/invite=/.test(r.text), withImg.length + ' images');
+    r = await req('PUT', R + '/avatar', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('avatar set for sig tests -> 200', r.status === 200, r.status);
+    r = await req('GET', R + '/members', { token: TA });
+    const me = (r.json.members || []).find((x) => x.name === 'ApiA');
+    check('members avatar url is signed', !!me && !!me.avatar && /[?&]exp=\d+&sig=/.test(me.avatar) && !/invite=/.test(me.avatar), me && me.avatar);
+    const avPath = new URL(me.avatar, BASE).pathname + new URL(me.avatar, BASE).search;
+    r = await req('GET', avPath, {});
+    check('signed avatar reads with no credential -> 200', r.status === 200 && r.headers.get('content-type') === 'image/png', r.status);
+    await req('DELETE', R + '/avatar', { token: TA });
+
     // Revocation.
     const invC = await req('POST', R + '/invites', { owner: true, json: { name: 'ApiC', kind: 'agent' } });
     await req('DELETE', R + '/invites/' + invC.json.token, { owner: true });

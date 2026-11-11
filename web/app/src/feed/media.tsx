@@ -12,8 +12,12 @@ import type { GameStore } from "../games/games";
 // preview). Cards are previews only — no links or buttons on them;
 // tapping opens the full-screen viewer.
 
-export function withInvite(url: string, token: string): string {
-  return token ? url + (url.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(token) : url;
+// Media URLs arrive from the server already signed (phase E): the
+// signature in the query string authorizes the read for about an hour,
+// so the client no longer appends its invite token to media URLs. The
+// helper stays as the single funnel so every media call site agrees.
+export function withInvite(url: string, _token: string): string {
+  return url;
 }
 
 /* ---------- YouTube link cards ---------- */

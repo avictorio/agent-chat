@@ -559,7 +559,23 @@ change behavior. In summary:
   verified by head size; blobs kept for rollback) and
   /admin/purge-avatars (null a blob only where its R2 copy verifies)
   finishes the move per room; destroy() sweeps avatar keys with the
-  rest of the room's R2 objects.
+  rest of the room's R2 objects. Phase E (same day) retired the
+  credential from media URLs: listings, stream frames, attach
+  responses and /members now carry signed URLs
+  (?exp=<unix>&sig=<base64url HMAC-SHA256>) minted with a per-room
+  32-byte key kept in the room's own cfg (media_sig_key) - no new
+  Worker secret, nothing for check:config to inventory. Read routes
+  accept a valid signature with no credential (an invalid or expired
+  one answers 403), and header auth plus ?invite= keep working for
+  one release before ?invite= is removed from media routes. Because
+  serialization is sync and WebCrypto is async-only, the HMAC uses a
+  small plain-JS SHA-256 (sha256Bytes/hmacSha256 by the signed-media
+  helpers; verified against RFC 4231 vectors and node:crypto). The
+  web app no longer appends invite= to media or avatar URLs
+  (withInvite is a pass-through funnel); the stream URL and the speak
+  page still use ?invite= this release. A page left open past the
+  one-hour expiry gets fresh URLs from any listing re-read (stream
+  reconnect or pull-to-refresh).
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
   the native uploader plugin); size and magic bytes are verified at finish,

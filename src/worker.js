@@ -626,6 +626,31 @@ export class Room extends DurableObject {
   // request instead of falling back (see STORE_MSG).
   mediaKey(room, id, kind) { return (room || this.roomName || "room") + "/" + id + "/" + kind; }
 
+  // The room's media signing key (phase E): 32 random bytes in cfg,
+  // created on first use. mediaSigKey hands the base64url form to the
+  // Worker for verification; the bytes themselves never leave the pair.
+  mediaSigKeyBytes() {
+    if (this._sigBytes) return this._sigBytes;
+    const row = this.sql.exec("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray()[0];
+    if (row && row.v) {
+      try { const b = b64urlDecode(row.v); if (b.length === 32) { this._sigBytes = b; return b; } } catch (e) {}
+    }
+    const b = crypto.getRandomValues(new Uint8Array(32));
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('media_sig_key', ?)", b64urlEncode(b));
+    this._sigBytes = b;
+    return b;
+  }
+
+  mediaSigKey() {
+    if (!this.ready) return null;
+    return b64urlEncode(this.mediaSigKeyBytes());
+  }
+
+  mediaQuery(id, kind) {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp);
+  }
+
   async putMedia(id, kind, data, type, room) {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
@@ -2598,29 +2623,29 @@ export class Room extends DurableObject {
     // Audio and images: listings carry type, size and URL; the bytes live behind the URL.
     for (const r of rows) {
       if ("audio_type" in r) {
-        r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" : null, transcript: r.audio_transcript || null } : null;
+        r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" + this.mediaQuery(r.id, "audio") : null, transcript: r.audio_transcript || null } : null;
         delete r.audio_type;
         delete r.audio_size;
         delete r.audio_transcript;
       }
       if ("image_type" in r) {
-        r.image = r.image_type ? { type: r.image_type, bytes: r.image_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/image" : null } : null;
+        r.image = r.image_type ? { type: r.image_type, bytes: r.image_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/image" + this.mediaQuery(r.id, "image") : null } : null;
         delete r.image_type;
         delete r.image_size;
       }
       if ("video_type" in r) {
-        r.video = r.video_type ? { type: r.video_type, bytes: r.video_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/video" : null } : null;
+        r.video = r.video_type ? { type: r.video_type, bytes: r.video_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/video" + this.mediaQuery(r.id, "video") : null } : null;
         delete r.video_type;
         delete r.video_size;
       }
       if ("html_type" in r) {
-        r.html = r.html_type ? { type: r.html_type, bytes: r.html_size || 0, name: r.html_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/html" : null } : null;
+        r.html = r.html_type ? { type: r.html_type, bytes: r.html_size || 0, name: r.html_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/html" + this.mediaQuery(r.id, "html") : null } : null;
         delete r.html_type;
         delete r.html_size;
         delete r.html_name;
       }
       if ("doc_type" in r) {
-        r.doc = r.doc_type ? { type: r.doc_type, bytes: r.doc_size || 0, name: r.doc_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/doc" : null } : null;
+        r.doc = r.doc_type ? { type: r.doc_type, bytes: r.doc_size || 0, name: r.doc_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/doc" + this.mediaQuery(r.id, "doc") : null } : null;
         delete r.doc_type;
         delete r.doc_size;
         delete r.doc_name;
@@ -3133,7 +3158,9 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10), from, owner); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
     case "get_members": {
       const mb = await stub.members();
-      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
+      const avq = {};
+      for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
+      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
       return Object.assign({ room: room }, mb);
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
@@ -3188,7 +3215,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "decline_game": { needFrom(); const r = await stub.gameDecline(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "speak_message": return { room: room, id: parseInt(A.id, 10), url: origin + "/api/rooms/" + room + "/messages/" + parseInt(A.id, 10) + "/speak" + (invite ? "?invite=" + encodeURIComponent(invite) : ""), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The audio bytes do not ride this protocol." };
+    case "speak_message": { const sid = parseInt(A.id, 10); return { room: room, id: sid, url: origin + "/api/rooms/" + room + "/messages/" + sid + "/speak?" + (await mediaSigParams(env, room, sid, "speak")), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The signed URL works for about an hour with no credential. The audio bytes do not ride this protocol." }; }
     case "get_voice": { needFrom(); return { room: room, name: from, voice: await stub.voiceOf(from) }; }
     case "begin_upload": {
       needFrom();
@@ -3208,9 +3235,9 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
       const id = parseInt(A.id, 10);
       const buf = mcpDecodeB64(A.base64, "base64");
       if (!buf.byteLength) throw new Error("\"base64\" is empty");
-      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image" } }; }
-      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? String(A.transcript).slice(0, MAX_TEXT) : null, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } }; }
-      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video" } }; }
+      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
+      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? String(A.transcript).slice(0, MAX_TEXT) : null, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
+      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
       throw new Error("\"kind\" must be image, audio or video");
     }
     default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");
@@ -3241,6 +3268,117 @@ function sniffAudio(buf) {
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "audio/webm";
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return "audio/mp4";
   return null;
+}
+
+// ---- Signed media URLs (media plan phase E) ----
+// Media reads accept a short-lived signature instead of a credential:
+// sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)), exp a unix
+// timestamp about an hour out. The room key is 32 random bytes kept in
+// the room's own cfg (media_sig_key), so there is no site-wide secret to
+// rotate. WebCrypto's subtle API is async-only, but message
+// serialization is sync, so the HMAC is computed with the plain-JS
+// SHA-256 below (verified against RFC 4231 vectors and node:crypto).
+// Header auth and ?invite= keep working on the same routes for one
+// release; the signatures are what listings, frames and the web app use.
+const SHA256_K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+function sha256Bytes(msg) {
+  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const ml = msg.length;
+  const total = Math.ceil((ml + 9) / 64) * 64;
+  const buf = new Uint8Array(total);
+  buf.set(msg);
+  buf[ml] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(total - 4, ml * 8, false);
+  dv.setUint32(total - 8, Math.floor(ml / 0x20000000), false);
+  const w = new Uint32Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let off = 0; off < total; off += 64) {
+    for (let t = 0; t < 16; t++) w[t] = dv.getUint32(off + t * 4, false);
+    for (let t = 16; t < 64; t++) {
+      const s0 = rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3);
+      const s1 = rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10);
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (let t = 0; t < 64; t++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + SHA256_K[t] + w[t]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const mj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + mj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+  }
+  const out = new Uint8Array(32);
+  const odv = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) odv.setUint32(i * 4, H[i], false);
+  return out;
+}
+function hmacSha256(key, msg) {
+  let k = key;
+  if (k.length > 64) k = sha256Bytes(k);
+  const inner = new Uint8Array(64 + msg.length);
+  const outer = new Uint8Array(64 + 32);
+  for (let i = 0; i < 64; i++) {
+    const kb = i < k.length ? k[i] : 0;
+    inner[i] = kb ^ 0x36;
+    outer[i] = kb ^ 0x5c;
+  }
+  inner.set(msg, 64);
+  outer.set(sha256Bytes(inner), 64);
+  return sha256Bytes(outer);
+}
+
+function mediaSig(keyBytes, room, id, kind, exp) {
+  return b64urlEncode(hmacSha256(keyBytes, new TextEncoder().encode(room + "|" + id + "|" + kind + "|" + exp)));
+}
+
+// The Worker verifies signatures with the room's key, fetched from the
+// room object once and cached in the isolate for a minute.
+const _mediaKeyCache = new Map();
+async function roomMediaKeyBytes(env, room) {
+  const hit = _mediaKeyCache.get(room);
+  if (hit && Date.now() - hit.at < 60000) return hit.bytes;
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const b64 = await stub.mediaSigKey();
+  if (!b64) return null;
+  const bytes = b64urlDecode(b64);
+  _mediaKeyCache.set(room, { bytes: bytes, at: Date.now() });
+  return bytes;
+}
+
+async function mediaSigParams(env, room, id, kind) {
+  const key = await roomMediaKeyBytes(env, room);
+  if (!key) return "";
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  return "exp=" + exp + "&sig=" + mediaSig(key, room, id, kind, exp);
+}
+
+// Tri-state for read routes: "none" (no signature params - fall through
+// to credential auth), "ok" (serve), "bad" (params present but invalid
+// or expired - the route answers 403).
+async function mediaSigState(env, room, id, kind, url) {
+  const exp = url.searchParams.get("exp");
+  const sig = url.searchParams.get("sig");
+  if (!exp || !sig) return "none";
+  const e = parseInt(exp, 10);
+  if (!e || e < Math.floor(Date.now() / 1000)) return "bad";
+  const key = await roomMediaKeyBytes(env, room);
+  if (!key) return "bad";
+  return mediaSig(key, room, id, kind, e) === sig ? "ok" : "bad";
 }
 
 // ---- Web Push (VAPID, RFC 8292 + payload encryption, RFC 8291) ----
@@ -4049,7 +4187,8 @@ function docs(o) {
     "    PUT    /api/rooms/ROOM/avatar              your X-Invite-Token; body: the image bytes",
     "                                               (Content-Type: image/png etc.) or JSON {\"image\": \"<base64 or data: URL>\"}",
     "    DELETE /api/rooms/ROOM/avatar              removes yours",
-    "    GET    /api/rooms/ROOM/avatars/NAME        the image (same access as the room; ?invite=TOKEN works in img tags)",
+    "    GET    /api/rooms/ROOM/avatars/NAME        the image (/members carries a signed URL that works",
+    "                                             for about an hour with no credential; ?invite=TOKEN also works this release)",
     "    PUT|DELETE /api/rooms/ROOM/members/NAME/avatar   owner key: set or clear anyone's",
     "  GET /members gives each member an avatar URL (or null). Streams send an \"event: members\" when one changes.",
     "  claude has a fixed avatar in the web room.",
@@ -4104,8 +4243,8 @@ function docs(o) {
     "                                               its media and reactions go with it",
     "    PUT    /api/rooms/ROOM/messages/ID/audio   attach to your own message (or the owner key): the",
     "                                               audio bytes, or JSON {\"audio\": \"<base64>\"}",
-    "    GET    /api/rooms/ROOM/messages/ID/audio   the clip (same access as the room; ?invite=TOKEN",
-    "                                               works in audio tags)",
+    "    GET    /api/rooms/ROOM/messages/ID/audio   the clip (listings carry signed URLs that work for",
+    "                                               about an hour with no credential; ?invite=TOKEN also works this release)",
     "",
     "IMAGE MESSAGES",
     "  One image per message, up to 5 MB (JPEG, PNG, GIF, WebP or AVIF), attached the same ways as",
@@ -4116,7 +4255,7 @@ function docs(o) {
     "  enough on its own - \"text\" may be empty when one is present.",
     "  Messages with an image carry \"image\": {\"type\", \"bytes\", \"url\"} (null when there is",
     "  none), and the image itself is at GET /api/rooms/ROOM/messages/ID/image (same access as",
-    "  the room; ?invite=TOKEN works in img tags).",
+    "  about an hour with no credential; header auth and ?invite=TOKEN also work this release).",
     "",
     "VIDEO MESSAGES",
     "  One video per message (MP4, WebM or MOV). Up to 25 MB it attaches like an image:",
@@ -4149,7 +4288,7 @@ function docs(o) {
     "  Markdown in a card, with the raw file one click away. Messages carry \"html\" / \"doc\"",
     "  as {\"type\", \"bytes\", \"name\", \"url\"} (null when absent); the content itself is at",
     "  GET /api/rooms/ROOM/messages/ID/html and .../ID/doc (same access as the room;",
-    "  ?invite=TOKEN works in iframes and fetches).",
+    "  signed URLs from listings work for about an hour; ?invite=TOKEN also works this release).",
     "",
     "PHONE NOTIFICATIONS (WEB PUSH)",
     "  Members can get a phone notification for new messages via Web Push. Serve",
@@ -4667,7 +4806,12 @@ export default {
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
       if (m[3] !== undefined) {
         if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-        const acc = await stub.access(invite, owner);
+        let acc = await stub.access(invite, owner);
+        if (!acc.ok) {
+          const ss = await mediaSigState(env, room, decodeURIComponent(m[3]).toLowerCase(), "avatar", url);
+          if (ss === "ok") acc = { ok: true, name: null };
+          else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+        }
         if (!acc.ok) return json({ error: acc.error }, acc.status);
         const a = await stub.getAvatar(decodeURIComponent(m[3]));
         if (!a) return json({ error: "No avatar" }, 404);
@@ -4979,10 +5123,12 @@ export default {
       if (kind === "members") {
         if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
         const mb = await stub.members();
+        const avq = {};
+        for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
         mb.members = mb.members.map((x) => {
           const v = x.avatar_version;
           delete x.avatar_version;
-          x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v : null;
+          x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null;
           // Invite links are visible to members of an invite-only room (every caller
           // here holds an invite or the owner key), so a lost link can be re-sent from
           // the members list. Agent members also carry the full hand-off block, so the
@@ -5155,7 +5301,12 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
+      let acc = await stub.access(invite, owner);
+      if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
+        const ss = await mediaSigState(env, room, id, "speak", url);
+        if (ss === "ok") acc = { ok: true, name: null };
+        else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+      }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
       const meta = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
@@ -5206,7 +5357,12 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
+      let acc = await stub.access(invite, owner);
+      if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
+        const ss = await mediaSigState(env, room, id, "audio", url);
+        if (ss === "ok") acc = { ok: true, name: null };
+        else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+      }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
         return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
@@ -5229,7 +5385,7 @@ export default {
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
       const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio" } });
+      return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } });
     }
 
     // Images attached to messages. Reading needs the same access as the room
@@ -5240,7 +5396,12 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
+      let acc = await stub.access(invite, owner);
+      if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
+        const ss = await mediaSigState(env, room, id, "image", url);
+        if (ss === "ok") acc = { ok: true, name: null };
+        else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+      }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
         return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
@@ -5262,7 +5423,7 @@ export default {
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       const r = await stub.attachImage(id, acc.name || "", buf, itype, owner, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image" } });
+      return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } });
     }
 
     // Videos attached to messages. Same access as images; serving honours Range so
@@ -5273,7 +5434,12 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
+      let acc = await stub.access(invite, owner);
+      if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
+        const ss = await mediaSigState(env, room, id, "video", url);
+        if (ss === "ok") acc = { ok: true, name: null };
+        else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+      }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method === "GET" || request.method === "HEAD") {
         return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
@@ -5295,7 +5461,7 @@ export default {
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);
       if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" } });
+      return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } });
     }
 
     // HTML artifacts and Markdown documents attached to messages. Reading needs
@@ -5310,7 +5476,12 @@ export default {
       const id = parseInt(m[2], 10);
       const kind = m[3];
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
+      let acc = await stub.access(invite, owner);
+      if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
+        const ss = await mediaSigState(env, room, id, kind, url);
+        if (ss === "ok") acc = { ok: true, name: null };
+        else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
+      }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
       return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: owner });
@@ -5384,7 +5555,7 @@ export default {
       if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
       const doneRes = await stub.streamComplete(id, counted, sniffed, room);
       if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
-      return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" }, published: !!doneRes.published });
+      return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort|status)\/?$/);
@@ -5423,7 +5594,7 @@ export default {
       if (action === "finish") {
         const r = await stub.finishVideoUpload(id, acc.name || "", owner, room);
         if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video" }, published: !!r.published });
+        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!r.published });
       }
       const r = await stub.abortVideoUpload(id, acc.name || "", owner);
       if (r.status !== 200) return json({ error: r.error }, r.status);

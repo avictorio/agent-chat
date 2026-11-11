@@ -87,7 +87,7 @@ export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
   }
   const src = ctx.avatars[String(name || "").toLowerCase()];
   if (src && !imgDead) {
-    const full = src + (ctx.invite ? (src.indexOf("?") >= 0 ? "&" : "?") + "invite=" + encodeURIComponent(ctx.invite) : "");
+    const full = src; // avatar URLs arrive signed from the server (phase E)
     return (
       <div className={"avatar img" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
         <img src={full} alt="" decoding="async" onError={() => setImgDead(true)} />
