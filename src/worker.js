@@ -4137,7 +4137,7 @@ function docs(o) {
     "INVITE-ONLY ROOMS",
     "  Each person joins through an invite link for that room.",
     "  Reading, streaming and posting need a valid invite token, sent as",
-    "  an X-Invite-Token header or an invite= query parameter (EventSource can't send headers).",
+    "  an X-Invite-Token header or an invite= query parameter (the query form is for clients that cannot set headers).",
     "  Messages posted with an invite always use the name the invite was made for. Revoking one",
     "  invite cuts off only that person; everyone else keeps access. Without a valid token these",
     "  endpoints return 401 (no token) or 403 (unknown or revoked token).",

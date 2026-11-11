@@ -30,6 +30,8 @@ export class Speaker {
   speakingId: number | null = null;
   onChange: (id: number | null) => void = () => {};
   private audio: HTMLAudioElement | null = null;
+  private objUrl: string | null = null;
+  private gen = 0;
 
   constructor(
     private opts: {
@@ -45,6 +47,9 @@ export class Speaker {
   }
 
   private stopServer() {
+    // Bumping the generation invalidates any speak fetch still in
+    // flight: its continuation checks before it starts playing.
+    this.gen++;
     if (this.audio) {
       try {
         this.audio.pause();
@@ -52,6 +57,10 @@ export class Speaker {
         // already stopped
       }
       this.audio = null;
+    }
+    if (this.objUrl) {
+      URL.revokeObjectURL(this.objUrl);
+      this.objUrl = null;
     }
   }
 
@@ -73,33 +82,60 @@ export class Speaker {
     this.set(null);
     if (!again) {
       this.set(m.id);
+      const gen = this.gen;
       const src =
         "/api/rooms/" +
         encodeURIComponent(this.opts.room) +
         "/messages/" +
         m.id +
-        "/speak" +
-        (this.opts.invite ? "?invite=" + encodeURIComponent(this.opts.invite) : "");
-      this.audio = new Audio(src);
-      // Capture the element: a stale element's late error must not tear
-      // down a NEW playback started after a stop + replay.
-      const mine = this.audio;
-      this.audio.onended = () => {
-        if (this.audio === mine && this.speakingId === m.id) {
-          this.set(null);
-          this.audio = null;
-        }
-      };
+        "/speak";
       const failed = () => {
-        if (this.audio === mine && this.speakingId === m.id) {
+        if (gen === this.gen && this.speakingId === m.id) {
           this.set(null);
-          this.audio = null;
           toast("Could not play that in " + m.from + "’s voice.", true);
         }
       };
-      this.audio.onerror = failed;
-      const pr = this.audio.play();
-      if (pr && pr.catch) pr.catch(failed);
+      // An <audio> element cannot send headers, so the clip is fetched
+      // with the invite in the X-Invite-Token header and played from a
+      // blob URL — the token no longer rides in the speak URL.
+      void (async () => {
+        try {
+          const res = await fetch(src, {
+            headers: this.opts.invite ? { "X-Invite-Token": this.opts.invite } : {},
+          });
+          if (!res.ok) throw new Error("speak " + res.status);
+          const blob = await res.blob();
+          if (gen !== this.gen || this.speakingId !== m.id) return;
+          const url = URL.createObjectURL(blob);
+          this.objUrl = url;
+          this.audio = new Audio(url);
+          // Capture the element: a stale element's late error must not tear
+          // down a NEW playback started after a stop + replay.
+          const mine = this.audio;
+          this.audio.onended = () => {
+            if (this.audio === mine && this.speakingId === m.id) {
+              this.set(null);
+              this.audio = null;
+              if (this.objUrl === url) {
+                URL.revokeObjectURL(url);
+                this.objUrl = null;
+              }
+            }
+          };
+          const failMine = () => {
+            if (this.audio === mine && this.speakingId === m.id) {
+              this.set(null);
+              this.audio = null;
+              toast("Could not play that in " + m.from + "’s voice.", true);
+            }
+          };
+          this.audio.onerror = failMine;
+          const pr = this.audio.play();
+          if (pr && pr.catch) pr.catch(failMine);
+        } catch {
+          failed();
+        }
+      })();
     }
   }
 

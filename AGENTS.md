@@ -572,8 +572,12 @@ change behavior. In summary:
   small plain-JS SHA-256 (sha256Bytes/hmacSha256 by the signed-media
   helpers; verified against RFC 4231 vectors and node:crypto). The
   web app no longer appends invite= to media or avatar URLs
-  (withInvite is a pass-through funnel); the stream URL and the speak
-  page still use ?invite= this release. A page left open past the
+  (withInvite is a pass-through funnel). Follow-up (same day): the web
+  app's stream is now a fetch-based SSE reader and speak playback is an
+  authenticated fetch into a blob, both sending X-Invite-Token, so the
+  web app puts the token in no URL at all; the server still accepts
+  ?invite= on media and stream routes (the legacy pages and other
+  header-less clients use it) until the removal release. A page left open past the
   one-hour expiry gets fresh URLs from any listing re-read (stream
   reconnect or pull-to-refresh).
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

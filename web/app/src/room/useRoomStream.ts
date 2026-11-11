@@ -41,9 +41,9 @@ export function useRoomStream(opts: {
   closeRef: { current: () => void };
 }) {
   const { client, room, token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef, closeRef } = opts;
-  const esRef = useRef<EventSource | null>(null);
+  const ctrlRef = useRef<AbortController | null>(null);
   const membersTimerRef = useRef<number>(0);
-  closeRef.current = () => esRef.current?.close();
+  closeRef.current = () => ctrlRef.current?.abort();
 
   // Initial load + stream, mirroring the current app's start().
   useEffect(() => {
@@ -60,75 +60,107 @@ export function useRoomStream(opts: {
       }
       if (!cancelled) streamRefLocal.fn();
     };
+    // The stream is read with fetch, not EventSource: EventSource
+    // cannot send headers, which is why the invite token used to ride
+    // in the stream URL. The reader below speaks just enough SSE —
+    // event/data framing plus the server's retry: hint — to carry the
+    // same five frame kinds with the token in the X-Invite-Token
+    // header, like every other call this client makes.
     const stream = () => {
-      esRef.current?.close();
+      ctrlRef.current?.abort();
       if (deniedRef.current || cancelled) return;
-      const url =
-        "/api/rooms/" +
-        encodeURIComponent(room) +
-        "/stream?after=" +
-        (feed.lastRef.current ?? 0) +
-        // state is opt-in on the server: naming it here is what subscribes
-        // this client to room_state as its own event (it no longer rides
-        // inside message frames).
-        "&events=message,reaction,game,members,state" +
-        (token ? "&invite=" + encodeURIComponent(token) : "");
-      const es = new EventSource(url);
-      esRef.current = es;
-      es.onopen = () => {
-        setStatus("live");
-        window.dispatchEvent(new Event("ac-stream-open"));
+      const ctrl = new AbortController();
+      ctrlRef.current = ctrl;
+      let retryMs = 3000;
+      const onFrame = (kind: string, data: string) => {
+        try {
+          if (kind === "members") {
+            window.clearTimeout(membersTimerRef.current);
+            membersTimerRef.current = window.setTimeout(() => void board.loadAllRef.current(), 300);
+          } else if (kind === "reaction") {
+            const d = JSON.parse(data) as {
+              id: number;
+              reactions?: Record<string, string[]>;
+            };
+            feed.setMessages((arr) =>
+              arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
+            );
+          } else if (kind === "game") {
+            const d = JSON.parse(data) as { game?: unknown };
+            if (d.game) gamesRef.current?.onFrame(d.game);
+          } else if (kind === "state") {
+            const d = JSON.parse(data) as { room_state?: RoomState };
+            if (d.room_state) board.applyState(d.room_state);
+          } else if (kind === "message") {
+            const m = JSON.parse(data) as Message;
+            feed.addMsg(m);
+            if (feed.lastRef.current === null || m.id > feed.lastRef.current) feed.lastRef.current = m.id;
+          }
+        } catch {
+          // malformed frame: ignore
+        }
       };
-      es.addEventListener("members", () => {
-        window.clearTimeout(membersTimerRef.current);
-        membersTimerRef.current = window.setTimeout(() => void board.loadAllRef.current(), 300);
-      });
-      es.addEventListener("reaction", (e) => {
-        try {
-          const d = JSON.parse((e as MessageEvent).data) as {
-            id: number;
-            reactions?: Record<string, string[]>;
-          };
-          feed.setMessages((arr) =>
-            arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
-          );
-        } catch {
-          // malformed frame: ignore
-        }
-      });
-      es.addEventListener("game", (e) => {
-        try {
-          const d = JSON.parse((e as MessageEvent).data) as { game?: unknown };
-          if (d.game) gamesRef.current?.onFrame(d.game);
-        } catch {
-          // malformed frame: ignore
-        }
-      });
-      es.addEventListener("state", (e) => {
-        try {
-          const d = JSON.parse((e as MessageEvent).data) as { room_state?: RoomState };
-          if (d.room_state) board.applyState(d.room_state);
-        } catch {
-          // malformed frame: ignore
-        }
-      });
-      es.addEventListener("message", (e) => {
-        try {
-          const m = JSON.parse((e as MessageEvent).data) as Message;
-          feed.addMsg(m);
-          if (feed.lastRef.current === null || m.id > feed.lastRef.current) feed.lastRef.current = m.id;
-        } catch {
-          // malformed frame: ignore
-        }
-      });
-      es.onerror = () => {
+      const dropped = () => {
+        if (ctrl.signal.aborted || cancelled) return;
         if (!deniedRef.current) setStatus("reconnecting");
-        if (es.readyState === EventSource.CLOSED) {
-          window.setTimeout(() => {
-            if (!cancelled) void recheck();
-          }, 3000);
-        }
+        window.setTimeout(() => {
+          if (!cancelled && ctrlRef.current === ctrl) void recheck();
+        }, retryMs);
       };
+      void (async () => {
+        try {
+          const res = await fetch(
+            "/api/rooms/" +
+              encodeURIComponent(room) +
+              "/stream?after=" +
+              (feed.lastRef.current ?? 0) +
+              // state is opt-in on the server: naming it here is what subscribes
+              // this client to room_state as its own event (it no longer rides
+              // inside message frames).
+              "&events=message,reaction,game,members,state",
+            {
+              headers: {
+                Accept: "text/event-stream",
+                ...(token ? { "X-Invite-Token": token } : {}),
+              },
+              signal: ctrl.signal,
+            }
+          );
+          if (!res.ok || !res.body) throw new Error("stream " + res.status);
+          setStatus("live");
+          window.dispatchEvent(new Event("ac-stream-open"));
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+            let cut = buf.indexOf("\n\n");
+            while (cut >= 0) {
+              const block = buf.slice(0, cut);
+              buf = buf.slice(cut + 2);
+              let kind = "message";
+              const dataLines: string[] = [];
+              for (const line of block.split("\n")) {
+                if (line.startsWith("event:")) kind = line.slice(6).trim();
+                else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+                else if (line.startsWith("retry:")) {
+                  const n = Number(line.slice(6).trim());
+                  if (Number.isFinite(n) && n >= 0) retryMs = n;
+                }
+              }
+              if (dataLines.length) onFrame(kind, dataLines.join("\n"));
+              else if (kind === "members") onFrame("members", "");
+              cut = buf.indexOf("\n\n");
+            }
+          }
+        } catch {
+          // Aborted on purpose (deny, unmount, a newer stream) or a
+          // network drop; dropped() tells the two apart.
+        }
+        dropped();
+      })();
     };
     streamRefLocal.fn = stream;
 
@@ -179,7 +211,7 @@ export function useRoomStream(opts: {
 
     return () => {
       cancelled = true;
-      esRef.current?.close();
+      ctrlRef.current?.abort();
       feed.endSettle();
       speaker.stopAll();
     };
