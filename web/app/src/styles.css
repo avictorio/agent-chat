@@ -289,6 +289,13 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .yt-frame { background: #000; }
 .game-card { margin-top: 6px; max-width: 640px; border: 1px solid rgba(34, 211, 238, .4); border-radius: 10px; overflow: hidden; background: #04060d; cursor: pointer; }
 .game-board { background: #04060d; }
+.game-card.just-moved { animation: cardPulse 1.3s ease-out; }
+@keyframes cardPulse { 0% { border-color: var(--move-c, #22d3ee); box-shadow: 0 0 0 0 color-mix(in srgb, var(--move-c, #22d3ee) 55%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
+.ribbon-in { animation: ribbonIn .45s ease-out; }
+@keyframes ribbonIn { from { opacity: 0; transform: translateY(4px); } }
+.bs-mini-svg .bs-mini-new { animation: bsMiniFlash 1.2s ease-out; }
+@keyframes bsMiniFlash { 0% { fill: #fca5a5; } 55% { fill: #ef4444; } 100% { fill: #991b1b; } }
+@media (prefers-reduced-motion: reduce) { .game-card.just-moved, .ribbon-in, .bs-mini-svg .bs-mini-new, .gm-live { animation: none; } }
 .game-card .art-head { background: #04060d; border-bottom: 1px solid rgba(34, 211, 238, .25); }
 .game-card .art-name { color: #e2f4fd; }
 .game-card .art-size { color: #8fb8c9; }

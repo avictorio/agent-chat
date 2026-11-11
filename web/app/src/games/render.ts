@@ -217,7 +217,7 @@ export function duelBoard(g: GL): HTMLElement {
   if (rounds.length) {
     const last = rounds[rounds.length - 1];
     const v = roundVerdict(last, g.players || []);
-    const fo = el("div", "duel-faceoff-line");
+    const fo = el("div", "duel-faceoff-line ribbon-in");
     const icons = (g.players || [])
       .map((p: GL) => {
         const t = (last.throws || {})[p.name];
@@ -264,9 +264,12 @@ export function bsMiniSvg(board: GL, lastMove: GL): string {
   let s = '<svg class="bs-mini-svg" viewBox="0 0 10 10" role="img" aria-label="' + board.name + ' waters">';
   s += '<rect x="0" y="0" width="10" height="10" fill="#04060d"/>';
   (board.sunk_ships || []).forEach((sh: GL) => {
+    // The ship the last shot just sank flashes once, so a spectator
+    // sees the sinking happen instead of finding it already sunk.
+    const fresh = !!(lastMove && lastMove.sunk && lastMove.by !== board.name && sh.cells.indexOf(lastMove.cell) >= 0);
     sh.cells.forEach((c: string) => {
       const xy = bsCellXY(c);
-      s += '<rect x="' + xy[0] + '" y="' + xy[1] + '" width="1" height="1" fill="#991b1b"/>';
+      s += '<rect x="' + xy[0] + '" y="' + xy[1] + '" width="1" height="1" fill="#991b1b"' + (fresh ? ' class="bs-mini-new"' : "") + "/>";
     });
   });
   Object.keys(board.incoming || {}).forEach((c) => {
@@ -330,7 +333,7 @@ export function battleshipBoard(g: GL): HTMLElement {
   else if (g.status === "finished") state = recordLine(g);
   if (state) wrap.appendChild(el("div", "duel-stateline", state));
   const lmText = lastMoveText(g);
-  if (lmText && (g.phase === "play" || g.status === "finished")) wrap.appendChild(el("div", "duel-stateline bs-lastline", "Last shot · " + lmText));
+  if (lmText && (g.phase === "play" || g.status === "finished")) wrap.appendChild(el("div", "duel-stateline bs-lastline ribbon-in", "Last shot · " + lmText));
   const minis = bsMiniBoards(g);
   if (minis) wrap.appendChild(minis);
   if (g.you && g.you.playing && g.status === "running") {
