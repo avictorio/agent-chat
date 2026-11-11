@@ -133,6 +133,12 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
+    // Upload tickets (media plan phase C, 2026-11-11): begin_upload mints a
+    // single-use, 15-minute ticket so a client that cannot present the invite
+    // token (an agent whose token lives in its gateway) can still PUT bytes.
+    // Only the ticket's SHA-256 is stored; the raw ticket exists solely in the
+    // begin_upload response and the PUT URL it authorizes.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
     try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch (e) {}
@@ -620,6 +626,66 @@ export class Room extends DurableObject {
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   }
+  // ---- Upload tickets (phase C): a single-use credential for one PUT ----
+  // Minted by begin_upload (MCP) or the REST upload-ticket route for a draft
+  // the member owns. The redeem route is deliberately unauthenticated: the
+  // ticket in the URL is the whole credential, which is what lets an agent
+  // whose invite token lives in its gateway (never in its sandbox) upload.
+  // (The TTL itself lives with the test hooks above: ticketTtlMs.)
+  async mintUploadTicket(msgId, kind, member, room) {
+    if (!this.ready) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
+    if (!r) return { status: 404, error: "No message with that id" };
+    if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
+    if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
+    const now = Date.now();
+    this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
+    const open = this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ?", member, now).toArray()[0];
+    if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const maxBytes = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
+    const expires = now + this.ticketTtlMs();
+    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes);
+    return { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
+  }
+
+  async redeemUpload(rawTicket, data, room) {
+    // An unknown room answers exactly like an unknown ticket: no hint.
+    if (!this.ready) return { status: 404, error: "Unknown upload ticket" };
+    const h = await sha256hex(String(rawTicket || ""));
+    const t = this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries FROM ut WHERE h = ?", h).toArray()[0];
+    // No hint whether a garbled ticket ever existed.
+    if (!t) return { status: 404, error: "Unknown upload ticket" };
+    const now = Date.now();
+    if (t.used) return { status: 410, error: "This upload link has already been used" };
+    if (now > t.expires) return { status: 410, error: "This upload link has expired" };
+    if (t.tries >= TICKET_MAX_TRIES) return { status: 410, error: "This upload link has had too many attempts" };
+    this.sql.exec("UPDATE ut SET tries = tries + 1 WHERE h = ?", h);
+    const inv = this.sql.exec("SELECT revoked FROM inv WHERE lower(name) = lower(?)", t.member).toArray()[0];
+    if (!inv || inv.revoked) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    const m = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray()[0];
+    if (!m) return { status: 404, error: "The draft this upload was opened for is gone" };
+    if (!m.draft) return { status: 409, error: "The draft this upload was opened for is already published" };
+    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The draft changed hands; open a fresh upload" };
+    const kind = t.kind;
+    if (!data.byteLength) return { status: 400, error: "The upload body is empty" };
+    if (data.byteLength > t.max_bytes) return { status: 413, error: kind === "image" ? "Images can be up to 5 MB" : kind === "audio" ? "Audio clips can be up to 5 MB" : "Videos can be up to 25 MB on a single-shot upload; larger files use the chunked flow" };
+    const type = kind === "image" ? sniffImage(data) : kind === "audio" ? sniffAudio(data) : sniffVideo(data);
+    if (!type) return { status: 415, error: kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV" };
+    // Same R2-only write as every other path (phase A): a storage failure is
+    // a 503 and does NOT consume the ticket, so the PUT can simply retry.
+    try { await this.putMedia(t.msg, kind, data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
+    if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, t.msg);
+    if (kind === "audio") this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, t.msg);
+    if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, t.msg);
+    this.sql.exec("UPDATE ut SET used = ? WHERE h = ?", now, h);
+    let published = false;
+    const mp = await this.maybeAutoPublish(t.msg, room);
+    if (mp) published = true;
+    return { status: 200, type: type, bytes: data.byteLength, published: published };
+  }
+
   // ---- Chunked video upload: multipart straight into R2, for files past the
   // single-request size limit. The client sends VIDEO_PART-sized pieces; the upload
   // state (upload id, received parts) lives in the md row until finish or abort.
@@ -2909,7 +2975,7 @@ function agentOnboarding(origin, room, name, token) {
     "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
     "  Endpoint: POST " + ep + "\n" +
     "  Header: X-Invite-Token: " + token + "\n" +
-    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a REST upload session for the bytes.\n" +
+    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a one-time upload URL for the bytes - the URL itself is the credential, no token needed.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
     "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs one hook watcher for every room you belong to: the watcher keeps a small registry of your rooms, listens to each room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in your rooms between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
     "Watcher registry line for this room - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll:\n" +
@@ -2928,7 +2994,8 @@ function agentOnboarding(origin, room, name, token) {
 // "as" to act under a name. Owner-only administration (invites, room
 // deletion, push diagnostics) is deliberately NOT in the catalog - it
 // stays on REST. Large media never rides the protocol: begin_upload hands
-// back a REST upload session (control plane here, bytes there).
+// back a one-time upload URL (control plane here, bytes there, and the URL
+// itself is the credential - no token crosses to wherever the bytes live).
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 function mcpTool(name, description, properties, required) {
   const props = Object.assign({ as: { type: "string", description: "Owner key only: act under this name. Invite callers ignore this - your name is fixed by your invite." } }, properties || {});
@@ -2940,7 +3007,7 @@ function mcpCatalog() {
     mcpTool("whoami", "Who this credential acts as in this room.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
-    mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). For anything larger, use begin_upload instead. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its chunked video verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
+    mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). Inline base64 is for tiny files only - for anything beyond a few KB, use begin_upload, whose one-time URL takes the raw bytes with no credential. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its media upload verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
     mcpTool("publish_message", "Publish one of your draft messages, optionally replacing its text.", { id: id, text: { type: "string" } }, ["id"]),
     mcpTool("react", "Add your reaction to a message (one emoji, or like/love/haha/wow/sad/angry). Pass reaction as null to remove yours.", { id: id, reaction: { type: ["string", "null"] } }, ["id", "reaction"]),
@@ -2972,8 +3039,8 @@ function mcpCatalog() {
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
     mcpTool("speak_message", "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.", { id: id }, ["id"]),
     mcpTool("get_voice", "Your cloned-voice status in this room (whether a voice is saved for you).", {}),
-    mcpTool("begin_upload", "Start a media upload the delegated way: creates a draft message and returns the REST session for the bytes (single-shot PUT, or the chunked video flow for files over 25 MB). Publish with publish_message when the bytes are in, unless publish_on_complete is set.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
-    mcpTool("attach_media", "Attach a small file (base64) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Larger files go through begin_upload.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
+    mcpTool("begin_upload", "Start a media upload: creates a draft message and returns a one-time upload URL that needs no other credential (valid 15 minutes, single use). PUT the raw bytes there, then publish_message - unless publish_on_complete is set. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
+    mcpTool("attach_media", "Attach a tiny file (base64, a few KB at most) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Any real file goes through begin_upload instead.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
   ];
   // Read hints matter: some harnesses (Hermes among them) ask for approval
   // before any tool that is not marked read-only, and their cron runs cannot
@@ -3098,9 +3165,11 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
       const kind = String(A.kind || "");
       if (["image", "audio", "video"].indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio or video");
       const msg = await stub.post(from, String(A.text || ""), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
-      const base = origin + "/api/rooms/" + room + "/messages/" + msg.id;
-      const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: { method: "PUT", url: base + "/" + kind, headers: { "X-Invite-Token": "<the token you called with>", "Content-Type": "<the file's media type>" }, max_bytes: kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX, note: "PUT the raw file bytes to this URL with your invite token (data plane on REST). Then call publish_message with message_id - unless publish_on_complete is set, in which case a chunked video publishes itself when it verifies." } };
-      if (kind === "video") out.upload.chunked = { start: base + "/video/start", part: base + "/video/part", finish: base + "/video/finish", status: base + "/video/status", stream: base + "/video/stream", note: "For files over 25 MB: the same chunked multipart flow the web app uses (10 MB parts up to 1 GB). See GET /api for the exact call shapes." };
+      const t = await stub.mintUploadTicket(msg.id, kind, from, room);
+      if (t.status !== 200) throw new Error(t.error);
+      const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, kind, t) };
+      if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
+      if (kind === "video") { const base = origin + "/api/rooms/" + room + "/messages/" + msg.id; out.upload.chunked = { start: base + "/video/start", part: base + "/video/part", finish: base + "/video/finish", status: base + "/video/status", stream: base + "/video/stream", note: "For files over 25 MB the chunked flow still authenticates with your invite token in this version - tickets cover single-shot uploads up to 25 MB. The same chunked multipart flow the web app uses (10 MB parts up to 1 GB); see GET /api for the exact call shapes." }; }
       return out;
     }
     case "attach_media": {
@@ -3160,6 +3229,25 @@ function b64urlDecode(text) {
   const t = String(text || "").replace(/-/g, "+").replace(/_/g, "/");
   const pad = t.length % 4 === 0 ? "" : "=".repeat(4 - (t.length % 4));
   return Uint8Array.from(atob(t + pad), (c) => c.charCodeAt(0));
+}
+// The upload object begin_upload and the REST upload-ticket route hand out
+// (media plan phase C). The URL is the credential: single-use, short-lived,
+// and the only place the raw ticket exists outside the client's hands.
+function ticketUpload(origin, room, kind, t) {
+  return {
+    method: "PUT",
+    url: origin + "/api/uploads/" + room + "/" + t.ticket,
+    headers: { "Content-Type": "<the file's media type>" },
+    auth: "none - the URL is the credential",
+    single_use: true,
+    expires_at: new Date(t.expires).toISOString(),
+    max_bytes: t.max_bytes,
+    note: "PUT the raw file bytes to url. No invite token or other credential: the URL itself authorizes this one upload, until expires_at. Then call publish_message with message_id."
+  };
+}
+async function sha256hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text)));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function concatBytes() {
   let n = 0;
@@ -3956,6 +4044,23 @@ function docs(o) {
     "    GET    /api/rooms/ROOM/messages/ID/speak   hear a message in its sender's cloned voice",
     "                                               (synthesized on first play, then cached in the room)",
     "",
+    "UPLOADING FILES",
+    "  The way to attach a real file - especially for agents, whose invite token may live in a",
+    "  gateway the file bytes never pass: begin_upload (MCP) or, for a draft that already exists,",
+    "  POST /api/rooms/ROOM/messages/ID/upload-ticket {\"kind\": \"image\"|\"audio\"|\"video\"}. Both",
+    "  return a one-time upload URL that needs NO other credential - the URL itself authorizes",
+    "  that single PUT, for 15 minutes, for one file up to the kind's single-shot cap (image and",
+    "  audio 5 MB, video 25 MB). The bytes are sniffed by content, never by Content-Type, and a",
+    "  ticket is spent only by a successful upload:",
+    "    curl -X PUT --data-binary @file.png -H \"Content-Type: image/png\" \"<upload url>\"",
+    "  Then publish the draft (publish_message, or POST /messages/ID/publish) - unless the draft",
+    "  was opened with publish_on_complete, in which case it publishes itself when the upload",
+    "  lands. Used or expired links answer 410; a wrong kind of file answers 415 and oversize",
+    "  413, and neither spends the link, so fix the file and PUT again. If storage itself is",
+    "  unavailable the answer is 503 and nothing was saved - retry the same PUT. Videos over",
+    "  25 MB still use the invite-token chunked flow below in this version. Inline base64",
+    "  (post_message / attach_media) is for tiny files only.",
+    "",
     "AUDIO MESSAGES",
     "  A message can carry one short audio clip, stored in the room with the message and played",
     "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 5 MB.",
@@ -4134,7 +4239,7 @@ function docs(o) {
     "    Stateless streamable-HTTP JSON-RPC with your invite token: send initialize, then tools/list",
     "    for the catalog (messages, reactions, board, games, voice, fetch, delegated uploads) and",
     "    tools/call to use them. Your name is fixed by your credential. Large media never rides the",
-    "    protocol: begin_upload returns a REST upload session and the bytes go there.",
+    "    protocol: begin_upload returns a one-time upload URL and the bytes go there - the URL itself is the credential.",
     "    Invited as an agent? This endpoint is your home surface: your invite's agent_onboarding",
     "    block (or the setup view the room page shows agent invites) has the paste-ready version.",
     "  POST /api/rooms/ROOM/tools/fetch    {\"from\": name, \"url\": \"https://...\", \"post\": true}",
@@ -4224,6 +4329,22 @@ export default {
       if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
       const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
       return json(await tstub.setTestTicketTtl(tb && tb.ttl_ms));
+    }
+    // Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
+    // begin_upload ticket. Deliberately NO access check: the ticket is the
+    // credential (single-use, 15 minutes, hash-only at rest). The ticket is
+    // never echoed back in any response.
+    const um = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/?$/);
+    if (um) {
+      const uroom = decodeURIComponent(um[1]).toLowerCase();
+      if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
+      if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB on a single-shot upload; larger files use the chunked flow" }, 413);
+      const ubuf = await request.arrayBuffer();
+      const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
+      const ur = await ustub.redeemUpload(decodeURIComponent(um[2]), ubuf, uroom);
+      if (ur.status !== 200) return json({ error: ur.error }, ur.status);
+      return json({ room: uroom, ok: true, type: ur.type, bytes: ur.bytes, published: ur.published });
     }
     if (path === "/emoji.json") {
       const data = env.REQUESTS ? await emojiList(env) : null;
@@ -4473,7 +4594,7 @@ export default {
         if (req.method === "ping") return ok({});
         if (req.method === "initialize") {
           const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
-          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: "1.0.0" }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a REST upload session. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it." });
+          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: "1.0.0" }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it." });
         }
         if (!acc.ok) return fail(-32001, acc.error);
         if (req.method === "tools/list") return ok({ tools: mcpCatalog() });
@@ -5279,6 +5400,27 @@ export default {
       const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? String(body.text) : undefined);
       if (r.status !== 200) return json({ error: r.error }, r.status);
       return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
+    }
+
+    // Mint an upload ticket for one of your drafts (phase C): the REST twin
+    // of MCP begin_upload for a draft that already exists. The response is
+    // the only place the raw ticket ever appears.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/upload-ticket\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const id = parseInt(m[2], 10);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      const body = await readBody(request);
+      const kind = String((body && body.kind) || "");
+      if (["image", "audio", "video"].indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio or video" }, 400);
+      const member = acc.name || String((body && body.from) || "");
+      const t = await stub.mintUploadTicket(id, kind, member, room);
+      if (t.status !== 200) return json({ error: t.error }, t.status);
+      return json({ room: room, message_id: id, draft: true, upload: ticketUpload(url.origin, room, kind, t) });
     }
 
     // Delete one of your own messages (the owner can delete any). Its media

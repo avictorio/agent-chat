@@ -647,9 +647,13 @@ async function waitUp() {
     check('mcp duel throws resolve and finish a best-of-1', !!mcpDuelEnd && mcpDuelEnd.resolved === true && mcpDuelEnd.game.status === 'finished' && mcpDuelEnd.game.winner === 'Poc', JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', text: 'mcp delegated upload' } }, { token: TP });
     const up = r.json && r.json.result && r.json.result.structuredContent;
-    check('mcp begin_upload returns a REST session', !!up && !!up.message_id && up.upload && up.upload.method === 'PUT' && String(up.upload.url).includes('/messages/' + up.message_id + '/image'), JSON.stringify(r.json).slice(0, 220));
-    r = await req('PUT', R2 + '/messages/' + up.message_id + '/image', { token: TP, headers: { 'Content-Type': 'image/png' }, body: PNG });
-    check('delegated bytes land over REST', r.status === 200, r.status);
+    check('mcp begin_upload returns a one-time ticket URL', !!up && !!up.message_id && up.upload && up.upload.method === 'PUT' && String(up.upload.url).includes('/api/uploads/') && up.upload.single_use === true && String(up.upload.auth).includes('URL is the credential') && !String(up.upload.url).includes(TP), JSON.stringify(r.json).slice(0, 220));
+    // The whole point of the ticket: the PUT carries no credential at all.
+    // (wrangler dev reports the production origin in returned URLs, so the
+    // suite rewrites the origin back to the dev base before dereferencing.)
+    const putTicket = (url, body, type) => fetch(BASE + new URL(url).pathname, { method: 'PUT', headers: { 'Content-Type': type || 'image/png' }, body });
+    r = await putTicket(up.upload.url, PNG);
+    check('ticket PUT with no credential lands the bytes', r.status === 200, r.status);
     r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: up.message_id } }, { token: TP });
     check('mcp publish completes the upload', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && r.json.result.structuredContent.id === up.message_id), JSON.stringify(r.json).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=10', { token: TRex });
@@ -662,6 +666,71 @@ async function waitUp() {
     await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: R2.slice('/api/rooms/'.length), on: false } });
     r = await mcp(R2, 'tools/call', { name: 'attach_media', arguments: { id: up.message_id, kind: 'image', base64: PNG.toString('base64') } }, { token: TP });
     check('mcp attach_media works again after the outage', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+
+    // Phase C: upload tickets - lifecycle and failure semantics.
+    const room2Name = R2.slice('/api/rooms/'.length);
+    const mintTicket = async (args) => {
+      const rr = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: args || { kind: 'image', text: 'ticket probe' } }, { token: TP });
+      return rr.json && rr.json.result && rr.json.result.structuredContent;
+    };
+    // A spent ticket answers 410 on a second PUT.
+    r = await putTicket(up.upload.url, PNG);
+    check('spent ticket -> 410', r.status === 410, r.status);
+    // A garbled ticket answers 404 with no hint.
+    r = await putTicket(BASE + '/api/uploads/' + room2Name + '/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', PNG);
+    check('garbled ticket -> 404', r.status === 404, r.status);
+    // Wrong-kind bytes answer 415 and do not spend the ticket.
+    const tk1 = await mintTicket();
+    r = await putTicket(tk1.upload.url, mp4(), 'video/mp4');
+    check('video bytes on an image ticket -> 415', r.status === 415, r.status);
+    r = await putTicket(tk1.upload.url, PNG);
+    check('the same ticket still takes the right file after a 415', r.status === 200, r.status);
+    // Oversize answers 413 and does not spend the ticket.
+    const tk2 = await mintTicket();
+    r = await putTicket(tk2.upload.url, Buffer.alloc(5000001, 7));
+    check('oversize on a ticket -> 413', r.status === 413, r.status);
+    r = await putTicket(tk2.upload.url, PNG);
+    check('the same ticket still works after a 413', r.status === 200, r.status);
+    // Ticket media on a draft stays private until publish (existing rule, new path).
+    r = await req('GET', R2 + '/messages/' + tk2.message_id + '/image', { token: TRex });
+    check('ticket-uploaded draft media is private before publish', r.status === 404, r.status);
+    r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: tk2.message_id } }, { token: TP });
+    check('publish after ticket upload works', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 160));
+    r = await req('GET', R2 + '/messages/' + tk2.message_id + '/image', { token: TRex });
+    check('ticket-uploaded media is room-visible after publish', r.status === 200, r.status);
+    // The ticket string leaks nowhere: not in listings, not in the publish result.
+    const listing = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    const rawTicket = tk2.upload.url.split('/').pop();
+    check('ticket appears in no listing', !JSON.stringify(listing.json).includes(rawTicket));
+    // A ticket for an already-published draft answers 409.
+    const tk3 = await mintTicket({ kind: 'image', text: 'publish first' });
+    await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: tk3.message_id } }, { token: TP });
+    r = await putTicket(tk3.upload.url, PNG);
+    check('ticket whose draft got published -> 409', r.status === 409, r.status);
+    // An expired ticket answers 410 (TTL shortened through the test hook).
+    await req('POST', '/api/test-hooks/ticket-ttl', { owner: true, json: { room: room2Name, ttl_ms: 1 } });
+    const tk4 = await mintTicket();
+    await new Promise(res => setTimeout(res, 30));
+    r = await putTicket(tk4.upload.url, PNG);
+    check('expired ticket -> 410', r.status === 410, r.status);
+    await req('POST', '/api/test-hooks/ticket-ttl', { owner: true, json: { room: room2Name, ttl_ms: 0 } });
+    // A storage outage answers 503 and does not spend the ticket.
+    const tk5 = await mintTicket();
+    await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: room2Name, on: true } });
+    r = await putTicket(tk5.upload.url, PNG);
+    check('ticket PUT during outage -> 503', r.status === 503, r.status);
+    await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: room2Name, on: false } });
+    r = await putTicket(tk5.upload.url, PNG);
+    check('the same ticket retries fine after the outage', r.status === 200, r.status);
+    // A ticket dies with its member's invite.
+    const invRev = await req('POST', R2 + '/invites', { owner: true, json: { name: 'TickRev', kind: 'agent' } });
+    const TRev = invRev.json.token;
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', text: 'revoked member upload' } }, { token: TRev });
+    const tk6 = r.json && r.json.result && r.json.result.structuredContent;
+    check('second member can mint a ticket', !!tk6 && !!tk6.upload, JSON.stringify(r.json).slice(0, 160));
+    await req('DELETE', R2 + '/invites/' + TRev, { owner: true });
+    r = await putTicket(tk6.upload.url, PNG);
+    check('ticket of a revoked member -> 403', r.status === 403, r.status);
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });

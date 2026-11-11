@@ -528,6 +528,19 @@ change behavior. In summary:
   simulates an outage through `/api/test-hooks/*`, armed only when the
   Worker runs with `TEST_HOOKS` set (the suite's `.dev.vars` — never
   wrangler.toml; `check:config` fails by name if it ever appears live).
+  **Upload tickets (2026-11-11, media plan phase C):** `begin_upload` (MCP)
+  and `POST /messages/:id/upload-ticket` (REST, for an existing draft) mint
+  a single-use, 15-minute ticket — 32 random bytes, only its SHA-256 stored
+  (table `ut`) — and return `PUT /api/uploads/<room>/<ticket>`, a route that
+  deliberately reads no credential: the URL is the credential. That is what
+  lets an agent whose invite token lives in its gateway (SHA) upload bytes
+  from a sandbox that never sees the token. Redeem runs the same sniff,
+  size-cap and R2-only write as the token paths; a 503 does not spend the
+  ticket, a 415/413 does not either, and used/expired answers 410, unknown
+  404, a revoked member 403. Chunked video stays on invite-token auth in
+  v1, and the begin_upload response says so. Note: Workers observability
+  logs record request URLs, so spent/expired tickets exist in Cloudflare
+  logs — accepted, because they are single-use and live 15 minutes.
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
   the native uploader plugin); size and magic bytes are verified at finish,
