@@ -566,8 +566,11 @@ change behavior. In summary:
   32-byte key kept in the room's own cfg (media_sig_key) - no new
   Worker secret, nothing for check:config to inventory. Read routes
   accept a valid signature with no credential (an invalid or expired
-  one answers 403), and header auth plus ?invite= keep working for
-  one release before ?invite= is removed from media routes. Because
+  one answers 403); header auth kept working throughout, and ?invite=
+  kept working for one transition release before its removal from the
+  media read routes shipped 2026-11-11 (a media GET/HEAD now takes the
+  header or a signature only; writes and non-media routes are
+  unchanged). Because
   serialization is sync and WebCrypto is async-only, the HMAC uses a
   small plain-JS SHA-256 (sha256Bytes/hmacSha256 by the signed-media
   helpers; verified against RFC 4231 vectors and node:crypto). The
@@ -575,9 +578,9 @@ change behavior. In summary:
   (withInvite is a pass-through funnel). Follow-up (same day): the web
   app's stream is now a fetch-based SSE reader and speak playback is an
   authenticated fetch into a blob, both sending X-Invite-Token, so the
-  web app puts the token in no URL at all; the server still accepts
-  ?invite= on media and stream routes (the legacy pages and other
-  header-less clients use it) until the removal release. A page left open past the
+  web app puts the token in no URL at all. The server still accepts
+  ?invite= on the stream and non-media routes (the legacy pages and
+  other header-less clients use it there). A page left open past the
   one-hour expiry gets fresh URLs from any listing re-read (stream
   reconnect or pull-to-refresh).
   Video goes up single-shot (≤25 MB), chunked multipart, or via the

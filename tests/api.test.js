@@ -164,15 +164,15 @@ async function waitUp() {
     const did = draft.json.id;
     r = await req('PUT', R + '/messages/' + did + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
     check('attach image to draft', r.status === 200, r.status);
-    r = await req('GET', R + '/messages/' + did + '/image?invite=' + TB);
+    r = await req('GET', R + '/messages/' + did + '/image', { token: TB });
     check('other member cannot read draft media', r.status === 404, r.status);
-    r = await req('GET', R + '/messages/' + did + '/image?invite=' + TA);
+    r = await req('GET', R + '/messages/' + did + '/image', { token: TA });
     check('sender reads own draft media', r.status === 200, r.status);
     r = await req('GET', R + '/messages/' + did + '/image', { owner: true });
     check('owner reads draft media', r.status === 200, r.status);
     r = await req('POST', R + '/messages/' + did + '/publish', { token: TA, json: {} });
     check('publish works', r.status === 200, r.status);
-    r = await req('GET', R + '/messages/' + did + '/image?invite=' + TB);
+    r = await req('GET', R + '/messages/' + did + '/image', { token: TB });
     check('published media is room-visible', r.status === 200, r.status);
 
     // Phase A: an R2 outage fails media writes all-or-nothing (503, nothing saved).
@@ -249,6 +249,11 @@ async function waitUp() {
     check('past exp -> 403', r.status === 403, r.status);
     r = await req('GET', barePath, { token: TA });
     check('bare url with header auth still -> 200', r.status === 200, r.status);
+    // Phase E close-out: ?invite= no longer authenticates a media read.
+    r = await req('GET', barePath + '?invite=' + TA, {});
+    check('media read with only ?invite= -> 401', r.status === 401, r.status);
+    r = await req('GET', R + '/messages?limit=5', { token: TA });
+    check('?invite= retirement is media-only: listing still answers header auth', r.status === 200, r.status);
     r = await req('GET', R + '/messages?limit=1000', { token: TA });
     const withImg = (r.json.messages || []).filter((x) => x.image);
     check('listing urls are signed, no invite= anywhere', withImg.length > 0 && withImg.every((x) => /[?&]exp=\d+&sig=/.test(x.image.url)) && !/invite=/.test(r.text), withImg.length + ' images');
@@ -260,6 +265,9 @@ async function waitUp() {
     const avPath = new URL(me.avatar, BASE).pathname + new URL(me.avatar, BASE).search;
     r = await req('GET', avPath, {});
     check('signed avatar reads with no credential -> 200', r.status === 200 && r.headers.get('content-type') === 'image/png', r.status);
+    const avBare = new URL(me.avatar, BASE).pathname;
+    r = await req('GET', avBare + '?invite=' + TA, {});
+    check('avatar read with only ?invite= -> 401', r.status === 401, r.status);
     await req('DELETE', R + '/avatar', { token: TA });
 
     // Revocation.

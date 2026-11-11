@@ -4188,7 +4188,7 @@ function docs(o) {
     "                                               (Content-Type: image/png etc.) or JSON {\"image\": \"<base64 or data: URL>\"}",
     "    DELETE /api/rooms/ROOM/avatar              removes yours",
     "    GET    /api/rooms/ROOM/avatars/NAME        the image (/members carries a signed URL that works",
-    "                                             for about an hour with no credential; ?invite=TOKEN also works this release)",
+    "                                             for about an hour with no credential; the header also works - ?invite= no longer authenticates media reads)",
     "    PUT|DELETE /api/rooms/ROOM/members/NAME/avatar   owner key: set or clear anyone's",
     "  GET /members gives each member an avatar URL (or null). Streams send an \"event: members\" when one changes.",
     "  claude has a fixed avatar in the web room.",
@@ -4244,7 +4244,7 @@ function docs(o) {
     "    PUT    /api/rooms/ROOM/messages/ID/audio   attach to your own message (or the owner key): the",
     "                                               audio bytes, or JSON {\"audio\": \"<base64>\"}",
     "    GET    /api/rooms/ROOM/messages/ID/audio   the clip (listings carry signed URLs that work for",
-    "                                               about an hour with no credential; ?invite=TOKEN also works this release)",
+    "                                               about an hour with no credential; the header also works - ?invite= no longer authenticates media reads)",
     "",
     "IMAGE MESSAGES",
     "  One image per message, up to 5 MB (JPEG, PNG, GIF, WebP or AVIF), attached the same ways as",
@@ -4255,7 +4255,7 @@ function docs(o) {
     "  enough on its own - \"text\" may be empty when one is present.",
     "  Messages with an image carry \"image\": {\"type\", \"bytes\", \"url\"} (null when there is",
     "  none), and the image itself is at GET /api/rooms/ROOM/messages/ID/image (same access as",
-    "  about an hour with no credential; header auth and ?invite=TOKEN also work this release).",
+    "  about an hour with no credential; the X-Invite-Token header also works - ?invite= no longer authenticates media reads).",
     "",
     "VIDEO MESSAGES",
     "  One video per message (MP4, WebM or MOV). Up to 25 MB it attaches like an image:",
@@ -4288,7 +4288,7 @@ function docs(o) {
     "  Markdown in a card, with the raw file one click away. Messages carry \"html\" / \"doc\"",
     "  as {\"type\", \"bytes\", \"name\", \"url\"} (null when absent); the content itself is at",
     "  GET /api/rooms/ROOM/messages/ID/html and .../ID/doc (same access as the room;",
-    "  signed URLs from listings work for about an hour; ?invite=TOKEN also works this release).",
+    "  signed URLs from listings work for about an hour; the header also works - ?invite= no longer authenticates media reads).",
     "",
     "PHONE NOTIFICATIONS (WEB PUSH)",
     "  Members can get a phone notification for new messages via Web Push. Serve",
@@ -4472,6 +4472,11 @@ export default {
     const path = url.pathname;
     const owner = !!env.OWNER_KEY && request.headers.get("X-Owner-Key") === env.OWNER_KEY;
     const invite = (request.headers.get("X-Invite-Token") || url.searchParams.get("invite") || "").trim();
+    // Media reads (phase E close-out, 2026-11-11): ?invite= is retired on
+    // the byte-serving routes - a media GET/HEAD authenticates with the
+    // header or a signed URL only. Writes and non-media routes keep the
+    // merged form above.
+    const inviteHdr = (request.headers.get("X-Invite-Token") || "").trim();
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(APP_INDEX);
@@ -4798,7 +4803,7 @@ export default {
     }
 
     // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
-    // reading needs the same access as the room (?invite= works for img tags).
+    // reading takes the header or a signed URL (?invite= no longer authenticates media reads).
     m = path.match(/^\/api\/rooms\/([^\/]+)\/(?:avatar|members\/([^\/]+)\/avatar|avatars\/([^\/]+))\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
@@ -4806,7 +4811,7 @@ export default {
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
       if (m[3] !== undefined) {
         if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-        let acc = await stub.access(invite, owner);
+        let acc = await stub.access(inviteHdr, owner);
         if (!acc.ok) {
           const ss = await mediaSigState(env, room, decodeURIComponent(m[3]).toLowerCase(), "avatar", url);
           if (ss === "ok") acc = { ok: true, name: null };
@@ -5301,7 +5306,7 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      let acc = await stub.access(invite, owner);
+      let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
       if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
         const ss = await mediaSigState(env, room, id, "speak", url);
         if (ss === "ok") acc = { ok: true, name: null };
@@ -5357,7 +5362,7 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      let acc = await stub.access(invite, owner);
+      let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
       if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
         const ss = await mediaSigState(env, room, id, "audio", url);
         if (ss === "ok") acc = { ok: true, name: null };
@@ -5388,15 +5393,15 @@ export default {
       return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } });
     }
 
-    // Images attached to messages. Reading needs the same access as the room
-    // (?invite= works for img tags); attaching is the sender's own invite or the owner key.
+    // Images attached to messages. Reading takes the header or a signed URL
+    // (?invite= no longer authenticates media reads); attaching is the sender's own invite or the owner key.
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/image\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      let acc = await stub.access(invite, owner);
+      let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
       if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
         const ss = await mediaSigState(env, room, id, "image", url);
         if (ss === "ok") acc = { ok: true, name: null };
@@ -5434,7 +5439,7 @@ export default {
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      let acc = await stub.access(invite, owner);
+      let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
       if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
         const ss = await mediaSigState(env, room, id, "video", url);
         if (ss === "ok") acc = { ok: true, name: null };
@@ -5476,7 +5481,7 @@ export default {
       const id = parseInt(m[2], 10);
       const kind = m[3];
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      let acc = await stub.access(invite, owner);
+      let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
       if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
         const ss = await mediaSigState(env, room, id, kind, url);
         if (ss === "ok") acc = { ok: true, name: null };
