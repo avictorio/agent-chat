@@ -1552,6 +1552,22 @@ export class Room extends DurableObject {
     return opp.fleet.filter((s) => s.hits.length >= s.size).length;
   }
 
+  // What anyone in the room may see of a battleship board: the fire a
+  // captain has taken (the rival's own shot record, already public in
+  // the counts) and the ships that are already sunk. Un-hit fleet
+  // cells never leave the server - this is the spectator's board.
+  bsPublicBoards(g) {
+    const st = g.st;
+    return st.players.map((p) => {
+      const foe = st.players.find((q) => q.name !== p.name);
+      const incoming = {};
+      if (foe) for (const k of Object.keys(foe.shots || {})) incoming[this.bsLabel(k)] = foe.shots[k];
+      const sunkShips = [];
+      if (p.fleet) for (const s of p.fleet) if (s.hits.length >= s.size) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+      return { name: p.name, hex: p.hex, incoming: incoming, sunk_ships: sunkShips };
+    });
+  }
+
   battleshipSummary(g) {
     const st = g.st;
     return {
@@ -1559,6 +1575,7 @@ export class Room extends DurableObject {
       phase: g.status === "running" ? st.phase : null, turn: st.turn, turn_of: g.status === "running" && st.phase === "play" ? st.turn_of : null,
       turn_seconds: st.tick_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       winner: st.winner || null, declined_by: st.declined_by || null,
+      last_move: st.last_move || null, boards: this.bsPublicBoards(g),
       players: st.players.map((p) => {
         const vals = Object.values(p.shots || {});
         return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, placed: !!p.fleet, shots: vals.length, hits: vals.filter((v) => v === "hit").length, sunk: this.bsSunkBy(g, p.name), afloat: this.bsAfloat(p) };
@@ -1672,16 +1689,19 @@ export class Room extends DurableObject {
     if (me.shots[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + " (" + me.shots[key] + ")" };
     const ship = this.bsShipAt(opp, key);
     let note;
+    let sunkSize = null;
     if (ship) {
       me.shots[key] = "hit";
       ship.hits.push(key);
-      note = ship.hits.length >= ship.size
+      if (ship.hits.length >= ship.size) sunkSize = ship.size;
+      note = sunkSize
         ? me.name + " fires " + this.bsLabel(key) + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
         : me.name + " fires " + this.bsLabel(key) + " - hit.";
     } else {
       me.shots[key] = "miss";
       note = me.name + " fires " + this.bsLabel(key) + " - miss.";
     }
+    st.last_move = { by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
     st.log.push({ tick: st.turn, text: note });
     if (!st.misses) st.misses = {};
     st.misses[me.name] = 0;
@@ -3649,6 +3669,10 @@ function docs(o) {
     "           you have already fired at answers 400. GET /games/ID returns your fleet",
     "           and shots in full, the rival's board only as your shots and sinkings have",
     "           revealed it (sunk ships are public), whose turn it is, and your legal_moves.",
+    "           Every view also carries boards (the public record for spectators: per",
+    "           captain, the fire their waters have taken and their sunk ships - never an",
+    "           un-hit hull) and last_move ({by, cell, result, sunk, turn}) so clients can",
+    "           show the battle and animate the latest shot.",
     "    The clock: a turn that expires passes to the rival and counts as a miss; three",
     "           missed turns in a row forfeit the match. The Referee posts only the result.",
     "  Humans play from the arena: one tap places a random fleet, then tap a cell on the",

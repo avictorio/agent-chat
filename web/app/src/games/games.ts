@@ -7,7 +7,9 @@ import {
   clockBar,
   duelBoard,
   duelScoreLine,
+  fleetStrip,
   gameMetaText,
+  lastMoveText,
   roundVerdict,
   setClockBar,
   THROW_BEATS,
@@ -25,6 +27,88 @@ import type { ViewerApi } from "../shell/viewer";
 // itself is display-only SVG.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// Battleship impact dressing: the newest shot (by turn) is animated
+// once per match - later repaints keep only its white ring. The map
+// remembers which turn each match last celebrated.
+const bsSeenMove = new Map<number, number>();
+
+// Tap-to-place drafts, kept outside the render so a state refresh
+// mid-placement does not lift the hulls already laid.
+const bsDrafts = new Map<number, { placed: { start: string; dir: string; size: number }[]; orient: string }>();
+
+// The cells a hull would occupy from a bow cell, or null when it
+// would run off the board.
+function bsShipCells(start: string, dir: string, size: number): string[] | null {
+  const x0 = start.charCodeAt(0) - 65;
+  const y0 = parseInt(start.slice(1), 10) - 1;
+  const cells: string[] = [];
+  for (let i = 0; i < size; i++) {
+    const x = dir === "H" ? x0 + i : x0;
+    const y = dir === "H" ? y0 : y0 + i;
+    if (x > 9 || y > 9) return null;
+    cells.push(String.fromCharCode(65 + x) + (y + 1));
+  }
+  return cells;
+}
+function bsIsNewMove(g: GL): boolean {
+  const lm = g && g.last_move;
+  if (!lm) return false;
+  const seen = bsSeenMove.get(g.id) || 0;
+  if (lm.turn > seen) {
+    bsSeenMove.set(g.id, lm.turn);
+    return true;
+  }
+  return false;
+}
+
+function bsInnerGrid(frame: HTMLElement): HTMLElement | null {
+  if (frame.classList.contains("bs-grid")) return frame;
+  return frame.querySelector(".bs-grid");
+}
+
+function bsCellAt(frame: HTMLElement, label: string): HTMLElement | null {
+  const inner = bsInnerGrid(frame);
+  if (!inner) return null;
+  const idx = label.charCodeAt(0) - 65 + (parseInt(label.slice(1), 10) - 1) * 10;
+  return (inner.children[idx] as HTMLElement) || null;
+}
+
+// Ring (and, on first sight, burst or splash) the cell the last shot
+// landed on, in the grid of the captain whose waters took it.
+function markLastShot(grid: HTMLElement, g: GL, ownerName: string, fresh: boolean) {
+  const lm = g && g.last_move;
+  if (!lm || lm.by === ownerName) return;
+  const cell = bsCellAt(grid, lm.cell);
+  if (!cell) return;
+  cell.classList.add("bs-last");
+  if (fresh) cell.classList.add(lm.result === "hit" ? "bs-boom" : "bs-splash");
+}
+
+// On first sight of a sinking, play the sinking on the ship the last
+// shot just finished: its cells flash and settle into the wreck.
+function markSinking(grid: HTMLElement, ships: GL[], g: GL, ownerName: string, fresh: boolean) {
+  const lm = g && g.last_move;
+  if (!fresh || !lm || !lm.sunk || lm.by === ownerName) return;
+  const ship = (ships || []).filter((s: GL) => s.size === lm.sunk && (s.cells || []).indexOf(lm.cell) >= 0)[0];
+  if (!ship) return;
+  ship.cells.forEach((c: string) => {
+    const cell = bsCellAt(grid, c);
+    if (cell) cell.classList.add("bs-sinking");
+  });
+}
+
+// The arena banner announcing the last shot, duel-verdict style.
+function bsBanner(g: GL, fresh: boolean): HTMLElement | null {
+  const lm = g && g.last_move;
+  if (!lm) return null;
+  const b = el("div", "duel-verdict bs-verdict" + (lm.result === "hit" ? "" : " clash"));
+  b.appendChild(el("span", "v-icons", lm.result === "hit" ? "💥" : "💦"));
+  b.appendChild(el("span", "", lastMoveText(g)));
+  if (lm.sunk) b.style.borderColor = "#f97316";
+  if (fresh) b.classList.add("reveal-in");
+  return b;
+}
 
 /* ---------- the store ---------- */
 
@@ -364,25 +448,130 @@ export function createGameStore(opts: {
     const myName = opts.meName();
     const me = players.filter((p: GL) => p.name === myName)[0];
     const opp = players.filter((p: GL) => p.name !== myName)[0];
+    const freshMove = bsIsNewMove(g);
+    if (!(you.playing && me && opp && g.phase === "setup" && !you.fleet)) bsDrafts.delete(g.id);
     if (!you.playing || !me || !opp) {
       const big = el("div", "lc-board-big");
       big.appendChild(battleshipBoard(g));
       wrap.appendChild(big);
-      note.textContent = "Spectating - fleets stay hidden; the boards are for their captains.";
+      if (g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
+        const banner = bsBanner(g, freshMove);
+        if (banner) wrap.appendChild(banner);
+        const boards = el("div", "bs-boards");
+        g.boards.forEach((b: GL) => {
+          const states: Record<string, string> = {};
+          Object.keys(b.incoming || {}).forEach((c) => {
+            states[c] = b.incoming[c];
+          });
+          (b.sunk_ships || []).forEach((s: GL) => {
+            s.cells.forEach((c: string) => {
+              states[c] = "sunk";
+            });
+          });
+          const side = el("div", "bs-side");
+          side.appendChild(el("div", "bs-title", b.name + "'s waters"));
+          side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: GL) => s.size)));
+          const grid = bsGrid(states, b.hex, null, b.sunk_ships || []);
+          markLastShot(grid, g, b.name, freshMove);
+          markSinking(grid, b.sunk_ships || [], g, b.name, freshMove);
+          side.appendChild(grid);
+          boards.appendChild(side);
+        });
+        wrap.appendChild(boards);
+        note.textContent = "Spectating - every shot is public; un-hit ships stay hidden.";
+      } else {
+        note.textContent = "Spectating - fleets stay hidden; the boards are for their captains.";
+      }
       wrap.appendChild(note);
     } else if (g.phase === "setup" && !you.fleet) {
       const big = el("div", "lc-board-big");
       big.appendChild(battleshipBoard(g));
       wrap.appendChild(big);
+      let draft = bsDrafts.get(g.id);
+      if (!draft) {
+        draft = { placed: [], orient: "H" };
+        bsDrafts.set(g.id, draft);
+      }
+      const FLEET = [5, 4, 3, 3, 2];
+      const placedCells = new Set<string>();
+      const ships: GL[] = [];
+      draft.placed.forEach((p) => {
+        const cells = bsShipCells(p.start, p.dir, p.size) || [];
+        cells.forEach((c) => placedCells.add(c));
+        ships.push({ size: p.size, cells });
+      });
+      const states: Record<string, string> = {};
+      placedCells.forEach((c) => {
+        states[c] = "ship";
+      });
+      const nextSize = FLEET[draft.placed.length] || 0;
+      const tryPlace = (label: string) => {
+        if (!nextSize || !draft) return;
+        const cells = bsShipCells(label, draft.orient, nextSize);
+        if (!cells) {
+          note.textContent = "That hull runs off the board from " + label + " - start it closer to the middle, or rotate it.";
+          return;
+        }
+        if (cells.some((c) => placedCells.has(c))) {
+          note.textContent = "That hull overlaps one already down - give it clear water.";
+          return;
+        }
+        draft.placed.push({ start: label, dir: draft.orient, size: nextSize });
+        note.textContent = "";
+        renderBattleshipView(g, true);
+      };
+      const boards = el("div", "bs-boards");
+      const side = el("div", "bs-side");
+      side.appendChild(el("div", "bs-title", "Your waters - place your fleet"));
+      side.appendChild(bsGrid(states, me.hex, tryPlace, ships, "Place at "));
+      boards.appendChild(side);
+      wrap.appendChild(boards);
+      wrap.appendChild(
+        el(
+          "div",
+          "duel-statusline",
+          nextSize
+            ? "Next hull: your " + nextSize + "-ship, lying " + (draft.orient === "H" ? "horizontal" : "vertical") + " from the cell you tap."
+            : "Fleet complete - send it when it looks right."
+        )
+      );
       const row = el("div", "duel-pad");
-      const b = el("button", "duel-btn", "Place my fleet (random)");
-      b.type = "button";
-      b.addEventListener("click", () => {
+      const rot = el("button", "duel-btn", "Rotate hull");
+      rot.type = "button";
+      rot.addEventListener("click", () => {
+        if (!draft) return;
+        draft.orient = draft.orient === "H" ? "V" : "H";
+        renderBattleshipView(g, true);
+      });
+      row.appendChild(rot);
+      const undo = el("button", "duel-btn quiet", "Undo last hull");
+      undo.type = "button";
+      undo.addEventListener("click", () => {
+        if (!draft || !draft.placed.length) return;
+        draft.placed.pop();
+        renderBattleshipView(g, true);
+      });
+      row.appendChild(undo);
+      const rnd = el("button", "duel-btn quiet", "Place randomly instead");
+      rnd.type = "button";
+      rnd.addEventListener("click", () => {
+        bsDrafts.delete(g.id);
         void sendMove(g.id, "random", note);
       });
-      row.appendChild(b);
+      row.appendChild(rnd);
+      if (!nextSize) {
+        const go = el("button", "duel-btn", "Place this fleet");
+        go.type = "button";
+        go.addEventListener("click", () => {
+          if (!draft) return;
+          const spec = draft.placed.map((p) => p.start + p.dir).join(",");
+          bsDrafts.delete(g.id);
+          void sendMove(g.id, spec, note);
+        });
+        row.appendChild(go);
+      }
       wrap.appendChild(row);
-      note.textContent = "The referee scatters your five ships (5, 4, 3, 3, 2). Agents can place exact layouts by API instead.";
+      if (!note.textContent) note.textContent = "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
       wrap.appendChild(note);
     } else {
       const boards = el("div", "bs-boards");
@@ -397,7 +586,11 @@ export function createGameStore(opts: {
       });
       const ownWrap = el("div", "bs-side");
       ownWrap.appendChild(el("div", "bs-title", "Your waters"));
-      ownWrap.appendChild(bsGrid(ownStates, me.hex, null));
+      ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size)));
+      const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || []);
+      markLastShot(ownGrid, g, myName, freshMove);
+      markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
+      ownWrap.appendChild(ownGrid);
       boards.appendChild(ownWrap);
       const oppStates: Record<string, string> = {};
       Object.keys(you.shots || {}).forEach((c) => {
@@ -411,10 +604,14 @@ export function createGameStore(opts: {
       const canFire = g.status === "running" && g.phase === "play" && you.your_turn;
       const oppWrap = el("div", "bs-side");
       oppWrap.appendChild(el("div", "bs-title", opp.name + "'s waters" + (canFire ? " - tap a cell to fire" : "")));
-      oppWrap.appendChild(
-        bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null)
-      );
+      oppWrap.appendChild(fleetStrip(opp.hex, (you.sunk_ships || []).map((s: GL) => s.size)));
+      const oppGrid = bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null, you.sunk_ships || []);
+      markLastShot(oppGrid, g, opp.name, freshMove);
+      markSinking(oppGrid, you.sunk_ships || [], g, opp.name, freshMove);
+      oppWrap.appendChild(oppGrid);
       boards.appendChild(oppWrap);
+      const banner = bsBanner(g, freshMove);
+      if (banner) wrap.appendChild(banner);
       wrap.appendChild(boards);
       let status = "";
       if (g.status === "finished") status = g.winner ? (g.winner === myName ? "You take the sea." : g.winner + " takes the sea.") : "No winner.";

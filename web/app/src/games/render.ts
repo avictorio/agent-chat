@@ -180,6 +180,66 @@ export function bsLabel(x: number, y: number): string {
   return String.fromCharCode(65 + x) + (y + 1);
 }
 
+export function bsCellXY(label: string): [number, number] {
+  return [label.charCodeAt(0) - 65, parseInt(label.slice(1), 10) - 1];
+}
+
+// The latest shot, in words: "Ada fires A6 · HIT · Henry's 4-ship is
+// sunk". Empty until somebody has fired.
+export function lastMoveText(g: GL): string {
+  const lm = g && g.last_move;
+  if (!lm) return "";
+  let t = lm.by + " fires " + lm.cell + " · " + (lm.result === "hit" ? "HIT" : "miss");
+  if (lm.sunk) {
+    const foe = (g.players || []).filter((p: GL) => p.name !== lm.by)[0];
+    t += " · " + (foe ? foe.name + "'s " : "a ") + lm.sunk + "-ship is sunk";
+  }
+  return t;
+}
+
+// One captain's public waters as a tiny SVG for the feed card: every
+// shot that has landed on them, sunk hulls filled dark red. The last
+// shot fired at this board wears a white ring.
+export function bsMiniSvg(board: GL, lastMove: GL): string {
+  let s = '<svg class="bs-mini-svg" viewBox="0 0 10 10" role="img" aria-label="' + board.name + ' waters">';
+  s += '<rect x="0" y="0" width="10" height="10" fill="#04060d"/>';
+  (board.sunk_ships || []).forEach((sh: GL) => {
+    sh.cells.forEach((c: string) => {
+      const xy = bsCellXY(c);
+      s += '<rect x="' + xy[0] + '" y="' + xy[1] + '" width="1" height="1" fill="#991b1b"/>';
+    });
+  });
+  Object.keys(board.incoming || {}).forEach((c) => {
+    const xy = bsCellXY(c);
+    if (board.incoming[c] === "miss")
+      s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.16" fill="rgba(186,230,253,.65)"/>';
+    else s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.3" fill="#fb923c"/>';
+  });
+  if (lastMove && lastMove.by !== board.name) {
+    const xy = bsCellXY(lastMove.cell);
+    s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.46" fill="none" stroke="#ffffff" stroke-width="0.09"/>';
+  }
+  s += "</svg>";
+  return s;
+}
+
+// The pair of mini boards the card shows once the shooting starts,
+// so the battle plays out in the feed, not only in the arena.
+export function bsMiniBoards(g: GL): HTMLElement | null {
+  if (!g.boards || !g.boards.length) return null;
+  if (!(g.phase === "play" || g.status === "finished")) return null;
+  const wrap = el("div", "bs-minis");
+  g.boards.forEach((b: GL) => {
+    const side = el("div", "bs-mini");
+    side.appendChild(el("div", "bs-mini-name", b.name));
+    const holder = el("div", "");
+    holder.innerHTML = bsMiniSvg(b, g.last_move);
+    side.appendChild(holder);
+    wrap.appendChild(side);
+  });
+  return wrap;
+}
+
 // The battleship card body: a scoreboard, not the boards themselves -
 // fleet positions are secret, so the feed shows counts and whose
 // turn it is. The boards live in the arena, and only for the player
@@ -195,6 +255,12 @@ export function battleshipBoard(g: GL): HTMLElement {
     const stats = el("span", "duel-state", (p.afloat != null ? p.afloat : 5) + " afloat · " + (p.hits || 0) + " hits · " + (p.sunk || 0) + " sunk");
     stats.style.marginLeft = "8px";
     row.appendChild(stats);
+    const bd = (g.boards || []).filter((b: GL) => b.name === p.name)[0];
+    if (bd) {
+      const strip = fleetStrip(p.hex, (bd.sunk_ships || []).map((s: GL) => s.size), 6);
+      strip.style.marginLeft = "auto";
+      row.appendChild(strip);
+    }
     wrap.appendChild(row);
   });
   let state = "";
@@ -203,6 +269,10 @@ export function battleshipBoard(g: GL): HTMLElement {
   else if (g.status === "running") state = "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "");
   else if (g.status === "finished") state = g.winner ? g.winner + " takes the sea" : "No winner";
   if (state) wrap.appendChild(el("div", "duel-stateline", state));
+  const lmText = lastMoveText(g);
+  if (lmText && (g.phase === "play" || g.status === "finished")) wrap.appendChild(el("div", "duel-stateline bs-lastline", "Last shot · " + lmText));
+  const minis = bsMiniBoards(g);
+  if (minis) wrap.appendChild(minis);
   if (g.you && g.you.playing && g.status === "running") {
     if (g.phase === "setup" && !(g.you.fleet && g.you.fleet.length)) wrap.appendChild(el("span", "duel-pill your-throw", "PLACE YOUR FLEET"));
     else if (g.phase === "play" && g.you.your_turn) wrap.appendChild(el("span", "duel-pill your-throw", "YOUR SHOT"));
@@ -210,30 +280,71 @@ export function battleshipBoard(g: GL): HTMLElement {
   return wrap;
 }
 
-// One 10x10 board as a DOM grid. states maps a cell label ("C5") to
+// The fleet as a strip of hull silhouettes, longest first: an afloat
+// hull wears its captain's color, a sunk one sits dark and low.
+// sunkSizes lists the sizes already on the ocean floor.
+export function fleetStrip(hex: string, sunkSizes: number[], unit?: number): HTMLElement {
+  const strip = el("div", "bs-strip");
+  const left = sunkSizes.slice();
+  [5, 4, 3, 3, 2].forEach((size) => {
+    const i = left.indexOf(size);
+    const sunk = i >= 0;
+    if (sunk) left.splice(i, 1);
+    const hull = el("span", "bs-hull" + (sunk ? " sunk" : ""));
+    hull.style.width = size * (unit || 8) + "px";
+    if (!sunk) hull.style.background = hex;
+    hull.title = "a " + size + "-ship" + (sunk ? " (sunk)" : "");
+    strip.appendChild(hull);
+  });
+  return strip;
+}
+
+// One 10x10 board as a DOM grid inside a coordinate frame (A-J
+// across, 1-10 down). states maps a cell label ("C5") to
 // "ship" | "hit" | "miss" | "sunk"; shipHex colors ship cells. When
 // onFire is given, unfired cells are buttons that report their label.
-export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null): HTMLElement {
+// ships (optional) groups cells into hulls so a ship reads as one
+// tapered shape - bow at its first cell, stern at its last - instead
+// of a row of squares.
+export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null, ships?: GL[], verb?: string): HTMLElement {
+  const seg: Record<string, string> = {};
+  (ships || []).forEach((s: GL) => {
+    const cells: string[] = s.cells || [];
+    if (cells.length < 2) return;
+    const horiz = (cells[0] || "").slice(1) === (cells[1] || "").slice(1);
+    cells.forEach((c, i) => {
+      seg[c] = (horiz ? "seg-h" : "seg-v") + (i === 0 ? " seg-start" : i === cells.length - 1 ? " seg-end" : " seg-mid");
+    });
+  });
   const grid = el("div", "bs-grid");
   for (let y = 0; y < 10; y++) {
     for (let x = 0; x < 10; x++) {
       const label = bsLabel(x, y);
       const st = states[label] || "";
-      const cell = el(onFire && !st ? "button" : "div", "bs-cell " + st) as HTMLElement;
-      if (st === "ship" || st === "hit") cell.style.background = shipHex;
+      const cell = el(onFire && !st ? "button" : "div", "bs-cell " + st + (seg[label] ? " " + seg[label] : "")) as HTMLElement;
+      if (st === "ship" || st === "hit") cell.style.backgroundColor = shipHex;
       if (st === "hit") cell.textContent = "✕";
       if (st === "sunk") cell.textContent = "✕";
       if (st === "miss") cell.textContent = "·";
       if (onFire && !st) {
         const b = cell as HTMLButtonElement;
         b.type = "button";
-        b.setAttribute("aria-label", "Fire at " + label);
+        b.setAttribute("aria-label", (verb || "Fire at ") + label);
         b.addEventListener("click", () => onFire(label));
       }
       grid.appendChild(cell);
     }
   }
-  return grid;
+  const frame = el("div", "bs-frame");
+  frame.appendChild(el("div", ""));
+  const ax = el("div", "bs-axis-x");
+  for (let x = 0; x < 10; x++) ax.appendChild(el("span", "", String.fromCharCode(65 + x)));
+  frame.appendChild(ax);
+  const ay = el("div", "bs-axis-y");
+  for (let y = 0; y < 10; y++) ay.appendChild(el("span", "", String(y + 1)));
+  frame.appendChild(ay);
+  frame.appendChild(grid);
+  return frame;
 }
 
 export function duelScoreLine(g: GL): string {

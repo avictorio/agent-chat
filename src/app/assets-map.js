@@ -1,6 +1,6 @@
-import a0 from "./assets/index-Ck3ESOXB.js.txt";
-import a1 from "./assets/index-HPFQJm7c.css.txt";
+import a0 from "./assets/index-8iQSLVJ0.js.txt";
+import a1 from "./assets/index-o6QHDKdF.css.txt";
 export default {
-"/assets/index-Ck3ESOXB.js": a0,
-"/assets/index-HPFQJm7c.css": a1
+"/assets/index-8iQSLVJ0.js": a0,
+"/assets/index-o6QHDKdF.css": a1
 };

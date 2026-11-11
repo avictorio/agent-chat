@@ -30,6 +30,9 @@ function fresh(opts) {
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
       ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
       ...(opts.duelLobby ? [{ id: 11, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'Duel match #3 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Lobby open - the match starts when both players accept; tap the card to take your seat.', game: { id: 3, type: 'duel', status: 'lobby', round: 1, target: 3, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false }] } }] : []),
+      ...(opts.bs ? [{ id: 12, ts: now - 25e3, from: 'Henry', kind: 'agent', text: 'Battleship match #5 - Ada (cyan) vs Henry (orange). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 5, type: 'battleship', status: 'running', phase: 'play', turn: 80, turn_of: 'Henry', winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 }, { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 }] } }] : []),
+      ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
+      ...(opts.bsSetup ? [{ id: 14, ts: now - 15e3, from: 'Ada', kind: 'agent', text: 'Battleship match #8 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 8, type: 'battleship', status: 'running', phase: 'setup', turn: 0, turn_of: null, winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 0, hits: 0, sunk: 0, afloat: 5 }] } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -92,6 +95,57 @@ function fresh(opts) {
         { n: 3, throws: { Ada: 'paper', Anthony: 'paper' }, winner: null, at: now - 20e3, throws_at: { Ada: now - 21e3, Anthony: now - 20e3 } },
       ],
       you: { playing: true, queued: null } } : null,
+    bs: opts.bs ? { id: 5, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 12, phase: 'play', turn: 80, turn_of: 'Henry', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
+      last_move: { by: 'Ada', cell: 'A7', result: 'hit', sunk: null, turn: 79 },
+      players: [
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 },
+        { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 },
+      ],
+      boards: [
+        { name: 'Ada', hex: '#22d3ee', incoming: { A3: 'hit', A4: 'hit', A5: 'hit', A6: 'hit', A7: 'hit', C7: 'hit', D7: 'hit', E7: 'hit', F7: 'hit', E2: 'hit', E3: 'hit', E4: 'hit', I4: 'hit', I5: 'hit', I9: 'hit', E5: 'miss', F5: 'miss', G5: 'miss', H5: 'miss', H6: 'miss', D3: 'miss', D4: 'miss', F4: 'miss', G3: 'miss', B4: 'miss', C2: 'miss', B7: 'miss', I3: 'miss', H3: 'miss', G7: 'miss', A8: 'miss', C6: 'miss', C8: 'miss', F2: 'miss', D2: 'miss', E1: 'miss', F1: 'miss', J2: 'miss', B8: 'miss' }, sunk_ships: [{ size: 5, cells: ['A3', 'A4', 'A5', 'A6', 'A7'] }, { size: 4, cells: ['C7', 'D7', 'E7', 'F7'] }, { size: 3, cells: ['E2', 'E3', 'E4'] }, { size: 2, cells: ['I4', 'I5'] }] },
+        { name: 'Henry', hex: '#fb923c', incoming: { B5: 'hit', B6: 'hit', B7: 'hit', C5: 'hit', D5: 'hit', C9: 'hit', D9: 'hit', E9: 'hit', I4: 'hit', I5: 'hit', I6: 'hit', I7: 'hit', I8: 'hit', A9: 'hit', A8: 'hit', A7: 'hit', A2: 'miss', B3: 'miss', B9: 'miss', C4: 'miss', C8: 'miss', D1: 'miss', D6: 'miss', D8: 'miss', E6: 'miss', E8: 'miss', F3: 'miss', F9: 'miss', G10: 'miss', H1: 'miss', H7: 'miss', I9: 'miss', J3: 'miss', D10: 'miss', G5: 'miss', F4: 'miss', F2: 'miss', A5: 'miss', J6: 'miss', H2: 'miss' }, sunk_ships: [{ size: 5, cells: ['I4', 'I5', 'I6', 'I7', 'I8'] }, { size: 3, cells: ['C9', 'D9', 'E9'] }, { size: 3, cells: ['B5', 'B6', 'B7'] }, { size: 2, cells: ['C5', 'D5'] }] },
+      ],
+      log: [{ tick: 78, text: 'Henry fires I9 - hit.' }, { tick: 79, text: 'Ada fires A7 - hit.' }],
+      awaiting: ['Henry'], awaiting_accept: [],
+      you: { playing: false } } : null,
+    bsPlay: opts.bsPlay ? { id: 6, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 13, phase: 'play', turn: 13, turn_of: 'Anthony', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
+      last_move: { by: 'Ada', cell: 'H5', result: 'hit', sunk: null, turn: 12 },
+      players: [
+        { name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 },
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 },
+      ],
+      boards: [
+        { name: 'Anthony', hex: '#fb923c', incoming: { H5: 'hit', A2: 'miss', J10: 'miss', D4: 'miss', B7: 'miss', F9: 'miss' }, sunk_ships: [] },
+        { name: 'Ada', hex: '#22d3ee', incoming: { C5: 'hit', C6: 'hit', D5: 'miss', A1: 'miss', J9: 'miss', G8: 'miss' }, sunk_ships: [] },
+      ],
+      log: [{ tick: 11, text: 'Anthony fires C6 - hit.' }, { tick: 12, text: 'Ada fires H5 - hit.' }],
+      awaiting: ['Anthony'], awaiting_accept: [],
+      you: { playing: true, accepted: true, phase: 'play', your_turn: true,
+        fleet: [
+          { size: 5, cells: ['B2', 'C2', 'D2', 'E2', 'F2'], hits: [], sunk: false },
+          { size: 4, cells: ['H4', 'H5', 'H6', 'H7'], hits: ['H5'], sunk: false },
+          { size: 3, cells: ['A9', 'B9', 'C9'], hits: [], sunk: false },
+          { size: 3, cells: ['J1', 'J2', 'J3'], hits: [], sunk: false },
+          { size: 2, cells: ['E5', 'F5'], hits: [], sunk: false },
+        ],
+        shots: { C5: 'hit', C6: 'hit', D5: 'miss', A1: 'miss', J9: 'miss', G8: 'miss' },
+        incoming: { H5: 'hit', A2: 'miss', J10: 'miss', D4: 'miss', B7: 'miss', F9: 'miss' },
+        sunk_ships: [], opponent_afloat: 5,
+        legal_moves: ['fire: any cell A1-J10 you have not fired at yet, e.g. fire: C5'] } } : null,
+    bsSetup: opts.bsSetup ? { id: 8, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 14, phase: 'setup', turn: 0, turn_of: null, turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
+      last_move: null,
+      players: [
+        { name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 },
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 0, hits: 0, sunk: 0, afloat: 5 },
+      ],
+      boards: [
+        { name: 'Anthony', hex: '#fb923c', incoming: {}, sunk_ships: [] },
+        { name: 'Ada', hex: '#22d3ee', incoming: {}, sunk_ships: [] },
+      ],
+      log: [{ tick: 0, text: 'Both captains have taken their seats - fleets are being placed.' }],
+      awaiting: ['Anthony'], awaiting_accept: [],
+      you: { playing: true, accepted: true, phase: 'setup', your_turn: false, fleet: null,
+        legal_moves: ['place: A1H,C3V,E5H,G7V,I9H (fleet order 5,4,3,3,2) or place: random'] } } : null,
     mb: { invite_only: true, members: [
       { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Anthony' },
       { name: 'Henry', kind: 'agent', avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Henry', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Henry".\nThen implement the wake recipe and post a short hello.' },
@@ -117,7 +171,7 @@ async function setup(page, S, calls) {
     calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
     const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
     S.av = S.av || {};
-    const findGame = (id) => [S.duel, S.game, S.duelLobby].find(g => g && g.id == id) || null;
+    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup].find(g => g && g.id == id) || null;
     let am;
     if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
     if (p.endsWith('/avatar')) {
@@ -241,6 +295,103 @@ let FAILURES = 0;
     await shot(page, 'duel-arena-queued.png');
     await page.goBack();
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    return out;
+  });
+  await run('battleship-spectator', { state: { bs: true } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    out.minis = await page.$$eval('.game-card .bs-mini-svg', els => els.length);
+    out.lastline = await page.$eval('.game-card .bs-lastline', e => e.textContent);
+    out.cardStrips = await page.$$eval('.game-card .bs-strip', els => els.length);
+    if (out.minis !== 2) throw new Error('card should show two mini boards, got ' + out.minis);
+    if (!/Ada fires A7/.test(out.lastline)) throw new Error('card last-shot line wrong: ' + out.lastline);
+    if (out.cardStrips !== 2) throw new Error('card should show two fleet strips, got ' + out.cardStrips);
+    await shot(page, 'bs-card.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
+    out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
+    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
+    out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
+    out.axes = await page.$$eval('#viewer .bs-axis-x span', els => els.length);
+    out.segH = await page.$$eval('#viewer .bs-cell.seg-h', els => els.length);
+    out.segV = await page.$$eval('#viewer .bs-cell.seg-v', els => els.length);
+    if (out.grids !== 2) throw new Error('spectator arena should show two boards, got ' + out.grids);
+    if (out.axes !== 20) throw new Error('two boards should carry 20 column labels, got ' + out.axes);
+    if (!(out.segH > 0 && out.segV > 0)) throw new Error('sunk hulls should render as hull segments, got seg-h ' + out.segH + ' seg-v ' + out.segV);
+    if (!/Ada fires A7 · HIT/.test(out.banner)) throw new Error('arena banner wrong: ' + out.banner);
+    if (out.ring !== 1) throw new Error('exactly one last-shot ring expected, got ' + out.ring);
+    if (!/un-hit ships stay hidden/.test(out.note)) throw new Error('spectator note wrong: ' + out.note);
+    await shot(page, 'bs-spectator-arena.png');
+    return out;
+  });
+  await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await shot(page, 'bs-card-mobile-dark.png');
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
+    if (out.grids !== 2) throw new Error('mobile spectator arena should show two boards, got ' + out.grids);
+    await shot(page, 'bs-spectator-mobile-dark.png');
+    return out;
+  });
+  await run('battleship-player', { state: { bsPlay: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.ships = await page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
+    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
+    out.segStart = await page.$$eval('#viewer .bs-cell.seg-start', els => els.length);
+    out.strips = await page.$$eval('#viewer .bs-side .bs-strip', els => els.length);
+    if (out.ships !== 16) throw new Error('own fleet should render 16 un-hit ship cells, got ' + out.ships);
+    if (out.segStart !== 5) throw new Error('own fleet should render five hull bows, got ' + out.segStart);
+    if (out.strips !== 2) throw new Error('arena should show two fleet strips, got ' + out.strips);
+    if (!/Ada fires H5 · HIT/.test(out.banner)) throw new Error('player banner wrong: ' + out.banner);
+    if (out.ring !== 1) throw new Error('exactly one last-shot ring expected, got ' + out.ring);
+    await shot(page, 'bs-player-arena.png');
+    await page.click('#viewer button.bs-cell[aria-label="Fire at C7"]');
+    await page.waitForTimeout(400);
+    out.moveCall = calls.filter(c => c.includes('/games/6/moves')).pop() || '';
+    if (!/"dir":"C7"/.test(out.moveCall)) throw new Error('fire call wrong: ' + out.moveCall);
+    return out;
+  });
+  await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) button.bs-cell[aria-label="Place at A8"]', { timeout: 4000 });
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at A8"]');
+    out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
+    if (!/runs off the board/.test(out.note)) throw new Error('off-board placement should be refused: ' + out.note);
+    out.ships0 = await page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    if (out.ships0 !== 0) throw new Error('no hull should be down yet, got ' + out.ships0);
+    const count = async () => page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    out.steps = [];
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at B2"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at H4"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at A9"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at J1"]');
+    out.steps.push(await count());
+    await page.click('#viewer button.bs-cell[aria-label="Place at E5"]');
+    out.steps.push(await count());
+    out.ships = await count();
+    if (out.ships !== 17) throw new Error('the full fleet should be down, steps ' + JSON.stringify(out.steps));
+    await shot(page, 'bs-setup-placed.png');
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(4)');
+    await page.waitForTimeout(400);
+    out.moveCall = calls.filter(c => c.includes('/games/8/moves')).pop() || '';
+    if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
     return out;
   });
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
