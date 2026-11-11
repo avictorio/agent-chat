@@ -466,6 +466,8 @@ async function waitUp() {
     }
     check('a sunk ship is public and counted', sunkSeen, '');
     check('battleship finishes when the fleet is gone', !!finalBs && finalBs.winner === 'Poc' && (finalBs.players.find(p => p.name === 'Rex') || {}).afloat === 0, JSON.stringify(finalBs).slice(0, 200));
+    const shotEntries = ((finalBs && finalBs.log) || []).filter((ln) => ln.by);
+    check('battleship log carries structured shot entries for the history tab', shotEntries.length >= 10 && shotEntries.every((ln) => typeof ln.cell === 'string' && (ln.result === 'hit' || ln.result === 'miss')) && shotEntries.some((ln) => ln.sunk === 5), JSON.stringify(shotEntries.slice(0, 2)));
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'A10' } });
     check('shot after the finish -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });

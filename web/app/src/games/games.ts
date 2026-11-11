@@ -139,7 +139,7 @@ export function createGameStore(opts: {
     listeners.forEach((fn) => fn());
   };
 
-  let gameView: { id: number; wrap: HTMLElement; lastRounds?: number } | null = null;
+  let gameView: { id: number; wrap: HTMLElement; lastRounds?: number; tab?: string } | null = null;
   let gameViewTimer = 0;
   let gameRenderKey = "";
 
@@ -279,6 +279,140 @@ export function createGameStore(opts: {
     }
   }
 
+  // The standard game history: every arena carries the same two
+  // tabs - Game and History - and the History tab renders one row
+  // grammar for every kind: an index chip (Turn/Round/Tick N), the
+  // actors as color-dot chips, their action, and an outcome pill.
+  // Battleship rows come from the log's structured shot entries,
+  // duel rows from rounds, cycles rows from the move log grouped
+  // by tick; narrative log lines ride along as note rows.
+  const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
+
+  function histCount(g: GL): number {
+    if (g.type === "duel") return (g.rounds || []).length;
+    if (g.type === "battleship") return (g.log || []).length;
+    const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
+    return ticks.size;
+  }
+
+  function arenaTabs(g: GL): HTMLElement {
+    const tabs = el("div", "arena-tabs");
+    const cur = (gameView && gameView.tab) || "game";
+    const defs: [string, string][] = [
+      ["game", "Game"],
+      ["history", "History · " + histCount(g)],
+    ];
+    defs.forEach(([id, label]) => {
+      const b = el("button", "arena-tab" + (cur === id ? " on" : ""), label);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        if (!gameView || (gameView.tab || "game") === id) return;
+        gameView.tab = id;
+        const cg = cache.get(g.id);
+        if (cg) renderGameView(cg, true);
+      });
+      tabs.appendChild(b);
+    });
+    return tabs;
+  }
+
+  function histWho(p: GL): HTMLElement {
+    const s = el("span", "hist-who");
+    const d = el("span", "hist-dot");
+    d.style.background = (p && p.hex) || "#94a3b8";
+    s.appendChild(d);
+    s.appendChild(document.createTextNode((p && p.name) || "?"));
+    return s;
+  }
+
+  function historyList(g: GL): HTMLElement {
+    const list = el("div", "hist-list");
+    const players = g.players || [];
+    const byName = (n: string): GL => players.filter((p: GL) => p.name === n)[0] || { name: n, hex: "#94a3b8" };
+    const row = (idx: string): HTMLElement => {
+      const r = el("div", "hist-row");
+      r.appendChild(el("span", "hist-idx", idx));
+      return r;
+    };
+    let n = 0;
+    if (g.type === "duel") {
+      (g.rounds || []).forEach((r: GL) => {
+        n++;
+        const rw = row("Round " + r.n);
+        players.forEach((p: GL) => {
+          const seg = el("span", "hist-seg");
+          seg.appendChild(histWho(p));
+          const t = (r.throws || {})[p.name];
+          seg.appendChild(el("span", "hist-act", t ? (THROW_EMOJI[t] || "") + " " + t : "— no throw"));
+          rw.appendChild(seg);
+        });
+        if (r.winner) {
+          const pill = el("span", "hist-pill win", r.winner + " takes it");
+          pill.style.borderColor = byName(r.winner).hex;
+          pill.style.color = byName(r.winner).hex;
+          rw.appendChild(pill);
+        } else rw.appendChild(el("span", "hist-pill tie", "Tie"));
+        list.appendChild(rw);
+      });
+    } else if (g.type === "battleship") {
+      (g.log || []).forEach((ln: GL) => {
+        n++;
+        if (ln.by) {
+          const rw = row("Turn " + ln.tick);
+          const seg = el("span", "hist-seg");
+          seg.appendChild(histWho(byName(ln.by)));
+          seg.appendChild(el("span", "hist-act", "fires"));
+          rw.appendChild(seg);
+          rw.appendChild(el("span", "hist-cell", ln.cell || ""));
+          if (ln.sunk) rw.appendChild(el("span", "hist-pill sunk", "Sunk · " + ln.sunk));
+          else if (ln.result === "hit") rw.appendChild(el("span", "hist-pill hit", "Hit"));
+          else rw.appendChild(el("span", "hist-pill miss", "Miss"));
+          list.appendChild(rw);
+        } else {
+          const rw = row("Turn " + ln.tick);
+          rw.appendChild(el("span", "hist-note", ln.text || ""));
+          list.appendChild(rw);
+        }
+      });
+    } else {
+      const byTick = new Map<number, GL[]>();
+      (g.move_log || []).forEach((m: GL) => {
+        if (!byTick.has(m.tick)) byTick.set(m.tick, []);
+        (byTick.get(m.tick) as GL[]).push(m);
+      });
+      const notes = new Map<number, string[]>();
+      (g.log || []).forEach((ln: GL) => {
+        if (/^Tick \d+:/.test(ln.text || "")) return;
+        if (!notes.has(ln.tick)) notes.set(ln.tick, []);
+        (notes.get(ln.tick) as string[]).push(ln.text || "");
+      });
+      const ticks = Array.from(new Set([...byTick.keys(), ...notes.keys()])).sort((a, b) => a - b);
+      ticks.forEach((t) => {
+        const moves = byTick.get(t) || [];
+        if (moves.length) {
+          n++;
+          const rw = row("Tick " + t);
+          moves.forEach((m: GL) => {
+            const seg = el("span", "hist-seg");
+            seg.appendChild(histWho(byName(m.name)));
+            seg.appendChild(el("span", "hist-act", (DIR_ARROW[m.dir] || "") + " " + (m.dir || "")));
+            if (!m.submitted) seg.appendChild(el("span", "hist-src", "clock"));
+            rw.appendChild(seg);
+          });
+          list.appendChild(rw);
+        }
+        (notes.get(t) || []).forEach((txt) => {
+          n++;
+          const rw = row("Tick " + t);
+          rw.appendChild(el("span", "hist-note", txt));
+          list.appendChild(rw);
+        });
+      });
+    }
+    if (!n) list.appendChild(el("div", "hist-empty", "No history yet - the record writes itself as the match plays."));
+    return list;
+  }
+
   function renderDuelView(g: GL, force?: boolean) {
     if (!gameView) return;
     const key =
@@ -288,7 +422,9 @@ export function createGameStore(opts: {
       "|" +
       (g.players || []).map((p: GL) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
       "|" +
-      ((g.you && g.you.queued) || "");
+      ((g.you && g.you.queued) || "") +
+      "|" +
+      ((gameView && gameView.tab) || "game");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     const wrap = gameView.wrap;
@@ -296,6 +432,16 @@ export function createGameStore(opts: {
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    wrap.appendChild(arenaTabs(g));
+    if (gameView.tab === "history") {
+      wrap.appendChild(historyList(g));
+      if (g.status === "finished" || g.status === "cancelled") {
+        const hnote = el("div", "lc-note", "");
+        wrap.appendChild(rematchRow(g, hnote));
+        wrap.appendChild(hnote);
+      }
+      return;
+    }
     const big = el("div", "lc-board-big");
     big.appendChild(duelBoard(g));
     wrap.appendChild(big);
@@ -372,45 +518,6 @@ export function createGameStore(opts: {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
-    if (rounds.length) {
-      const stripWrap = el("div", "duel-rounds");
-      stripWrap.appendChild(el("div", "", "Rounds"));
-      const strip = el("div", "duel-strip");
-      const detail = el("div", "duel-chip-detail", "");
-      const setDetail = (r: GL) => {
-        const v2 = roundVerdict(r, players);
-        const parts = players.map((p: GL) => {
-          const t = (r.throws || {})[p.name];
-          return p.name + " " + (t ? (THROW_EMOJI[t] || "") + " " + t : "- no throw");
-        });
-        detail.textContent = "Round " + r.n + " - " + parts.join(" vs ") + " · " + v2.text;
-      };
-      rounds.forEach((r: GL) => {
-        const chip = el("button", "duel-chip" + (r.winner ? "" : " tie"));
-        chip.type = "button";
-        chip.appendChild(el("span", "chip-r", "R" + r.n));
-        const ic = players
-          .map((p: GL) => {
-            const t = (r.throws || {})[p.name];
-            return t ? THROW_EMOJI[t] || "" : "—";
-          })
-          .join("");
-        chip.appendChild(el("span", "", ic));
-        if (r.winner) {
-          const wp2 = players.filter((p: GL) => p.name === r.winner)[0];
-          if (wp2) {
-            chip.style.borderColor = wp2.hex;
-            chip.style.background = "linear-gradient(" + wp2.hex + "2e, " + wp2.hex + "2e), #0a1420";
-          }
-        } else chip.appendChild(el("span", "chip-r", "="));
-        chip.addEventListener("click", () => setDetail(r));
-        strip.appendChild(chip);
-      });
-      stripWrap.appendChild(strip);
-      setDetail(rounds[rounds.length - 1]);
-      stripWrap.appendChild(detail);
-      wrap.appendChild(stripWrap);
-    }
   }
 
   function renderBattleshipView(g: GL, force?: boolean) {
@@ -429,7 +536,9 @@ export function createGameStore(opts: {
       "|" +
       (you.fleet ? "fleet" : "") +
       "|" +
-      (you.shots ? Object.keys(you.shots).length : 0);
+      (you.shots ? Object.keys(you.shots).length : 0) +
+      "|" +
+      ((gameView && gameView.tab) || "game");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     const wrap = gameView.wrap;
@@ -437,7 +546,16 @@ export function createGameStore(opts: {
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    wrap.appendChild(arenaTabs(g));
     const note = el("div", "lc-note", "");
+    if (gameView.tab === "history") {
+      wrap.appendChild(historyList(g));
+      if (g.status === "finished" || g.status === "cancelled") {
+        wrap.appendChild(rematchRow(g, note));
+        wrap.appendChild(note);
+      }
+      return;
+    }
     if (g.status === "lobby") {
       wrap.appendChild(lobbyPanel(g, note));
       wrap.appendChild(note);
@@ -624,14 +742,6 @@ export function createGameStore(opts: {
       wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
-    if (g.log && g.log.length) {
-      const log = el("div", "lc-log");
-      log.appendChild(el("div", "", "The record"));
-      g.log.forEach((ln: GL) => {
-        log.appendChild(el("div", "", "Turn " + ln.tick + " - " + ln.text));
-      });
-      wrap.appendChild(log);
-    }
   }
 
   function renderGameView(g: GL, force?: boolean) {
@@ -651,7 +761,9 @@ export function createGameStore(opts: {
       "|" +
       ((g.you && g.you.queued) || "") +
       "|" +
-      (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("");
+      (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
+      "|" +
+      ((gameView && gameView.tab) || "game");
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     const wrap = gameView.wrap;
@@ -665,6 +777,16 @@ export function createGameStore(opts: {
     );
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    wrap.appendChild(arenaTabs(g));
+    if (gameView.tab === "history") {
+      wrap.appendChild(historyList(g));
+      if (g.status === "finished" || g.status === "cancelled") {
+        const hnote = el("div", "lc-note", "");
+        wrap.appendChild(rematchRow(g, hnote));
+        wrap.appendChild(hnote);
+      }
+      return;
+    }
     const big = el("div", "lc-board-big");
     big.innerHTML = boardSvg(g);
     wrap.appendChild(big);
@@ -730,14 +852,6 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
     }
     if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
-    if (g.log && g.log.length) {
-      const log = el("div", "lc-log");
-      log.appendChild(el("div", "", "The record"));
-      g.log.forEach((ln: GL) => {
-        log.appendChild(el("div", "", "Tick " + ln.tick + " - " + ln.text));
-      });
-      wrap.appendChild(log);
-    }
   }
 
   async function fetchGame(id: number): Promise<void> {

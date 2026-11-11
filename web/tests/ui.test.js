@@ -73,6 +73,10 @@ function fresh(opts) {
       ],
       trails: [[3, 5, 0], [4, 5, 0], [5, 5, 0], [9, 5, 1], [8, 5, 1], [7, 5, 1], [6, 0, 2], [6, 1, 2], [6, 2, 2], [6, 3, 2]],
       log: [{ tick: 0, text: 'Match created by Henry - Ada, Henry, Anthony on the grid.' }],
+      move_log: [
+        { tick: 1, name: 'Ada', dir: 'right', submitted: true }, { tick: 1, name: 'Henry', dir: 'left', submitted: true }, { tick: 1, name: 'Anthony', dir: 'down', submitted: false },
+        { tick: 2, name: 'Ada', dir: 'right', submitted: true }, { tick: 2, name: 'Henry', dir: 'left', submitted: false }, { tick: 2, name: 'Anthony', dir: 'down', submitted: true },
+      ],
       awaiting: ['Henry', 'Anthony'],
       you: { playing: true, alive: true, dir: 'down', queued: null, legal_moves: ['down', 'left', 'right'] } } : null,
     duel: (opts.duel || opts.duelDone) ? { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', created_by: 'Ada', card_msg: 10, round: opts.duelDone ? 7 : 4, best_of: 5, target: 3, round_seconds: 600, deadline: now + 400e3, winner: opts.duelDone ? 'Anthony' : null,
@@ -105,7 +109,7 @@ function fresh(opts) {
         { name: 'Ada', hex: '#22d3ee', incoming: { A3: 'hit', A4: 'hit', A5: 'hit', A6: 'hit', A7: 'hit', C7: 'hit', D7: 'hit', E7: 'hit', F7: 'hit', E2: 'hit', E3: 'hit', E4: 'hit', I4: 'hit', I5: 'hit', I9: 'hit', E5: 'miss', F5: 'miss', G5: 'miss', H5: 'miss', H6: 'miss', D3: 'miss', D4: 'miss', F4: 'miss', G3: 'miss', B4: 'miss', C2: 'miss', B7: 'miss', I3: 'miss', H3: 'miss', G7: 'miss', A8: 'miss', C6: 'miss', C8: 'miss', F2: 'miss', D2: 'miss', E1: 'miss', F1: 'miss', J2: 'miss', B8: 'miss' }, sunk_ships: [{ size: 5, cells: ['A3', 'A4', 'A5', 'A6', 'A7'] }, { size: 4, cells: ['C7', 'D7', 'E7', 'F7'] }, { size: 3, cells: ['E2', 'E3', 'E4'] }, { size: 2, cells: ['I4', 'I5'] }] },
         { name: 'Henry', hex: '#fb923c', incoming: { B5: 'hit', B6: 'hit', B7: 'hit', C5: 'hit', D5: 'hit', C9: 'hit', D9: 'hit', E9: 'hit', I4: 'hit', I5: 'hit', I6: 'hit', I7: 'hit', I8: 'hit', A9: 'hit', A8: 'hit', A7: 'hit', A2: 'miss', B3: 'miss', B9: 'miss', C4: 'miss', C8: 'miss', D1: 'miss', D6: 'miss', D8: 'miss', E6: 'miss', E8: 'miss', F3: 'miss', F9: 'miss', G10: 'miss', H1: 'miss', H7: 'miss', I9: 'miss', J3: 'miss', D10: 'miss', G5: 'miss', F4: 'miss', F2: 'miss', A5: 'miss', J6: 'miss', H2: 'miss' }, sunk_ships: [{ size: 5, cells: ['I4', 'I5', 'I6', 'I7', 'I8'] }, { size: 3, cells: ['C9', 'D9', 'E9'] }, { size: 3, cells: ['B5', 'B6', 'B7'] }, { size: 2, cells: ['C5', 'D5'] }] },
       ],
-      log: [{ tick: 78, text: 'Henry fires I9 - hit.' }, { tick: 79, text: 'Ada fires A7 - hit.' }],
+      log: [{ tick: 78, text: 'Henry fires I9 - hit.', by: 'Henry', cell: 'I9', result: 'hit', sunk: null }, { tick: 79, text: "Ada fires A7 - hit, and Henry's 5-ship is sunk.", by: 'Ada', cell: 'A7', result: 'hit', sunk: 5 }],
       awaiting: ['Henry'], awaiting_accept: [],
       you: { playing: false } } : null,
     bsPlay: opts.bsPlay ? { id: 6, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 13, phase: 'play', turn: 13, turn_of: 'Anthony', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
@@ -324,6 +328,14 @@ let FAILURES = 0;
     if (out.ring !== 1) throw new Error('exactly one last-shot ring expected, got ' + out.ring);
     if (!/un-hit ships stay hidden/.test(out.note)) throw new Error('spectator note wrong: ' + out.note);
     await shot(page, 'bs-spectator-arena.png');
+    if (await page.$('#viewer .lc-log') !== null) throw new Error('the plain-text record should be gone from the game tab');
+    await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
+    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
+    out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
+    if (out.histRows !== 2) throw new Error('history should render one row per record entry, got ' + out.histRows);
+    if (!/I9/.test(out.histText) || !/Hit/.test(out.histText) || !/Sunk · 5/.test(out.histText)) throw new Error('history rows should carry cell badges and outcome pills: ' + out.histText);
+    await shot(page, 'bs-spectator-history.png');
     return out;
   });
   await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
@@ -725,6 +737,15 @@ let FAILURES = 0;
     out.moveCall = calls.filter(c => c.includes('/games/1/moves')).pop() || '';
     if (!/"dir":"left"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
     await shot(page, 'game-arena-queued.png');
+    await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
+    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
+    out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
+    if (out.histRows !== 3) throw new Error('cycles history should render the creation note plus one row per tick, got ' + out.histRows);
+    if (!/Tick 1/.test(out.histText) || !/clock/.test(out.histText)) throw new Error('cycles history should show moves with clock-default tags: ' + out.histText.slice(0, 200));
+    await shot(page, 'game-arena-history.png');
+    await page.click('#viewer .arena-tabs .arena-tab:nth-child(1)');
+    await page.waitForSelector('#viewer .lc-pad', { timeout: 4000 });
     await page.goBack();
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return out;
@@ -828,9 +849,16 @@ let FAILURES = 0;
     if (!/Anthony/.test(out.arenaWinner) || !/3–2/.test(out.arenaWinner)) throw new Error('finished arena should carry the winner banner: ' + out.arenaWinner);
     out.chips = await page.$$eval('#viewer .duel-chip', els => els.length);
     out.rematch = await page.$$eval('#viewer button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
-    if (out.chips !== 7) throw new Error('strip should carry 7 round chips, got ' + out.chips);
+    if (out.chips !== 0) throw new Error('the rounds strip should be gone from the game tab, got ' + out.chips);
     if (out.rematch !== 1) throw new Error('finished duel should offer one Rematch, got ' + out.rematch);
     await shot(page, 'duel-finished.png');
+    await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
+    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
+    out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
+    if (out.histRows !== 7) throw new Error('history should render one row per round, got ' + out.histRows);
+    if (!/takes it/.test(out.histText) || !/Tie/.test(out.histText)) throw new Error('history rows should carry outcome pills: ' + out.histText.slice(0, 200));
+    await shot(page, 'duel-finished-history.png');
     await page.goBack();
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return out;
@@ -842,6 +870,12 @@ let FAILURES = 0;
     await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
     await page.waitForTimeout(300);
     await shot(page, 'duel-mobile-arena.png');
+    await page.tap('#viewer .arena-tabs .arena-tab:nth-child(2)');
+    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    const rows = await page.$$eval('#viewer .hist-row', els => els.length);
+    if (rows !== 3) throw new Error('mobile history should render one row per round, got ' + rows);
+    await page.waitForTimeout(200);
+    await shot(page, 'duel-mobile-history.png');
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };

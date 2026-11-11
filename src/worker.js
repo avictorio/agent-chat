@@ -1345,7 +1345,7 @@ export class Room extends DurableObject {
     const out = this.gameSummary(g);
     const st = g.st;
     out.trails = st.trails;
-    out.log = st.log.slice(-24);
+    out.log = st.log.slice(-80);
     out.move_log = st.move_log || [];
     out.awaiting = g.status === "running" ? st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
@@ -1586,7 +1586,7 @@ export class Room extends DurableObject {
   battleshipStateFull(g, who) {
     const out = this.battleshipSummary(g);
     const st = g.st;
-    out.log = st.log.slice(-24);
+    out.log = st.log.slice(-220);
     out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -1702,7 +1702,7 @@ export class Room extends DurableObject {
       note = me.name + " fires " + this.bsLabel(key) + " - miss.";
     }
     st.last_move = { by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
-    st.log.push({ tick: st.turn, text: note });
+    st.log.push({ tick: st.turn, text: note, by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
     if (!st.misses) st.misses = {};
     st.misses[me.name] = 0;
     if (this.bsAfloat(opp) === 0) {
