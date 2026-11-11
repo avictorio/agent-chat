@@ -92,6 +92,14 @@ for (const key of Object.keys(liveVars)) {
   else
     fail(key + ": live but NOT in wrangler.toml [vars] - the next deploy will DELETE it; move it into the file");
 }
+// Test hooks must never be live: TEST_HOOKS arms the /api/test-hooks routes
+// (the API suite sets it in .dev.vars only). If it ever appears in the live
+// config - as a var or a secret - the outage simulation is one owner call
+// away from production. Fail loudly and by name.
+for (const name of ["TEST_HOOKS", "TEST_R2_FAIL"]) {
+  if (name in liveVars || liveSecrets.has(name))
+    fail(name + ": TEST HOOK LIVE - remove it from the dashboard config immediately; it belongs only in the test suite's .dev.vars");
+}
 // Required secrets must be listed live (names only).
 for (const name of REQUIRED_SECRETS) {
   if (liveSecrets.has(name)) ok("secret " + name + " present");

@@ -64,7 +64,7 @@ async function waitUp() {
 (async () => {
   const hadVars = fs.existsSync(DEV_VARS);
   const backup = hadVars ? fs.readFileSync(DEV_VARS) : null;
-  fs.writeFileSync(DEV_VARS, 'OWNER_KEY=' + OWNER + '\nRESEND_API_KEY=re_fake_for_tests\n');
+  fs.writeFileSync(DEV_VARS, 'OWNER_KEY=' + OWNER + '\nRESEND_API_KEY=re_fake_for_tests\nTEST_HOOKS=1\n');
   const child = spawn('npx', ['wrangler', 'dev', '--port', String(PORT)], { cwd: ROOT, detached: true, stdio: 'ignore' });
   try {
     check('wrangler dev comes up', await waitUp());
@@ -174,6 +174,31 @@ async function waitUp() {
     check('publish works', r.status === 200, r.status);
     r = await req('GET', R + '/messages/' + did + '/image?invite=' + TB);
     check('published media is room-visible', r.status === 200, r.status);
+
+    // Phase A: an R2 outage fails media writes all-or-nothing (503, nothing saved).
+    const STORE_MSG = 'Storage is unavailable right now. Nothing was saved; try again.';
+    const roomName = R.slice('/api/rooms/'.length);
+    const setFail = (on) => req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: roomName, on } });
+    r = await setFail(true);
+    check('test hook arms the R2 outage', r.status === 200 && r.json && r.json.test_r2_fail === true, r.status + ' ' + r.text.slice(0, 80));
+    const beforeOutage = await req('GET', R + '/messages?limit=1000', { token: TA });
+    const nBefore = (beforeOutage.json.messages || []).length;
+    r = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'outage pic', image: PNG.toString('base64') } });
+    check('inline image post during outage -> 503', r.status === 503 && r.json && r.json.error === STORE_MSG, r.status + ' ' + r.text.slice(0, 100));
+    const afterOutage = await req('GET', R + '/messages?limit=1000', { token: TA });
+    check('failed post left no message behind', (afterOutage.json.messages || []).length === nBefore && !(afterOutage.json.messages || []).some((x) => x.text === 'outage pic'));
+    const od = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'outage draft', draft: true } });
+    check('text-only draft still works during outage', od.status === 201, od.status);
+    r = await req('PUT', R + '/messages/' + od.json.id + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('attach during outage -> 503', r.status === 503 && r.json && r.json.error === STORE_MSG, r.status + ' ' + r.text.slice(0, 100));
+    r = await req('GET', R + '/messages/' + od.json.id + '/image', { token: TA });
+    check('failed attach left no media (GET -> 404)', r.status === 404, r.status);
+    r = await setFail(false);
+    check('test hook clears the outage', r.status === 200 && r.json && r.json.test_r2_fail === false, r.status);
+    r = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'outage pic', image: PNG.toString('base64') } });
+    check('same inline post succeeds after the outage (retry works)', r.status === 201 && r.json && !!r.json.image, r.status + ' ' + r.text.slice(0, 100));
+    r = await req('PUT', R + '/messages/' + od.json.id + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('same attach succeeds after the outage', r.status === 200, r.status);
 
     // Revocation.
     const invC = await req('POST', R + '/invites', { owner: true, json: { name: 'ApiC', kind: 'agent' } });
@@ -629,6 +654,14 @@ async function waitUp() {
     check('mcp publish completes the upload', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && r.json.result.structuredContent.id === up.message_id), JSON.stringify(r.json).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=10', { token: TRex });
     check('delegated upload is room-visible', (r.json.messages || []).some(x => x.id === up.message_id && x.image), JSON.stringify((r.json.messages || []).map(x => x.id)).slice(0, 120));
+    // Phase A on the MCP surface: during a simulated R2 outage, attach_media
+    // fails as a tool error carrying the storage message, and recovers after.
+    await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: R2.slice('/api/rooms/'.length), on: true } });
+    r = await mcp(R2, 'tools/call', { name: 'attach_media', arguments: { id: up.message_id, kind: 'image', base64: PNG.toString('base64') } }, { token: TP });
+    check('mcp attach_media during outage -> tool error with the storage message', !!(r.json && r.json.result && r.json.result.isError && JSON.stringify(r.json.result).includes('Storage is unavailable right now. Nothing was saved; try again.')), JSON.stringify(r.json).slice(0, 220));
+    await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: R2.slice('/api/rooms/'.length), on: false } });
+    r = await mcp(R2, 'tools/call', { name: 'attach_media', arguments: { id: up.message_id, kind: 'image', base64: PNG.toString('base64') } }, { token: TP });
+    check('mcp attach_media works again after the outage', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });

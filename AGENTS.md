@@ -518,6 +518,16 @@ change behavior. In summary:
   light theme washed out once already.
 - **Media and drafts:** message audio (5 MB), images (5 MB) and video are
   stored in R2 under `<room>/<msgId>/<kind>`; the DO keeps only the index.
+  **Media writes are R2-only and all-or-nothing (2026-11-11, media plan
+  phase A):** `putMedia` throws on a missing binding or a failed put — the
+  `au`/`im` in-DB fallback is never written any more (legacy rows are still
+  read until phase B drains them). Callers turn the failure into a 503 with
+  "Storage is unavailable right now. Nothing was saved; try again."; an
+  inline-media post rolls its message row, index rows and any written
+  objects back, so no message exists without its media. The API suite
+  simulates an outage through `/api/test-hooks/*`, armed only when the
+  Worker runs with `TEST_HOOKS` set (the suite's `.dev.vars` — never
+  wrangler.toml; `check:config` fails by name if it ever appears live).
   Video goes up single-shot (≤25 MB), chunked multipart, or via the
   whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
   the native uploader plugin); size and magic bytes are verified at finish,

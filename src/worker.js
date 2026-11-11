@@ -46,6 +46,12 @@ const BOT_NAME = "claude";
 const MEMBER_INVITES_PER_DAY = 5;
 const MAX_ACTIVE_INVITES = 50;
 const AVATAR_MAX = 2000000;
+// Media storage failures are all-or-nothing (2026-11-11, media plan phase A):
+// an R2 failure fails the whole request with this message and leaves nothing
+// behind - no message without its media, no index row without an object.
+const STORE_MSG = "Storage is unavailable right now. Nothing was saved; try again.";
+function storeError() { const e = new Error(STORE_MSG); e.storeFail = true; return e; }
+function isStoreError(e) { return !!e && (e.storeFail === true || String(e.message || e) === STORE_MSG); }
 const VOICE_SAMPLE_MAX = 10000000; // voice samples up to 10 MB
 const AUDIO_MAX = 5000000;
 const IMAGE_MAX = 5000000;
@@ -55,6 +61,9 @@ const HTML_MAX = 2000000;
 const DOC_MAX = 1000000;
 const VIDEO_PART = 10000000;
 const VIDEO_PART_BIG = 25000000;
+const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes (phase C)
+const TICKET_MAX_PER_MEMBER = 20;
+const TICKET_MAX_TRIES = 5;
 const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
 // Files up to 1 GB upload in 10 MB parts; larger ones in 25 MB parts, so a 5 GB
 // file needs 200 round trips instead of 500. The plan is pinned per upload in md.
@@ -447,8 +456,10 @@ export class Room extends DurableObject {
   async putVoiceSample(name, data, type, room) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const key = this.voiceSampleKey(room, name);
-    if (!this.env || !this.env.MEDIA) return null;
-    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { return null; }
+    // Storage failure is its own answer (phase A): the route turns STORE_FAIL
+    // into a 503, distinct from the no-such-member null.
+    if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
+    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { return "STORE_FAIL"; }
     const prev = this.voiceRow(name);
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
@@ -505,26 +516,48 @@ export class Room extends DurableObject {
     return { sender: r.sender, text: r.text };
   }
 
+  // Test hooks (suite only): when the Worker runs with TEST_HOOKS set (the API
+  // suite's .dev.vars - never wrangler.toml, and check:config fails if the name
+  // ever appears live), owner calls to /api/test-hooks/* flip cfg flags that
+  // simulate an R2 outage and shorten upload-ticket TTLs in this room.
+  r2TestFail() {
+    if (!this.env || !this.env.TEST_HOOKS) return false;
+    const r = this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray()[0];
+    return !!(r && r.v === "1");
+  }
+
+  setTestR2Fail(on) {
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_r2_fail', ?)", on ? "1" : "0");
+    return { test_r2_fail: !!on };
+  }
+
+  ticketTtlMs() {
+    if (this.env && this.env.TEST_HOOKS) {
+      const r = this.sql.exec("SELECT v FROM cfg WHERE k = 'test_ticket_ttl_ms'").toArray()[0];
+      const n = r ? parseInt(r.v, 10) : NaN;
+      if (n > 0) return n;
+    }
+    return TICKET_TTL_MS;
+  }
+
+  setTestTicketTtl(ms) {
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_ticket_ttl_ms', ?)", String(Math.max(0, Math.floor(Number(ms) || 0))));
+    return { test_ticket_ttl_ms: this.ticketTtlMs() };
+  }
+
   // Audio clips: one short clip per message, bytes in their own table so listings stay light.
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
-  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: read as a fallback
-  // for anything not yet in R2, and written only when an R2 put fails, so media is never lost.
+  // md maps (msg, kind) to an R2 key. au/im are the legacy in-DB store: still read
+  // as a fallback for anything not yet migrated, but never written any more -
+  // since phase A an R2 failure fails the request instead (see STORE_MSG).
   mediaKey(room, id, kind) { return (room || this.roomName || "room") + "/" + id + "/" + kind; }
 
   async putMedia(id, kind, data, type, room) {
     const key = this.mediaKey(room, id, kind);
-    let stored = false;
-    if (this.env && this.env.MEDIA) {
-      try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); stored = true; } catch (e) {}
-    }
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, stored ? key : null, data.byteLength);
-    if (!stored) {
-      // R2 unavailable (no binding, or the put failed): keep a legacy in-DB copy so the
-      // media is not lost. It backfills to R2 on the next owner migrate run.
-      if (kind === "audio") this.sql.exec("INSERT OR REPLACE INTO au (msg, type, data) VALUES (?, ?, ?)", id, type, data);
-      if (kind === "image") this.sql.exec("INSERT OR REPLACE INTO im (msg, type, data) VALUES (?, ?, ?)", id, type, data);
-    }
-    return stored ? key : null;
+    if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
+    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { throw storeError(); }
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength);
+    return key;
   }
 
   mediaMeta(id, kind, viewer) {
@@ -564,7 +597,7 @@ export class Room extends DurableObject {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
-    await this.putMedia(id, "audio", data, type, room);
+    try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
     else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
@@ -574,7 +607,7 @@ export class Room extends DurableObject {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
-    await this.putMedia(id, "image", data, type, room);
+    try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   }
@@ -583,7 +616,7 @@ export class Room extends DurableObject {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
-    await this.putMedia(id, "video", data, type, room);
+    try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   }
@@ -1267,25 +1300,40 @@ export class Room extends DurableObject {
     this.roomName = room;
     const ts = Date.now();
     const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
-    if (audio) {
-      await this.putMedia(id, "audio", audio.data, audio.type, room);
-      this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
-    }
-    if (image) {
-      await this.putMedia(id, "image", image.data, image.type, room);
-      this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", image.type, image.data.byteLength, id);
-    }
-    if (video) {
-      await this.putMedia(id, "video", video.data, video.type, room);
-      this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", video.type, video.data.byteLength, id);
-    }
-    if (html) {
-      await this.putMedia(id, "html", html.data, html.type, room);
-      this.sql.exec("UPDATE m SET html_type = ?, html_size = ?, html_name = ? WHERE id = ?", html.type, html.data.byteLength, html.name || null, id);
-    }
-    if (doc) {
-      await this.putMedia(id, "doc", doc.data, doc.type, room);
-      this.sql.exec("UPDATE m SET doc_type = ?, doc_size = ?, doc_name = ? WHERE id = ?", doc.type, doc.data.byteLength, doc.name || null, id);
+    // Inline media is all or nothing (phase A): every put lands in R2 before
+    // the message is announced at the end of this method, so on a storage
+    // failure the catch below removes the row, its index rows and any object
+    // already written - no message, no frame, no push survives a failed post.
+    try {
+      if (audio) {
+        await this.putMedia(id, "audio", audio.data, audio.type, room);
+        this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", audio.type, audio.data.byteLength, audio.transcript || null, id);
+      }
+      if (image) {
+        await this.putMedia(id, "image", image.data, image.type, room);
+        this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", image.type, image.data.byteLength, id);
+      }
+      if (video) {
+        await this.putMedia(id, "video", video.data, video.type, room);
+        this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", video.type, video.data.byteLength, id);
+      }
+      if (html) {
+        await this.putMedia(id, "html", html.data, html.type, room);
+        this.sql.exec("UPDATE m SET html_type = ?, html_size = ?, html_name = ? WHERE id = ?", html.type, html.data.byteLength, html.name || null, id);
+      }
+      if (doc) {
+        await this.putMedia(id, "doc", doc.data, doc.type, room);
+        this.sql.exec("UPDATE m SET doc_type = ?, doc_size = ?, doc_name = ? WHERE id = ?", doc.type, doc.data.byteLength, doc.name || null, id);
+      }
+    } catch (e) {
+      if (isStoreError(e)) {
+        const keys = this.sql.exec("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
+        this.sql.exec("DELETE FROM md WHERE msg = ?", id);
+        this.sql.exec("DELETE FROM m WHERE id = ?", id);
+        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (e2) {} }
+        throw storeError();
+      }
+      throw e;
     }
     if (id > KEEP) {
       // Drafts are exempt from the trim: a long upload can sit on an old id
@@ -4154,6 +4202,29 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(APP_INDEX);
     if (path === "/api/build") return json({ build: await currentBuildId() });
+    // Test hooks: inert unless the Worker runs with TEST_HOOKS set (the API
+    // suite's .dev.vars only - never wrangler.toml; check:config fails if the
+    // name ever appears in the live config). Owner key required regardless.
+    if (path === "/api/test-hooks/r2-fail") {
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const tb = await readBody(request);
+      const troom = String((tb && tb.room) || "").toLowerCase();
+      if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+      const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+      return json(await tstub.setTestR2Fail(!!(tb && tb.on)));
+    }
+    if (path === "/api/test-hooks/ticket-ttl") {
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const tb = await readBody(request);
+      const troom = String((tb && tb.room) || "").toLowerCase();
+      if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+      const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+      return json(await tstub.setTestTicketTtl(tb && tb.ttl_ms));
+    }
     if (path === "/emoji.json") {
       const data = env.REQUESTS ? await emojiList(env) : null;
       if (!data) return json({ error: "The emoji list isn't available right now" }, 503);
@@ -4535,7 +4606,8 @@ export default {
         const type = sniffAudio(buf);
         if (!type) return json({ error: "Samples must be MP3, WAV, M4A, OGG or WebM audio" }, 415);
         const key = await stub.putVoiceSample(who, buf, type, room);
-        if (!key) return json({ error: "No member with that name, or sample storage is unavailable" }, 404);
+        if (key === "STORE_FAIL") return json({ error: STORE_MSG }, 503);
+        if (!key) return json({ error: "No member with that name" }, 404);
         if (!env.CARTESIA_API_KEY) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, note: "Sample stored. Server cloning is not configured yet, so no voice id was saved." }, 202);
         let vid;
         try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && e.message) || e), sample_stored: true }, 502); }
@@ -4944,7 +5016,10 @@ export default {
         // empty cache; caching this buffer anyway would resurrect the old
         // voice for this message indefinitely.
         const v2 = await stub.voiceOf(src.sender);
-        if (v2 && v2.voice_id === v.voice_id) await stub.putMedia(id, "speak", b, "audio/mpeg", room);
+        // The speak cache is best-effort: a storage failure (phase A makes
+        // putMedia throw) must not fail playback - this play is served from
+        // the buffer below and the next play simply re-synthesizes.
+        if (v2 && v2.voice_id === v.voice_id) { try { await stub.putMedia(id, "speak", b, "audio/mpeg", room); } catch (e) {} }
         return b;
       })();
       SPEAK_INFLIGHT.set(skey, synth);
@@ -5379,7 +5454,9 @@ export default {
         const trusted = owner;
         // Only the owner key may post as the reserved bot name.
         if (from.toLowerCase() === BOT_NAME && !trusted) return json({ error: "The name \"" + BOT_NAME + "\" is reserved" }, 403);
-        const msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc);
+        let msg;
+        try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
+        catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }
         return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
       }
 
