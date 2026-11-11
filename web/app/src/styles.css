@@ -310,7 +310,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 @keyframes lcHeadPulse { 50% { opacity: .45; } }
 .lc-svg .lc-new { animation: lcNewFade .55s ease-out; }
 @keyframes lcNewFade { 0% { opacity: .8; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .lc-svg .lc-head, .lc-svg .lc-new { animation: none; } }
+.lc-svg .lc-draw { stroke-dasharray: 1; stroke-dashoffset: 0; animation: lcDrawIn .25s linear; }
+@keyframes lcDrawIn { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .lc-svg .lc-head, .lc-svg .lc-new, .lc-svg .lc-draw { animation: none; } }
 .lc-arena { max-width: 720px; margin: 0 auto; padding: 12px 14px 20px; }
 .lc-board-big .lc-svg { max-height: 58vh; }
 .lc-meta { color: var(--dim); font-size: 13px; margin: 8px 0 2px; }
@@ -368,7 +370,9 @@ button.bs-cell:hover { background: rgba(56, 189, 248, .3); }
 .bs-cell.sunk { background: #7f1d1d; color: #fecaca; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .45), inset 0 0 0 1px rgba(0, 0, 0, .22); filter: saturate(.72); }
 div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: waterDrift 5.5s ease-in-out infinite alternate; }
 @keyframes waterDrift { from { background-color: rgba(56, 189, 248, .05); } to { background-color: rgba(56, 189, 248, .12); } }
-@media (prefers-reduced-motion: reduce) { div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: none; } }
+button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
+@keyframes bsAim { 0% { transform: scale(1); } 35% { transform: scale(.8); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { div.bs-cell:not(.ship):not(.hit):not(.miss):not(.sunk) { animation: none; } button.bs-cell.bs-aim { animation: none; } }
 .bs-sonar { margin-top: 8px; font-size: 13px; color: #7dd3fc; background: rgba(56, 189, 248, .08); border: 1px solid rgba(56, 189, 248, .3); border-radius: 10px; padding: 7px 10px; }
 .duel-h2h { text-align: center; font-size: 12.5px; color: var(--muted, #94a3b8); margin-top: 6px; letter-spacing: .2px; }
 .arena-hint { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: #93c5fd; background: rgba(59, 130, 246, .08); border: 1px dashed rgba(59, 130, 246, .35); border-radius: 10px; padding: 7px 10px; }

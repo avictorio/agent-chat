@@ -149,6 +149,15 @@ export function boardSvg(g: GL): string {
     const lc = lastCell[i];
     if (lc) {
       if (p.alive) {
+        // The newest segment draws itself in: a line from the previous
+        // cell to the growth point, stroke-dashoffset over 250 ms, so
+        // the trail visibly extends instead of appearing whole.
+        const cells = byColor[i] || [];
+        if (cells.length >= 2) {
+          const a = cells[cells.length - 2];
+          if (Math.abs(a[0] - lc[0]) + Math.abs(a[1] - lc[1]) === 1)
+            s += '<line class="lc-draw" x1="' + (a[0] + 0.5) + '" y1="' + (a[1] + 0.5) + '" x2="' + (lc[0] + 0.5) + '" y2="' + (lc[1] + 0.5) + '" stroke="' + p.hex + '" stroke-width="0.62" stroke-linecap="round" pathLength="1"/>';
+        }
         // The growth point sparks white and settles each render, so
         // the trail visibly extends tick over tick.
         s += '<rect class="lc-new" x="' + lc[0] + '" y="' + lc[1] + '" width="1" height="1" fill="#ffffff" opacity="0"/>';
@@ -485,7 +494,12 @@ export function bsGrid(states: Record<string, string>, shipHex: string, onFire: 
         const b = cell as HTMLButtonElement;
         b.type = "button";
         b.setAttribute("aria-label", (verb || "Fire at ") + label);
-        b.addEventListener("click", () => onFire(label));
+        b.addEventListener("click", () => {
+          // A shot gets an anticipation beat: the cell dips while the
+          // shot is in flight, before the stream brings the result.
+          if (!verb || verb.indexOf("Fire") === 0) b.classList.add("bs-aim");
+          onFire(label);
+        });
       }
       grid.appendChild(cell);
     }

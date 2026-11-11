@@ -731,6 +731,8 @@ let FAILURES = 0;
     const out = {};
     await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
     out.trailCells = await page.$$eval('.game-card .lc-svg rect', els => els.length);
+    out.drawLines = await page.$$eval('.game-card .lc-draw', els => els.length);
+    if (out.drawLines < 2) throw new Error('each living rider should carry a draw-in segment, got ' + out.drawLines);
     out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
     if (out.trailCells < 10) throw new Error('board should render trails and heads, got ' + out.trailCells + ' rects');
     if (!/Tick 3/.test(out.cardMeta)) throw new Error('card meta wrong: ' + out.cardMeta);
