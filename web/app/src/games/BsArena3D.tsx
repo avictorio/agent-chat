@@ -547,6 +547,50 @@ function LastShotRing({ x, z }: { x: number; z: number }) {
   );
 }
 
+/* The endgame sonar ping (state: g.sonar = {for, axis, label}) names
+   a row or column of the hunted captain's waters holding an un-hit
+   cell of their last ship. In the scene it is a translucent cyan band
+   across that row/column on the hunted tile, a bright sweep line
+   travelling its length, and a floating label - presentation only,
+   the same public information the 2D arena prints as a text line. */
+function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; sonar: GL }) {
+  const bandMat = useRef<MeshStandardMaterial>(null);
+  const sweep = useRef<Group>(null);
+  const isRow = sonar.axis === "row";
+  const idx = isRow ? parseInt(String(sonar.label).slice(4), 10) - 1 : String(sonar.label).charCodeAt(7) - 65;
+  const span = isRow ? w : h;
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (bandMat.current) bandMat.current.opacity = 0.14 + 0.08 * (0.5 + 0.5 * Math.sin(t * 2.2));
+    if (sweep.current) {
+      const p = ((t % 2.8) / 2.8) * (span + 2) - (span / 2 + 1);
+      if (isRow) sweep.current.position.x = tile.cx + p;
+      else sweep.current.position.z = p;
+    }
+  });
+  if (!(idx >= 0 && idx < span)) return null;
+  const bandPos: [number, number, number] = isRow
+    ? [tile.cx, 0.07, idx - (h - 1) / 2]
+    : [tile.cx + idx - (w - 1) / 2, 0.07, 0];
+  return (
+    <group>
+      <mesh position={bandPos}>
+        <boxGeometry args={isRow ? [w, 0.02, 1] : [1, 0.02, h]} />
+        <meshStandardMaterial ref={bandMat} color="#164e63" emissive="#22d3ee" emissiveIntensity={1.15} toneMapped={false} transparent opacity={0.18} depthWrite={false} />
+      </mesh>
+      <group position={bandPos} ref={sweep}>
+        <mesh position={[0, 0.015, 0]}>
+          <boxGeometry args={isRow ? [0.07, 0.03, 1] : [1, 0.03, 0.07]} />
+          <meshBasicMaterial color="#a5f3fc" toneMapped={false} transparent opacity={0.9} depthWrite={false} />
+        </mesh>
+      </group>
+      <sprite position={[bandPos[0], 1.2, bandPos[2]]} scale={[3.6, 0.68, 1]}>
+        <spriteMaterial map={textTexture("SONAR · " + String(sonar.label).toUpperCase(), "#67e8f9", true)} depthWrite={false} transparent opacity={0.95} />
+      </sprite>
+    </group>
+  );
+}
+
 /* ---------- one ocean tile: grid hologram, labels, ships, fires ---------- */
 
 type ShipT = { key: string; size: number; variant: number; sunk: boolean; cells: string[]; hits: string[] };
@@ -676,6 +720,7 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
   const w = g.w || 10;
   const h = g.h || 10;
   const tiles = useMemo(() => buildTiles(g, me), [g, me]);
+  const sonar = g && g.sonar && g.phase === "play" && g.status === "running" ? g.sonar : null;
   const world = useRef<Group>(null);
   const [hover, setHover] = useState<string | null>(null);
   const downAt = useRef<{ x: number; y: number } | null>(null);
@@ -818,6 +863,7 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
           return (
             <group key={tile.name + ti}>
               <GridHolo tile={tile} w={w} h={h} />
+              {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
               {shipEls}
               {fireEls}
               {tile.water.map((m) => {

@@ -377,7 +377,11 @@ let FAILURES = 0;
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 8000 });
+    /* 20s, not the usual 4-8s: the canvas waits on the lazy three.js
+       chunk loading plus software-GL init, which runs long on a
+       loaded box - an 8s wait flaked twice on 2026-11-12 while the
+       scene itself rendered fine. */
+    await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
     out.toggleOn = await page.$eval('#viewer .lc-view-btn.on', e => e.textContent);
     if (out.toggleOn !== '3D') throw new Error('the 3D toggle should be the active one by default, got ' + out.toggleOn);
     if (await page.$('#viewer .bs-grid') !== null) throw new Error('the 2D grids should not render when 3D is the default');
