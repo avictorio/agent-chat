@@ -150,6 +150,9 @@ export function createGameStore(opts: {
     tab?: string;
     lc3d?: { root: Root; host: HTMLElement } | null;
     lc3dSeq?: number;
+    bs3d?: { root: Root; host: HTMLElement } | null;
+    bs3dSeq?: number;
+    bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
   let gameRenderKey = "";
@@ -611,6 +614,7 @@ export function createGameStore(opts: {
     wrap.appendChild(arenaTabs(g));
     const note = el("div", "lc-note", "");
     if (gameView.tab === "history") {
+      dropBs3d();
       wrap.appendChild(historyList(g));
       if (g.status === "finished" || g.status === "cancelled") {
         wrap.appendChild(rematchRow(g, note));
@@ -619,6 +623,7 @@ export function createGameStore(opts: {
       return;
     }
     if (g.status === "lobby") {
+      dropBs3d();
       wrap.appendChild(lobbyPanel(g, note));
       wrap.appendChild(note);
       return;
@@ -636,6 +641,8 @@ export function createGameStore(opts: {
       if (g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
         const banner = bsBanner(g, freshMove);
         if (banner) wrap.appendChild(banner);
+        if (gameView) gameView.bsFire = null;
+        const use3d = bsBoardsOr3d(g, wrap);
         const boards = el("div", "bs-boards");
         g.boards.forEach((b: GL) => {
           const states: Record<string, string> = {};
@@ -656,13 +663,15 @@ export function createGameStore(opts: {
           side.appendChild(grid);
           boards.appendChild(side);
         });
-        wrap.appendChild(boards);
+        if (!use3d) wrap.appendChild(boards);
         note.textContent = "Spectating - every shot is public; un-hit ships stay hidden.";
       } else {
+        dropBs3d();
         note.textContent = "Spectating - fleets stay hidden; the boards are for their captains.";
       }
       wrap.appendChild(note);
     } else if (g.phase === "setup" && !you.fleet) {
+      dropBs3d();
       const big = el("div", "lc-board-big");
       big.appendChild(battleshipBoard(g));
       wrap.appendChild(big);
@@ -791,7 +800,8 @@ export function createGameStore(opts: {
       boards.appendChild(oppWrap);
       const banner = bsBanner(g, freshMove);
       if (banner) wrap.appendChild(banner);
-      wrap.appendChild(boards);
+      if (gameView) gameView.bsFire = canFire ? (label: string) => { void sendMove(g.id, label, note); } : null;
+      if (!bsBoardsOr3d(g, wrap)) wrap.appendChild(boards);
       let status = "";
       if (g.status === "finished" || g.status === "cancelled") status = "";
       else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
@@ -884,6 +894,96 @@ export function createGameStore(opts: {
     row.appendChild(mk("2D", false));
     row.appendChild(mk("3D", true));
     return row;
+  }
+
+  /* ---- Battleship 3D board (R3F, 2026-11-12) ----
+     Same bridge pattern as the Light Cycles scene: ./BsArena3D is a
+     dynamic import (three.js stays in the lazy chunk), the preference
+     persists per device and defaults to 2D, and the React root lives
+     on gameView so re-appending the host keeps the canvas alive
+     across repaints. The component receives the same per-viewer state
+     as the 2D boards plus a fire callback wired to sendMove. */
+  const BS3D_KEY = "ac:bs3d";
+  let bs3dComp: Promise<ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void }>> | null = null;
+  function bs3dPref(): boolean {
+    try {
+      return localStorage.getItem(BS3D_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function setBs3dPref(on: boolean) {
+    try {
+      localStorage.setItem(BS3D_KEY, on ? "1" : "0");
+    } catch {
+      // storage unavailable: the toggle still works for this view
+    }
+  }
+  function loadBs3d() {
+    if (!bs3dComp) bs3dComp = import("./BsArena3D").then((m) => m.default);
+    return bs3dComp;
+  }
+  function dropBs3d() {
+    const gv = gameView;
+    if (gv && gv.bs3d) {
+      const m = gv.bs3d;
+      gv.bs3d = null;
+      gv.bsFire = null;
+      m.root.unmount();
+    }
+  }
+  function paintBs3d(g: GL, host: HTMLElement) {
+    const gv = gameView;
+    if (!gv) return;
+    const seq = (gv.bs3dSeq = (gv.bs3dSeq || 0) + 1);
+    void loadBs3d().then((Comp) => {
+      // A newer paint, a closed viewer or a toggle-off supersedes us.
+      if (!gameView || gameView !== gv || gv.bs3dSeq !== seq || !gv.bs3d || gv.bs3d.host !== host) return;
+      gv.bs3d.root.render(
+        createElement(Comp, {
+          g,
+          me: opts.meName(),
+          aspect: host.clientWidth / Math.max(1, host.clientHeight),
+          onFire: (label: string) => {
+            if (gameView && gameView.bsFire) gameView.bsFire(label);
+          },
+        })
+      );
+    });
+  }
+  function bsViewToggle(g: GL): HTMLElement {
+    const row = el("div", "lc-view-toggle");
+    const on = bs3dPref();
+    const mk = (label: string, is3d: boolean) => {
+      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
+      b.type = "button";
+      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (bs3dPref() === is3d) return;
+        setBs3dPref(is3d);
+        if (!is3d) dropBs3d();
+        renderGameView(g, true);
+      });
+      return b;
+    };
+    row.appendChild(mk("2D", false));
+    row.appendChild(mk("3D", true));
+    return row;
+  }
+  /* Append the toggle (and, when the pref is on, the 3D host in place
+     of the 2D boards). Returns true when the caller should skip
+     building its 2D boards. */
+  function bsBoardsOr3d(g: GL, wrap: HTMLElement): boolean {
+    wrap.appendChild(bsViewToggle(g));
+    if (!bs3dPref()) return false;
+    if (!gameView) return false;
+    if (!gameView.bs3d) {
+      const host = el("div", "lc-board-big lc-3d-host");
+      gameView.bs3d = { root: createRoot(host), host };
+    }
+    wrap.appendChild(gameView.bs3d.host);
+    paintBs3d(g, gameView.bs3d.host);
+    return true;
   }
 
   function renderGameView(g: GL, force?: boolean) {
@@ -1028,6 +1128,7 @@ export function createGameStore(opts: {
 
   function openGame(id: number, type?: string) {
     dropLc3d();
+    dropBs3d();
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(
@@ -1105,6 +1206,7 @@ export function createGameStore(opts: {
     },
     viewerClosed() {
       dropLc3d();
+      dropBs3d();
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
         gameViewTimer = 0;
