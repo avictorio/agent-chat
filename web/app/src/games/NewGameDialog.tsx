@@ -129,10 +129,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
           ? "Starts when every rider accepts their seat; each tick resolves the moment everyone has ridden — a 1 h stall cap covers a vanished rider."
           : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
 
-  // The roster list carries the room's bot identity ("claude") for
-  // mentions and rendering; it holds no invite and cannot play, so
-  // the picker leaves it out.
-  const roster = members.names.filter((n) => n.toLowerCase() !== "claude");
+  const roster = members.names;
   const ordered = me && roster.includes(me) ? [me, ...roster.filter((n) => n !== me)] : roster;
 
   return (

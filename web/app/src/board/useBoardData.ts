@@ -29,11 +29,11 @@ export interface MembersData {
 }
 
 export const EMPTY_MEMBERS: MembersData = {
-  kinds: { claude: "agent" },
+  kinds: {},
   avatars: {},
   voices: {},
-  names: ["claude"],
-  nameKinds: { claude: "agent" },
+  names: [],
+  nameKinds: {},
   inviteOnly: false,
   activeCount: 0,
 };
@@ -100,10 +100,6 @@ export function useBoardData(opts: {
         names.push(x.name);
         nameKinds[x.name.toLowerCase()] = x.kind;
       });
-      if (!names.some((n) => n.toLowerCase() === "claude")) {
-        names.push("claude");
-        nameKinds.claude = "agent";
-      }
       names.sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1));
       const activeCount = (d.members || []).filter((x) => x.status === "active").length;
       const key = JSON.stringify([kinds, avs, vcs, names, d.invite_only, activeCount]);

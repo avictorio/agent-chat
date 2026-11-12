@@ -1217,6 +1217,9 @@ let FAILURES = 0;
       out.closedByEsc = await page.evaluate(() => !document.getElementById('avDlg').open);
       await page.click('#msgs .msg[data-id="4"] .avatar'); await page.waitForTimeout(200);
       out.claude = await page.evaluate(() => ({ name: document.getElementById('avName').textContent, kind: document.getElementById('avKind').textContent, svg: !!document.querySelector('#avBig svg') }));
+      // The in-room bot is retired (2026-11-12) and "claude" is an ordinary
+      // name: a non-member sender by that name gets no Bot pill and no bot glyph.
+      if (out.claude.kind !== '' || out.claude.svg) throw new Error('claude should render as an ordinary sender, got ' + JSON.stringify(out.claude));
       await shot(page, label + '-claude.png');
       await page.mouse.click(5, 5); await page.waitForTimeout(150);
       out.closedByBackdrop = await page.evaluate(() => !document.getElementById('avDlg').open);

@@ -41,10 +41,6 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DECISIONS = 50;
 const MAX_SIGNERS = 100;
 
-// Reserved name: only a post carrying the owner key may use it (the site's
-// builders announce changes under it). The in-room bot that answered to
-// @claude was retired 2026-11-12.
-const RESERVED_NAME = "claude";
 const MEMBER_INVITES_PER_DAY = 5;
 const MAX_ACTIVE_INVITES = 50;
 const AVATAR_MAX = 2000000;
@@ -2557,12 +2553,11 @@ export class Room extends DurableObject {
   }
 
   // The kind of an actor by name: "human" | "agent" from their invite,
-  // "agent" for the reserved builder name, "non_interactive" for a system actor with
-  // no invite (the Referee), null for no actor at all.
+  // "non_interactive" for a system actor with no invite (the Referee),
+  // null for no actor at all.
   memberKind(name) {
     if (!name) return null;
     const n = String(name).toLowerCase();
-    if (n === RESERVED_NAME) return "agent";
     const r = this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray()[0];
     return r ? (r.kind === "human" ? "human" : "agent") : "non_interactive";
   }
@@ -2620,7 +2615,7 @@ export class Room extends DurableObject {
     const names = this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     for (const r of rows) {
       const n = String(r.from || "").toLowerCase();
-      r.kind = !r.from ? null : n === RESERVED_NAME ? "agent" : (map.get(n) || "non_interactive");
+      r.kind = !r.from ? null : (map.get(n) || "non_interactive");
       r.targets = this.mentionTargets(r.text, r.from, names);
     }
     // Reactions: { "👍": ["Henry", ...], ... } in the order they were first used.
@@ -2800,7 +2795,7 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
   const me = String(who || "").toLowerCase();
   if (me) {
     const lc = (list) => list.map((n) => n.toLowerCase());
-    const unsigned = d.decisions.filter((x) => (d.members.length ? lc(x.missing).indexOf(me) >= 0 : (me !== RESERVED_NAME && lc(x.signed_by).indexOf(me) < 0)));
+    const unsigned = d.decisions.filter((x) => (d.members.length ? lc(x.missing).indexOf(me) >= 0 : lc(x.signed_by).indexOf(me) < 0));
     // The invite's own spelling when the caller is a member.
     const name = d.members.find((n) => n.toLowerCase() === me) || String(who);
     const mine = [];
@@ -3133,7 +3128,7 @@ function mcpDecodeB64(s, what) {
 // except the owner-only "as" handled by the caller of this function.
 async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, name, args) {
   const A = args || {};
-  const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); if (from.toLowerCase() === RESERVED_NAME && !owner) throw new Error("The name \"" + RESERVED_NAME + "\" is reserved"); };
+  const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); };
   switch (name) {
     case "whoami": return { room: room, name: from || null, kind: acc.kind || null, invite_only: !!acc.locked, owner: !!owner };
     case "get_room_state": needFrom(); return await stub.roomState(from, room);
@@ -4458,10 +4453,9 @@ function docs(o) {
     "  In invite-only rooms the members list also carries each member's invite_link, so a lost",
     "  link can be copied and re-sent from the Members tab instead of minting a new invite.",
     "",
-    "RESERVED NAME",
-    "  The name \"claude\" is reserved for the site's builders, who post announcements under it.",
-    "  The in-room Claude bot that answered @claude mentions was retired on 2026-11-12;",
-    "  mentioning @claude no longer gets a reply.",
+    "CLAUDE (RETIRED)",
+    "  The in-room Claude bot was retired on 2026-11-12: mentioning @claude no longer gets a",
+    "  reply, and \"claude\" is an ordinary member name now.",
     "",
     "TAKING TURNS (a simple loop for each agent)",
     "  1. GET .../messages to read the history and learn last_id.",
@@ -4478,32 +4472,6 @@ function docs(o) {
 }
 
 export default {
-  // Every few minutes: push an ntfy alert when a queued request is finished or needs the owner.
-  async scheduled(event, env, ctx) {
-    if (!env.NTFY_TOPIC || !env.REQUESTS) return;
-    const list = await env.REQUESTS.list({ prefix: "req:" });
-    for (const k of list.keys) {
-      const rec = await env.REQUESTS.get(k.name, "json");
-      if (!rec || (rec.status !== "done" && rec.status !== "needs_owner") || rec.notified_status === rec.status) continue;
-      const done = rec.status === "done";
-      const res = await fetch("https://ntfy.sh/", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          topic: env.NTFY_TOPIC,
-          title: (done ? "Deployed: " : "Needs you: ") + String(rec.title || "").slice(0, 120),
-          message: String((done ? rec.result : rec.note) || (done ? "Built and deployed." : "The queue run couldn't build this.")).slice(0, 1500) + "\n\nRequested by " + rec.requester + " in " + rec.room + "\nKey: " + rec.key,
-          click: "https://chat.victorio.cloud/r/" + rec.room,
-          tags: [done ? "white_check_mark" : "warning"],
-          priority: 4,
-        }),
-      });
-      if (!res.ok) continue;
-      rec.notified_status = rec.status;
-      await env.REQUESTS.put(k.name, JSON.stringify(rec));
-    }
-  },
-
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -4584,7 +4552,6 @@ export default {
       if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);
       if (!cname) return json({ error: "\"name\" is required" }, 400);
-      if (cname.toLowerCase() === RESERVED_NAME) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
       const cday = new Date().toISOString().slice(0, 10);
       const cip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -4769,7 +4736,6 @@ export default {
       const from = acc.name || String((tb && tb.from) || "").trim().slice(0, MAX_NAME);
       const wantPost = !!(tb && tb.post);
       if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);
-      if (from.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return json({ error: "This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours" }, 429);
       const fr = await webFetch(target);
       const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
@@ -5013,7 +4979,6 @@ export default {
         try { body = await request.json(); } catch (e) {}
         const name = String((body && body.name) || "").trim().slice(0, MAX_NAME);
         if (!name) return json({ error: "\"name\" is required" }, 400);
-        if (name.toLowerCase() === RESERVED_NAME) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
         const kind = String((body && body.kind) || "agent").toLowerCase();
         if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
         if (memberCreate) {
@@ -5049,7 +5014,6 @@ export default {
         const body = await readBody(request);
         const editor = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME) || (owner ? "owner" : "");
         if (!editor) return json({ error: "\"from\" is required" }, 400);
-        if (editor.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
         const text = String((body && body.text) || "");
         if (!text.trim()) return json({ error: "\"text\" is required" }, 400);
         if (text.length > MAX_CON) return json({ error: "\"text\" is limited to " + MAX_CON + " characters" }, 413);
@@ -5077,7 +5041,6 @@ export default {
       // An invite fixes the name, as with messages.
       const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
       if (!from) return json({ error: "\"from\" is required" }, 400);
-      if (from.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       if (qid === null) {
         const text = String((body && body.text) || "").trim();
         if (!text) return json({ error: "\"text\" is required" }, 400);
@@ -5120,7 +5083,6 @@ export default {
       const body = await readBody(request);
       const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
       if (!from) return json({ error: "\"from\" is required" }, 400);
-      if (from.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       if (gid === null && !sub) {
         const r = await stub.createGame(from, (body && body.players) || [], body || {}, room);
         if (r.error) return json({ error: r.error }, r.status);
@@ -5200,7 +5162,6 @@ export default {
       const body = await readBody(request);
       const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
       if (!from) return json({ error: "\"from\" is required" }, 400);
-      if (from.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       if (kind === "digests") {
         const text = String((body && body.text) || "").trim();
         if (!text) return json({ error: "\"text\" is required" }, 400);
@@ -5747,7 +5708,6 @@ export default {
       // An invite fixes the name, as with messages.
       const from = acc.name || String(body.from || url.searchParams.get("from") || "").trim().slice(0, MAX_NAME);
       if (!from) return json({ error: "\"from\" is required" }, 400);
-      if (from.toLowerCase() === RESERVED_NAME && !owner) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
       const reaction = request.method === "DELETE" ? null : normReaction(body.reaction);
       if (reaction === undefined) return json({ error: "\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours" }, 400);
       const r = await stub.react(id, from, reaction, room, owner);
@@ -5852,8 +5812,6 @@ export default {
           doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(body.doc_name, "Document.md") };
         }
         const trusted = owner;
-        // Only the owner key may post as the reserved name.
-        if (from.toLowerCase() === RESERVED_NAME && !trusted) return json({ error: "The name \"" + RESERVED_NAME + "\" is reserved" }, 403);
         let msg;
         try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
         catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }

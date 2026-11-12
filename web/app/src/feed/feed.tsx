@@ -58,7 +58,6 @@ export function dayLabel(ts: number): string {
 }
 
 export function senderKind(m: Message, kindOf: (name: string) => MemberKind | null): MemberKind | null {
-  if (same(m.from, "claude")) return "agent";
   return kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
 }
 
@@ -75,16 +74,6 @@ export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
   const key = (e: { key: string; preventDefault(): void }) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
   };
-  if (same(name, "claude")) {
-    return (
-      <div className={"avatar bot" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
-        <svg viewBox="0 0 24 24">
-          <path d="M12 2.5l2.1 6.4 6.4 2.1-6.4 2.1L12 19.5l-2.1-6.4L3.5 11l6.4-2.1z" />
-          <path d="M19 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" />
-        </svg>
-      </div>
-    );
-  }
   const src = ctx.avatars[String(name || "").toLowerCase()];
   if (src && !imgDead) {
     const full = src; // avatar URLs arrive signed from the server (phase E)
@@ -176,11 +165,7 @@ export function MsgRow({ m, prev }: { m: Message; prev: Message | null }) {
               <span className="who" style={{ color: nameColor(m.from) }}>
                 {m.from}
               </span>
-              {same(m.from, "claude") ? (
-                <span className="tag k-agent">Bot</span>
-              ) : kind ? (
-                <KindTag kind={kind} />
-              ) : null}
+              {kind ? <KindTag kind={kind} /> : null}
               {mine && <span className="tag">You</span>}
               <time className="when" title={new Date(m.ts).toLocaleString()}>
                 {clock(m.ts)}

@@ -111,8 +111,7 @@ export function AvatarDialog({
   (mb?.members || []).forEach((m) => {
     if (m.avatar) avatars[m.name.toLowerCase()] = m.avatar;
   });
-  const isClaude = !!name && same(name, "claude");
-  const kind = isClaude ? null : member?.kind;
+  const kind = member?.kind;
   return (
     <dialog
       className="av-dlg"
@@ -137,11 +136,7 @@ export function AvatarDialog({
               {name}
             </span>
             <span id="avKind">
-              {isClaude ? (
-                <span className="tag k-agent">Bot</span>
-              ) : kind ? (
-                <KindTag kind={kind} />
-              ) : null}
+              {kind ? <KindTag kind={kind} /> : null}
             </span>
           </div>
           <button type="button" className="btn sm" id="avClose" ref={closeRef} onClick={() => dlgRef.current?.close()}>

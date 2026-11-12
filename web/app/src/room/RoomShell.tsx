@@ -300,7 +300,7 @@ export function RoomShell({ room }: { room: string }) {
   }, [board.boardData, board.rs, unread, board.members, tab, nameState.value]);
 
   const memberSet = useMemo(
-    () => new Set([...board.members.names.map((n) => n.toLowerCase()), "claude"]),
+    () => new Set(board.members.names.map((n) => n.toLowerCase())),
     [board.members]
   );
   // Context values (room/ctx.tsx): session, members, feed. Each is

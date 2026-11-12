@@ -1,6 +1,6 @@
 # Deploy config for the chat.victorio.cloud Worker.
 # Cloudflare Workers Builds runs `npx wrangler deploy` on every push to main.
-# Secrets (NTFY_TOPIC, OWNER_KEY, FCM_SA, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY) live only in Cloudflare and are kept across deploys.
+# Secrets (OWNER_KEY, FCM_SA, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY) live only in Cloudflare and are kept across deploys.
 # Never put them in this file.
 
 name = "victorio-chat"
@@ -46,9 +46,11 @@ class_name = "Room"
 tag = "v1"
 new_sqlite_classes = ["Room"]
 
-# ntfy "Deployed / Needs you" alerts for the change-request queue. Removing this stops them.
+# No cron triggers. The change-request queue and its ntfy alerts were retired
+# 2026-11-12. Keep this as an explicit empty list: a deploy replaces the live
+# crons with this array, while a missing [triggers] would leave them in place.
 [triggers]
-crons = ["*/3 * * * *"]
+crons = []
 
 [observability]
 enabled = true
