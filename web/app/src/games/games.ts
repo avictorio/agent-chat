@@ -1,4 +1,6 @@
 import type { RoomClient } from "@chat/shared";
+import { createElement, type ComponentType } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { el } from "../lib";
 import {
   battleshipBoard,
@@ -141,7 +143,14 @@ export function createGameStore(opts: {
     listeners.forEach((fn) => fn());
   };
 
-  let gameView: { id: number; wrap: HTMLElement; lastRounds?: number; tab?: string } | null = null;
+  let gameView: {
+    id: number;
+    wrap: HTMLElement;
+    lastRounds?: number;
+    tab?: string;
+    lc3d?: { root: Root; host: HTMLElement } | null;
+    lc3dSeq?: number;
+  } | null = null;
   let gameViewTimer = 0;
   let gameRenderKey = "";
 
@@ -810,6 +819,73 @@ export function createGameStore(opts: {
     }
   }
 
+  /* ---- Light Cycles 3D board (R3F spike, 2026-11-12) ----
+     The arena's board can render as a 3D scene (./LcArena3D,
+     react-three-fiber) instead of the SVG. The scene module is a
+     dynamic import, so three.js ships in a lazy chunk that loads
+     only when a viewer flips the toggle; the preference persists
+     per device and defaults to 2D. The React root lives on the
+     gameView object: renderGameView clears and rebuilds the wrap
+     on every state change, and re-appending the same host element
+     keeps the canvas (and the camera) alive across repaints. */
+  const LC3D_KEY = "ac:lc3d";
+  let lc3dComp: Promise<ComponentType<{ g: GL; aspect?: number }>> | null = null;
+  function lc3dPref(): boolean {
+    try {
+      return localStorage.getItem(LC3D_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function setLc3dPref(on: boolean) {
+    try {
+      localStorage.setItem(LC3D_KEY, on ? "1" : "0");
+    } catch {
+      // storage unavailable: the toggle still works for this view
+    }
+  }
+  function loadLc3d() {
+    if (!lc3dComp) lc3dComp = import("./LcArena3D").then((m) => m.default);
+    return lc3dComp;
+  }
+  function dropLc3d() {
+    const gv = gameView;
+    if (gv && gv.lc3d) {
+      const m = gv.lc3d;
+      gv.lc3d = null;
+      m.root.unmount();
+    }
+  }
+  function paintLc3d(g: GL, host: HTMLElement) {
+    const gv = gameView;
+    if (!gv) return;
+    const seq = (gv.lc3dSeq = (gv.lc3dSeq || 0) + 1);
+    void loadLc3d().then((Comp) => {
+      // A newer paint, a closed viewer or a toggle-off supersedes us.
+      if (!gameView || gameView !== gv || gv.lc3dSeq !== seq || !gv.lc3d || gv.lc3d.host !== host) return;
+      gv.lc3d.root.render(createElement(Comp, { g, aspect: host.clientWidth / Math.max(1, host.clientHeight) }));
+    });
+  }
+  function lcViewToggle(g: GL): HTMLElement {
+    const row = el("div", "lc-view-toggle");
+    const on = lc3dPref();
+    const mk = (label: string, is3d: boolean) => {
+      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
+      b.type = "button";
+      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (lc3dPref() === is3d) return;
+        setLc3dPref(is3d);
+        if (!is3d) dropLc3d();
+        renderGameView(g, true);
+      });
+      return b;
+    };
+    row.appendChild(mk("2D", false));
+    row.appendChild(mk("3D", true));
+    return row;
+  }
+
   function renderGameView(g: GL, force?: boolean) {
     if (!gameView || gameView.id !== g.id) return;
     if (g.type === "duel") {
@@ -850,6 +926,7 @@ export function createGameStore(opts: {
     if (wb) wrap.appendChild(wb);
     wrap.appendChild(arenaTabs(g));
     if (gameView.tab === "history") {
+      dropLc3d();
       wrap.appendChild(historyList(g));
       if (g.status === "finished" || g.status === "cancelled") {
         const hnote = el("div", "lc-note", "");
@@ -858,9 +935,19 @@ export function createGameStore(opts: {
       }
       return;
     }
-    const big = el("div", "lc-board-big");
-    big.innerHTML = boardSvg(g);
-    wrap.appendChild(big);
+    wrap.appendChild(lcViewToggle(g));
+    if (lc3dPref()) {
+      if (!gameView.lc3d) {
+        const host = el("div", "lc-board-big lc-3d-host");
+        gameView.lc3d = { root: createRoot(host), host };
+      }
+      wrap.appendChild(gameView.lc3d.host);
+      paintLc3d(g, gameView.lc3d.host);
+    } else {
+      const big = el("div", "lc-board-big");
+      big.innerHTML = boardSvg(g);
+      wrap.appendChild(big);
+    }
     const chips = el("div", "lc-players");
     (g.players || []).forEach((p: GL) => {
       const chip = el("span", "lc-chip" + (p.alive ? "" : " out"));
@@ -940,6 +1027,7 @@ export function createGameStore(opts: {
   }
 
   function openGame(id: number, type?: string) {
+    dropLc3d();
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(
@@ -1016,6 +1104,7 @@ export function createGameStore(opts: {
       return n;
     },
     viewerClosed() {
+      dropLc3d();
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
         gameViewTimer = 0;
