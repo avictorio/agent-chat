@@ -1,16 +1,18 @@
 import { useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { CameraControls, Grid, Instance, Instances, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
+import { CameraControls, Grid, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
+import { Color } from "three";
 import type * as THREE from "three";
 
 // Light Cycles in 3D — the R3F spike (2026-11-12). Renders the same
 // full game state the 2D SVG board consumes (GET /games/:id):
 // g.w / g.h, g.trails as [x, y, playerIndex] cells in growth order,
-// g.players[i] = { name, hex, alive, x, y }. Trails become glowing
-// walls on a reflective floor; each live rider sits on a light
-// cycle built from primitives (glowing hubless wheels, lit rider),
-// and a wreck's wall dims, mirroring the 2D board's opacity
+// g.players[i] = { name, hex, alive, x, y }. Trails become thin,
+// translucent light ribbons on a reflective floor — continuous
+// walls a tire's width thick and a wheel tall, with a bright core
+// line along the top edge, pouring out of the back of each light
+// cycle; a wreck's ribbon dims, mirroring the 2D board's opacity
 // language. Loaded lazily by games.ts behind the arena's
 // 2D/3D toggle, so three.js ships in its own chunk and the chat app
 // pays for it only when a viewer asks for the 3D board.
@@ -112,6 +114,85 @@ function LightCycle({ x, z, hex, dir }: { x: number; z: number; hex: string; dir
   );
 }
 
+// A trail, as ribbon runs: each maximal straight stretch of cells
+// becomes ONE continuous wall segment (no per-cell blocks), with a
+// small overhang so corners merge into clean joints. The ribbon is
+// a tire's width thick (0.18) and a wheel tall (1.0), translucent,
+// with a bright core strip along its top edge.
+type Run = { cx: number; cz: number; len: number; axis: "x" | "z" };
+
+function trailRuns(cells: number[][], wx: (x: number) => number, wz: (y: number) => number): Run[] {
+  if (!cells.length) return [];
+  const runs: Run[] = [];
+  const emit = (s: number, e: number) => {
+    const a = cells[s]!;
+    const b = cells[e]!;
+    const ax = a[0] ?? 0;
+    const ay = a[1] ?? 0;
+    const bx = b[0] ?? 0;
+    const by = b[1] ?? 0;
+    runs.push({
+      cx: (wx(ax) + wx(bx)) / 2,
+      cz: (wz(ay) + wz(by)) / 2,
+      len: Math.abs(bx - ax) + Math.abs(by - ay) + 0.24,
+      axis: bx !== ax ? "x" : "z",
+    });
+  };
+  if (cells.length === 1) {
+    emit(0, 0);
+    return runs;
+  }
+  let s = 0;
+  let pdx = Math.sign((cells[1]![0] ?? 0) - (cells[0]![0] ?? 0));
+  let pdy = Math.sign((cells[1]![1] ?? 0) - (cells[0]![1] ?? 0));
+  for (let k = 2; k < cells.length; k++) {
+    const dx = Math.sign((cells[k]![0] ?? 0) - (cells[k - 1]![0] ?? 0));
+    const dy = Math.sign((cells[k]![1] ?? 0) - (cells[k - 1]![1] ?? 0));
+    if (dx !== pdx || dy !== pdy) {
+      emit(s, k - 1);
+      s = k - 1;
+      pdx = dx;
+      pdy = dy;
+    }
+  }
+  emit(s, cells.length - 1);
+  return runs;
+}
+
+function Ribbon({ runs, hex, alive }: { runs: Run[]; hex: string; alive: boolean }) {
+  const core = new Color(hex).lerp(new Color("#ffffff"), 0.45);
+  return (
+    <group>
+      {runs.map((r, j) => (
+        <group key={j} position={[r.cx, 0, r.cz]}>
+          <mesh position={[0, 0.5, 0]}>
+            <boxGeometry args={r.axis === "x" ? [r.len, 1, 0.18] : [0.18, 1, r.len]} />
+            <meshStandardMaterial
+              color="#04060a"
+              emissive={hex}
+              emissiveIntensity={alive ? 1.15 : 0.4}
+              transparent
+              opacity={alive ? 0.8 : 0.5}
+              toneMapped={false}
+            />
+          </mesh>
+          <mesh position={[0, 0.955, 0]}>
+            <boxGeometry args={r.axis === "x" ? [r.len, 0.09, 0.22] : [0.22, 0.09, r.len]} />
+            <meshStandardMaterial
+              color="#04060a"
+              emissive={core}
+              emissiveIntensity={alive ? 3.4 : 0.7}
+              transparent
+              opacity={0.95}
+              toneMapped={false}
+            />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
 export default function LcArena3D({ g, aspect }: { g: any; aspect?: number }) {
   const w = (g && g.w) || 30;
   const h = (g && g.h) || 22;
@@ -147,49 +228,36 @@ export default function LcArena3D({ g, aspect }: { g: any; aspect?: number }) {
           blur={[280, 60]}
           resolution={1024}
           mixBlur={0.9}
-          mixStrength={7}
-          roughness={0.92}
+          mixStrength={9}
+          roughness={0.6}
           depthScale={1.1}
           minDepthThreshold={0.4}
           maxDepthThreshold={1.4}
           color="#04060d"
           metalness={0.5}
-          mirror={0.55}
+          mirror={0.7}
         />
       </mesh>
       <Grid
         position={[0, 0.01, 0]}
         args={[w, h]}
         cellSize={1}
-        cellThickness={0.55}
-        cellColor="#123a4d"
+        cellThickness={0.5}
+        cellColor="#16283a"
         sectionSize={5}
-        sectionThickness={1.15}
-        sectionColor="#0e7490"
+        sectionThickness={1}
+        sectionColor="#2b4d63"
         fadeDistance={dist * 2.1}
         fadeStrength={1.4}
         followCamera={false}
         infiniteGrid={false}
       />
 
-      {/* Trails: one instanced wall run per rider. */}
+      {/* Trails: continuous light ribbons, one per rider. */}
       {players.map((p, i) => {
-        const cells = byPlayer[i] || [];
-        if (!cells.length) return null;
-        return (
-          <Instances key={String(g.id) + ":" + i} limit={Math.max(1, cells.length)} frustumCulled={false}>
-            <boxGeometry args={[0.92, 0.72, 0.92]} />
-            <meshStandardMaterial
-              color="#04060a"
-              emissive={p.hex}
-              emissiveIntensity={p.alive ? 2.2 : 0.45}
-              toneMapped={false}
-            />
-            {cells.map((c, j) => (
-              <Instance key={j} position={[wx(c[0] ?? 0), 0.36, wz(c[1] ?? 0)]} />
-            ))}
-          </Instances>
-        );
+        const runs = trailRuns(byPlayer[i] || [], wx, wz);
+        if (!runs.length) return null;
+        return <Ribbon key={String(g.id) + ":" + i} runs={runs} hex={p.hex} alive={!!p.alive} />;
       })}
 
       {/* Live riders, on actual light cycles. Heading comes from
