@@ -978,7 +978,7 @@ export function createGameStore(opts: {
     if (!bs3dPref()) return false;
     if (!gameView) return false;
     if (!gameView.bs3d) {
-      const host = el("div", "lc-board-big lc-3d-host");
+      const host = el("div", "lc-board-big lc-3d-host bs-3d-host");
       gameView.bs3d = { root: createRoot(host), host };
     }
     wrap.appendChild(gameView.bs3d.host);

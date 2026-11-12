@@ -907,12 +907,18 @@ export default function BsArena3D({
 }) {
   const w = g.w || 10;
   const span = 2 * w + 4;
-  const narrow = (aspect ?? 1) < 1;
-  const cd = span * (narrow ? 1.45 : 0.88);
+  /* Frame by host aspect, not by a portrait/landscape guess: the
+     two-tile span fits the horizontal fov when the camera distance
+     scales as 1/aspect (anchored on the verified desktop framing,
+     aspect 1.44 at cd ~22). A wide-but-short host (a phone with the
+     shortened BS host) needs the same pullback as a portrait one. */
+  const aspectV = aspect ?? 1.44;
+  const narrow = aspectV < 1.3;
+  const cd = Math.min(40, Math.max(19, (span * 1.34) / Math.max(0.7, aspectV)));
   return (
     <Canvas
       dpr={[1, 1.75]}
-      camera={{ position: [0, cd * 0.76, cd * 0.65], fov: narrow ? 62 : 46, near: 0.1, far: 600 }}
+      camera={{ position: [0, cd * 0.76, cd * 0.65], fov: narrow ? 56 : 46, near: 0.1, far: 600 }}
       gl={{ antialias: true }}
     >
       <Scene g={g} me={me} onFire={onFire} cd={cd} />
