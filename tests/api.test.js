@@ -500,7 +500,7 @@ async function waitUp() {
     // post naming the player, and a lobby nobody completes expires on
     // its join window and is called off the same way.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3 } });
-    check('duel default round clock is 60', r.status === 201 && r.json.game.round_seconds === 60 && r.json.game.status === 'lobby', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    check('duel default round clock is 180', r.status === 201 && r.json.game.round_seconds === 180 && r.json.game.status === 'lobby', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
     const duelD = r.json.game.id;
     r = await req('POST', R2 + '/games/' + duelD + '/decline', { token: TRex, json: {} });
     check('decline calls the match off', r.status === 200 && r.json.game.status === 'cancelled' && r.json.game.declined_by === 'Rex', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
@@ -517,10 +517,42 @@ async function waitUp() {
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posts the expiry', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + expId + ' never started') && x.text.includes('Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 80))));
 
+    // Light Cycles absence rule (2026-11-12): a rider the clock
+    // carries for three ticks in a row is taken out. Rex rides on
+    // safe_moves every tick; Poc never submits a move.
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30 } });
+    const lcAbsent = r.json.game.id;
+    await req('POST', R2 + '/games/' + lcAbsent + '/accept', { token: TRex, json: {} });
+    let lcFinal = null;
+    let lcSafeOk = false;
+    for (let i = 0; i < 100 && !lcFinal; i++) {
+      const st = await req('GET', R2 + '/games/' + lcAbsent, { token: TRex });
+      const g = st.json && st.json.game;
+      if (!g) break;
+      if (g.status === 'finished') { lcFinal = g; break; }
+      if (g.you && g.you.alive && !g.you.queued) {
+        if (Array.isArray(g.you.safe_moves) && g.you.safe_moves.every(d => (g.you.legal_moves || []).indexOf(d) >= 0)) lcSafeOk = true;
+        const mv = (g.you.safe_moves && g.you.safe_moves[0]) || (g.you.legal_moves || [])[0];
+        if (mv) await req('POST', R2 + '/games/' + lcAbsent + '/moves', { token: TRex, json: { dir: mv } });
+      }
+      await new Promise(res => setTimeout(res, 1500));
+    }
+    check('safe_moves ride inside legal_moves', lcSafeOk, '');
+    check('an absent rider is taken out after three clock ticks', !!lcFinal && lcFinal.winner === 'Rex' && (lcFinal.log || []).some(e => e.text.includes('taken out - three ticks')), JSON.stringify(lcFinal).slice(0, 240));
+
     // Battleship: lobby, placement (explicit fleets both sides),
     // secrecy, turn order, a sinking, the win, and the result post.
     // Poc's fleet hugs rows 10/5-8/6/2-4/2, Rex's rows 1/3-6/5/7-9, so
     // every scripted shot's outcome is known in advance.
+    // Both captains walk away: this game is set up FIRST so its 30s
+    // turns expire while the rest of the suite runs; the late checks
+    // at the end verify it ends with no winner, not a win for
+    // whoever's clock happened to fire last.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30 } });
+    const bsAbandon = r.json.game.id;
+    await req('POST', R2 + '/games/' + bsAbandon + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + bsAbandon + '/moves', { token: TP, json: { dir: 'random' } });
+    await req('POST', R2 + '/games/' + bsAbandon + '/moves', { token: TRex, json: { dir: 'random' } });
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
     check('battleship with 3 players -> 400', r.status === 400, r.status);
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
@@ -537,25 +569,38 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A10H,C5V,E6H,G2V,I2H' } });
     check('explicit placement lands', r.status === 200 && r.json.game.you.fleet.length === 5 && r.json.game.you.fleet.reduce((n, s) => n + s.cells.length, 0) === 17, r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 160));
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'A1H,C3V,E5H,G7V,I9H' } });
-    check('second placement opens play, creator fires first', r.status === 200 && r.json.resolved === true && r.json.game.phase === 'play' && r.json.game.turn_of === 'Poc', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    check('second placement opens play, first shot is a coin flip', r.status === 200 && r.json.resolved === true && r.json.game.phase === 'play' && (r.json.game.turn_of === 'Poc' || r.json.game.turn_of === 'Rex'), r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const bsFirst = r.json.game.turn_of;
     // Secrecy: neither captain's view carries the rival's unhit cells
     // (quoted labels appear only as cell values), and a spectator
-    // gets counts, never a fleet.
+    // gets counts, never a fleet. you.legal_moves is stripped before
+    // each string match: it lists every open cell by design, ship and
+    // water alike, so a label appearing there says nothing about the
+    // fleet.
     r = await req('GET', R2 + '/games/' + bsId, { token: TRex });
-    const rexView = JSON.stringify(r.json.game);
+    const rexObj = JSON.parse(JSON.stringify(r.json.game));
+    if (rexObj.you) delete rexObj.you.legal_moves;
+    const rexView = JSON.stringify(rexObj);
     check('rival fleet stays secret from Rex', r.status === 200 && !rexView.includes('"A10"') && !rexView.includes('"J2"'), rexView.slice(0, 220));
     r = await req('GET', R2 + '/games/' + bsId, { token: TP });
-    check('rival fleet stays secret from Poc', r.status === 200 && !JSON.stringify(r.json.game).includes('"J9"'), JSON.stringify(r.json.game).slice(0, 220));
+    const pocObj = JSON.parse(JSON.stringify(r.json.game));
+    if (pocObj.you) delete pocObj.you.legal_moves;
+    check('rival fleet stays secret from Poc', r.status === 200 && !JSON.stringify(pocObj).includes('"J9"'), JSON.stringify(pocObj).slice(0, 220));
     r = await req('GET', R2 + '/games/' + bsId, { token: TRae });
     check('spectator sees no fleet at all', r.status === 200 && r.json.game.you.playing === false && !('fleet' in r.json.game) && (r.json.game.players || []).every(p => p.placed === true), JSON.stringify(r.json.game).slice(0, 220));
-    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'J10' } });
+    r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: bsFirst === 'Poc' ? TRex : TP, json: { dir: 'J10' } });
     check('firing out of turn -> 409', r.status === 409, r.status);
+    // If the coin flip gave Rex the first shot, he spends it on water
+    // (J10 misses Poc's fleet), so the scripted hunt below always runs
+    // Poc-shoots / Rex-misses from Poc's first turn.
+    if (bsFirst === 'Rex') await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'J10' } });
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A1' } });
     check('first shot hits and passes the turn', r.status === 200 && r.json.game.you.shots.A1 === 'hit' && r.json.game.turn_of === 'Rex' && (r.json.game.players.find(p => p.name === 'Poc') || {}).hits === 1, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=50', { token: TRex });
     const bsNudge = ((r.json.room_state && r.json.room_state.awaiting_you) || []).find(x => x.type === 'game' && x.id === bsId);
     check('room_state nudges the captain to fire', !!bsNudge && typeof bsNudge.turn === 'number', JSON.stringify(bsNudge));
-    await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'J10' } });
+    await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: bsFirst === 'Poc' ? 'J10' : 'J8' } });
+    const rxSkip = bsFirst === 'Rex' ? 1 : 0;
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TP, json: { dir: 'A1' } });
     check('firing the same cell twice -> 400', r.status === 400, r.status);
     // Play it out: Poc works Rex's fleet down; Rex answers with water.
@@ -570,7 +615,7 @@ async function waitUp() {
         sunkSeen = (chk.json.game.you.sunk_ships || []).some(s => s.size === 5) && (chk.json.game.players.find(p => p.name === 'Rex') || {}).afloat === 4;
       }
       if (mv.json.game.status === 'finished') { finalBs = mv.json.game; break; }
-      await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: rexMisses[i] } });
+      await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: rexMisses[i + rxSkip] } });
     }
     check('a sunk ship is public and counted', sunkSeen, '');
     check('battleship finishes when the fleet is gone', !!finalBs && finalBs.winner === 'Poc' && (finalBs.players.find(p => p.name === 'Rex') || {}).afloat === 0, JSON.stringify(finalBs).slice(0, 200));
@@ -588,9 +633,10 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + bsClock + '/moves', { token: TP, json: { dir: 'random' } });
     r = await req('POST', R2 + '/games/' + bsClock + '/moves', { token: TRex, json: { dir: 'random' } });
     check('random placements open play', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const bsClockFirst = r.json.game.turn_of;
     await new Promise(res => setTimeout(res, 32000));
     r = await req('GET', R2 + '/games/' + bsClock, { token: TP });
-    check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === 'Rex' && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')) && (r.json.game.misses || {}).Poc === 1, JSON.stringify(r.json.game).slice(0, 240));
+    check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === (bsClockFirst === 'Poc' ? 'Rex' : 'Poc') && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')) && (r.json.game.misses || {})[bsClockFirst] === 1, JSON.stringify(r.json.game).slice(0, 240));
 
     // Variants: skirmish compresses the board and fleet; salvo holds
     // the turn for one shot per afloat ship.
@@ -598,11 +644,19 @@ async function waitUp() {
     check('skirmish created 8x8 with the small fleet', r.status === 201 && r.json.game.variant === 'skirmish' && r.json.game.w === 8 && (r.json.game.fleet_sizes || []).join() === '4,3,3,2' && r.json.game.sonar === null, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     const skId = r.json.game.id;
     await req('POST', R2 + '/games/' + skId + '/accept', { token: TRex, json: {} });
-    await req('POST', R2 + '/games/' + skId + '/moves', { token: TP, json: { dir: 'random' } });
+    r = await req('GET', R2 + '/games/' + skId, { token: TP });
+    const skHint = ((r.json.game.you || {}).legal_moves || [])[0] || '';
+    check('skirmish placement hint is built for the 8x8 fleet', skHint.includes('A1H,A3H,A5H,A7H') && skHint.includes('4,3,3,2') && !skHint.includes('I9'), skHint);
+    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: TP, json: { dir: 'A1H,A3H,A5H,A7H' } });
+    check('the skirmish hint example itself places cleanly', r.status === 200 && (r.json.game.you.fleet || []).length === 4, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     r = await req('POST', R2 + '/games/' + skId + '/moves', { token: TRex, json: { dir: 'random' } });
     check('skirmish fleets carry 4 ships / 12 cells', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 4 && r.json.game.you.fleet.reduce((n, s) => n + s.cells.length, 0) === 12, r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 160));
-    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: TP, json: { dir: 'J10' } });
+    r = await req('GET', R2 + '/games/' + skId, { token: TP });
+    const skTurnTok = r.json.game.turn_of === 'Poc' ? TP : TRex;
+    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: skTurnTok, json: { dir: 'J10' } });
     check('a shot off the skirmish board -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R2 + '/games/' + skId + '/moves', { token: skTurnTok, json: { dir: 'B2,B3' } });
+    check('a comma list in a non-salvo match -> 400', r.status === 400 && String(r.json.error || '').includes('salvo'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     r = await req('POST', R2 + '/games/' + skId + '/cancel', { token: TP, json: {} });
     check('skirmish cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', variant: 'salvo', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
@@ -611,16 +665,88 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + svId + '/accept', { token: TRex, json: {} });
     await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'random' } });
     r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TRex, json: { dir: 'random' } });
-    check('salvo opens with 5 shots for the first captain', r.status === 200 && r.json.game.phase === 'play' && r.json.game.turn_of === 'Poc' && r.json.game.salvo_left === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
-    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'A1' } });
-    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'B1' } });
-    check('mid-salvo the turn holds and the count runs down', r.status === 200 && r.json.game.turn_of === 'Poc' && r.json.game.salvo_left === 3, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
-    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'C1' } });
-    await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'D1' } });
-    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: TP, json: { dir: 'E1' } });
-    check('the fifth shot passes the turn with a fresh salvo', r.status === 200 && r.json.game.turn_of === 'Rex' && r.json.game.salvo_left >= 3 && r.json.game.salvo_left <= 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    check('salvo opens with 5 shots for the first captain', r.status === 200 && r.json.game.phase === 'play' && (r.json.game.turn_of === 'Poc' || r.json.game.turn_of === 'Rex') && r.json.game.salvo_left === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    const svFirst = r.json.game.turn_of;
+    const svFT = svFirst === 'Poc' ? TP : TRex;
+    // One call can carry the whole volley (2026-11-12): shots after
+    // the first never changed the awaited turn, so a wake-driven
+    // player was never re-woken for them, and the list was refused.
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'A1,B1' } });
+    check('a salvo volley fires its whole list in one call', r.status === 200 && r.json.game.turn_of === svFirst && r.json.game.salvo_left === 3 && (r.json.game.you.shots || {}).A1 && (r.json.game.you.shots || {}).B1, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'A2,A3,A4,A5' } });
+    check('a volley longer than the shots left -> 400', r.status === 400, r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('GET', R2 + '/games/' + svId, { token: svFT });
+    check('a refused volley fires nothing (the list is validated first)', r.status === 200 && !(r.json.game.you.shots || {}).A2 && r.json.game.salvo_left === 3, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'C1' } });
+    check('a single salvo shot still holds the turn', r.status === 200 && r.json.game.turn_of === svFirst && r.json.game.salvo_left === 2, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'D1,E1' } });
+    check('a closing volley passes the turn with a fresh salvo', r.status === 200 && r.json.game.turn_of !== svFirst && r.json.game.salvo_left >= 3 && r.json.game.salvo_left <= 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     r = await req('POST', R2 + '/games/' + svId + '/cancel', { token: TP, json: {} });
     check('salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+
+    // Reserved name (2026-11-12): "Referee" is the games' official -
+    // it cannot be invited as a member, and it cannot be seated.
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });
+    check('inviting a member named Referee -> 400', r.status === 400 && String(r.json.error || '').toLowerCase().includes('reserved'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Referee', 'Poc'], best_of: 3 } });
+    check('seating Referee in a game -> 400', r.status === 400 && String(r.json.error || '').toLowerCase().includes('reserved'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    // Duel clock: the default round deadline is 180s (owner's call,
+    // 2026-11-12 - an agent's wake-to-act cycle runs 1-2 minutes, so
+    // the old 60s could end a duel before a woken player threw).
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3 } });
+    check('duel default round clock is 180', r.status === 201 && r.json.game.round_seconds === 180, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 140));
+    const duelDef = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + duelDef + '/cancel', { token: TP, json: {} });
+    check('default-clock duel cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+    // An unthrown round 1 calls the duel off (verified in the late
+    // checks at the end of the run, once its 30s round has expired).
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 30 } });
+    const duelR1 = r.json.game.id;
+    await req('POST', R2 + '/games/' + duelR1 + '/accept', { token: TRex, json: {} });
+
+    // Endgame sonar: drive a scripted classic match until both
+    // captains are down to their last ship, then trade misses until
+    // the referee pings. The ping must name the shooter whose turn
+    // it is, and a row/column that truly holds an un-hit cell of the
+    // hunted last ship.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
+    const snId = r.json.game.id;
+    await req('POST', R2 + '/games/' + snId + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + snId + '/moves', { token: TP, json: { dir: 'A1H,A3H,A5H,A7H,A9H' } });
+    await req('POST', R2 + '/games/' + snId + '/moves', { token: TRex, json: { dir: 'J1V,H1V,F1V,F5V,H6V' } });
+    // Poc's last ship is A9H (row 9, columns A-B); Rex's is H6V
+    // (column H, rows 6-7). Neither queue touches them.
+    const snQueues = { Poc: ['J1', 'J2', 'J3', 'J4', 'J5', 'H1', 'H2', 'H3', 'H4', 'F1', 'F2', 'F3', 'F5', 'F6', 'F7'], Rex: ['A1', 'B1', 'C1', 'D1', 'E1', 'A3', 'B3', 'C3', 'D3', 'A5', 'B5', 'C5', 'A7', 'B7', 'C7', 'D7'] };
+    const snPads = { Poc: ['A10', 'B10', 'C10', 'D10', 'E10', 'G10', 'I10', 'J10', 'A8', 'J8'], Rex: ['J10', 'I10', 'G10', 'E10', 'C10', 'A10', 'B8', 'D10', 'J8', 'I8'] };
+    let st0 = await req('GET', R2 + '/games/' + snId, { token: TP });
+    const snHolder = st0.json.game.turn_of;
+    if (snHolder !== 'Poc') st0 = await req('GET', R2 + '/games/' + snId, { token: TRex });
+    check('play-phase legal_moves list every open cell', ((st0.json.game.you || {}).legal_moves || []).length === 100, JSON.stringify((st0.json.game.you || {}).legal_moves || []).slice(0, 120));
+    let snState = null;
+    let snPing = null;
+    let snShots = 0;
+    for (let step = 0; step < 70 && !snPing; step++) {
+      const st = await req('GET', R2 + '/games/' + snId, { token: TP });
+      const g = st.json && st.json.game;
+      if (!g) break;
+      snState = g;
+      if (g.sonar) { snPing = g.sonar; break; }
+      if (g.status !== 'running' || g.phase !== 'play') break;
+      const turn = g.turn_of;
+      const q = snQueues[turn].length ? snQueues[turn] : snPads[turn];
+      const cell = q.shift();
+      const mv = await req('POST', R2 + '/games/' + snId + '/moves', { token: turn === 'Poc' ? TP : TRex, json: { dir: cell } });
+      if (mv.status !== 200) break;
+      snShots++;
+    }
+    check('sonar pings once both captains are down to one ship', !!snPing, 'shots=' + snShots + ' sonar=' + JSON.stringify(snState && snState.sonar));
+    check('the ping names the shooter whose turn it is', !!snPing && !!snState && snPing.for === snState.turn_of, JSON.stringify(snPing));
+    const snTruth = snPing ? (snPing.for === 'Poc' ? ['row 6', 'row 7', 'column H'] : ['row 9', 'column A', 'column B']) : [];
+    check('the pinged line holds an un-hit cell of the last ship', !!snPing && snTruth.indexOf(snPing.label) >= 0, JSON.stringify(snPing));
+    r = await req('GET', R2 + '/games/' + snId, { token: TP });
+    check('the shots record is complete and timestamped', (r.json.game.shots || []).length === snShots && (r.json.game.shots || []).every(s => typeof s.at === 'number' && typeof s.cell === 'string' && (s.result === 'hit' || s.result === 'miss')), 'shots=' + ((r.json.game.shots || []).length) + ' fired=' + snShots);
+    r = await req('POST', R2 + '/games/' + snId + '/cancel', { token: TP, json: {} });
+    check('sonar match cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
     // Stream subscriptions: events= narrows the frame kinds, game=
     // restricts game frames to given matches, and a malformed
@@ -911,6 +1037,26 @@ async function waitUp() {
     const recDuel = rec.duel || [];
     check('games list: record carries duel standings', recDuel.length >= 1 && recDuel.every((p) => typeof p.w === 'number' && typeof p.l === 'number'), JSON.stringify(rec).slice(0, 200));
     check('games list: record sorted by wins, wins were recorded', recDuel.every((p, i) => i === 0 || recDuel[i - 1].w >= p.w) && recDuel.reduce((a, p) => a + p.w, 0) >= 1, JSON.stringify(recDuel));
+
+    // Late checks for the two clock-driven matches set up earlier
+    // (the unthrown-round-1 duel and the double-abandon battleship):
+    // poll briefly, since the wall-clock time they need depends on
+    // how long the rest of the suite took. These run BEFORE the room
+    // destruction below: after it, every poll would 404.
+    async function pollGame(id, pred, tries, gapMs) {
+      let g = null;
+      for (let i = 0; i < tries; i++) {
+        const rr = await req('GET', R2 + '/games/' + id, { token: TP });
+        if (rr.json && rr.json.game) g = rr.json.game;
+        if (g && pred(g)) return g;
+        await new Promise(res => setTimeout(res, gapMs));
+      }
+      return g;
+    }
+    const r1Final = await pollGame(duelR1, g => g.status !== 'running', 8, 10000);
+    check('an unthrown round 1 calls the duel off (no phantom 0-0)', !!r1Final && r1Final.status === 'cancelled' && !r1Final.winner, JSON.stringify(r1Final || null).slice(0, 200));
+    const abFinal = await pollGame(bsAbandon, g => g.status === 'finished', 12, 15000);
+    check('both captains abandoning ends with no winner', !!abFinal && abFinal.status === 'finished' && !abFinal.winner && (abFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(abFinal || null).slice(0, 240));
 
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });

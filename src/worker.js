@@ -948,7 +948,16 @@ export class Room extends DurableObject {
     return true;
   }
 
+  // "Referee" is the room's game official - the name the DO itself
+  // posts match results under. It is reserved (2026-11-12, games
+  // review): if a member could hold it, their posts and game frames
+  // would be indistinguishable from the official's.
+  isReservedName(name) {
+    return String(name || "").trim().toLowerCase() === "referee";
+  }
+
   invite(name, kind, by) {
+    if (this.isReservedName(name)) return null;
     if (this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", name).toArray().length) return null;
     const bytes = crypto.getRandomValues(new Uint8Array(18));
     const token = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, "-").replace(/\//g, "_");
@@ -1411,6 +1420,7 @@ export class Room extends DurableObject {
     const byLower = new Map(members.map((n) => [n.toLowerCase(), n]));
     const names = [];
     for (const p of playersIn) {
+      if (this.isReservedName(p)) return { status: 400, error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot play." };
       const canon = byLower.get(String(p || "").trim().toLowerCase());
       if (!canon) return { status: 400, error: String(p) + " is not a member of this room" };
       if (names.indexOf(canon) >= 0) return { status: 400, error: canon + " is listed twice" };
@@ -1422,6 +1432,21 @@ export class Room extends DurableObject {
   legalMoves(p) {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
     return ["up", "down", "left", "right"].filter((d) => d !== rev[p.dir]);
+  }
+
+  // The subset of legal moves that does not crash on this tick as the
+  // board stands: the target cell is in bounds and holds no trail and
+  // no rider's head. (Another rider steering into the same cell can
+  // still kill you - that is the game, not a wall.)
+  safeMoves(st, p) {
+    const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+    const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
+    for (const q of st.players) if (q.alive) occ.add(q.x + "," + q.y);
+    return this.legalMoves(p).filter((d) => {
+      const v = dirs[d];
+      const x = p.x + v[0], y = p.y + v[1];
+      return x >= 0 && y >= 0 && x < st.w && y < st.h && !occ.has(x + "," + y);
+    });
   }
 
   gameSummary(g) {
@@ -1447,7 +1472,7 @@ export class Room extends DurableObject {
     out.awaiting = g.status === "running" ? st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
-    out.you = me ? { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, alive: me.alive, dir: me.dir, queued: st.pending[me.name] || null, legal_moves: g.status === "running" && me.alive ? this.legalMoves(me) : [] } : { playing: false };
+    out.you = me ? { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, alive: me.alive, dir: me.dir, queued: st.pending[me.name] || null, legal_moves: g.status === "running" && me.alive ? this.legalMoves(me) : [], safe_moves: g.status === "running" && me.alive ? this.safeMoves(st, me) : [] } : { playing: false };
     return out;
   }
 
@@ -1552,6 +1577,19 @@ export class Room extends DurableObject {
     const st = g.st;
     const thrown = st.players.filter((p) => st.pending[p.name]).length;
     if (thrown === 0) {
+      if (st.round === 1) {
+        // An unthrown round 1 means the match never really started:
+        // call it off (cancelled, no result on anyone's record)
+        // rather than recording a 0-0 finish (2026-11-12, games
+        // review - two of the room's first 14 duels ended as
+        // phantom 0-0 finishes this way; duel #15 was one).
+        g.status = "cancelled";
+        st.log.push({ tick: st.round, text: "Round 1 went unthrown - the duel is called off." });
+        this.saveGame(g);
+        this.postSystem("Duel match #" + g.id + " is off - round 1 went unthrown.", room);
+        this.afterGameChange(g, room, "Referee");
+        return;
+      }
       g.status = "finished";
       const a = st.players[0], b = st.players[1];
       const sa = st.score[a.name] || 0, sb = st.score[b.name] || 0;
@@ -1594,6 +1632,14 @@ export class Room extends DurableObject {
 
   bsFleetSizes(st) { return (st && st.fleet_sizes) || [5, 4, 3, 3, 2]; }
 
+  // A placement example that is valid on this board: one ship per odd
+  // row from column A, in fleet order. (The hardcoded classic example
+  // named five ships and a cell off the 8x8 skirmish board, so copying
+  // it there failed with a 400 - games review, 2026-11-12.)
+  bsExample(st) {
+    return this.bsFleetSizes(st).map((s, i) => "A" + (2 * i + 1) + "H").join(",");
+  }
+
   // A placement is one entry per ship in fleet order (5, 4, 3, 3, 2 on
   // the classic board; 4, 3, 3, 2 on the 8x8 skirmish), each a start
   // cell plus H or V: "A1H,C3V,E5H,G7V,I9H".
@@ -1601,7 +1647,7 @@ export class Room extends DurableObject {
     const sizes = this.bsFleetSizes(st);
     const bw = (st && st.w) || 10, bh = (st && st.h) || 10;
     const parts = String(spec || "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length !== sizes.length) return { error: "place all " + sizes.length + " ships, in fleet order (" + sizes.join(", ") + "): e.g. A1H,C3V,E5H,G7V,I9H - or answer random" };
+    if (parts.length !== sizes.length) return { error: "place all " + sizes.length + " ships, in fleet order (" + sizes.join(", ") + "): e.g. " + this.bsExample(st) + " - or answer random" };
     const used = {};
     const fleet = [];
     for (let i = 0; i < sizes.length; i++) {
@@ -1674,21 +1720,30 @@ export class Room extends DurableObject {
   // A turn begins (first turn, a passed turn, a clock pass): the salvo
   // count resets to the shooter's afloat ships, and the endgame sonar
   // may ping. Sonar is a visible rule, announced at creation: once both
-  // captains are down to one ship, every 6th turn the referee names a
+  // captains are down to one ship, every third of the shooter's own
+  // turns the referee names a
   // row or column of the waters the shooter is hunting that holds an
   // un-hit hull cell of the last ship - the hunt stays a deduction.
   bsBeginTurn(st) {
     const shooter = st.players.find((p) => p.name === st.turn_of);
     st.salvo_left = st.variant === "salvo" && shooter ? this.bsAfloat(shooter) : null;
     st.sonar = null;
-    if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || st.turn % 6 !== 0) return;
+    // The cadence counts the SHOOTER's own turns (every third): the
+    // old turn % 6 test only ever fired on even turns, and since the
+    // first shooter was fixed, that meant only players[1] ever got a
+    // ping (games review, 2026-11-12).
+    if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || Math.ceil(st.turn / 2) % 3 !== 0) return;
     const opp = st.players.find((p) => p.name !== shooter.name);
     const ship = opp.fleet.find((s) => s.hits.length < s.size);
     if (!ship) return;
     const open = ship.cells.filter((c) => ship.hits.indexOf(c) < 0).map((c) => c.split(",").map(Number));
     if (!open.length) return;
     const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
-    const useRow = cols.length === 1 || (rows.length > 1 && Math.random() < 0.5);
+    // The axis is a coin flip. It used to follow the ship's shape (a
+    // one-column ship always drew a row ping), which read the last
+    // ship's orientation straight off the ping (games review,
+    // 2026-11-12); a random axis stays truthful and says nothing.
+    const useRow = Math.random() < 0.5;
     const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
     const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
     st.sonar = { turn: st.turn, for: shooter.name, axis: useRow ? "row" : "column", label: label };
@@ -1731,6 +1786,7 @@ export class Room extends DurableObject {
     const out = this.battleshipSummary(g);
     const st = g.st;
     out.log = st.log.slice(-220);
+    out.shots = st.shots || [];
     out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -1746,8 +1802,16 @@ export class Room extends DurableObject {
     for (const k of Object.keys(me.shots || {})) you.shots[this.bsLabel(k)] = me.shots[k];
     if (opp) for (const k of Object.keys(opp.shots || {})) you.incoming[this.bsLabel(k)] = opp.shots[k];
     if (opp && opp.fleet) for (const s of opp.fleet) if (s.hits.length >= s.size) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
-    if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: A1H,C3V,E5H,G7V,I9H (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
-    if (g.status === "running" && st.phase === "play" && you.your_turn) you.legal_moves = ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5" + (st.variant === "salvo" ? " - salvo: " + (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) + " shot(s) left this turn" : "")];
+    if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
+    if (g.status === "running" && st.phase === "play" && you.your_turn) {
+      // The open cells themselves, as a list a woken player can pick
+      // from directly - the old sentence form forced them to
+      // reconstruct the board from their shot map first (games
+      // review, 2026-11-12). The salvo count rides in salvo_left.
+      const open = [];
+      for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) { const k = this.bsKey(x, y); if (!(me.shots || {})[k]) open.push(this.bsLabel(k)); }
+      you.legal_moves = open;
+    }
     out.you = you;
     return out;
   }
@@ -1791,9 +1855,36 @@ export class Room extends DurableObject {
     return { status: 201, game: this.battleshipStateFull(g, creator) };
   }
 
+  // Apply one shot whose cell has already been validated. Records it
+  // in the shooter's shot map, the narrative log, last_move, and the
+  // untrimmed st.shots record - which carries a timestamp per shot,
+  // because the narrative log trims past 240 entries and had no times
+  // at all, so match length and turn latency were unmeasurable
+  // (games review, 2026-11-12).
+  bsApplyShot(st, me, opp, key) {
+    const ship = this.bsShipAt(opp, key);
+    let sunkSize = null;
+    if (ship) {
+      me.shots[key] = "hit";
+      ship.hits.push(key);
+      if (ship.hits.length >= ship.size) sunkSize = ship.size;
+    } else {
+      me.shots[key] = "miss";
+    }
+    const note = sunkSize
+      ? me.name + " fires " + this.bsLabel(key) + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
+      : me.name + " fires " + this.bsLabel(key) + " - " + (ship ? "hit." : "miss.");
+    st.last_move = { by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
+    st.log.push({ tick: st.turn, text: note, by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
+    if (!st.shots) st.shots = [];
+    st.shots.push({ by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn, at: Date.now() });
+    return { won: this.bsAfloat(opp) === 0 };
+  }
+
   // One call per phase: in setup, dir carries the placement (or
-  // "random"); in play, it carries the shot ("C5", "fire: C5"). Each
-  // shot resolves the moment it lands - there is nothing to queue.
+  // "random"); in play, it carries the shot ("C5", "fire: C5") - or,
+  // in a salvo match, the whole volley as a comma list ("C5,D6,E7").
+  // Each shot resolves the moment it lands - there is nothing to queue.
   async battleshipMove(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -1810,7 +1901,7 @@ export class Room extends DurableObject {
         fleet = this.bsRandomFleet(st);
       } else {
         const r = this.bsPlacement(spec, st);
-        if (r.error) return { status: 400, error: r.error, legal_moves: ["place: A1H,C3V,E5H,G7V,I9H (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"] };
+        if (r.error) return { status: 400, error: r.error, legal_moves: ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"] };
         fleet = r.fleet;
       }
       me.fleet = fleet;
@@ -1818,7 +1909,9 @@ export class Room extends DurableObject {
       let resolved = false;
       if (st.players.every((p) => p.fleet)) {
         st.phase = "play";
-        st.turn_of = st.players[0].name;
+        // The first shot is a coin flip (2026-11-12): players[0] used
+        // to fire first in every match, in an order the creator chose.
+        st.turn_of = st.players[Math.floor(Math.random() * st.players.length)].name;
         st.turn = 1;
         st.deadline = Date.now() + st.tick_seconds * 1000;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
@@ -1835,34 +1928,42 @@ export class Room extends DurableObject {
     if (cell.indexOf("fire:") === 0) cell = cell.slice(5).trim();
     if (cell.indexOf("fire ") === 0) cell = cell.slice(5).trim();
     if (cell.indexOf("shoot:") === 0) cell = cell.slice(6).trim();
-    const at = this.bsParseCell(cell);
-    if (!at || at[0] >= st.w || at[1] >= st.h) return { status: 400, error: "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"] };
-    const key = this.bsKey(at[0], at[1]);
+    // A salvo turn may arrive as ONE call carrying the whole volley
+    // ("C5,D6,E7"). Shots after the first never changed the awaited
+    // turn, so a wake-driven player was never re-woken for them, and
+    // the list form was refused outright (games review, 2026-11-12).
+    // The whole list is validated before anything fires.
+    const cells = cell.split(",").map((c) => c.trim()).filter(Boolean);
+    const openHint = ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"];
+    const badCell = { status: 400, error: "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: openHint };
+    if (!cells.length) return badCell;
+    if (cells.length > 1 && st.variant !== "salvo") return { status: 400, error: "One shot per call in " + (st.variant || "classic") + " - a comma list is a salvo volley (variant salvo only)", legal_moves: openHint };
+    const salvoLeft = st.variant === "salvo" ? (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) : 1;
+    if (cells.length > salvoLeft) return { status: 400, error: cells.length + " shots in one call - you have " + salvoLeft + " left this turn", legal_moves: openHint };
     if (!me.shots) me.shots = {};
-    if (me.shots[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + " (" + me.shots[key] + ")" };
-    const ship = this.bsShipAt(opp, key);
-    let note;
-    let sunkSize = null;
-    if (ship) {
-      me.shots[key] = "hit";
-      ship.hits.push(key);
-      if (ship.hits.length >= ship.size) sunkSize = ship.size;
-      note = sunkSize
-        ? me.name + " fires " + this.bsLabel(key) + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
-        : me.name + " fires " + this.bsLabel(key) + " - hit.";
-    } else {
-      me.shots[key] = "miss";
-      note = me.name + " fires " + this.bsLabel(key) + " - miss.";
+    const keys = [];
+    for (const c of cells) {
+      const at = this.bsParseCell(c);
+      if (!at || at[0] >= st.w || at[1] >= st.h) return badCell;
+      const key = this.bsKey(at[0], at[1]);
+      if (me.shots[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + " (" + me.shots[key] + ")" };
+      if (keys.indexOf(key) >= 0) return { status: 400, error: this.bsLabel(key) + " appears twice in the volley" };
+      keys.push(key);
     }
-    st.last_move = { by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
-    st.log.push({ tick: st.turn, text: note, by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
+    let fired = 0;
+    let won = false;
+    for (const key of keys) {
+      const r = this.bsApplyShot(st, me, opp, key);
+      fired++;
+      if (r.won) { won = true; break; }
+    }
     if (!st.misses) st.misses = {};
     st.misses[me.name] = 0;
-    if (this.bsAfloat(opp) === 0) {
+    if (won) {
       g.status = "finished";
       st.winner = me.name;
       st.log.push({ tick: st.turn, text: me.name + " sinks the last ship and takes the sea." });
-    } else if (st.variant === "salvo" && (st.salvo_left = (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) - 1) > 0) {
+    } else if (st.variant === "salvo" && (st.salvo_left = (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) - fired) > 0) {
       // Salvo: the turn holds until the shooter's shots run out - one
       // per ship they still have afloat, counted at the turn's start.
       // The turn clock does not extend; a salvo is one decision window.
@@ -1896,7 +1997,7 @@ export class Room extends DurableObject {
       if (st.phase === "setup") {
         for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(st); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
         st.phase = "play";
-        st.turn_of = st.players[0].name;
+        st.turn_of = st.players[Math.floor(Math.random() * st.players.length)].name;
         st.turn = 1;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
         this.bsBeginTurn(st);
@@ -1908,8 +2009,18 @@ export class Room extends DurableObject {
         st.misses[cur.name] = (st.misses[cur.name] || 0) + 1;
         if (st.misses[cur.name] >= 3) {
           g.status = "finished";
-          st.winner = nxt.name;
-          st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + nxt.name + " takes the sea by forfeit." });
+          if ((st.misses[nxt.name] || 0) >= 2) {
+            // Both captains have walked away: reaching three misses
+            // first only "wins" because this clock fires first - the
+            // first shooter always lost that race. With the rival
+            // also at two or more, the match is abandoned, not won
+            // (games review, 2026-11-12).
+            st.winner = null;
+            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - but " + nxt.name + " has missed " + st.misses[nxt.name] + " too. Both captains have abandoned the sea - no winner." });
+          } else {
+            st.winner = nxt.name;
+            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + nxt.name + " takes the sea by forfeit." });
+          }
         } else {
           st.log.push({ tick: st.turn, text: cur.name + " let the turn clock run out (" + st.misses[cur.name] + " missed in a row) - the turn passes." });
           st.turn_of = nxt.name;
@@ -1979,8 +2090,26 @@ export class Room extends DurableObject {
     st.log.push({ tick: st.tick, text: "Tick " + st.tick + ": " + attribution.map((a) => a.name + " " + a.dir + (a.submitted ? " (submitted)" : " (clock default)")).join("; ") + "." });
     for (const p of deaths) {
       p.alive = false;
-      if (!st.record_keeper) st.record_keeper = p.name;
       st.log.push({ tick: st.tick, text: p.name + " is out at tick " + st.tick + " - the trail holds at (" + p.x + ", " + p.y + ")." });
+    }
+    // The record keeper is the first rider out - unless several die
+    // on the same tick, in which case no single rider is credited
+    // (the old loop quietly took whoever came first in player order).
+    if (!st.record_keeper && deaths.length === 1) st.record_keeper = deaths[0].name;
+    // Absence rule (2026-11-12): a rider the clock carries for three
+    // ticks in a row is taken out. Without it an async match with one
+    // absent rider burns the full stall cap on every tick - some 19
+    // hours on the 2-player grid - riding straight the whole way.
+    // It never decides a match the tick's own deaths already ended.
+    if (!st.absent_streak) st.absent_streak = {};
+    for (const a of attribution) st.absent_streak[a.name] = a.submitted ? 0 : (st.absent_streak[a.name] || 0) + 1;
+    if (st.players.filter((p) => p.alive).length > 1) {
+      for (const p of st.players) {
+        if (p.alive && (st.absent_streak[p.name] || 0) >= 3) {
+          p.alive = false;
+          st.log.push({ tick: st.tick, text: p.name + " is taken out - three ticks in a row without a submitted move." });
+        }
+      }
     }
     const alive = st.players.filter((p) => p.alive);
     if (alive.length <= 1) {
@@ -2031,13 +2160,25 @@ export class Room extends DurableObject {
   // finish overnight with nobody reading it.
   async alarm() {
     const room = this.roomName || (this.ctx.id && this.ctx.id.name) || "";
-    const rows = this.sql.exec("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
-    for (const r of rows) {
-      const g = this.gameRow(r.id);
-      if (g && g.status === "running") this.advanceGame(g, room);
-      else if (g && g.status === "lobby") this.advanceLobby(g, room);
+    // One match's bad state must not stop every clock in the room:
+    // advance each match under its own try/catch, and re-arm in a
+    // finally - the old loop let a single throw skip the re-arm, so
+    // no match had a clock until somebody happened to read one
+    // (games review, 2026-11-12).
+    try {
+      const rows = this.sql.exec("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
+      for (const r of rows) {
+        try {
+          const g = this.gameRow(r.id);
+          if (g && g.status === "running") this.advanceGame(g, room);
+          else if (g && g.status === "lobby") this.advanceLobby(g, room);
+        } catch (e) {
+          console.error("alarm: advancing match " + r.id + " failed: " + (e && e.message ? e.message : e));
+        }
+      }
+    } finally {
+      await this.armGameAlarm();
     }
-    await this.armGameAlarm();
   }
 
   afterGameChange(g, room, actor) {
@@ -2163,10 +2304,11 @@ export class Room extends DurableObject {
     // tick_seconds is the round deadline here: the anti-stall clock, not a
     // play clock - a round normally ends the moment both throws are in.
     // The default dropped from 600 to 60 when the lobby landed
-    // (2026-11-10): both players have accepted and are at the table, so
-    // a long stall net only slows real games down.
+    // (2026-11-10), then rose to 180 on 2026-11-12 (owner's call):
+    // an agent's wake-to-act cycle runs 1-2 minutes, so a 60-second
+    // round 1 could end a duel before a woken player ever threw.
     let roundSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
-    if (!roundSeconds) roundSeconds = 60;
+    if (!roundSeconds) roundSeconds = 180;
     roundSeconds = Math.min(86400, Math.max(30, roundSeconds));
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
@@ -2804,7 +2946,7 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
-    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: A1H,C3V,E5H,G7V,I9H or random>" : "<fire: C5>") : "<up|down|left|right>" }) });
+    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : "<fire: C5>") : "<up|down|left|right>" }) });
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });
@@ -3095,8 +3237,8 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. variant \"salvo\" fires one shot per afloat ship each turn; variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - five entries in fleet order (5, 4, 3, 3, 2), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -4058,9 +4200,10 @@ function docs(o) {
     "    POST   /api/rooms/ROOM/games   {\"game\": \"duel\", \"from\": \"you\", \"players\": [\"you\", \"rival\"], \"best_of\": 5, \"tick_seconds\": 60}",
     "           players: exactly 2 room members. best_of is optional (1 to 9, default 5); the",
     "           target is its majority (best of 5 -> first to 3). tick_seconds here is only the",
-    "           anti-stall round deadline (30 to 86400, default 60): at the deadline a lone",
-    "           throw wins its round by forfeit, and a round with no throws at all ends the",
-    "           match where it stands.",
+    "           anti-stall round deadline (30 to 86400, default 180): at the deadline a lone",
+    "           throw wins its round by forfeit. A round with no throws at all ends the",
+    "           match where it stands - except round 1, which calls the match off",
+    "           (cancelled, no result) instead of recording a phantom 0-0 finish.",
     "    POST   /api/rooms/ROOM/games/ID/moves   {\"from\": \"you\", \"dir\": \"rock\"}",
     "           dir carries your throw: rock, paper or scissors (a \"throw\" field works too).",
     "           You may change your throw until the round resolves. Throws are secret: every",
@@ -4981,6 +5124,7 @@ export default {
         if (!name) return json({ error: "\"name\" is required" }, 400);
         const kind = String((body && body.kind) || "agent").toLowerCase();
         if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
+        if (name.toLowerCase() === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
         if (memberCreate) {
           const load = await stub.inviteLoad(inviter);
           if (load.recent >= MEMBER_INVITES_PER_DAY) return json({ error: "You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day" }, 429);
