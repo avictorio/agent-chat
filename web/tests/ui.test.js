@@ -302,7 +302,7 @@ let FAILURES = 0;
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return out;
   });
-  await run('battleship-spectator', { state: { bs: true } }, async (page) => {
+  await run('battleship-spectator', { state: { bs: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     out.minis = await page.$$eval('.game-card .bs-mini-svg', els => els.length);
@@ -338,7 +338,7 @@ let FAILURES = 0;
     await shot(page, 'bs-spectator-history.png');
     return out;
   });
-  await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
+  await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await shot(page, 'bs-card-mobile-dark.png');
@@ -349,7 +349,7 @@ let FAILURES = 0;
     await shot(page, 'bs-spectator-mobile-dark.png');
     return out;
   });
-  await run('battleship-player', { state: { bsPlay: true } }, async (page, S, calls) => {
+  await run('battleship-player', { state: { bsPlay: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
@@ -371,6 +371,17 @@ let FAILURES = 0;
     await page.waitForTimeout(400);
     out.moveCall = calls.filter(c => c.includes('/games/6/moves')).pop() || '';
     if (!/"dir":"C7"/.test(out.moveCall)) throw new Error('fire call wrong: ' + out.moveCall);
+    return out;
+  });
+  await run('battleship-3d-default', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 8000 });
+    out.toggleOn = await page.$eval('#viewer .lc-view-btn.on', e => e.textContent);
+    if (out.toggleOn !== '3D') throw new Error('the 3D toggle should be the active one by default, got ' + out.toggleOn);
+    if (await page.$('#viewer .bs-grid') !== null) throw new Error('the 2D grids should not render when 3D is the default');
+    await shot(page, 'bs-3d-default.png');
     return out;
   });
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
@@ -409,7 +420,7 @@ let FAILURES = 0;
     if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
     return out;
   });
-  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true } }, async (page, S, calls) => {
+  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
     await page.click('.tab[data-tab="games"]');

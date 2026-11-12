@@ -834,7 +834,8 @@ export function createGameStore(opts: {
      react-three-fiber) instead of the SVG. The scene module is a
      dynamic import, so three.js ships in a lazy chunk that loads
      only when a viewer flips the toggle; the preference persists
-     per device and defaults to 2D. The React root lives on the
+     per device and defaults to 3D (a stored "0" is an explicit
+     opt-out and is respected). The React root lives on the
      gameView object: renderGameView clears and rebuilds the wrap
      on every state change, and re-appending the same host element
      keeps the canvas (and the camera) alive across repaints. */
@@ -842,7 +843,7 @@ export function createGameStore(opts: {
   let lc3dComp: Promise<ComponentType<{ g: GL; aspect?: number }>> | null = null;
   function lc3dPref(): boolean {
     try {
-      return localStorage.getItem(LC3D_KEY) === "1";
+      return localStorage.getItem(LC3D_KEY) !== "0";
     } catch {
       return false;
     }
@@ -899,7 +900,8 @@ export function createGameStore(opts: {
   /* ---- Battleship 3D board (R3F, 2026-11-12) ----
      Same bridge pattern as the Light Cycles scene: ./BsArena3D is a
      dynamic import (three.js stays in the lazy chunk), the preference
-     persists per device and defaults to 2D, and the React root lives
+     persists per device and defaults to 3D (a stored "0" is an
+     explicit opt-out and is respected), and the React root lives
      on gameView so re-appending the host keeps the canvas alive
      across repaints. The component receives the same per-viewer state
      as the 2D boards plus a fire callback wired to sendMove. */
@@ -907,7 +909,7 @@ export function createGameStore(opts: {
   let bs3dComp: Promise<ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void }>> | null = null;
   function bs3dPref(): boolean {
     try {
-      return localStorage.getItem(BS3D_KEY) === "1";
+      return localStorage.getItem(BS3D_KEY) !== "0";
     } catch {
       return false;
     }
