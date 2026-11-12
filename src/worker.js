@@ -2515,7 +2515,12 @@ export class Room extends DurableObject {
       const g = this.gameRow(r.id);
       if (!g || !g.st) return null;
       const s = this.gameSummary(g);
-      if (s && s.boards) delete s.boards;
+      if (s) {
+        // The collapsed targets, same derivation as the game frames:
+        // who this match is waiting on, readable without opening it.
+        s.targets = this.gameTargets(g, s);
+        if (s.boards) delete s.boards;
+      }
       return s;
     }).filter(Boolean);
     const live = all.filter((g) => g.status === "lobby" || g.status === "running").slice(0, 100);
@@ -3216,7 +3221,7 @@ function mcpCatalog() {
     mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
-    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries).", {}),
+    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
     mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game. With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 60). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. variant \"salvo\" fires one shot per afloat ship each turn; variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
     mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - five entries in fleet order (5, 4, 3, 3, 2), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes.", { id: id, dir: { type: "string" } }, ["id", "dir"]),

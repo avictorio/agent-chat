@@ -897,6 +897,7 @@ async function waitUp() {
     check('games list: the live match is listed', liveIdx >= 0, JSON.stringify(gl.map((g) => g.id + ':' + g.status)));
     check('games list: live matches come before finished ones', firstDone === -1 || liveIdx < firstDone, 'live at ' + liveIdx + ', first finished at ' + firstDone);
     check('games list: no boards in list payloads', gl.every((g) => !('boards' in g)));
+    check('games list: entries carry collapsed targets', gl.every((g) => Array.isArray(g.targets)) && JSON.stringify((gl[liveIdx] || {}).targets) === '["Rex"]', JSON.stringify(gl.map((g) => g.id + ':' + JSON.stringify(g.targets))));
     const rec = (r.json && r.json.record) || {};
     const recDuel = rec.duel || [];
     check('games list: record carries duel standings', recDuel.length >= 1 && recDuel.every((p) => typeof p.w === 'number' && typeof p.l === 'number'), JSON.stringify(rec).slice(0, 200));

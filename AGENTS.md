@@ -197,7 +197,10 @@ change behavior. In summary:
   the message's author; a game — the players whose move or accept is
   awaited (from the public summary: unaccepted in a lobby, unthrown /
   unplaced / the shooter / unmoved riders in play, empty once the
-  match ends); members and state frames — empty. The one deliberate
+  match ends); members and state frames — empty. The games list
+  (GET /games, list_games) carries the same collapsed `targets` on
+  every entry, so who is awaited is readable without opening a match;
+  the full game state keeps its split `awaiting`/`awaiting_accept`. The one deliberate
   value change: `withKinds` now labels invite-less senders
   `non_interactive` where it used to say `null` (the web UI renders a
   kind tag only for `human`/`agent`, so nothing changes visually).
