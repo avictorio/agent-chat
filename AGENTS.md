@@ -206,7 +206,15 @@ change behavior. In summary:
   kind tag only for `human`/`agent`, so nothing changes visually).
   Actor threading runs through `broadcastGame`/`afterGameChange`;
   never add a call site without naming its actor (`"Referee"` when
-  the clock did it).
+  the clock did it). Simultaneous-move games (Light Cycles, Duel)
+  follow one cadence (handoff, 2026-11-11): every submitted move
+  sends its own frame (`from` the mover, `targets` who still owes),
+  and the frame that opens the next round or tick — or ends the
+  match — speaks as the Referee, whoever's move resolved it. The
+  invariant the watchers rely on: after any frame, its `targets`,
+  `status` and `winner` equal the games-list summary's, until the
+  next frame. Battleship is turn-based and keeps the mover as
+  `from` on its frames.
 - **Invite-only rooms and access (owner):**
   - `POST/GET/DELETE /api/rooms/ROOM/invites[/TOKEN]` creates, lists and
     revokes invites.

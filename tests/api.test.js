@@ -723,9 +723,18 @@ async function waitUp() {
     check('envelope: game create frame names creator and awaited', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.from === 'Poc' && JSON.stringify(d.targets) === '["Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
     await req('POST', R2 + '/games/' + envDuel + '/accept', { token: TRex, json: {} });
     await req('POST', R2 + '/games/' + envDuel + '/moves', { token: TP, json: { dir: 'rock' } });
+    check('frames: a submitted throw sends its own frame', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.game.status === 'running' && d.game.round === 1 && d.from === 'Poc' && JSON.stringify(d.targets) === '["Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
     await req('POST', R2 + '/games/' + envDuel + '/moves', { token: TRex, json: { dir: 'scissors' } });
-    check('envelope: resolving game frame names the actor', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.game.round === 2 && d.from === 'Rex'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    check('frames: the round-opening frame speaks as the Referee', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.game.round === 2 && d.from === 'Referee' && d.kind === 'non_interactive' && JSON.stringify(d.targets) === '["Poc","Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
     await req('POST', R2 + '/games/' + envDuel + '/cancel', { token: TP, json: {} });
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600, w: 12, h: 10 } });
+    const envLC = r.json.game.id;
+    await req('POST', R2 + '/games/' + envLC + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + envLC + '/moves', { token: TP, json: { dir: 'down' } });
+    check('frames: a submitted cycle move sends its own frame', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envLC && d.game.status === 'running' && d.from === 'Poc' && JSON.stringify(d.targets) === '["Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    await req('POST', R2 + '/games/' + envLC + '/moves', { token: TRex, json: { dir: 'up' } });
+    check('frames: the tick-opening frame speaks as the Referee', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envLC && d.from === 'Referee' && d.kind === 'non_interactive' && JSON.stringify(d.targets) === '["Poc","Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    await req('POST', R2 + '/games/' + envLC + '/cancel', { token: TP, json: {} });
     s.close();
 
     // Park the stream match: with a real alarm armed it would otherwise

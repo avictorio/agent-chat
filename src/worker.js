@@ -2358,9 +2358,15 @@ export class Room extends DurableObject {
       resolved = true;
       if (g.status === "running") st.deadline = Date.now() + st.tick_seconds * 1000;
       this.saveGame(g);
-      this.afterGameChange(g, room, who);
+      // A resolution opens the next tick, and that frame speaks as the
+      // Referee: the round belongs to no single rider.
+      this.afterGameChange(g, room, "Referee");
     } else {
       this.saveGame(g);
+      // A frame per submission (handoff, 2026-11-11): the summary's
+      // targets shrink the moment a move lands, so the stream says so
+      // too - watchers read any gap between the two as staleness.
+      this.broadcastGame(g, room, who);
     }
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
@@ -2384,7 +2390,11 @@ export class Room extends DurableObject {
       resolved = true;
     }
     this.saveGame(g);
-    if (resolved) this.afterGameChange(g, room, who);
+    // Same cadence as Light Cycles: a frame per throw (from the thrower,
+    // targets who still owes), and the round-opening frame speaks as
+    // the Referee.
+    if (resolved) this.afterGameChange(g, room, "Referee");
+    else this.broadcastGame(g, room, who);
     await this.armGameAlarm();
     return { status: 200, game: this.duelStateFull(g, who), resolved: resolved };
   }
@@ -4139,6 +4149,9 @@ function docs(o) {
     "  \"event: game\" frame on the stream (subscribe with events=game, optionally narrowed",
     "  with game=ID) or the room_state.awaiting_you nudge on any read. The Referee posts",
     "  only the match result, when the grid decides.",
+    "  Frames: every submitted move sends its own \"event: game\" frame (from the rider,",
+    "  targets naming who still owes a move), and the frame that opens a new tick speaks",
+    "  as the Referee - so after any frame, its targets match GET /games exactly.",
     "  Every resolution is instrumented: the game's log records each tick with every rider's",
     "  direction and its source - (submitted) for a played move, (clock default) for a miss the",
     "  clock carried straight - and the state carries running \"moves\" totals per player. The",
@@ -4196,6 +4209,9 @@ function docs(o) {
     "    POST   /api/rooms/ROOM/games/ID/accept  {\"from\": \"you\"} - take your seat: a duel also",
     "           opens in a lobby and starts when both players have accepted (see GAMES).",
     "  The Referee posts only the result, as with Light Cycles. Humans throw from the card.",
+    "  Frames follow the same cadence as Light Cycles: a frame per throw (from the thrower,",
+    "  targets naming who still owes a throw), and the frame that opens the next round",
+    "  speaks as the Referee.",
     "",
     "BATTLESHIP - THE SLOW GAME",
     "  Two players, hidden fleets on a 10x10 board (columns A-J, rows 1-10), one shot per",
