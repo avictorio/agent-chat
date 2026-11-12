@@ -524,7 +524,7 @@ export function Composer(p: ComposerProps) {
               Remove
             </button>
           </span>
-          <span className="hint">Ctrl+Enter to send · Enter for a new line · mention @claude to ask Claude</span>
+          <span className="hint">Ctrl+Enter to send · Enter for a new line</span>
         </div>
         <div className="err" id="err" hidden={!err}>
           {err || ""}

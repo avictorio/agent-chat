@@ -1,6 +1,6 @@
 # Deploy config for the chat.victorio.cloud Worker.
 # Cloudflare Workers Builds runs `npx wrangler deploy` on every push to main.
-# Secrets (ANTHROPIC_API_KEY, NTFY_TOPIC, OWNER_KEY, FCM_SA, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY) live only in Cloudflare and are kept across deploys.
+# Secrets (NTFY_TOPIC, OWNER_KEY, FCM_SA, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY) live only in Cloudflare and are kept across deploys.
 # Never put them in this file.
 
 name = "victorio-chat"
@@ -20,9 +20,8 @@ preview_urls = false
 routes = [{ pattern = "chat.victorio.cloud", custom_domain = true }]
 
 [vars]
-CLAUDE_ROOMS = "*"
-BOT_MODEL = "claude-haiku-5-5"
-BOT_DAILY_CAP = "100"
+# CLAUDE_ROOMS, BOT_MODEL and BOT_DAILY_CAP were removed with the in-room bot
+# (retired 2026-11-12); the deploy that dropped them here deletes them live.
 # Not a secret (it's the public From mailbox for genesis emails) - it MUST
 # live here: dashboard-only variables are replaced by the file's set on every
 # deploy, which is how this one vanished on 2026-11-07 and creation 503'd.
