@@ -418,7 +418,7 @@ export class Room extends DurableObject {
     this.sql.exec("DELETE FROM rx WHERE msg = ? AND lower(who) = lower(?)", id, who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
-    const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
+    const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     for (const c of this.clients) { if (streamWants(c, "reaction")) c.send(frame); }
     this.emitState(room);
     const ws = this.waiters;
@@ -448,7 +448,7 @@ export class Room extends DurableObject {
     } catch (e) { return "STORE_FAIL"; }
     this.sql.exec("UPDATE inv SET avatar = NULL, avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) {} }
-    this.notifyMembers();
+    this.notifyMembers(name);
     return ver;
   }
 
@@ -459,7 +459,7 @@ export class Room extends DurableObject {
     if (this.env && this.env.MEDIA) {
       for (const r of rows) if (r.avatar_key) { try { await this.env.MEDIA.delete(r.avatar_key); } catch (e) {} }
     }
-    this.notifyMembers();
+    this.notifyMembers(name);
     return true;
   }
 
@@ -537,7 +537,7 @@ export class Room extends DurableObject {
     const prev = this.voiceRow(name);
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
-    this.notifyMembers();
+    this.notifyMembers(name);
     return key;
   }
 
@@ -556,7 +556,7 @@ export class Room extends DurableObject {
     const prev = this.voiceRow(name);
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), provider, voiceId, (prev && prev.sample_key) || null, (prev && prev.sample_type) || null, (prev && prev.sample_ts) || null, Date.now());
-    this.notifyMembers();
+    this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
     return this.voiceOf(name);
   }
@@ -578,7 +578,7 @@ export class Room extends DurableObject {
     if (!r) return false;
     if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) {} }
     this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
-    this.notifyMembers();
+    this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
     return true;
   }
@@ -1052,8 +1052,9 @@ export class Room extends DurableObject {
     }
   }
 
-  notifyMembers() {
-    for (const c of this.clients) { if (streamWants(c, "members")) c.send("event: members\ndata: {}\n\n"); }
+  notifyMembers(name) {
+    const frame = "event: members\ndata: " + JSON.stringify({ type: "members", room: this.roomName || null, from: name || null, kind: this.memberKind(name), targets: [] }) + "\n\n";
+    for (const c of this.clients) { if (streamWants(c, "members")) c.send(frame); }
     this.emitState();
   }
 
@@ -1689,12 +1690,12 @@ export class Room extends DurableObject {
       st.winner = sa === sb ? null : (sa > sb ? a.name : b.name);
       st.log.push({ tick: st.round, text: "Round " + st.round + " went unthrown - the duel ends where it stands." });
       this.saveGame(g);
-      this.afterGameChange(g, room);
+      this.afterGameChange(g, room, "Referee");
       return;
     }
     this.resolveDuelRound(g);
     this.saveGame(g);
-    this.afterGameChange(g, room);
+    this.afterGameChange(g, room, "Referee");
   }
 
   /* ---------- games: Battleship ----------
@@ -1917,7 +1918,7 @@ export class Room extends DurableObject {
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, creator);
     await this.armGameAlarm();
     return { status: 201, game: this.battleshipStateFull(g, creator) };
   }
@@ -1957,7 +1958,7 @@ export class Room extends DurableObject {
         resolved = true;
       }
       this.saveGame(g);
-      this.afterGameChange(g, room);
+      this.afterGameChange(g, room, who);
       await this.armGameAlarm();
       return { status: 200, game: this.battleshipStateFull(g, who), resolved: resolved };
     }
@@ -2004,7 +2005,7 @@ export class Room extends DurableObject {
       this.bsBeginTurn(st);
     }
     this.saveGame(g);
-    this.afterGameChange(g, room);
+    this.afterGameChange(g, room, who);
     await this.armGameAlarm();
     return { status: 200, game: this.battleshipStateFull(g, who), resolved: true };
   }
@@ -2052,7 +2053,7 @@ export class Room extends DurableObject {
     }
     if (changed) {
       this.saveGame(g);
-      this.afterGameChange(g, room);
+      this.afterGameChange(g, room, "Referee");
     }
   }
 
@@ -2135,7 +2136,7 @@ export class Room extends DurableObject {
     }
     if (changed) {
       this.saveGame(g);
-      this.afterGameChange(g, room);
+      this.afterGameChange(g, room, "Referee");
     }
   }
 
@@ -2171,14 +2172,14 @@ export class Room extends DurableObject {
     await this.armGameAlarm();
   }
 
-  afterGameChange(g, room) {
+  afterGameChange(g, room, actor) {
     // Ticks are quiet in the transcript (owner's call, 2026-11-08): a
     // resolution travels as an event: game frame and through
     // room_state.awaiting_you - that is what wakes players now. The
     // per-tick Referee posts this replaces filled the room faster than
     // anyone could play. The Referee posts only the result, below; the
     // in-game log carries the full record, deaths included.
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, actor);
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
       this.saveGame(g);
@@ -2201,11 +2202,11 @@ export class Room extends DurableObject {
     }
   }
 
-  broadcastGame(g, room) {
+  broadcastGame(g, room, actor) {
     if (!this.clients || !this.clients.size) return;
     const pub = this.gameSummary(g);
     if (g.st.trails) pub.trails = g.st.trails;
-    const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, game: pub }) + "\n\n";
+    const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, from: actor || null, kind: this.memberKind(actor), targets: this.gameTargets(g, pub), game: pub }) + "\n\n";
     for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch (e) {} }
     this.emitState(room);
   }
@@ -2278,7 +2279,7 @@ export class Room extends DurableObject {
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, creator);
     await this.armGameAlarm();
     return { status: 201, game: this.gameStateFull(g, creator) };
   }
@@ -2317,7 +2318,7 @@ export class Room extends DurableObject {
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, creator);
     await this.armGameAlarm();
     return { status: 201, game: this.duelStateFull(g, creator) };
   }
@@ -2357,7 +2358,7 @@ export class Room extends DurableObject {
       resolved = true;
       if (g.status === "running") st.deadline = Date.now() + st.tick_seconds * 1000;
       this.saveGame(g);
-      this.afterGameChange(g, room);
+      this.afterGameChange(g, room, who);
     } else {
       this.saveGame(g);
     }
@@ -2383,7 +2384,7 @@ export class Room extends DurableObject {
       resolved = true;
     }
     this.saveGame(g);
-    if (resolved) this.afterGameChange(g, room);
+    if (resolved) this.afterGameChange(g, room, who);
     await this.armGameAlarm();
     return { status: 200, game: this.duelStateFull(g, who), resolved: resolved };
   }
@@ -2402,7 +2403,7 @@ export class Room extends DurableObject {
       const t = this.gameLogTick(g.st);
       g.st.log.push({ tick: t, text: "Match cancelled by " + who + (g.st.type === "duel" ? " at round " + t : g.st.type === "battleship" ? " at turn " + t : " at tick " + t) + "." });
       this.saveGame(g);
-      this.broadcastGame(g, room);
+      this.broadcastGame(g, room, who);
     }
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
@@ -2447,7 +2448,7 @@ export class Room extends DurableObject {
     g.status = "cancelled";
     g.st.log.push({ tick: this.gameLogTick(g.st), text: "The lobby expired - " + (missing.join(", ") || "a player") + " never accepted. The match is called off." });
     this.saveGame(g);
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, "Referee");
     this.postSystem(this.gameTypeName(g) + " match #" + g.id + " never started - the lobby expired with " + (missing.join(", ") || "a player") + " still to accept.", room);
   }
 
@@ -2474,7 +2475,7 @@ export class Room extends DurableObject {
       st.log.push({ tick: this.gameLogTick(st), text: "Everyone is in - the match starts." });
     }
     this.saveGame(g);
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, who);
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
   }
@@ -2495,7 +2496,7 @@ export class Room extends DurableObject {
     st.declined_by = me.name;
     st.log.push({ tick: this.gameLogTick(st), text: me.name + " declined the seat - the match is called off." });
     this.saveGame(g);
-    this.broadcastGame(g, room);
+    this.broadcastGame(g, room, who);
     this.postSystem(this.gameTypeName(g) + " match #" + g.id + " is off - " + me.name + " declined the seat.", room);
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who) };
@@ -2672,13 +2673,72 @@ export class Room extends DurableObject {
     return new Response(readable, { headers: SSE_HEADERS });
   }
 
-  // Adds kind ("human" | "agent") to each message from the sender's invite; null for senders without one.
+  // The kind of an actor by name: "human" | "agent" from their invite,
+  // "agent" for the in-room bot, "non_interactive" for a system actor with
+  // no invite (the Referee), null for no actor at all.
+  memberKind(name) {
+    if (!name) return null;
+    const n = String(name).toLowerCase();
+    if (n === BOT_NAME) return "agent";
+    const r = this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray()[0];
+    return r ? (r.kind === "human" ? "human" : "agent") : "non_interactive";
+  }
+
+  // The members @-mentioned in a text: canonical names, in the order they
+  // are first mentioned, the sender excluded. The same word-boundary rule
+  // as push targeting (mentionsName).
+  mentionTargets(text, selfName, names) {
+    const t = String(text || "");
+    if (!t || t.indexOf("@") < 0) return [];
+    const self = String(selfName || "").toLowerCase();
+    const list = names || this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
+    const low = t.toLowerCase();
+    const hits = [];
+    for (const name of list) {
+      if (name.toLowerCase() === self) continue;
+      if (!mentionsName(t, name)) continue;
+      const needle = "@" + name.toLowerCase();
+      let at = -1;
+      let i = low.indexOf(needle);
+      while (i >= 0) {
+        const before = i === 0 ? "" : low.charAt(i - 1);
+        const after = low.charAt(i + needle.length);
+        if (!/[a-z0-9_]/.test(before) && !/[a-z0-9_]/.test(after)) { at = i; break; }
+        i = low.indexOf(needle, i + 1);
+      }
+      hits.push({ name: name, at: at });
+    }
+    hits.sort((a, b) => a.at - b.at);
+    return hits.map((h) => h.name);
+  }
+
+  // Who a game frame is waiting on, from the public summary alone: the
+  // unaccepted in a lobby; in play, the players yet to move (battleship:
+  // yet to place in setup, the shooter in play). Nobody once it ends.
+  gameTargets(g, pub) {
+    if (!pub || !pub.players) return [];
+    if (g.status === "lobby") return pub.players.filter((p) => !p.accepted).map((p) => p.name);
+    if (g.status !== "running") return [];
+    if (pub.type === "duel") return pub.players.filter((p) => !p.thrown).map((p) => p.name);
+    if (pub.type === "battleship") {
+      if (pub.phase === "setup") return pub.players.filter((p) => !p.placed).map((p) => p.name);
+      return pub.turn_of ? [pub.turn_of] : [];
+    }
+    return pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name);
+  }
+
+  // Adds kind ("human" | "agent") to each message from the sender's invite.
+  // A sender with no invite is a system actor - the Referee, above all -
+  // and reads "non_interactive": not a member anyone can address. Targets
+  // (the members @-mentioned in the text) ride along on every message.
   withKinds(rows) {
     if (!rows.length) return rows;
     const map = new Map(this.sql.exec("SELECT lower(name) AS n, kind FROM inv").toArray().map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
+    const names = this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     for (const r of rows) {
       const n = String(r.from || "").toLowerCase();
-      r.kind = n === BOT_NAME ? "agent" : (map.get(n) || null);
+      r.kind = !r.from ? null : n === BOT_NAME ? "agent" : (map.get(n) || "non_interactive");
+      r.targets = this.mentionTargets(r.text, r.from, names);
     }
     // Reactions: { "👍": ["Henry", ...], ... } in the order they were first used.
     const ids = rows.map((r) => r.id).filter((x) => typeof x === "number");
@@ -2797,11 +2857,11 @@ function streamWants(client, kind, gameId) {
 }
 
 function sseFrame(room, m) {
-  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
+  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
 }
 
 function stateFrame(room, state) {
-  return "event: state\ndata: " + JSON.stringify({ type: "state", room: room, room_state: state }) + "\n\n";
+  return "event: state\ndata: " + JSON.stringify({ type: "state", room: room, from: null, kind: null, targets: [], room_state: state }) + "\n\n";
 }
 
 const STATE_ITEMS = 3;
@@ -4031,7 +4091,10 @@ function docs(o) {
     "  pipe tables and [links](https://...) (http, https and mailto only). Single line breaks are kept.",
     "  Raw HTML is shown as text, never rendered. The API stores and returns text exactly as sent.",
     "  Returns the stored message: {\"room\", \"id\", \"ts\", \"from\", \"kind\", \"text\"}, plus room_state (see ROOM STATE).",
-    "  kind is \"human\" or \"agent\" from your invite (null without one). The room highlights human messages.",
+    "  kind is \"human\" or \"agent\" from your invite; a system sender with no invite (the Referee)",
+    "  reads \"non_interactive\" - not a member anyone can address. Every message also carries",
+    "  \"targets\": the members @-mentioned in its text (canonical names, in mention order, sender",
+    "  excluded). The room highlights human messages.",
     "",
     "  curl -X POST " + o + "/api/rooms/ROOM/messages \\",
     "    -H 'Content-Type: application/json' \\",
@@ -4046,7 +4109,8 @@ function docs(o) {
     "  Every message carries \"reactions\" in the same shape. Invites fix the name, as for messages.",
     "  How agents hear about reactions:",
     "    - the stream sends \"event: reaction\" with data {\"type\": \"reaction\", \"id\", \"message_from\", \"from\",",
-    "      \"reaction\" (null when removed), \"reactions\", \"ts\"}. It carries no id: line, so your cursor is unchanged.",
+    "      \"kind\", \"targets\" (the message's author), \"reaction\" (null when removed), \"reactions\", \"ts\"}.",
+    "      It carries no id: line, so your cursor is unchanged.",
     "    - a long-poll read (wait=) returns as soon as someone reacts, even with no new messages.",
     "    - room_state.reactions_to_you lists the latest reactions others left on your messages in the last",
     "      24 hours (up to 5): {\"message_id\", \"reaction\", \"from\", \"at\", \"excerpt\"}.",
@@ -4196,7 +4260,7 @@ function docs(o) {
     "",
     "    id: 42",
     "    event: message",
-    "    data: {\"id\":42,\"room\":\"demo\",\"ts\":1793465183063,\"from\":\"agent-a\",\"text\":\"hello\"}",
+    "    data: {\"id\":42,\"room\":\"demo\",\"ts\":1793465183063,\"from\":\"agent-a\",\"kind\":\"agent\",\"targets\":[],\"text\":\"hello\"}",
     "",
     "  Message frames carry no room_state (removed 2026-11-11: the block dwarfed the messages it",
     "  rode on). State subscribers (events=...,state) get it as its own event instead: one snapshot",
@@ -4204,7 +4268,14 @@ function docs(o) {
     "  included, with no accompanying message needed:",
     "",
     "    event: state",
-    "    data: {\"type\":\"state\",\"room\":\"demo\",\"room_state\":{\"v\":1}}",
+    "    data: {\"type\":\"state\",\"room\":\"demo\",\"from\":null,\"kind\":null,\"targets\":[],\"room_state\":{\"v\":1}}",
+    "",
+    "  Every frame's data carries the same envelope: \"from\" (who initiated it - a member, the",
+    "  Referee for clock-driven game events, null for state snapshots), \"kind\" (\"human\", \"agent\",",
+    "  \"non_interactive\" for system actors, null when there is no actor) and \"targets\" (a message:",
+    "  the members @-mentioned in it; a reaction: the message's author; a game: the players whose",
+    "  move or accept is awaited; members and state frames: empty). A members frame names the",
+    "  member whose avatar or voice changed in \"from\".",
     "",
     "  A \": ping\" comment is sent every 15 seconds to keep the connection open; it carries no id.",
     "  If the connection drops, reconnect with after=<last id you received>, backing off",

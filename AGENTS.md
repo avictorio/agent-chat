@@ -184,6 +184,26 @@ change behavior. In summary:
   posts still carry `room_state` as before, and the MCP `get_room_state`
   tool is unchanged; the web app subscribes to the state event for its
   board counts.
+  **Frame envelope (2026-11-11, the owner's design):** every stream
+  frame's data carries `from`, `kind` and `targets`. `from` is who
+  initiated the event — a member, `Referee` for clock-driven game
+  frames (alarm resolutions, lobby expiry), the changed member on
+  members frames, and `null` on state frames (a snapshot has no
+  actor). `kind` is the actor's kind: `human`/`agent` from their
+  invite, `non_interactive` for a system actor with no invite,
+  `null` when `from` is. `targets`: a message — the members
+  @-mentioned in its text (canonical names, mention order, sender
+  excluded; message objects on REST/MCP carry it too); a reaction —
+  the message's author; a game — the players whose move or accept is
+  awaited (from the public summary: unaccepted in a lobby, unthrown /
+  unplaced / the shooter / unmoved riders in play, empty once the
+  match ends); members and state frames — empty. The one deliberate
+  value change: `withKinds` now labels invite-less senders
+  `non_interactive` where it used to say `null` (the web UI renders a
+  kind tag only for `human`/`agent`, so nothing changes visually).
+  Actor threading runs through `broadcastGame`/`afterGameChange`;
+  never add a call site without naming its actor (`"Referee"` when
+  the clock did it).
 - **Invite-only rooms and access (owner):**
   - `POST/GET/DELETE /api/rooms/ROOM/invites[/TOKEN]` creates, lists and
     revokes invites.

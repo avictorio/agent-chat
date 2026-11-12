@@ -422,6 +422,7 @@ async function waitUp() {
     const refPosts = (r.json.messages || []).filter(x => x.from === 'Referee' && x.text.includes('match #' + gid));
     check('exactly one referee post per match (the result)', refPosts.length === 1 && refPosts[0].text.includes('is over'), JSON.stringify(refPosts.map(x => x.text.slice(0, 60))));
     check('result post reports move totals', refPosts.length === 1 && refPosts[0].text.includes('Moves submitted:'), refPosts.map(x => x.text.slice(0, 160)).join(' | '));
+    check('referee post carries kind non_interactive and targets', refPosts.length === 1 && refPosts[0].kind === 'non_interactive' && Array.isArray(refPosts[0].targets), JSON.stringify(refPosts.map(x => x.kind)));
     const nudged = ((r.json.room_state && r.json.room_state.awaiting_you) || []).some(x => x.type === 'game' && x.id === clockId);
     check('room_state nudges the clock match', nudged, JSON.stringify(r.json.room_state).slice(0, 200));
     const nudgeItem = ((r.json.room_state && r.json.room_state.awaiting_you) || []).find(x => x.type === 'game' && x.id === clockId);
@@ -701,6 +702,32 @@ async function waitUp() {
     check('stream: board change pushes a state frame', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"open_questions"') && f.includes('State event probe question?')), 4000), JSON.stringify(s.frames).slice(-400));
     if (probeQid) await req('DELETE', R2 + '/questions/' + probeQid, { token: TP });
     s.close();
+    // Envelope: every frame kind carries from + kind + targets, and
+    // message objects carry targets on reads and post responses too.
+    function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch (e) { return null; } }
+    s = await openStream(R2 + '/stream?events=all,state&after=latest', TP);
+    check('envelope: state snapshot has a null actor', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'state' && d.from === null && d.kind === null && Array.isArray(d.targets); }), 4000), JSON.stringify(s.frames).slice(0, 200));
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: '@Rex envelope probe' } });
+    const envMsgId = r.json.id;
+    check('envelope: post response carries mention targets', JSON.stringify(r.json.targets) === '["Rex"]', JSON.stringify(r.json).slice(0, 200));
+    check('envelope: message frame carries from/kind/targets', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.id === envMsgId && d.from === 'Poc' && !!d.kind && JSON.stringify(d.targets) === '["Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    r = await req('GET', R2 + '/messages?after=' + (envMsgId - 1) + '&limit=5', { token: TP });
+    const envListed = (r.json.messages || []).find(x => x.id === envMsgId);
+    check('envelope: listing carries mention targets', !!envListed && JSON.stringify(envListed.targets) === '["Rex"]', JSON.stringify(envListed).slice(0, 200));
+    await req('POST', R2 + '/messages/' + envMsgId + '/reactions', { token: TRex, json: { from: 'Rex', reaction: '\uD83D\uDC4D' } });
+    check('envelope: reaction frame targets the author', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'reaction' && d.from === 'Rex' && JSON.stringify(d.targets) === '["Poc"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    await req('PUT', R2 + '/avatar', { token: TP, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('envelope: members frame names the changed member', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'members' && d.from === 'Poc' && !!d.kind && Array.isArray(d.targets); }), 4000), JSON.stringify(s.frames).slice(-300));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
+    const envDuel = r.json.game.id;
+    check('envelope: game create frame names creator and awaited', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.from === 'Poc' && JSON.stringify(d.targets) === '["Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    await req('POST', R2 + '/games/' + envDuel + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + envDuel + '/moves', { token: TP, json: { dir: 'rock' } });
+    await req('POST', R2 + '/games/' + envDuel + '/moves', { token: TRex, json: { dir: 'scissors' } });
+    check('envelope: resolving game frame names the actor', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envDuel && d.game.round === 2 && d.from === 'Rex'; }), 4000), JSON.stringify(s.frames).slice(-300));
+    await req('POST', R2 + '/games/' + envDuel + '/cancel', { token: TP, json: {} });
+    s.close();
+
     // Park the stream match: with a real alarm armed it would otherwise
     // keep resolving ticks (and eventually post a result) behind the
     // rest of the suite's back.
