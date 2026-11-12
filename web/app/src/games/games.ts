@@ -74,7 +74,13 @@ function bsInnerGrid(frame: HTMLElement): HTMLElement | null {
 function bsCellAt(frame: HTMLElement, label: string): HTMLElement | null {
   const inner = bsInnerGrid(frame);
   if (!inner) return null;
-  const idx = label.charCodeAt(0) - 65 + (parseInt(label.slice(1), 10) - 1) * 10;
+  // The column count rides in the grid's inline style (repeat(N, 1fr),
+  // set by the board builder from the match's w). The old fixed 10
+  // landed every marker past row 1 on the wrong cell in skirmish,
+  // whose boards are 8 wide.
+  const m = /repeat\((\d+)/.exec(inner.style.gridTemplateColumns || "");
+  const w = m && m[1] ? parseInt(m[1], 10) : 10;
+  const idx = label.charCodeAt(0) - 65 + (parseInt(label.slice(1), 10) - 1) * w;
   return (inner.children[idx] as HTMLElement) || null;
 }
 
@@ -210,9 +216,13 @@ export function createGameStore(opts: {
 
   function rematchRow(g: GL, note: HTMLElement): HTMLElement {
     const row = el("div", "duel-pad");
+    // Rematch is offered to everyone for a finished or called-off
+    // match (the Nov 11 standardization); sendRematch's in-flight
+    // guard is what keeps a double tap from opening two lobbies.
     const b = el("button", "duel-btn", "Rematch");
     b.type = "button";
     b.addEventListener("click", () => {
+      b.disabled = true;
       void sendRematch(g, note);
     });
     row.appendChild(b);
@@ -220,7 +230,15 @@ export function createGameStore(opts: {
     return row;
   }
 
+  const rematchInFlight = new Set<number>();
+
   async function sendRematch(g: GL, note: HTMLElement | null) {
+    // One guard for every rematch surface (arena row, card, games
+    // list): a double tap used to open two lobbies. Rematch itself
+    // stays open to everyone - any member can run back a finished
+    // or called-off match with its original players.
+    if (rematchInFlight.has(g.id)) return;
+    rematchInFlight.add(g.id);
     const body: Record<string, unknown> = { players: (g.players || []).map((p: GL) => p.name) };
     if (g.type === "duel") {
       body.game = "duel";
@@ -248,6 +266,8 @@ export function createGameStore(opts: {
       }
     } catch {
       if (note) note.textContent = "The rematch did not reach the referee.";
+    } finally {
+      rematchInFlight.delete(g.id);
     }
   }
 
@@ -454,6 +474,16 @@ export function createGameStore(opts: {
     return list;
   }
 
+  // A compact signature of the per-viewer block. The arena render
+  // keys include it: without it, a refetch that changed only the
+  // viewer's own state (spectator -> player, your turn arriving)
+  // never repainted, and the arena could sit on "Spectating".
+  function youSig(g: GL): string {
+    const y = g.you;
+    if (!y) return "-";
+    return [y.playing ? 1 : 0, y.queued || "", y.alive === false ? 0 : 1, y.your_turn ? 1 : 0, y.phase || ""].join(",");
+  }
+
   function renderDuelView(g: GL, force?: boolean) {
     if (!gameView) return;
     const key =
@@ -464,6 +494,8 @@ export function createGameStore(opts: {
       (g.players || []).map((p: GL) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
       "|" +
       ((g.you && g.you.queued) || "") +
+      "|" +
+      youSig(g) +
       "|" +
       ((gameView && gameView.tab) || "game");
     if (!force && key === gameRenderKey) return;
@@ -488,7 +520,7 @@ export function createGameStore(opts: {
       return;
     }
     const big = el("div", "lc-board-big");
-    big.appendChild(duelBoard(g));
+    big.appendChild(duelBoard(g, true));
     wrap.appendChild(big);
     const tends = duelTendencies(g);
     if (tends.length) {
@@ -602,6 +634,14 @@ export function createGameStore(opts: {
       (you.fleet ? "fleet" : "") +
       "|" +
       (you.shots ? Object.keys(you.shots).length : 0) +
+      "|" +
+      youSig(g) +
+      "|" +
+      (g.salvo_left == null ? "" : g.salvo_left) +
+      "|" +
+      (g.sonar ? g.sonar.turn : "") +
+      "|" +
+      (g.last_move ? g.last_move.turn : "") +
       "|" +
       ((gameView && gameView.tab) || "game");
     if (!force && key === gameRenderKey) return;
@@ -1005,6 +1045,8 @@ export function createGameStore(opts: {
       "|" +
       ((g.you && g.you.queued) || "") +
       "|" +
+      youSig(g) +
+      "|" +
       (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
       "|" +
       ((gameView && gameView.tab) || "game");
@@ -1175,7 +1217,13 @@ export function createGameStore(opts: {
     onFrame(game: GL) {
       if (!game || !game.id) return;
       if (game.trails || game.type === "duel" || game.type === "battleship") {
-        cache.set(game.id, game);
+        // A frame carries the public summary, not the full state.
+        // Merge it over the cached entry instead of replacing it:
+        // replacing wiped the per-viewer fields (you, rounds, log)
+        // the cards and arenas render from, so a live update could
+        // show the wrong "your move" state until the next poll.
+        const prev = cache.get(game.id);
+        cache.set(game.id, prev ? Object.assign({}, prev, game) : game);
         notify();
       }
       if (gameView && gameView.id === game.id) void fetchGame(game.id);

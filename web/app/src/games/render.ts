@@ -283,7 +283,7 @@ export function duelStreak(g: GL, name: string): number {
   return n;
 }
 
-export function duelBoard(g: GL): HTMLElement {
+export function duelBoard(g: GL, slim?: boolean): HTMLElement {
   const wrap = el("div", "duel-board");
   const sc = g.score || {};
   (g.players || []).forEach((p: GL) => {
@@ -304,7 +304,11 @@ export function duelBoard(g: GL): HTMLElement {
     if (streak >= 2) row.appendChild(el("span", "duel-streak", "🔥" + streak));
     wrap.appendChild(row);
   });
-  if (g.status === "running") {
+  if (slim) {
+    // The arena composes its own status line, verdict banner and
+    // clock bar around the board; in slim mode the board is just
+    // the score rows, so nothing shows twice.
+  } else if (g.status === "running") {
     const states = (g.players || []).map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
     wrap.appendChild(el("div", "duel-stateline", states));
   } else if (g.status === "lobby") {
@@ -312,7 +316,7 @@ export function duelBoard(g: GL): HTMLElement {
     wrap.appendChild(el("div", "duel-stateline", states));
   }
   const rounds = g.rounds || [];
-  if (rounds.length) {
+  if (rounds.length && !slim) {
     const last = rounds[rounds.length - 1];
     const v = roundVerdict(last, g.players || []);
     const fo = el("div", "duel-faceoff-line ribbon-in");
@@ -326,11 +330,11 @@ export function duelBoard(g: GL): HTMLElement {
     fo.appendChild(el("span", "", v.text));
     wrap.appendChild(fo);
   }
-  if (g.you && g.you.playing && g.status === "running") {
+  if (!slim && g.you && g.you.playing && g.status === "running") {
     if (g.you.queued) wrap.appendChild(el("span", "duel-pill locked", "✓ LOCKED · " + g.you.queued));
     else wrap.appendChild(el("span", "duel-pill your-throw", "YOUR THROW"));
   }
-  if (g.status === "running" && g.deadline) wrap.appendChild(clockBar(g, false));
+  if (!slim && g.status === "running" && g.deadline) wrap.appendChild(clockBar(g, false));
   return wrap;
 }
 
