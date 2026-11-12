@@ -46,7 +46,10 @@ function LightCycle({ x, z, hex, dir }: { x: number; z: number; hex: string; dir
   return (
     <group position={[x, 0, z]}>
       <group ref={group} rotation-y={target}>
-        <group scale={1.45}>
+        {/* Shifted forward along the heading so the newest trail
+            cell sits under the rear wheel: the light stream comes
+            out of the back of the bike, like the films. */}
+        <group position={[0.95, 0, 0]} scale={1.45}>
         {/* wheels: glowing hubless rings over dark discs */}
         {[0.72, -0.72].map((wx, i) => (
           <group key={i} position={[wx, 0.36, 0]}>
@@ -103,7 +106,7 @@ function LightCycle({ x, z, hex, dir }: { x: number; z: number; hex: string; dir
           </mesh>
         </group>
         </group>
-        <pointLight color={hex} intensity={22} distance={11} decay={2} position={[0, 1.6, 0]} />
+        <pointLight color={hex} intensity={22} distance={11} decay={2} position={[0.95, 1.6, 0]} />
       </group>
     </group>
   );
@@ -175,7 +178,7 @@ export default function LcArena3D({ g, aspect }: { g: any; aspect?: number }) {
         if (!cells.length) return null;
         return (
           <Instances key={String(g.id) + ":" + i} limit={Math.max(1, cells.length)} frustumCulled={false}>
-            <boxGeometry args={[0.92, 0.62, 0.92]} />
+            <boxGeometry args={[0.92, 0.72, 0.92]} />
             <meshStandardMaterial
               color="#04060a"
               emissive={p.hex}
@@ -183,7 +186,7 @@ export default function LcArena3D({ g, aspect }: { g: any; aspect?: number }) {
               toneMapped={false}
             />
             {cells.map((c, j) => (
-              <Instance key={j} position={[wx(c[0] ?? 0), 0.31, wz(c[1] ?? 0)]} />
+              <Instance key={j} position={[wx(c[0] ?? 0), 0.36, wz(c[1] ?? 0)]} />
             ))}
           </Instances>
         );
