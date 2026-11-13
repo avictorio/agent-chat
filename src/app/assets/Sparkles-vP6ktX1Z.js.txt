@@ -1,0 +1,35 @@
+import{At as e,H as t,M as n,N as r,Ot as i,j as a,kt as o,n as s,r as c,rt as l,xt as u}from"./CameraControls-7kAhMJv7.js";import{i as d,s as f}from"./index-CSNHCAsk.js";var p=f(d()),m=class extends u{constructor(){super({uniforms:{time:{value:0},pixelRatio:{value:1}},vertexShader:`
+        uniform float pixelRatio;
+        uniform float time;
+        attribute float size;  
+        attribute float speed;  
+        attribute float opacity;
+        attribute vec3 noise;
+        attribute vec3 color;
+        varying vec3 vColor;
+        varying float vOpacity;
+
+        void main() {
+          vec4 modelPosition = modelMatrix * vec4(position, 1.0);
+          modelPosition.y += sin(time * speed + modelPosition.x * noise.x * 100.0) * 0.2;
+          modelPosition.z += cos(time * speed + modelPosition.x * noise.y * 100.0) * 0.2;
+          modelPosition.x += cos(time * speed + modelPosition.x * noise.z * 100.0) * 0.2;
+          vec4 viewPosition = viewMatrix * modelPosition;
+          vec4 projectionPostion = projectionMatrix * viewPosition;
+          gl_Position = projectionPostion;
+          gl_PointSize = size * 25. * pixelRatio;
+          gl_PointSize *= (1.0 / - viewPosition.z);
+          vColor = color;
+          vOpacity = opacity;
+        }
+      `,fragmentShader:`
+        varying vec3 vColor;
+        varying float vOpacity;
+        void main() {
+          float distanceToCenter = distance(gl_PointCoord, vec2(0.5));
+          float strength = 0.05 / distanceToCenter - 0.1;
+          gl_FragColor = vec4(vColor, strength * vOpacity);
+          #include <tonemapping_fragment>
+          #include <${s>=154?`colorspace_fragment`:`encodings_fragment`}>
+        }
+      `})}get time(){return this.uniforms.time.value}set time(e){this.uniforms.time.value=e}get pixelRatio(){return this.uniforms.pixelRatio.value}set pixelRatio(e){this.uniforms.pixelRatio.value=e}},h=e=>e&&e.constructor===Float32Array,g=e=>[e.r,e.g,e.b],_=t=>t instanceof i||t instanceof o||t instanceof e,v=e=>Array.isArray(e)?e:_(e)?e.toArray():[e,e,e];function y(e,n,r){return p.useMemo(()=>{if(n!==void 0){if(h(n))return n;if(n instanceof t){let t=Array.from({length:e*3},()=>g(n)).flat();return Float32Array.from(t)}if(_(n)||Array.isArray(n)){let t=Array.from({length:e*3},()=>v(n)).flat();return Float32Array.from(t)}return Float32Array.from({length:e},()=>n)}return Float32Array.from({length:e},r)},[n])}var b=p.forwardRef(({noise:e=1,count:i=100,speed:o=1,opacity:s=1,scale:u=1,size:d,color:f,children:g,..._},b)=>{p.useMemo(()=>a({SparklesImplMaterial:m}),[]);let x=p.useRef(null),S=r(e=>e.viewport.dpr),C=v(u),w=p.useMemo(()=>Float32Array.from(Array.from({length:i},()=>C.map(l.randFloatSpread)).flat()),[i,...C]),T=y(i,d,Math.random),E=y(i,s),D=y(i,o),O=y(i*3,e),k=y(f===void 0?i*3:i,h(f)?f:new t(f),()=>1);return n(e=>{x.current&&x.current.material&&(x.current.material.time=e.clock.elapsedTime)}),p.useImperativeHandle(b,()=>x.current,[]),p.createElement(`points`,c({key:`particle-${i}-${JSON.stringify(u)}`},_,{ref:x}),p.createElement(`bufferGeometry`,null,p.createElement(`bufferAttribute`,{attach:`attributes-position`,args:[w,3]}),p.createElement(`bufferAttribute`,{attach:`attributes-size`,args:[T,1]}),p.createElement(`bufferAttribute`,{attach:`attributes-opacity`,args:[E,1]}),p.createElement(`bufferAttribute`,{attach:`attributes-speed`,args:[D,1]}),p.createElement(`bufferAttribute`,{attach:`attributes-color`,args:[k,3]}),p.createElement(`bufferAttribute`,{attach:`attributes-noise`,args:[O,3]})),g||p.createElement(`sparklesImplMaterial`,{transparent:!0,pixelRatio:S,depthWrite:!1}))});export{b as t};

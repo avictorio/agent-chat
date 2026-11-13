@@ -35,7 +35,9 @@ export type SfxName =
   | "tear"
   | "wrap"
   | "smash"
-  | "buzzer";
+  | "buzzer"
+  | "whoosh"
+  | "zap";
 
 const KEY = "ac-sfx-muted";
 
@@ -217,6 +219,27 @@ function play(name: SfxName, ac: AudioContext, t: number, o: AudioNode) {
       noiseSrc(ac, t, 0.4, filt(ac, "bandpass", 3600, 1.2, c));
       const sub = env(ac, t, 0.5, 0.004, 0.4, o);
       osc(ac, "sine", t, 0.45, 110, 40, sub);
+      break;
+    }
+    case "whoosh": {
+      // a light cycle passing: a rising-then-falling filtered noise
+      // sweep over a low engine whine (Light Cycles' tick sprint)
+      const g = env(ac, t, 0.2, 0.09, 0.42, o);
+      const bp = filt(ac, "bandpass", 500, 1.6, g);
+      bp.frequency.setValueAtTime(500, t);
+      bp.frequency.exponentialRampToValueAtTime(2600, t + 0.16);
+      bp.frequency.exponentialRampToValueAtTime(700, t + 0.5);
+      noiseSrc(ac, t, 0.55, bp);
+      const w = env(ac, t, 0.07, 0.05, 0.45, o);
+      osc(ac, "sawtooth", t, 0.5, 140, 210, filt(ac, "lowpass", 900, 1, w));
+      break;
+    }
+    case "zap": {
+      // sparks off a wall the rider skimmed
+      const c = env(ac, t, 0.18, 0.002, 0.12, o);
+      noiseSrc(ac, t, 0.16, filt(ac, "highpass", 4200, 0.8, c));
+      const z = env(ac, t, 0.08, 0.002, 0.09, o);
+      osc(ac, "square", t, 0.1, 3100, 1400, z);
       break;
     }
     case "lock": {

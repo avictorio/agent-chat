@@ -205,10 +205,14 @@ on touch, 0 under reduced motion) is the ceiling for the breathing layer.
 | `ocean.tsx` | Battleship's water: one sinh-spaced mesh from the boards to the horizon, five travelling waves (CPU twin `oceanHeight()` so ships ride the same swell), calm zones over the boards (12% swell: grid at y 0.06 stays above water at `OCEAN_Y`), Fresnel sky reflection, a desktop mirror pass (oblique-clipped; objects with `userData.noMirror` are hidden from it), sun or moon glitter (`OceanLook.moonDir`), crest foam, impact ripples (`OceanStore.ripple`) and oil slicks (`setSlicks`). Runs on the juice clock. |
 | `ships.tsx` | Battleship's fleet: lofted hulls (flare, sheer, transom, boot-top and anti-fouling paint), class silhouettes, canvas-drawn decks, merged parts (~8 draws a ship), night lights, radar, waterline foam, and a shared patched shader for damage (`uHitX` scorched holes with glowing rims, `uChar` charring). BsArena3D's `ShipModel` floats them and stages the deaths: big ships break in two (clipping planes), cruisers and destroyers capsize, submarines sink to the sail. |
 | `fire.tsx` | Battleship's fire (`FireSystem`): every fire on the board in three instanced GPU draws (flames additive, smoke alpha, sparks additive), animated entirely in shaders from the juice clock. Flames are anchored sheets whose shape comes from upward-scrolling fBm through a flame envelope, coloured **by intensity** (red edge, orange, yellow heart); smoke is near-black in linear light, dense over the fire and thinning as it climbs downwind. A `FireSpec` spreads along the hull (`dir`, `spread`) and has a `kind`: `ship` (tall, from the deck), `water` (low, wide, half the smoke), `wreck` (big, smoky). |
+| `cycles.tsx` | Light Cycles' pieces: `CycleModel` (an extruded glossy shell hooding wheel drums whose faces are rings of light, a prone rider; merged once into one geometry per material, ~6 draws a cycle; reflections from a shared PMREM `RoomEnvironment`, no download), `TrailSystem` (every trail in one draw: walls carry their arc length `aS`, and the shader hides everything past each rider's `uHead`, so trails grow with the sprint and rewind for replays; white-hot top edge, energy flowing to the bike, hot near the head, the winner's wave), `GridFloor` (cell-exact grid, data pulses, the Zones tint from a `DataTexture`), `EdgeWall`, `Ridges`. |
+| `lcmodel.ts` | Light Cycles as a timeline, no three.js: `riders(g, me)` rebuilds every rider's path (cells, an index offset `k0` that aligns paths to match ticks, how it went out - wall, trail, head-on, timed out - from the log's "is out at tick N"), `poseAt(rider, T)` for any float tick, `impactAt`, `nearMisses`, `territory`, the viewer's `options` (server `safe_moves`, or the same test client-side), and the per-viewer last-seen tick for the catch-up. |
 | `chime.ts` | Owns the page's single `AudioContext`, unlocked on the first pointer or key press (`audioContext()`), and the your-move chime. |
 
-Arenas: `LcArena3D.tsx` (Light Cycles: synthwave night, derez on a
-crash), `BsArena3D.tsx` (Battleship: a dusk sea with real waves, light
+Arenas: `LcArena3D.tsx` (Light Cycles: Tron: Legacy's Grid - the owner's
+reference is the film's light cycles: glossy black shells over wheels
+that are rings of light, trails as luminous walls, a black mirror
+floor; see `cycles.tsx` and `lcmodel.ts`), `BsArena3D.tsx` (Battleship: a dusk sea with real waves, light
 painted warships and lasting damage - see `ocean.tsx` and `ships.tsx`;
 the owner found the night version too dark, lit from behind the hulls
 read as silhouettes - keep the ships lit from the player's side and
@@ -347,11 +351,19 @@ Details: `references/async-presentation.md`.
   splash and a peg; hit = flash, fire and smoke that keep burning; sink = the
   hull surfaces, its lights flicker out, it pitches and goes under in 2–4 s,
   neighbours auto-mark. The sink is where the animation budget pays off.
-- **Light Cycles: each tick plays as a sprint.** Tron: Legacy floor and
-  trails; all riders advance their new segments together in ~0.5–0.8 s;
-  near-miss glow; crash = slow-motion replay, then derez (voxel `Burst`,
-  trail collapse, `Shockwave`, `LightPillar`). High three-quarter camera by
-  default. Identity by hue plus trail pattern.
+- **Light Cycles: each tick plays as a sprint** (built 2026-11-13). The
+  trails in growth order replay any tick (`lcmodel.ts`), so a resolved
+  tick rides every cycle into its new cell together (~0.6 s), missed ticks
+  replay fast-forwarded with Skip, a crash races into what it hit with the
+  camera closing in and slow motion at the impact, a skimmed wall throws
+  sparks, the winner's trail lights end to end. A crashed rider's trail
+  stays (the server keeps it as a wall): dim it, never collapse it. The
+  viewer's options float over their cells (safe chevron, magenta X for
+  deadly, the queued turn lit; tap to steer), DOM tags de-overlap over the
+  cycles, Zones tints the floor by who reaches each cell first, and a
+  chase camera rides behind a cycle. High three-quarter camera by default:
+  the horizon cannot show without flattening the board, so the world (sky,
+  ridgelines) lives in the entry flight, crash close-ups and the chase cam.
 - **RPS Duel: a spotlit duel scored like music.** Two pools of light, sealed
   tokens on lock, the chant, the same-frame flip, a quantized timbre per
   throw, round chips that stay as the pattern record. Best fit for the full

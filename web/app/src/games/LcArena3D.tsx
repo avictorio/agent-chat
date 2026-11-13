@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { CameraControls, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
-import { Color } from "three";
-import type * as THREE from "three";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
+import { CameraControls, MeshReflectorMaterial } from "@react-three/drei";
+import { AdditiveBlending, Color, DoubleSide, ShaderMaterial, Vector3, type Group, type Mesh, type PointLight } from "three";
 import {
   ArenaFrame,
   FirstFrame,
@@ -16,553 +15,972 @@ import {
   type Ctl,
   type Home,
 } from "./arena3d";
-import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuiceStore, type Juice } from "./juice";
+import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Juice } from "./juice";
 import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
-import { BUZZ } from "./sfx";
+import { BUZZ, sfx } from "./sfx";
+import { CYCLE_NOSE, CYCLE_REAR_WHEEL, CYCLE_WHEEL_R, CycleModel, EdgeWall, GridFloor, MAX_RIDERS, Ridges, TrailSystem, poolTexture, type TrailUniforms } from "./cycles";
+import { DV, impactAt, nearMisses, options, poseAt, riders, seenTick, setSeenTick, territory, type Dir, type Rider } from "./lcmodel";
 
-// Light Cycles in 3D — the R3F spike (2026-11-12). Renders the same
-// full game state the 2D SVG board consumes (GET /games/:id):
-// g.w / g.h, g.trails as [x, y, playerIndex] cells in growth order,
-// g.players[i] = { name, hex, alive, x, y }. Trails become thin,
-// translucent light ribbons on a reflective floor — continuous
-// walls a tire's width thick and a wheel tall, with a bright core
-// line along the top edge, pouring out of the back of each light
-// cycle; a wreck's ribbon fades and its last cell carries a crash
-// mark, mirroring the 2D board. Loaded lazily by games.ts, so
-// three.js ships in its own chunk.
+/* Light Cycles in 3D (2026-11-13: the race).
+
+   The arena renders GET /games/:id - the trails in growth order, the
+   riders, the viewer's options - and, because every rider's path can
+   be rebuilt from the trails (lcmodel.ts), it plays the game as a race
+   instead of redrawing a board:
+
+   - the sprint: when a tick resolves, every rider rides its new cell
+     together (~0.6 s on the juice clock), trails pouring out behind;
+   - the catch-up: ticks the viewer missed since last time replay
+     fast-forwarded (up to 12), slowing for crashes, with Skip;
+   - crashes: the bike races into what it hit, the camera closes in,
+     time slows at the impact and the bike derezzes where it struck;
+     head-ons get their own staging; a rider skimming a wall throws
+     sparks; the winner's trail lights up end to end;
+   - play aids: the viewer's options marked on the floor (safe, or a
+     magenta X), the queued turn as a lit arrow, tap a marker to steer,
+     moved/deciding tags over every rider, a fuse ring in the last
+     quarter of the tick;
+   - extras: Zones (each cell tinted by the rider who reaches it first)
+     and a chase camera.
+
+   The look follows Tron: Legacy (cycles.tsx). Loaded lazily by
+   games.ts, so three.js ships in its own chunk. */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// A light cycle built from primitives, in the rider's colour:
-// hubless glowing wheel rings, a dark glossy hull, and a crouched
-// rider with lit suit stripes. Modelled facing +X; the group yaws
-// to the rider's heading with damped turns, and the wheels spin.
-// Placement (review, 2026-11-12): the bike must never reach past its
-// own cell, or open cells ahead read as taken and riders a cell apart
-// look crashed. The newest trail cell IS the head cell (as on the 2D
-// board), so the nose ends inside the head cell and the body lies
-// back over the trail just laid; the ribbon is trimmed to end under
-// the rear wheel, so the light still pours out of the back.
-const HEADING_YAW: Record<string, number> = { right: 0, up: Math.PI / 2, down: -Math.PI / 2, left: Math.PI };
-const BIKE_SCALE = 1.1;
-const BIKE_NOSE = 1.06; // front wheel rim, in model units
-const BIKE_SHIFT = 0.45 - BIKE_NOSE * BIKE_SCALE; // nose at +0.45 of the head cell
-const RIBBON_TRIM = 1.3; // ribbon ends this far behind the head cell's centre
+const BIKE_SCALE = 0.9;
+/* The nose ends 0.45 of a cell ahead of the bike's cell centre: never
+   past its own cell, or open cells ahead read as taken. */
+const BIKE_SHIFT = 0.45 - CYCLE_NOSE * BIKE_SCALE;
+/* The trail pours out from behind the rear wheel: it ends this far
+   behind the bike's cell centre. */
+const TRIM = -(BIKE_SHIFT + CYCLE_REAR_WHEEL * BIKE_SCALE) + CYCLE_WHEEL_R * BIKE_SCALE * 0.8;
+const YAW: Record<Dir, number> = { right: 0, up: Math.PI / 2, down: -Math.PI / 2, left: Math.PI };
+const SPRINT = 0.62; // s of juice clock for a live tick
+const FAST = 0.24; // a tick in the catch-up
+const CRASH_TICK = 1.45; // a tick with a crash in it, live or caught up
+const CATCH_MAX = 12;
+const DANGER = "#ff2d95"; // the reserved accent: deadly
 
-function LightCycle({ x, z, hex, dir, still }: { x: number; z: number; hex: string; dir: string; still: boolean }) {
-  const group = useRef<THREE.Group>(null!);
-  const wheels = useRef<(THREE.Mesh | null)[]>([]);
-  const target = HEADING_YAW[dir] ?? 0;
-  useFrame((state, delta) => {
-    if (!group.current) return;
-    if (still) {
-      group.current.rotation.y = target;
-      return;
-    }
-    // Shortest-arc damped turn toward the current heading; a turn in
-    // progress asks for every frame (the ambient ticker is slower).
-    let diff = target - group.current.rotation.y;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    group.current.rotation.y += diff * Math.min(1, delta * 7);
-    if (Math.abs(diff) > 0.003) state.invalidate();
-    const spin = delta * 5.2;
-    wheels.current.forEach((w) => {
-      if (w) w.rotation.z -= spin;
-    });
-  });
-  const suit = { color: "#171e2a", roughness: 0.5, metalness: 0.35, emissive: hex, emissiveIntensity: 0.32 } as const;
-  const chrome = { color: "#0a0d13", roughness: 0.32, metalness: 0.75 } as const;
-  return (
-    <group position={[x, 0, z]}>
-      <group ref={group} rotation-y={target}>
-        <group position={[BIKE_SHIFT, 0, 0]} scale={BIKE_SCALE}>
-          {/* wheels: glowing hubless rings over dark discs */}
-          {[0.72, -0.72].map((wx, i) => (
-            <group key={i} position={[wx, 0.36, 0]}>
-              <mesh
-                ref={(m) => {
-                  wheels.current[i] = m;
-                }}
-              >
-                <torusGeometry args={[0.34, 0.05, 12, 36]} />
-                <meshStandardMaterial color="#05070a" emissive={hex} emissiveIntensity={2.6} toneMapped={false} />
-              </mesh>
-              <mesh rotation-x={Math.PI / 2}>
-                <cylinderGeometry args={[0.26, 0.26, 0.07, 24]} />
-                <meshStandardMaterial {...chrome} />
-              </mesh>
-            </group>
-          ))}
-          {/* hull + fairing mass, faintly lit in the rider's colour */}
-          <mesh position={[0, 0.52, 0]} rotation-z={Math.PI / 2} scale={[1, 1, 0.62]}>
-            <capsuleGeometry args={[0.17, 0.95, 6, 14]} />
-            <meshStandardMaterial color="#141a26" roughness={0.3} metalness={0.85} />
-          </mesh>
-          <mesh position={[0.02, 0.58, 0]} scale={[1.45, 0.4, 0.27]}>
-            <sphereGeometry args={[0.5, 20, 14]} />
-            <meshStandardMaterial color="#10151f" roughness={0.35} metalness={0.7} emissive={hex} emissiveIntensity={0.22} />
-          </mesh>
-          {[0.115, -0.115].map((lz, i) => (
-            <mesh key={i} position={[0, 0.56, lz]}>
-              <boxGeometry args={[0.95, 0.035, 0.018]} />
-              <meshStandardMaterial color="#05070a" emissive={hex} emissiveIntensity={2.6} toneMapped={false} />
-            </mesh>
-          ))}
-          {/* rider: crouched torso, lit stripes, helmet with a light band */}
-          <group position={[-0.08, 0.86, 0]} rotation-z={-0.85}>
-            <mesh>
-              <capsuleGeometry args={[0.19, 0.52, 6, 14]} />
-              <meshStandardMaterial {...suit} />
-            </mesh>
-            {[0.13, -0.13].map((lz, i) => (
-              <mesh key={i} position={[0.02, 0.02, lz]}>
-                <capsuleGeometry args={[0.02, 0.46, 4, 8]} />
-                <meshStandardMaterial color="#05070a" emissive={hex} emissiveIntensity={2.6} toneMapped={false} />
-              </mesh>
-            ))}
-          </group>
-          <group position={[0.3, 1.06, 0]}>
-            <mesh>
-              <sphereGeometry args={[0.175, 20, 16]} />
-              <meshStandardMaterial {...suit} />
-            </mesh>
-            <mesh rotation-x={Math.PI / 2}>
-              <torusGeometry args={[0.168, 0.02, 8, 28]} />
-              <meshStandardMaterial color="#05070a" emissive={hex} emissiveIntensity={2.8} toneMapped={false} />
-            </mesh>
-          </group>
-        </group>
-        <pointLight color={hex} intensity={22} distance={11} decay={2} position={[BIKE_SHIFT, 1.6, 0]} />
-      </group>
-    </group>
-  );
-}
-
-// A trail, as ribbon runs: each maximal straight stretch of cells
-// becomes ONE continuous wall segment (no per-cell blocks), with a
-// small overhang so corners merge into clean joints. The ribbon is
-// a tire's width thick (0.18) and a wheel tall (1.0), translucent,
-// with a bright core strip along its top edge. trimHead shortens the
-// final run from its head end (a live rider's bike covers it).
-type Run = { cx: number; cz: number; len: number; axis: "x" | "z" };
-
-function trailRuns(cells: number[][], wx: (x: number) => number, wz: (y: number) => number, trimHead: number): Run[] {
-  if (!cells.length) return [];
-  const runs: Run[] = [];
-  const emit = (s: number, e: number, last: boolean) => {
-    const a = cells[s]!;
-    const b = cells[e]!;
-    const ax = wx(a[0] ?? 0);
-    const az = wz(a[1] ?? 0);
-    let bx = wx(b[0] ?? 0);
-    let bz = wz(b[1] ?? 0);
-    const axis: "x" | "z" = bx !== ax ? "x" : "z";
-    if (last && trimHead > 0) {
-      const span = Math.abs(bx - ax) + Math.abs(bz - az);
-      // A rider still on its spawn cell has no ribbon to show yet.
-      if (span === 0) return;
-      const t = Math.min(trimHead, span);
-      if (axis === "x") bx -= Math.sign(bx - ax) * t;
-      else bz -= Math.sign(bz - az) * t;
-    }
-    runs.push({ cx: (ax + bx) / 2, cz: (az + bz) / 2, len: Math.abs(bx - ax) + Math.abs(bz - az) + 0.24, axis });
-  };
-  if (cells.length === 1) {
-    emit(0, 0, true);
-    return runs;
-  }
-  let s = 0;
-  let pdx = Math.sign((cells[1]![0] ?? 0) - (cells[0]![0] ?? 0));
-  let pdy = Math.sign((cells[1]![1] ?? 0) - (cells[0]![1] ?? 0));
-  for (let k = 2; k < cells.length; k++) {
-    const dx = Math.sign((cells[k]![0] ?? 0) - (cells[k - 1]![0] ?? 0));
-    const dy = Math.sign((cells[k]![1] ?? 0) - (cells[k - 1]![1] ?? 0));
-    if (dx !== pdx || dy !== pdy) {
-      emit(s, k - 1, false);
-      s = k - 1;
-      pdx = dx;
-      pdy = dy;
-    }
-  }
-  emit(s, cells.length - 1, true);
-  return runs;
-}
-
-// A wreck keeps its hue and fades (opacity), as on the 2D board -
-// dimming the emissive drifted pink to maroon and orange to brown,
-// away from the rider's chip colour.
-function Ribbon({ runs, hex, alive }: { runs: Run[]; hex: string; alive: boolean }) {
-  const core = new Color(hex).lerp(new Color("#ffffff"), 0.45);
-  return (
-    <group>
-      {runs.map((r, j) => (
-        <group key={j} position={[r.cx, 0, r.cz]}>
-          <mesh position={[0, 0.5, 0]}>
-            <boxGeometry args={r.axis === "x" ? [r.len, 1, 0.18] : [0.18, 1, r.len]} />
-            <meshStandardMaterial
-              color="#04060a"
-              emissive={hex}
-              emissiveIntensity={alive ? 1.15 : 0.95}
-              transparent
-              opacity={alive ? 0.8 : 0.3}
-              depthWrite={alive}
-              toneMapped={false}
-            />
-          </mesh>
-          <mesh position={[0, 0.955, 0]}>
-            <boxGeometry args={r.axis === "x" ? [r.len, 0.09, 0.22] : [0.22, 0.09, r.len]} />
-            <meshStandardMaterial
-              color="#04060a"
-              emissive={core}
-              emissiveIntensity={alive ? 3.4 : 1.5}
-              transparent
-              opacity={alive ? 0.95 : 0.4}
-              depthWrite={alive}
-              toneMapped={false}
-            />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-// Where a rider crashed: the 2D board's ✕, on the floor of the
-// wreck's last cell, in the rider's colour lifted toward white.
-function CrashMark({ x, z, hex }: { x: number; z: number; hex: string }) {
-  const c = useMemo(() => new Color(hex).lerp(new Color("#ffffff"), 0.35), [hex]);
-  return (
-    <group position={[x, 0.05, z]}>
-      {[1, -1].map((s) => (
-        <mesh key={s} rotation-y={(s * Math.PI) / 4}>
-          <boxGeometry args={[1.05, 0.06, 0.14]} />
-          <meshStandardMaterial color="#04060a" emissive={c} emissiveIntensity={2.4} toneMapped={false} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-// The floor grid, drawn as exact cell-edge lines. drei's <Grid> puts
-// its lines on whole numbers from its centre, which runs them through
-// cell centres on odd-sized boards (the server allows any width
-// 12-40 and height 10-30). Sections every 5 cells from the board's
-// corner; the edge - a wall, and deadly - is drawn brighter.
-function BoardGrid({ w, h }: { w: number; h: number }) {
-  const { cells, sections, edge } = useMemo(() => {
-    const c: number[] = [];
-    const s: number[] = [];
-    for (let i = 1; i < w; i++) (i % 5 === 0 ? s : c).push(i - w / 2, 0.01, -h / 2, i - w / 2, 0.01, h / 2);
-    for (let j = 1; j < h; j++) (j % 5 === 0 ? s : c).push(-w / 2, 0.01, j - h / 2, w / 2, 0.01, j - h / 2);
-    const e = [
-      -w / 2, 0.012, -h / 2, w / 2, 0.012, -h / 2,
-      w / 2, 0.012, -h / 2, w / 2, 0.012, h / 2,
-      w / 2, 0.012, h / 2, -w / 2, 0.012, h / 2,
-      -w / 2, 0.012, h / 2, -w / 2, 0.012, -h / 2,
-    ];
-    return { cells: new Float32Array(c), sections: new Float32Array(s), edge: new Float32Array(e) };
-  }, [w, h]);
-  return (
-    <group key={w + "x" + h}>
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[cells, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color="#16283a" />
-      </lineSegments>
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[sections, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color="#2b4d63" />
-      </lineSegments>
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[edge, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial color="#4f8fb0" />
-      </lineSegments>
-    </group>
-  );
-}
-
-// The home framing for a host of this shape. A portrait host (a
-// phone) has a much narrower horizontal field of view at the same
-// vertical fov, so widen the lens and pull back or the board's edges
-// fall out of frame.
+/* The home framing for a host of this shape. A phone-width host is
+   short and the board must fill it: a steeper camera fitted to the
+   board, so cells read as cells. Wider hosts sit lower, so the trails
+   stand up as walls and the haze shows beyond the far edge. */
 function lcHome(w: number, h: number, aspect: number, width: number): Home {
-  // A phone-width host is short (styles.css) and the board must fill
-  // it: a steeper camera fitted to the board, so cells read as cells
-  // and the steering pad stays on screen below.
-  if (width < 560) return fitHome(w + 1, h + 1, 60, 46, aspect, 1.05);
-  const dist = Math.max(w, h);
-  const narrow = aspect < 1;
-  const cd = dist * (narrow ? 1.22 : 1);
-  return { pos: [0, cd * 0.74, cd * 0.9], fov: narrow ? 60 : 40 };
+  if (width < 560) return fitHome(w + 1, h + 1, 58, 46, aspect, 1.05);
+  if (aspect < 1) return fitHome(w + 2, h + 2, 46, 56, aspect, 1.03);
+  return fitHome(w + 2, h + 2, 36, 42, aspect, 1.02);
 }
 
-/* The Light Cycles world (2026-11-13): a synthwave night. A striped
-   sun sits on the far horizon behind the board, stars and faint
-   aurora above; the board is one lit patch of an endless grid that
-   runs off to the horizon in violet, with a slow pulse rolling out
-   from the centre. The fog is the horizon's colour, so the floor
-   melts into the sky. */
-const LC_FOG = "#0e0820";
+/* Tron: Legacy's Grid: a black world, a cold haze on the horizon, the
+   faintest stars; far ridgelines lit along their crests. */
+const LC_FOG = "#061019";
 const LC_SKY: SkySpec = {
-  top: "#010207",
-  mid: "#05081a",
-  horizon: LC_FOG,
-  ground: "#020308",
-  glow: "#ff2d95",
-  glowAmt: 0.32,
-  stars: 0.07,
-  aurora: 0.28,
+  top: "#000104",
+  mid: "#02050d",
+  horizon: "#0a1a28",
+  ground: "#010204",
+  glow: "#1aa3ff",
+  glowAmt: 0.16,
+  stars: 0.045,
+  aurora: 0.06,
   auroraA: "#22d3ee",
-  auroraB: "#a855f7",
-  sun: { size: 0.3, az: Math.PI, el: 0.05, a: "#ffd36b", b: "#ff2d95" },
+  auroraB: "#1e3a8a",
 };
 
-type Fx = { id: string; at: [number, number, number]; hex: string; mine: boolean };
+type Fx = { id: string; kind: "derez" | "spark"; at: [number, number, number]; hex: string; mine?: boolean };
 
-/* A rider derezzing: the bike comes apart into voxels of its colour,
-   a ring races out over the floor and a column of light marks the
-   spot. Removed when the voxels are gone. */
-function Derez({ fx, lite, onDone }: { fx: Fx; lite: boolean; onDone: () => void }) {
-  return (
-    <group>
-      <Burst at={fx.at} hex={fx.hex} count={lite ? 48 : 90} box={[1.9, 1.1, 0.6]} power={fx.mine ? 3.2 : 2.6} dur={1.8} onDone={onDone} />
-      <Shockwave at={[fx.at[0], 0.04, fx.at[2]]} hex={fx.hex} radius={fx.mine ? 11 : 7} dur={1.1} />
-      <LightPillar at={fx.at} hex={fx.hex} height={fx.mine ? 22 : 14} dur={1.7} />
-    </group>
-  );
+/* The race clock: the float tick on show (T) chasing the server's tick
+   (target), and what has already fired. */
+class Race {
+  T = 0;
+  target = 0;
+  fast = false;
+  startAt = 0;
+  played = false;
+  fired = new Set<string>();
+  list: Rider[] = [];
+  g: any = null;
+  live: number[] = new Array(MAX_RIDERS).fill(1);
+  waveAt: number[] = new Array(MAX_RIDERS).fill(-1);
+  push: null | { until: number; pos: [number, number, number]; tgt: [number, number, number] } = null;
+  chase: number | null = null;
 }
 
-/* Big moments, off state diffs (never for the state at open): a rider
-   falls - yours lands on every channel, slow motion included; anyone
-   else's is a medium beat. The match ending names the winner. */
-function useLcMoments(g: any, me: string, juice: Juice, cellAt: (i: number) => [number, number, number] | null) {
-  const prev = useRef<{ alive: Record<string, boolean>; status: string } | null>(null);
-  const [fx, setFx] = useState<Fx[]>([]);
-  const [say, setSay] = useState("");
-  useEffect(() => {
-    const players: any[] = (g && g.players) || [];
-    const alive: Record<string, boolean> = {};
-    players.forEach((p) => (alive[p.name] = !!p.alive));
-    const status = String((g && g.status) || "");
-    const was = prev.current;
-    prev.current = { alive, status };
-    if (!was) return;
-    const meKey = (me || "").toLowerCase();
-    const fallen = players.map((p, i) => ({ p, i })).filter(({ p }) => was.alive[p.name] && !alive[p.name]);
-    const add: Fx[] = [];
-    const lines: string[] = [];
-    fallen.forEach(({ p, i }) => {
-      const at = cellAt(i);
-      const mine = String(p.name).toLowerCase() === meKey;
-      if (at) add.push({ id: (g.tick || 0) + ":" + p.name, at, hex: p.hex, mine });
-      lines.push(mine ? "You crashed - you're out." : p.name + " crashed.");
-    });
-    const mineFell = fallen.some(({ p }) => String(p.name).toLowerCase() === meKey);
-    if (mineFell) {
-      juice.hit({
+function wrapPi(a: number): number {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+function smooth(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/* A rider's heading through a turn, and the lean into it. */
+function heading(p: ReturnType<typeof poseAt>): { yaw: number; roll: number } {
+  const yaw = YAW[p.dir];
+  if (p.dir === p.prev || p.f <= 0 || p.f >= 1) return { yaw, roll: 0 };
+  const a = YAW[p.prev];
+  const d = wrapPi(yaw - a);
+  const q = smooth(0, 0.42, p.f);
+  return { yaw: a + d * q, roll: -Math.sin(q * Math.PI) * 0.3 * Math.sign(d) };
+}
+
+/* ---------- the director: plays the race, fires its moments ---------- */
+
+function Director({
+  race,
+  wx,
+  wz,
+  ctl,
+  still,
+  u,
+  addFx,
+  say,
+  onCatch,
+  onChaseLost,
+}: {
+  race: MutableRefObject<Race>;
+  wx: (x: number) => number;
+  wz: (y: number) => number;
+  ctl: RefObject<Ctl | null>;
+  still: boolean;
+  u: TrailUniforms;
+  addFx: (f: Fx[]) => void;
+  say: (s: string) => void;
+  onCatch: (c: { from: number; to: number } | null) => void;
+  onChaseLost: () => void;
+}) {
+  const j = useJuice();
+  const lastJ = useRef(j.t);
+  const chaseYaw = useRef<number | null>(null);
+  const world = (r: Rider, T: number): [number, number, number] => {
+    const p = poseAt(r, T);
+    const f = DV[p.dir];
+    return [wx(p.x) + f[0] * BIKE_SHIFT * 0.6, 0.5, wz(p.y) + f[1] * BIKE_SHIFT * 0.6];
+  };
+
+  const crash = (r: Rider) => {
+    const R = race.current;
+    const out = r.out!;
+    const at = world(r, impactAt(r)! - 1e-4);
+    const fx: Fx[] = [{ id: "x" + r.i + ":" + out.tick, kind: "derez", at, hex: r.hex, mine: r.me }];
+    const group = out.kind === "headon" ? [r.i, ...out.with].sort() : [r.i];
+    // a head-on is staged once, by its lowest rider
+    if (out.kind === "headon" && group[0] !== r.i) {
+      addFx(fx);
+      return;
+    }
+    const names = group.map((i) => R.list[i]!.name);
+    const mineIn = group.some((i) => R.list[i]!.me);
+    if (out.kind === "taken") {
+      j.hit({
+        pulse: 0.3,
+        sound: "derez",
+        buzz: r.me ? BUZZ.lostOne : undefined,
+        title: { big: r.me ? "Timed out" : r.name + " timed out", small: "Three ticks without a move", tone: r.me ? "bad" : "neutral", hex: r.me ? undefined : r.hex },
+      });
+      say(r.me ? "You were taken out for missing three ticks." : r.name + " was taken out for missing three ticks.");
+    } else if (out.kind === "headon") {
+      j.hit({
+        trauma: mineIn ? 0.9 : 0.6,
+        stop: 240,
+        slow: mineIn ? 1 : 0.6,
+        pulse: 1,
+        flash: "#ffffff",
+        flashA: 0.45,
+        buzz: mineIn ? BUZZ.lostOne : undefined,
+        sound: mineIn ? ["derez", "lose"] : ["derez", "clash"],
+        title: { big: "Head-on", small: names.join(" and ") + " derezzed", tone: mineIn ? "bad" : "neutral" },
+      });
+      say("Head-on: " + names.join(" and ") + " crashed into each other.");
+    } else if (r.me) {
+      j.hit({
         trauma: 0.9,
         stop: 230,
         slow: 1,
         pulse: 1,
-        flash: fallen.find(({ p }) => String(p.name).toLowerCase() === meKey)!.p.hex,
+        flash: r.hex,
         flashA: 0.55,
         buzz: BUZZ.lostOne,
         sound: ["derez", "lose"],
-        title: { big: "Derezzed", small: "You're out of the race", tone: "bad" },
+        title: { big: "Derezzed", small: out.kind === "wall" ? "You hit the edge of the grid" : "You're out of the race", tone: "bad" },
       });
-    } else if (fallen.length) {
-      const first = fallen[0]!.p;
-      juice.hit({
-        trauma: 0.4,
-        stop: 110,
-        pulse: 0.7,
-        sound: "derez",
-        title: { big: fallen.length > 1 ? "Derezzed ×" + fallen.length : first.name + " derezzed", tone: "neutral", hex: first.hex },
+      say("You crashed - you're out.");
+    } else {
+      j.hit({ trauma: 0.45, stop: 170, slow: 0.35, pulse: 0.7, sound: "derez", title: { big: r.name + " derezzed", tone: "neutral", hex: r.hex } });
+      say(r.name + " crashed" + (out.kind === "wall" ? " into the edge of the grid." : "."));
+    }
+    group.forEach((i) => {
+      if (i !== r.i) {
+        const o = R.list[i]!;
+        fx.push({ id: "x" + o.i + ":" + out.tick, kind: "derez", at: world(o, impactAt(o)! - 1e-4), hex: o.hex, mine: o.me });
+      }
+    });
+    addFx(fx);
+    if (R.push) R.push.until = performance.now() + 1900;
+  };
+
+  const finish = () => {
+    const R = race.current;
+    const g = R.g;
+    const winner = g && g.winner ? String(g.winner) : "";
+    const wr = R.list.find((r) => r.name === winner);
+    const anyCrash = R.list.some((r) => r.out && r.out.tick === R.target);
+    const delay = anyCrash ? 1500 : 0;
+    const meIn = R.list.some((r) => r.me);
+    if (wr && wr.me) {
+      j.hit({ pulse: 0.8, buzz: BUZZ.wonMatch, sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Last rider standing", tone: "good" }, titleDelay: delay });
+      say("You won the match.");
+    } else if (wr) {
+      const iLost = meIn && !R.list.find((r) => r.me && r.out && r.out.tick === R.target);
+      j.hit({
+        title: { big: wr.name + " wins", small: meIn ? "Better luck next race" : undefined, tone: meIn ? "bad" : "neutral", hex: meIn ? undefined : wr.hex },
+        titleDelay: delay,
+        sound: meIn ? "lose" : "win",
+        soundDelay: delay / 1000,
+        buzz: iLost ? BUZZ.lostMatch : undefined,
       });
+      say(wr.name + " won the match.");
+    } else {
+      j.hit({ title: { big: "Draw", small: "No rider survived", tone: "neutral" }, titleDelay: delay });
+      say("The match ended in a draw.");
     }
-    if (status === "finished" && was.status !== "finished") {
-      const winner = g.winner ? String(g.winner) : "";
-      const wp = players.find((p) => p.name === winner);
-      const iWon = !!winner && winner.toLowerCase() === meKey;
-      const delay = fallen.length ? 1500 : 0;
-      if (iWon) {
-        juice.hit({ pulse: 0.8, buzz: BUZZ.wonMatch, sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Last rider standing", tone: "good" }, titleDelay: delay });
-        const wi = players.findIndex((p) => p.name === winner);
-        const at = wi >= 0 ? cellAt(wi) : null;
-        if (at) add.push({ id: "win:" + winner, at, hex: "#ffd36b", mine: false });
-      } else if (winner) {
-        const inIt = players.some((p) => String(p.name).toLowerCase() === meKey);
-        juice.hit({
-          title: { big: winner + " wins", small: inIt ? "Better luck next race" : undefined, tone: inIt ? "bad" : "neutral", hex: inIt ? undefined : wp ? wp.hex : undefined },
-          titleDelay: delay,
-          sound: inIt ? "lose" : "win",
-          soundDelay: delay / 1000,
-          buzz: inIt && !mineFell ? BUZZ.lostMatch : undefined,
-        });
-      } else juice.hit({ title: { big: "Draw", small: "No rider survived", tone: "neutral" }, titleDelay: delay });
-      lines.push(winner ? (iWon ? "You won the match." : winner + " won the match.") : "The match ended in a draw.");
+    if (wr) R.waveAt[wr.i] = j.t + delay / 1000;
+  };
+
+  /* Close in on a crash as its tick starts; the impact sets when to
+     return (the camera goes back to wherever the viewer had it). */
+  const pushIn = (k: number) => {
+    const R = race.current;
+    const c = ctl.current;
+    if (!c || still || R.chase !== null) return;
+    const hit = R.list.filter((r) => r.out && r.out.kind !== "taken" && r.out.tick === k);
+    if (!hit.length) return;
+    let fx = 0, fz = 0;
+    hit.forEach((r) => {
+      const p = world(r, impactAt(r)!);
+      fx += p[0] / hit.length;
+      fz += p[2] / hit.length;
+    });
+    const pos = c.getPosition(new Vector3());
+    const tgt = c.getTarget(new Vector3());
+    const dx = pos.x - fx, dy = pos.y, dz = pos.z - fz;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    const k2 = Math.max(9, d * 0.42) / d;
+    if (!R.push) R.push = { until: 0, pos: [pos.x, pos.y, pos.z], tgt: [tgt.x, tgt.y, tgt.z] };
+    void c.setLookAt(fx + dx * k2, Math.max(3.2, dy * k2 * 0.8), fz + dz * k2, fx, 0.3, fz, true);
+  };
+
+  useFrame((state, delta) => {
+    const R = race.current;
+    const now = performance.now();
+    const dJ = Math.max(0, j.t - lastJ.current);
+    lastJ.current = j.t;
+    if (R.push && R.push.until && now > R.push.until) {
+      const c = ctl.current;
+      if (c) void c.setLookAt(...R.push.pos, ...R.push.tgt, true);
+      R.push = null;
     }
-    if (add.length) setFx((f) => [...f, ...add]);
-    if (lines.length) setSay(lines.join(" "));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g]);
-  return { fx, done: (id: string) => setFx((f) => f.filter((x) => x.id !== id)), say };
+    if (R.T < R.target && now >= R.startAt) {
+      const prev = R.T;
+      if (still) R.T = R.target;
+      else {
+        const k = Math.floor(R.T) + 1;
+        const crashing = R.list.some((r) => r.out && r.out.kind !== "taken" && r.out.tick === k);
+        const dur = crashing ? CRASH_TICK : R.fast && R.target - R.T > 1.0001 ? FAST : SPRINT;
+        R.T = Math.min(R.target, R.T + dJ / dur);
+      }
+      R.played = true;
+      const cur = R.T;
+      // ticks starting: the whoosh, and the close-in on a crash
+      for (let m = Math.floor(prev) + 1; m <= Math.ceil(cur) && m <= R.target; m++) {
+        if (prev < m - 1 + 1e-6 && cur >= m - 1) {
+          if (!R.fired.has("t" + m)) {
+            R.fired.add("t" + m);
+            if (!still && !(R.fast && R.target - (m - 1) > 1)) sfx("whoosh");
+            pushIn(m);
+          }
+        }
+      }
+      // impacts
+      R.list.forEach((r) => {
+        const at = impactAt(r);
+        if (at === null || R.fired.has("x" + r.i)) return;
+        if (prev < at && cur >= at) {
+          R.fired.add("x" + r.i);
+          crash(r);
+        }
+      });
+      // ticks completed: near misses (live play only - not the fast
+      // catch-up, where they would rattle past)
+      for (let m = Math.floor(prev) + 1; m <= Math.floor(cur); m++) {
+        if (still || (R.fast && R.target - m > 0)) continue;
+        const g = R.g;
+        const nm = nearMisses(R.list, m, (g && g.w) || 30, (g && g.h) || 22);
+        if (nm.length) {
+          const fx: Fx[] = nm.map((n) => {
+            const v = DV[n.side];
+            return { id: "s" + n.i + ":" + m, kind: "spark", at: [wx(n.x) + v[0] * 0.5, 0.35, wz(n.y) + v[1] * 0.5], hex: R.list[n.i]!.hex };
+          });
+          addFx(fx);
+          sfx("zap");
+          j.hit({ pulse: 0.15 });
+        }
+      }
+      if (cur >= R.target) {
+        R.fast = false;
+        onCatch(null);
+        if (R.g) setSeenTick(R.g.id, R.target);
+        if (R.g && R.g.status === "finished" && !R.fired.has("fin")) {
+          R.fired.add("fin");
+          finish();
+        }
+      }
+      state.invalidate();
+    } else if (R.T < R.target) state.invalidate();
+    // the trails: heads, wreck fades, the winner's wave
+    const dt = Math.min(delta, 0.1);
+    R.list.forEach((r) => {
+      if (r.i >= MAX_RIDERS) return;
+      const p = poseAt(r, R.T);
+      u.head[r.i] = p.shown ? p.s - TRIM : r.cells.length + 1;
+      const want = p.shown || r.alive ? 1 : 0;
+      R.live[r.i] = still ? want : R.live[r.i]! + (want - R.live[r.i]!) * Math.min(1, dt * 2.5);
+      if (Math.abs(R.live[r.i]! - want) > 0.004) state.invalidate();
+      u.live[r.i] = R.live[r.i]!;
+      const w0 = R.waveAt[r.i]!;
+      if (w0 >= 0 && j.t >= w0) {
+        const e = j.t - w0;
+        const len = r.cells.length;
+        u.wave[r.i] = e * Math.max(14, len / 1.4) - 3;
+        u.flare[r.i] = 0.6 * Math.max(0, 1 - e / 3.5);
+        if (u.wave[r.i]! > len + 6 && u.flare[r.i] === 0) R.waveAt[r.i] = -1;
+        state.invalidate();
+      } else {
+        u.wave[r.i] = -99;
+        u.flare[r.i] = 0;
+      }
+    });
+    // the chase camera: behind the chosen rider, looking down its line
+    if (R.chase !== null) {
+      const r = R.list[R.chase];
+      const c = ctl.current;
+      const p = r ? poseAt(r, R.T) : null;
+      if (!r || !p || !p.shown) {
+        onChaseLost();
+      } else if (c) {
+        const h = heading(p).yaw;
+        const cy = chaseYaw.current === null ? h : chaseYaw.current + wrapPi(h - chaseYaw.current) * Math.min(1, dt * 3);
+        chaseYaw.current = cy;
+        const fx = Math.cos(cy), fz = -Math.sin(cy);
+        const bx = wx(p.x) + fx * BIKE_SHIFT, bz = wz(p.y) + fz * BIKE_SHIFT;
+        void c.setLookAt(bx - fx * 5.4, 2.3, bz - fz * 5.4, bx + fx * 5, 0.7, bz + fz * 5, true);
+      }
+    } else chaseYaw.current = null;
+  });
+  return null;
 }
 
-export default function LcArena3D({ g, me = "", aspect, onReady }: { g: any; me?: string; aspect?: number; onReady?: () => void }) {
+/* ---------- riders ---------- */
+
+function Bike({
+  r,
+  race,
+  wx,
+  wz,
+  still,
+}: {
+  r: Rider;
+  race: MutableRefObject<Race>;
+  wx: (x: number) => number;
+  wz: (y: number) => number;
+  still: boolean;
+}) {
+  const grp = useRef<Group>(null);
+  const lean = useRef<Group>(null);
+  const wheels = useRef<(Mesh | null)[]>([]);
+  const light = useRef<PointLight>(null);
+  const pool = useRef<Mesh>(null);
+  const spin = useRef(0);
+  const poolCol = useMemo(() => new Color(r.hex).multiplyScalar(0.55), [r.hex]);
+  useFrame((_, delta) => {
+    const R = race.current;
+    const rr = R.list[r.i];
+    const g = grp.current;
+    if (!rr || !g) return;
+    const p = poseAt(rr, R.T);
+    g.visible = p.shown;
+    if (light.current) light.current.intensity = p.shown ? 11 : 0;
+    if (!p.shown) return;
+    g.position.set(wx(p.x), 0, wz(p.y));
+    const hd = heading(p);
+    g.rotation.y = hd.yaw;
+    if (lean.current) lean.current.rotation.x = hd.roll;
+    const moving = R.T < R.target && p.f > 0 && p.f < 1;
+    if (!still) spin.current += Math.min(delta, 0.1) * (moving ? 18 : 1.1);
+    wheels.current.forEach((w) => {
+      if (w) w.rotation.z = -spin.current;
+    });
+    if (pool.current) pool.current.scale.x = moving ? 3.9 : 2.7;
+  });
+  return (
+    <group ref={grp}>
+      <group position={[BIKE_SHIFT, 0, 0]} scale={BIKE_SCALE}>
+        <CycleModel hex={r.hex} wheels={wheels} lean={lean} />
+      </group>
+      <mesh ref={pool} position={[BIKE_SHIFT - 0.35, 0.016, 0]} rotation-x={-Math.PI / 2} scale={[2.7, 1.5, 1]} renderOrder={-1}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial map={poolTexture()} color={poolCol} transparent depthWrite={false} blending={AdditiveBlending} toneMapped={false} />
+      </mesh>
+      {/* kept mounted after a crash (at 0): removing a light recompiles
+          every material, a stall right on the derez */}
+      <pointLight ref={light} color={r.hex} intensity={11} distance={9} decay={2} position={[BIKE_SHIFT, 1.5, 0]} />
+    </group>
+  );
+}
+
+/* Rider tags: DOM pills (name, or "You", and moved ✓ / deciding …)
+   over the cycles, in a layer over the canvas. Each frame projects a
+   point high above each bike and pushes overlapping tags apart, so
+   riders side by side stay readable and the tags never sit on the
+   cells just ahead of a bike (where the option markers are). */
+function TagTracker({ race, wx, wz, els }: { race: MutableRefObject<Race>; wx: (x: number) => number; wz: (y: number) => number; els: MutableRefObject<(HTMLDivElement | null)[]> }) {
+  const camera = useThree((st) => st.camera);
+  const size = useThree((st) => st.size);
+  const v = useMemo(() => new Vector3(), []);
+  useFrame(() => {
+    const R = race.current;
+    const boxes: { el: HTMLDivElement; x: number; y: number; w: number; h: number }[] = [];
+    R.list.forEach((r) => {
+      const el = els.current[r.i];
+      if (!el) return;
+      const p = poseAt(r, R.T);
+      if (!p.shown) {
+        el.style.opacity = "0";
+        return;
+      }
+      const f = DV[p.dir];
+      v.set(wx(p.x) + f[0] * BIKE_SHIFT, 2.5, wz(p.y) + f[1] * BIKE_SHIFT).project(camera);
+      if (v.z > 1 || v.z < -1) {
+        el.style.opacity = "0";
+        return;
+      }
+      const w = el.offsetWidth || 50;
+      const h = el.offsetHeight || 18;
+      boxes.push({ el, x: ((v.x + 1) / 2) * size.width - w / 2, y: ((1 - v.y) / 2) * size.height - h, w, h });
+    });
+    // lowest first; anything overlapping a placed tag moves up past it
+    boxes.sort((a, b) => b.y - a.y);
+    const placed: typeof boxes = [];
+    boxes.forEach((b) => {
+      for (let guard = 0; guard < 6; guard++) {
+        const hit = placed.find((o) => b.x < o.x + o.w + 3 && o.x < b.x + b.w + 3 && b.y < o.y + o.h + 2 && o.y < b.y + b.h + 2);
+        if (!hit) break;
+        b.y = hit.y - b.h - 3;
+      }
+      placed.push(b);
+      b.el.style.opacity = "1";
+      b.el.style.transform = "translate(" + Math.round(b.x) + "px," + Math.round(b.y) + "px)";
+    });
+  });
+  return null;
+}
+
+/* The viewer's options for this tick, on the floor: a chevron for each
+   safe heading, a magenta X for a deadly one, the queued turn lit and
+   joined to the bike by an arrow. Tapping one steers. Shown only when
+   the race is at rest on the present tick. */
+function Options({
+  opts,
+  hex,
+  from,
+  race,
+  wx,
+  wz,
+  onSteer,
+}: {
+  opts: ReturnType<typeof options>;
+  hex: string;
+  from: [number, number] | null;
+  race: MutableRefObject<Race>;
+  wx: (x: number) => number;
+  wz: (y: number) => number;
+  onSteer?: (dir: Dir) => void;
+}) {
+  const j = useJuice();
+  const grp = useRef<Group>(null);
+  const qref = useRef<Group>(null);
+  const lit = useMemo(() => new Color(hex).multiplyScalar(2.2), [hex]);
+  const dim = useMemo(() => new Color(hex).multiplyScalar(1.1), [hex]);
+  const bad = useMemo(() => new Color(DANGER).multiplyScalar(1.7), []);
+  useFrame(() => {
+    const R = race.current;
+    if (grp.current) grp.current.visible = R.T >= R.target;
+    if (qref.current) {
+      const s = 1 + 0.08 * Math.sin(j.t * 4);
+      qref.current.scale.set(s, 1, s);
+    }
+  });
+  if (!opts.length || !from) return null;
+  return (
+    <group ref={grp}>
+      {opts.map((o) => {
+        const v = DV[o.dir];
+        const yaw = YAW[o.dir];
+        const steer = (e: ThreeEvent<MouseEvent>) => {
+          if (e.delta > 8 || !onSteer) return;
+          e.stopPropagation();
+          onSteer(o.dir);
+        };
+        return (
+          <group key={o.dir} position={[wx(o.x), 1.12, wz(o.y)]}>
+            {/* a generous, invisible tap target at the marker */}
+            <mesh rotation-x={-Math.PI / 2} onClick={steer}>
+              <planeGeometry args={[1.25, 1.25]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            </mesh>
+            {o.safe ? (
+              <group ref={o.queued ? qref : undefined} rotation-y={yaw}>
+                {[1, -1].map((s) => (
+                  <mesh key={s} position={[0.03, 0, s * 0.2]} rotation-y={s * 0.75} renderOrder={12}>
+                    <boxGeometry args={[0.62, 0.03, 0.12]} />
+                    <meshBasicMaterial color={o.queued ? lit : dim} transparent opacity={o.queued ? 1 : 0.75} toneMapped={false} depthTest={false} />
+                  </mesh>
+                ))}
+              </group>
+            ) : (
+              <group rotation-y={Math.PI / 4}>
+                {[0, Math.PI / 2].map((a) => (
+                  <mesh key={a} rotation-y={a} renderOrder={12}>
+                    <boxGeometry args={[0.78, 0.03, 0.12]} />
+                    <meshBasicMaterial color={bad} transparent opacity={o.queued ? 1 : 0.75} toneMapped={false} depthTest={false} />
+                  </mesh>
+                ))}
+              </group>
+            )}
+            {o.queued ? (
+              /* the lit path from the bike's cell into the chosen one */
+              <mesh position={[-v[0] * 0.55, -0.01, -v[1] * 0.55]} rotation-y={yaw} renderOrder={11}>
+                <boxGeometry args={[0.8, 0.02, 0.1]} />
+                <meshBasicMaterial color={o.safe ? lit : bad} transparent opacity={0.8} toneMapped={false} depthTest={false} />
+              </mesh>
+            ) : null}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+/* The fuse: a ring round the viewer's bike that burns down over the
+   last quarter of the tick, hot and pulsing in its last moments if no
+   move is in. */
+const FUSE_V = /* glsl */ `
+varying vec2 vP;
+void main() {
+  vP = position.xy;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const FUSE_F = /* glsl */ `
+uniform float uFrac;
+uniform float uHot;
+uniform float uTime;
+uniform vec3 uCol;
+varying vec2 vP;
+void main() {
+  float r = length(vP);
+  float ring = smoothstep(0.9, 0.94, r) * (1.0 - smoothstep(1.02, 1.06, r));
+  float a = fract(atan(vP.x, vP.y) / 6.28318 + 1.0);
+  if (a > uFrac || ring < 0.01) discard;
+  vec3 c = mix(uCol * 1.8, vec3(1.0, 0.35, 0.7) * 2.2, uHot * (0.6 + 0.4 * sin(uTime * 9.0)));
+  gl_FragColor = vec4(c, ring * 0.9);
+}`;
+
+function Fuse({ g, at, hex, race }: { g: any; at: [number, number] | null; hex: string; race: MutableRefObject<Race> }) {
+  const j = useJuice();
+  const mesh = useRef<Mesh>(null);
+  const mat = useMemo(
+    () =>
+      new ShaderMaterial({
+        vertexShader: FUSE_V,
+        fragmentShader: FUSE_F,
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+        uniforms: { uFrac: { value: 1 }, uHot: { value: 0 }, uTime: { value: 0 }, uCol: { value: new Color(hex) } },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  useEffect(() => () => mat.dispose(), [mat]);
+  const deadline = Number((g && g.deadline) || 0);
+  const span = Number((g && g.tick_seconds) || 120) * 1000;
+  const queued = !!(g && g.you && g.you.queued);
+  // the ring burns in real time: ask for a frame a second even when
+  // the ambient ticker is off (reduced motion)
+  useEffect(() => {
+    const t = setInterval(() => {
+      const left = deadline - Date.now();
+      if (left > 0 && left < span * 0.25) j.invalidate?.();
+    }, 1000);
+    return () => clearInterval(t);
+  }, [deadline, span, j]);
+  useFrame(() => {
+    const R = race.current;
+    const left = deadline - Date.now();
+    const frac = left / (span * 0.25);
+    const on = !!at && deadline > 0 && R.T >= R.target && left > 0 && frac < 1;
+    if (mesh.current) mesh.current.visible = on;
+    mat.uniforms.uFrac!.value = Math.max(0, Math.min(1, frac));
+    mat.uniforms.uHot!.value = !queued && frac < 0.32 ? 1 : 0;
+    mat.uniforms.uTime!.value = j.t;
+  });
+  if (!at) return null;
+  return (
+    <mesh ref={mesh} material={mat} position={[at[0], 0.04, at[1]]} rotation-x={-Math.PI / 2} renderOrder={3}>
+      <planeGeometry args={[2.3, 2.3]} />
+    </mesh>
+  );
+}
+
+function FxLayer({ fx, lite, done }: { fx: Fx[]; lite: boolean; done: (id: string) => void }) {
+  return (
+    <>
+      {fx.map((f) =>
+        f.kind === "derez" ? (
+          <group key={f.id}>
+            <Burst at={f.at} hex={f.hex} count={lite ? 48 : 90} box={[1.9, 1.0, 0.6]} power={f.mine ? 3.2 : 2.6} dur={1.8} onDone={() => done(f.id)} />
+            <Shockwave at={[f.at[0], 0.04, f.at[2]]} hex={f.hex} radius={f.mine ? 11 : 7} dur={1.1} />
+            <LightPillar at={f.at} hex={f.hex} height={f.mine ? 22 : 14} dur={1.7} />
+          </group>
+        ) : (
+          <Burst key={f.id} at={f.at} hex="#e8f7ff" count={lite ? 10 : 18} box={[0.25, 0.3, 0.25]} power={1.5} piece={0.035} dur={0.55} rise={0.5} onDone={() => done(f.id)} />
+        )
+      )}
+    </>
+  );
+}
+
+export default function LcArena3D({
+  g,
+  me = "",
+  aspect,
+  onReady,
+  onSteer,
+}: {
+  g: any;
+  me?: string;
+  aspect?: number;
+  onReady?: () => void;
+  onSteer?: (dir: string) => void;
+}) {
   const still = useReducedMotion();
   const q = useQuality(still);
   const juice = useJuiceStore(still);
-  const first_ = useFirstVisit("lc:" + String((g && g.id) || ""));
+  const id = (g && g.id) || "";
+  const firstVisit = useFirstVisit("lc:" + String(id));
   const [ready, setReady] = useState(false);
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const w = (g && g.w) || 30;
   const h = (g && g.h) || 22;
-  const players: any[] = (g && g.players) || [];
-  const byPlayer: number[][][] = players.map(() => []);
-  ((g && g.trails) || []).forEach((c: number[]) => {
-    const arr = byPlayer[c[2] ?? -1];
-    if (arr) arr.push(c);
-  });
-  const wx = (x: number) => x - (w - 1) / 2;
-  const wz = (y: number) => y - (h - 1) / 2;
-  const dist = Math.max(w, h);
+  const tick = Number((g && g.tick) || 0);
+  const list = useMemo(() => riders(g, me), [g, me]);
+  const wx = useMemo(() => (x: number) => x - (w - 1) / 2, [w]);
+  const wz = useMemo(() => (y: number) => y - (h - 1) / 2, [h]);
   const home = (a: number, width: number) => lcHome(w, h, a, width);
   const first = home(aspect || 1.4, 9999);
-  const cellAt = (i: number): [number, number, number] | null => {
-    const p = players[i];
-    const cells = byPlayer[i] || [];
-    const last = cells[cells.length - 1];
-    if (last) return [wx(last[0] ?? 0), 0.05, wz(last[1] ?? 0)];
-    if (p && typeof p.x === "number") return [wx(p.x), 0.05, wz(p.y)];
-    return null;
+  const dist = Math.max(w, h);
+
+  /* the race: on first sight, open where the viewer last left this
+     match and replay the rest; later states extend it */
+  const race = useRef<Race>(new Race());
+  // a different match in the same view (a rematch) starts a new race
+  if (race.current.g && String(race.current.g.id) !== String(id)) race.current = new Race();
+  const R = race.current;
+  if (!R.g) {
+    const seen = seenTick(id);
+    R.target = tick;
+    R.T = seen === null || still || !(seen < tick) ? tick : Math.max(seen, tick - CATCH_MAX);
+    R.fast = R.target - R.T > 1;
+  } else if (tick > R.target) {
+    R.target = tick;
+    if (R.target - R.T > 1.0001) R.fast = true;
+  } else if (tick < R.target) {
+    R.T = R.target = tick;
+  }
+  R.list = list;
+  R.g = g;
+  const [catching, setCatching] = useState<{ from: number; to: number } | null>(null);
+  useEffect(() => {
+    if (!ready) return;
+    const Rr = race.current;
+    Rr.startAt = performance.now() + (firstVisit && !still ? 2700 : 450);
+    if (Rr.T < Rr.target - 1) setCatching({ from: Math.floor(Rr.T), to: Rr.target });
+    else if (Rr.T >= Rr.target) setSeenTick(id, Rr.target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+  useEffect(() => {
+    const Rr = race.current;
+    if (ready && Rr.target - Rr.T > 1.0001) setCatching({ from: Math.floor(Rr.T), to: Rr.target });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+  const skip = () => {
+    const Rr = race.current;
+    list.forEach((r) => {
+      const at = impactAt(r);
+      if (at !== null && at <= Rr.target) Rr.fired.add("x" + r.i);
+    });
+    for (let m = Math.floor(Rr.T) + 1; m <= Rr.target; m++) Rr.fired.add("t" + m);
+    // land a hair short of the present: the next frame steps onto it,
+    // so a finished match still names its winner
+    Rr.T = Math.max(Rr.T, Rr.target - 1e-4);
+    Rr.fast = false;
+    if (Rr.push && ctl.current) {
+      void ctl.current.setLookAt(...Rr.push.pos, ...Rr.push.tgt, true);
+      Rr.push = null;
+    }
+    setSeenTick(id, Rr.target);
+    setCatching(null);
+    juice.invalidate?.();
   };
-  const moments = useLcMoments(g, me, juice, cellAt);
+
+  const [fx, setFx] = useState<Fx[]>([]);
+  const tagEls = useRef<(HTMLDivElement | null)[]>([]);
+  const [said, setSaid] = useState("");
+  const u = useRef<TrailUniforms>({ head: new Array(MAX_RIDERS).fill(0), live: new Array(MAX_RIDERS).fill(1), wave: new Array(MAX_RIDERS).fill(-99), flare: new Array(MAX_RIDERS).fill(0) });
+
+  /* zones and the chase camera */
+  const [zones, setZones] = useState(false);
+  const own = useMemo(() => (zones ? territory(list, w, h) : null), [zones, list, w, h]);
+  const [chase, setChase] = useState<number | null>(null);
+  R.chase = chase;
+  const meR = list.find((r) => r.me);
+  const nextChase = () => {
+    const order = list.filter((r) => r.alive).map((r) => r.i);
+    if (meR && meR.alive) order.sort((a, b) => (a === meR.i ? -1 : b === meR.i ? 1 : 0));
+    if (!order.length) return null;
+    if (chase === null) return order[0]!;
+    const k = order.indexOf(chase);
+    return k < 0 || k === order.length - 1 ? null : order[k + 1]!;
+  };
+  const chaseName = chase !== null ? (list[chase] ? (list[chase]!.me ? "You" : list[chase]!.name) : "") : "";
+
+  const opts = useMemo(() => options(g, meR, list), [g, meR, list]);
+  const meCell: [number, number] | null = meR && meR.alive && meR.cells.length ? [wx(meR.cells[meR.cells.length - 1]![0]), wz(meR.cells[meR.cells.length - 1]![1])] : null;
+  const steer = onSteer
+    ? (d: Dir) => {
+        sfx("lock");
+        onSteer(d);
+      }
+    : undefined;
+
+  const status = (p: any): string => {
+    if (!g) return "";
+    if (g.status === "lobby") return p.accepted ? "✓" : "…";
+    if (g.status === "running" && p.alive) return p.moved ? "✓" : "…";
+    if (g.status === "finished" && g.winner === p.name) return "★";
+    return "";
+  };
+  const players: any[] = (g && g.players) || [];
   const label =
-    "Light Cycles board, 3D view: " +
-    (players.map((p) => p.name + (p.alive ? " riding" : " out")).join(", ") || "no riders") +
-    ".";
-  const intro = first_ ? { title: "Light Cycles", sub: players.map((p) => p.name).join(" · ") || "The grid is live", color: "#ff2d95" } : null;
+    "Light Cycles board, 3D view: " + (players.map((p) => p.name + (p.alive ? " riding" : " out")).join(", ") || "no riders") + ".";
+  const intro = firstVisit ? { title: "Light Cycles", sub: players.map((p) => p.name).join(" · ") || "The grid is live", color: "#22d3ee" } : null;
+
   return (
     <JuiceProvider juice={juice}>
-    <ArenaFrame
-      onReset={() => goHome(ctl, homeRef.current || first, !still)}
-      tools={<SoundToggle />}
-      overlay={
-        <>
-          <ImpactLayer juice={juice} intro={intro} ready={ready} />
-          <div className="sr-only" aria-live="polite">
-            {moments.say}
-          </div>
-        </>
-      }
-    >
-      <Canvas
-        role="img"
-        aria-label={label}
-        frameloop="demand"
-        dpr={q.dpr}
-        gl={{ antialias: false, powerPreference: "high-performance" }}
-        camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 800 }}
+      <ArenaFrame
+        onReset={() => {
+          setChase(null);
+          goHome(ctl, homeRef.current || first, !still);
+        }}
+        tools={
+          <>
+            <SoundToggle />
+            <button
+              type="button"
+              className={"arena3d-reset arena3d-toggle" + (zones ? " on" : "")}
+              aria-pressed={zones}
+              title="Zones: tint each open cell by the rider who can reach it first"
+              onClick={() => setZones((z) => !z)}
+            >
+              Zones
+            </button>
+            {list.some((r) => r.alive) ? (
+              <button
+                type="button"
+                className={"arena3d-reset arena3d-toggle" + (chase !== null ? " on" : "")}
+                aria-pressed={chase !== null}
+                title="Chase camera: ride behind a cycle. Tap again for the next rider."
+                onClick={() => {
+                  const n = nextChase();
+                  setChase(n);
+                  if (n === null) goHome(ctl, homeRef.current || first, !still);
+                }}
+              >
+                {chase !== null ? "Chase: " + chaseName : "Chase"}
+              </button>
+            ) : null}
+          </>
+        }
+        overlay={
+          <>
+            <ImpactLayer juice={juice} intro={intro} ready={ready} />
+            {catching ? (
+              <div className="lc-catchup" role="status">
+                <span>
+                  Replaying ticks {catching.from + 1}–{catching.to}
+                </span>
+                <button type="button" onClick={skip}>
+                  Skip
+                </button>
+              </div>
+            ) : null}
+            {g && g.status !== "lobby" ? (
+              <div className="lc-tags" aria-hidden="true">
+                {list.map((r) => {
+                  const st = status(players[r.i] || {});
+                  return (
+                    <div
+                      key={r.i}
+                      ref={(el) => {
+                        tagEls.current[r.i] = el;
+                      }}
+                      className={"lc-tag" + (r.me ? " me" : "")}
+                      style={{ ["--tc" as any]: r.hex, opacity: 0 }}
+                    >
+                      {r.me ? "You" : r.name}
+                      {st ? <span className="lc-tag-st">{st}</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            <div className="sr-only" aria-live="polite">
+              {said}
+            </div>
+          </>
+        }
       >
-        <FirstFrame
-          onReady={() => {
-            setReady(true);
-            if (onReady) onReady();
-          }}
-        />
-        <Ticker fps={q.ambientFps} />
-        <JuiceRig ctl={ctl} />
-        <color attach="background" args={[LC_FOG]} />
-        <fog attach="fog" args={[LC_FOG, dist * 2.1, dist * 5]} />
-        <SkyDome spec={LC_SKY} />
-        <ambientLight intensity={0.7} />
-        <directionalLight position={[w / 2, 18, h / 3]} intensity={0.55} color="#bfe9ff" />
-
-        {/* The floor: dark glass over the grid - reflective on
-            desktop (the sky and riders shine in it); a plain dark
-            floor on touch devices, where the reflection (a second
-            render of the scene) costs most. It runs to the horizon
-            under the endless grid. */}
-        <mesh rotation-x={-Math.PI / 2} position={[0, -0.02, 0]}>
-          <planeGeometry args={[400, 400]} />
-          {q.lite ? (
-            <meshStandardMaterial color="#05080f" roughness={0.55} metalness={0.4} />
-          ) : (
-          <MeshReflectorMaterial
-            blur={[280, 60]}
-            resolution={512}
-            mixBlur={0.9}
-            mixStrength={9}
-            roughness={0.6}
-            depthScale={1.1}
-            minDepthThreshold={0.4}
-            maxDepthThreshold={1.4}
-            color="#04060d"
-            metalness={0.5}
-            mirror={0.7}
+        <Canvas
+          role="img"
+          aria-label={label}
+          frameloop="demand"
+          dpr={q.dpr}
+          gl={{ antialias: false, powerPreference: "high-performance" }}
+          camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 900 }}
+        >
+          <FirstFrame
+            onReady={() => {
+              setReady(true);
+              if (onReady) onReady();
+            }}
           />
-          )}
-        </mesh>
-        <HorizonGrid half={[w / 2, h / 2]} off={[(w / 2) % 1, (h / 2) % 1]} cell={2} a="#6d28d9" b="#db2777" fade={30} line={0.16} y={-0.01} />
-        <BoardGrid w={w} h={h} />
-        {/* Trails: continuous light ribbons, one per rider. */}
-        {players.map((p, i) => {
-          const live = !!p.alive && typeof p.x === "number";
-          const runs = trailRuns(byPlayer[i] || [], wx, wz, live ? RIBBON_TRIM : 0);
-          if (!runs.length) return null;
-          return <Ribbon key={String(g.id) + ":" + i} runs={runs} hex={p.hex} alive={!!p.alive} />;
-        })}
+          <Ticker fps={q.ambientFps} />
+          <JuiceRig ctl={ctl} />
+          <Director
+            race={race}
+            wx={wx}
+            wz={wz}
+            ctl={ctl}
+            still={still}
+            u={u.current}
+            addFx={(f) => setFx((l) => [...l, ...f.filter((x) => !l.some((y) => y.id === x.id))])}
+            say={setSaid}
+            onCatch={(c) => setCatching(c)}
+            onChaseLost={() => {
+              setChase(null);
+              goHome(ctl, homeRef.current || first, !still);
+            }}
+          />
+          <color attach="background" args={[LC_FOG]} />
+          <fog attach="fog" args={[LC_FOG, dist * 1.5, dist * 4.4]} />
+          <SkyDome spec={LC_SKY} />
+          <Ridges />
+          <ambientLight intensity={0.55} />
+          <directionalLight position={[w / 3, 16, h / 2]} intensity={0.9} color="#cfeaff" />
+          <hemisphereLight args={["#8fb8d8", "#05070a", 0.35]} />
 
-        {/* Crash marks where wrecks end. */}
-        {players.map((p, i) => {
-          if (p.alive) return null;
-          const cells = byPlayer[i] || [];
-          const last = cells[cells.length - 1];
-          if (!last) return null;
-          return <CrashMark key={"x" + i} x={wx(last[0] ?? 0)} z={wz(last[1] ?? 0)} hex={p.hex} />;
-        })}
+          {/* The floor: black glass. A true mirror on desktop (the
+              cycles and their light shine in it, as in the film); a
+              glossy black floor that catches the riders' lights on
+              touch devices, where a second render costs most. */}
+          <mesh rotation-x={-Math.PI / 2} position={[0, -0.02, 0]}>
+            <planeGeometry args={[420, 420]} />
+            {q.lite ? (
+              <meshStandardMaterial color="#020305" roughness={0.28} metalness={0.75} />
+            ) : (
+              <MeshReflectorMaterial
+                blur={[220, 50]}
+                resolution={512}
+                mixBlur={0.75}
+                mixStrength={7}
+                roughness={0.42}
+                depthScale={1.0}
+                minDepthThreshold={0.4}
+                maxDepthThreshold={1.4}
+                color="#020304"
+                metalness={0.6}
+                mirror={0.85}
+              />
+            )}
+          </mesh>
+          <HorizonGrid half={[w / 2, h / 2]} off={[(w / 2) % 1, (h / 2) % 1]} cell={2} a="#0d3550" b="#1a6a96" fade={34} line={0.12} y={-0.01} />
+          <GridFloor w={w} h={h} own={own} hexes={list.map((r) => r.hex)} terr={zones ? 1 : 0} />
+          <EdgeWall w={w} h={h} />
 
-        {/* Live riders, on actual light cycles. Heading comes from
-            the state when it carries one, else from the last two
-            trail cells. */}
-        {players.map((p, i) => {
-          if (!p.alive || typeof p.x !== "number") return null;
-          let dir = typeof p.dir === "string" ? p.dir : "";
-          const cells = byPlayer[i] || [];
-          if (!(dir in HEADING_YAW) && cells.length >= 2) {
-            const a = cells[cells.length - 2]!;
-            const b = cells[cells.length - 1]!;
-            const dx = (b[0] ?? 0) - (a[0] ?? 0);
-            const dy = (b[1] ?? 0) - (a[1] ?? 0);
-            dir = dx > 0 ? "right" : dx < 0 ? "left" : dy > 0 ? "down" : "up";
-          }
-          return (
-            <LightCycle key={"h" + i} x={wx(p.x)} z={wz(p.y)} hex={p.hex} dir={dir in HEADING_YAW ? dir : "right"} still={still} />
-          );
-        })}
+          <TrailSystem list={list} wx={wx} wz={wz} u={u.current} />
+          <TagTracker race={race} wx={wx} wz={wz} els={tagEls} />
 
-        {moments.fx.map((f) => (
-          <Derez key={f.id} fx={f} lite={q.lite} onDone={() => moments.done(f.id)} />
-        ))}
+          {list.map((r) => (
+            <Bike key={"b" + r.i} r={r} race={race} wx={wx} wz={wz} still={still} />
+          ))}
 
-        <Sparkles count={70} scale={[w + 8, 5, h + 8]} position={[0, 2.6, 0]} size={2.2} speed={still ? 0 : 0.25} opacity={0.55} color="#7dd3fc" />
+          {/* where wrecks went out: the 2D board's ✕ on the floor */}
+          {list.map((r) => {
+            if (!r.out || r.alive) return null;
+            const c = r.cells[r.cells.length - 1];
+            if (!c) return null;
+            return <CrashMark key={"x" + r.i} race={race} r={r} x={wx(c[0])} z={wz(c[1])} hex={r.hex} />;
+          })}
 
-        <CameraControls ref={ctl} makeDefault minDistance={7} maxDistance={140} maxPolarAngle={Math.PI / 2.15} />
-        <TouchControls ctl={ctl} />
-        <Framer home={home} ctl={ctl} homeRef={homeRef} />
-        <Intro ctl={ctl} homeRef={homeRef} enabled={!!intro && !still} ready={ready} />
+          {meR ? <Options opts={opts} hex={meR.hex} from={meCell} race={race} wx={wx} wz={wz} onSteer={steer} /> : null}
+          {meR && g && g.status === "running" ? <Fuse g={g} at={meCell} hex={meR.hex} race={race} /> : null}
 
-        <ArenaPost q={q} bloom={1.25} threshold={1} vignette={0.58} />
-      </Canvas>
-    </ArenaFrame>
+          <FxLayer fx={fx} lite={q.lite} done={(fid) => setFx((l) => l.filter((x) => x.id !== fid))} />
+
+          <CameraControls ref={ctl} makeDefault minDistance={4} maxDistance={150} maxPolarAngle={Math.PI / 2.1} />
+          <TouchControls ctl={ctl} />
+          <Framer home={home} ctl={ctl} homeRef={homeRef} />
+          <Intro ctl={ctl} homeRef={homeRef} enabled={!!intro && !still} ready={ready} />
+
+          <ArenaPost q={q} bloom={1.2} threshold={1} vignette={0.6} />
+        </Canvas>
+      </ArenaFrame>
     </JuiceProvider>
+  );
+}
+
+/* Where a rider went out: the 2D board's ✕, in the rider's colour
+   lifted toward white - shown once its derez has played. */
+function CrashMark({ race, r, x, z, hex }: { race: MutableRefObject<Race>; r: Rider; x: number; z: number; hex: string }) {
+  const grp = useRef<Group>(null);
+  const c = useMemo(() => new Color(hex).lerp(new Color("#ffffff"), 0.35).multiplyScalar(2.2), [hex]);
+  useFrame(() => {
+    const R = race.current;
+    const at = impactAt(r);
+    if (grp.current) grp.current.visible = at === null || R.T >= at;
+  });
+  return (
+    <group ref={grp} position={[x, 0.05, z]}>
+      {[1, -1].map((s) => (
+        <mesh key={s} rotation-y={(s * Math.PI) / 4}>
+          <boxGeometry args={[1.0, 0.05, 0.12]} />
+          <meshBasicMaterial color={c} toneMapped={false} side={DoubleSide} />
+        </mesh>
+      ))}
+    </group>
   );
 }

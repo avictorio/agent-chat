@@ -1045,7 +1045,7 @@ export function createGameStore(opts: {
   }
 
   const LC3D_KEY = "ac:lc3d";
-  let lc3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void }>> | null = null;
+  let lc3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; onSteer?: (dir: string) => void }>> | null = null;
   function lc3dPref(): boolean {
     try {
       return localStorage.getItem(LC3D_KEY) !== "0";
@@ -1094,6 +1094,13 @@ export function createGameStore(opts: {
             me: opts.meName(),
             aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
             onReady: () => ready3d(h),
+            // tap a marker on the board to steer, as on the pad
+            onSteer:
+              g.you && g.you.playing && g.you.alive && g.status === "running"
+                ? (dir: string) => {
+                    void sendMove(g.id, dir, gv.wrap.querySelector(".lc-note") as HTMLElement | null);
+                  }
+                : undefined,
           })
         );
       },
@@ -1412,11 +1419,12 @@ export function createGameStore(opts: {
         pad.appendChild(b);
       });
       wrap.appendChild(pad);
+      const onBoard = lc3dPref() ? " (or tap a marker on the board)" : "";
       note.textContent = g.you.queued
-        ? "Queued: " + g.you.queued + " - tap another direction to change it before the tick resolves."
+        ? "Queued: " + g.you.queued + " - tap another direction" + onBoard + " to change it before the tick resolves."
         : g.mode === "async"
-          ? "Your move: pick a direction — the tick resolves the moment every rider has one in."
-          : "Your move: pick a direction before the tick closes.";
+          ? "Your move: pick a direction" + onBoard + " — the tick resolves the moment every rider has one in."
+          : "Your move: pick a direction" + onBoard + " before the tick closes.";
       wrap.appendChild(note);
     } else if (g.you && g.you.playing && g.status === "running") {
       note.textContent = "You are out - the record is yours to keep.";

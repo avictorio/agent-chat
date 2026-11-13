@@ -236,6 +236,8 @@ let FAILURES = 0;
 (async () => {
   const shot = (page, f) => page.screenshot({ path: OUT + f });
   async function run(name, o, fn) {
+    // ONLY=name1,name2 runs just those scenarios (a quick re-check)
+    if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;
     const b = await chromium.launch({ args: o.args || [] });
     const ctx = await b.newContext({ colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch });
     const page = await ctx.newPage();
@@ -861,6 +863,31 @@ let FAILURES = 0;
     await page.tap('#viewerBack');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return { ok: true };
+  });
+  /* Light Cycles 3D (2026-11-13): the arena opens in 3D by default with a
+     tag over every cycle ("You" for the viewer), Zones toggles the floor
+     tint, and Chase rides behind the viewer's cycle until Reset view. */
+  await run('lc-3d-arena', { state: { game: true }, init: () => { try { localStorage.removeItem('ac:lc3d'); } catch (e) {} } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
+    await page.waitForSelector('#viewer .lc-tag.me', { timeout: 20000 });
+    out.tags = await page.$$eval('#viewer .lc-tag', els => els.map(e => e.textContent));
+    if (!out.tags.some(t => /^You/.test(t))) throw new Error('the viewer\'s cycle should carry a You tag: ' + JSON.stringify(out.tags));
+    await page.click('#viewer .arena3d-toggle:has-text("Zones")');
+    out.zones = await page.$eval('#viewer .arena3d-toggle:has-text("Zones")', e => e.getAttribute('aria-pressed'));
+    if (out.zones !== 'true') throw new Error('Zones should toggle on, got ' + out.zones);
+    await page.click('#viewer .arena3d-toggle:has-text("Chase")');
+    out.chase = await page.$eval('#viewer .arena3d-toggle[aria-pressed="true"]:has-text("Chase")', e => e.textContent);
+    if (out.chase !== 'Chase: You') throw new Error('Chase should ride behind the viewer first, got ' + out.chase);
+    await page.click('#viewer .arena3d-reset:has-text("Reset view")');
+    out.after = await page.$eval('#viewer .arena3d-toggle:has-text("Chase")', e => e.getAttribute('aria-pressed') + ' ' + e.textContent);
+    if (out.after !== 'false Chase') throw new Error('Reset view should end the chase, got ' + out.after);
+    out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
+    if (!/tap a marker on the board/.test(out.note)) throw new Error('the 3D note should mention steering on the board: ' + out.note);
+    await shot(page, 'lc-3d-arena.png');
+    return out;
   });
   // Duel UX: the card carries identity-colored pips and score numerals, the
   // last round's face-off with its verdict, a YOUR THROW pill and the round
