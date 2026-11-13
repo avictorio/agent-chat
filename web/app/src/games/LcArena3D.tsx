@@ -4,7 +4,19 @@ import { CameraControls, MeshReflectorMaterial, Sparkles } from "@react-three/dr
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { Color } from "three";
 import type * as THREE from "three";
-import { ArenaFrame, FirstFrame, Framer, goHome, useReducedMotion, type Ctl, type Home } from "./arena3d";
+import {
+  ArenaFrame,
+  FirstFrame,
+  Framer,
+  Ticker,
+  TouchControls,
+  fitHome,
+  goHome,
+  useQuality,
+  useReducedMotion,
+  type Ctl,
+  type Home,
+} from "./arena3d";
 
 // Light Cycles in 3D — the R3F spike (2026-11-12). Renders the same
 // full game state the 2D SVG board consumes (GET /games/:id):
@@ -39,17 +51,19 @@ function LightCycle({ x, z, hex, dir, still }: { x: number; z: number; hex: stri
   const group = useRef<THREE.Group>(null!);
   const wheels = useRef<(THREE.Mesh | null)[]>([]);
   const target = HEADING_YAW[dir] ?? 0;
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!group.current) return;
     if (still) {
       group.current.rotation.y = target;
       return;
     }
-    // Shortest-arc damped turn toward the current heading.
+    // Shortest-arc damped turn toward the current heading; a turn in
+    // progress asks for every frame (the ambient ticker is slower).
     let diff = target - group.current.rotation.y;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     group.current.rotation.y += diff * Math.min(1, delta * 7);
+    if (Math.abs(diff) > 0.003) state.invalidate();
     const spin = delta * 5.2;
     wheels.current.forEach((w) => {
       if (w) w.rotation.z -= spin;
@@ -275,7 +289,11 @@ function BoardGrid({ w, h }: { w: number; h: number }) {
 // phone) has a much narrower horizontal field of view at the same
 // vertical fov, so widen the lens and pull back or the board's edges
 // fall out of frame.
-function lcHome(w: number, h: number, aspect: number): Home {
+function lcHome(w: number, h: number, aspect: number, width: number): Home {
+  // A phone-width host is short (styles.css) and the board must fill
+  // it: a steeper camera fitted to the board, so cells read as cells
+  // and the steering pad stays on screen below.
+  if (width < 560) return fitHome(w + 1, h + 1, 60, 46, aspect, 1.05);
   const dist = Math.max(w, h);
   const narrow = aspect < 1;
   const cd = dist * (narrow ? 1.22 : 1);
@@ -284,6 +302,7 @@ function lcHome(w: number, h: number, aspect: number): Home {
 
 export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: number; onReady?: () => void }) {
   const still = useReducedMotion();
+  const q = useQuality(still);
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const w = (g && g.w) || 30;
@@ -297,8 +316,8 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
   const wx = (x: number) => x - (w - 1) / 2;
   const wz = (y: number) => y - (h - 1) / 2;
   const dist = Math.max(w, h);
-  const home = (a: number) => lcHome(w, h, a);
-  const first = home(aspect || 1.4);
+  const home = (a: number, width: number) => lcHome(w, h, a, width);
+  const first = home(aspect || 1.4, 9999);
   const label =
     "Light Cycles board, 3D view: " +
     (players.map((p) => p.name + (p.alive ? " riding" : " out")).join(", ") || "no riders") +
@@ -308,22 +327,29 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
       <Canvas
         role="img"
         aria-label={label}
-        dpr={[1, 1.75]}
+        frameloop="demand"
+        dpr={q.dpr}
         gl={{ antialias: false, powerPreference: "high-performance" }}
         camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 500 }}
       >
         <FirstFrame onReady={onReady} />
+        <Ticker fps={q.ambientFps} />
         <color attach="background" args={["#04060d"]} />
         <fog attach="fog" args={["#04060d", dist * 2.1, dist * 4.4]} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[w / 2, 18, h / 3]} intensity={0.55} color="#bfe9ff" />
 
-        {/* The floor: dark glass over the grid. */}
+        {/* The floor: dark glass over the grid - reflective on
+            desktop; a plain dark floor on touch devices, where the
+            reflection (a second render of the scene) costs most. */}
         <mesh rotation-x={-Math.PI / 2} position={[0, -0.02, 0]}>
           <planeGeometry args={[w + 16, h + 16]} />
+          {q.lite ? (
+            <meshStandardMaterial color="#05080f" roughness={0.55} metalness={0.4} />
+          ) : (
           <MeshReflectorMaterial
             blur={[280, 60]}
-            resolution={1024}
+            resolution={512}
             mixBlur={0.9}
             mixStrength={9}
             roughness={0.6}
@@ -334,6 +360,7 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
             metalness={0.5}
             mirror={0.7}
           />
+          )}
         </mesh>
         <BoardGrid w={w} h={h} />
 
@@ -376,9 +403,10 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
         <Sparkles count={70} scale={[w + 8, 5, h + 8]} position={[0, 2.6, 0]} size={2.2} speed={still ? 0 : 0.25} opacity={0.55} color="#7dd3fc" />
 
         <CameraControls ref={ctl} makeDefault minDistance={7} maxDistance={140} maxPolarAngle={Math.PI / 2.15} />
+        <TouchControls ctl={ctl} />
         <Framer home={home} ctl={ctl} homeRef={homeRef} />
 
-        <EffectComposer multisampling={2}>
+        <EffectComposer multisampling={q.msaa}>
           <>
             <Bloom mipmapBlur intensity={1.25} luminanceThreshold={1} luminanceSmoothing={0.25} />
             <Vignette offset={0.2} darkness={0.58} />

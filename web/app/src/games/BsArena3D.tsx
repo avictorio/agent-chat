@@ -14,7 +14,20 @@
    three.js stays in the lazy chunk. */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
-import { ArenaFrame, FirstFrame, Framer, goHome, useReducedMotion, type Ctl, type Home } from "./arena3d";
+import {
+  ArenaFrame,
+  FirstFrame,
+  Framer,
+  Ticker,
+  TouchControls,
+  fitHome,
+  goHome,
+  useQuality,
+  useReducedMotion,
+  type Ctl,
+  type Home,
+  type Quality,
+} from "./arena3d";
 import { CameraControls, MeshReflectorMaterial, Sparkles, Trail } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import {
@@ -162,7 +175,7 @@ function FireFx({
       });
       smokes.current.forEach((s, i) => {
         if (!s) return;
-        const p = 0.15 + i * 0.2;
+        const p = 0.2 + i * 0.35;
         s.position.set(p * 0.5, 0.55 + p * 1.7 * scale, 0);
         const sc = (0.5 + p * 1.5) * scale;
         s.scale.set(sc, sc, 1);
@@ -215,7 +228,7 @@ function FireFx({
           <spriteMaterial map={tex} color={i === 0 ? "#ffd9a0" : i === 1 ? "#ff9a3c" : "#ff5a1f"} blending={AdditiveBlending} depthWrite={false} transparent opacity={0.8} />
         </sprite>
       ))}
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1].map((i) => (
         <sprite key={"s" + i} ref={(r) => (smokes.current[i] = r)}>
           <spriteMaterial map={tex} color="#23272c" depthWrite={false} transparent opacity={0.3} />
         </sprite>
@@ -328,6 +341,7 @@ function ShipModel({
          sinking first appeared in state: settle over ~2.4 s. */
       const p = Math.min(1, Math.max(0, (performance.now() - wreckAt) / 2400));
       wreck.current = p * p * (3 - 2 * p);
+      if (p < 1) state.invalidate();
     } else {
       wreck.current += (target - wreck.current) * Math.min(1, dt * 2);
     }
@@ -472,6 +486,7 @@ function ShotFx({ anim, world, onDone }: { anim: Anim; world: GL; onDone: () => 
   const FALL = 0.85;
   const BURST = anim.result === "hit" ? 1.7 : 1.25;
   useFrame((state, dt) => {
+    if (!done.current) state.invalidate();
     const t = state.clock.elapsedTime;
     if (start.current === null) start.current = t;
     const el = t - start.current;
@@ -862,7 +877,10 @@ function LightPatch({ seed }: { seed: number }) {
 function Scene({
   g,
   tiles,
+  foeName,
   onFire,
+  onAim,
+  aimMode,
   cd,
   aim,
   pending,
@@ -870,17 +888,22 @@ function Scene({
   home,
   homeRef,
   onReady,
+  q,
 }: {
   g: GL;
   tiles: TileT[];
+  foeName: string | null;
   onFire?: (label: string) => void;
+  onAim?: (label: string) => void;
+  aimMode: boolean;
   cd: number;
   aim: string | null;
   pending: string | null;
   ctl: RefObject<Ctl | null>;
-  home: (aspect: number) => Home;
+  home: (aspect: number, width: number) => Home;
   homeRef: { current: Home | null };
   onReady?: () => void;
+  q: Quality;
 }) {
   const still = useContext(Still);
   const w = g.w || 10;
@@ -891,8 +914,10 @@ function Scene({
   const downAt = useRef<{ x: number; y: number } | null>(null);
 
   /* Wrecks that appear while the view is open settle and burn in;
-     wrecks already there at mount are settled. */
-  const wreckKeys = tiles.flatMap((t, ti) => t.ships.filter((s) => s.sunk).map((s) => ti + ":" + s.key));
+     wrecks already there at mount are settled. Keyed by ocean name,
+     not position: on a phone the shown ocean swaps, and a wreck must
+     not replay its sinking when its ocean comes back into view. */
+  const wreckKeys = tiles.flatMap((t) => t.ships.filter((s) => s.sunk).map((s) => t.name + ":" + s.key));
   const seenWrecks = useRef<Set<string>>(new Set(wreckKeys));
   const [freshWrecks, setFreshWrecks] = useState<Record<string, number>>({});
 
@@ -921,35 +946,35 @@ function Scene({
     }
     if (lmKey && lmKey !== seenLm.current) {
       seenLm.current = lmKey;
-      const ti = tiles.findIndex((t) => t.name !== lm.by);
-      const tt = ti >= 0 ? tiles[ti] : undefined;
+      const tt = tiles.filter((t) => t.name !== lm.by)[0];
       if (tt && !still) {
         const loc = cellLocal(lm.cell, w, h);
         setAnim({ id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g]);
+  }, [g, tiles]);
 
   const foeTile = tiles.filter((t) => t.canFire)[0];
-  /* The tile a captain aims at with the keyboard - the enemy's, on or
-     off their turn (Enter only fires on it). */
-  const aimTile = g.you && g.you.playing ? tiles[1] : undefined;
-  const foeShotCells = useMemo(() => {
+  /* The ocean a captain aims at - the enemy's, on or off their turn
+     (Enter or the Fire button only fires on their turn). */
+  const aimTile = foeName ? tiles.filter((t) => t.name === foeName)[0] : undefined;
+  const pickTile = aimMode ? aimTile : foeTile;
+  const shotCells = useMemo(() => {
     const s = new Set<string>();
-    if (foeTile) {
-      foeTile.water.forEach((m) => s.add(m.label));
-      foeTile.ships.forEach((sh) => sh.cells.forEach((c) => s.add(c)));
+    if (pickTile) {
+      pickTile.water.forEach((m) => s.add(m.label));
+      pickTile.ships.forEach((sh) => sh.cells.forEach((c) => s.add(c)));
     }
     return s;
-  }, [foeTile]);
+  }, [pickTile]);
   const cellFromPoint = (p: { x: number; z: number }): string | null => {
-    if (!foeTile) return null;
-    const col = Math.round(p.x - foeTile.cx + (w - 1) / 2);
+    if (!pickTile) return null;
+    const col = Math.round(p.x - pickTile.cx + (w - 1) / 2);
     const row = Math.round(p.z + (h - 1) / 2);
     if (col < 0 || col >= w || row < 0 || row >= h) return null;
     const label = String.fromCharCode(65 + col) + (row + 1);
-    return foeShotCells.has(label) ? null : label;
+    return shotCells.has(label) ? null : label;
   };
   const evXY = (e: ThreeEvent<PointerEvent>): { x: number; y: number } => {
     const n = (e as GL).nativeEvent || e;
@@ -957,42 +982,50 @@ function Scene({
   };
 
   const lightBudget = { n: 0 };
-  const lmTileIdx = lm ? tiles.findIndex((t) => t.name !== lm.by) : -1;
-  const ringAt = foeTile && hover ? { tile: foeTile, label: hover } : aimTile && aim ? { tile: aimTile, label: aim } : null;
+  const lmTile = lm ? tiles.filter((t) => t.name !== lm.by)[0] : undefined;
+  const ringAt = !aimMode && foeTile && hover ? { tile: foeTile, label: hover } : aimTile && aim ? { tile: aimTile, label: aim } : null;
   const ringHot = !!(ringAt && ringAt.tile.canFire);
 
   return (
     <>
       <FirstFrame onReady={onReady} />
+      <Ticker fps={q.ambientFps} />
       <fog attach="fog" args={[SEA, cd * 1.9, cd * 4.2]} />
       <color attach="background" args={[SEA]} />
       <hemisphereLight args={["#8fb8d8", "#0a0f14", 0.85]} />
       <directionalLight position={[14, 20, 8]} intensity={1.45} color="#cfe6ff" />
       <directionalLight position={[-12, 9, -10]} intensity={0.4} color="#7fa8cc" />
       <ambientLight intensity={0.3} />
-      <CameraControls ref={ctl} makeDefault minDistance={7} maxDistance={80} maxPolarAngle={1.38} />
+      <CameraControls ref={ctl} makeDefault minDistance={6} maxDistance={80} maxPolarAngle={1.38} />
+      <TouchControls ctl={ctl} />
       <Framer home={home} ctl={ctl} homeRef={homeRef} />
       <group ref={world}>
-        {/* one reflective sea under both tiles */}
+        {/* one sea under the tiles: reflective on desktop; plain on
+            touch devices, where the reflection (a second render of the
+            whole scene) costs most */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
           <planeGeometry args={[130, 130]} />
-          <MeshReflectorMaterial
-            blur={[280, 60]}
-            resolution={1024}
-            mixBlur={0.9}
-            mixStrength={9}
-            roughness={0.6}
-            depthScale={1.1}
-            minDepthThreshold={0.4}
-            maxDepthThreshold={1.4}
-            color="#070d16"
-            metalness={0.6}
-            mirror={0.7}
-          />
+          {q.lite ? (
+            <meshStandardMaterial color="#070d16" roughness={0.6} metalness={0.5} />
+          ) : (
+            <MeshReflectorMaterial
+              blur={[280, 60]}
+              resolution={512}
+              mixBlur={0.9}
+              mixStrength={9}
+              roughness={0.6}
+              depthScale={1.1}
+              minDepthThreshold={0.4}
+              maxDepthThreshold={1.4}
+              color="#070d16"
+              metalness={0.6}
+              mirror={0.7}
+            />
+          )}
         </mesh>
         <LightPatch seed={1.7} />
         <LightPatch seed={4.9} />
-        {tiles.map((tile, ti) => {
+        {tiles.map((tile) => {
           const shipEls: GL[] = [];
           const fireEls: GL[] = [];
           const footEls: GL[] = [];
@@ -1010,7 +1043,7 @@ function Scene({
                 variant={s.variant}
                 hex={tile.hex}
                 sunk={s.sunk}
-                wreckAt={freshWrecks[ti + ":" + s.key]}
+                wreckAt={freshWrecks[tile.name + ":" + s.key]}
                 center={center}
                 vertical={vertical}
               />
@@ -1051,7 +1084,7 @@ function Scene({
             }
           });
           return (
-            <group key={tile.name + ti}>
+            <group key={tile.name}>
               <GridHolo tile={tile} w={w} h={h} />
               {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
               {footEls}
@@ -1068,18 +1101,20 @@ function Scene({
                   <MissMarker key={m.label} x={tile.cx + loc.x} z={loc.z} />
                 );
               })}
-              {lm && lmTileIdx === ti ? (
+              {lm && lmTile === tile ? (
                 <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
               ) : null}
             </group>
           );
         })}
-        {/* tap-to-fire surface over the enemy tile */}
-        {foeTile ? (
+        {/* the pick surface over the enemy tile: a click fires on
+            desktop; on touch a tap aims and the Fire button fires */}
+        {pickTile ? (
           <mesh
-            position={[foeTile.cx, 0.08, 0]}
+            position={[pickTile.cx, 0.08, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             onPointerMove={(e) => {
+              if (aimMode) return;
               const label = cellFromPoint(e.point);
               if (label !== hover) setHover(label);
             }}
@@ -1091,9 +1126,12 @@ function Scene({
               downAt.current = null;
               if (!d) return;
               const p = evXY(e);
-              if (Math.hypot(p.x - d.x, p.y - d.y) > 6) return;
+              if (Math.hypot(p.x - d.x, p.y - d.y) > 8) return;
               const label = cellFromPoint(e.point);
-              if (label && onFire) onFire(label);
+              if (!label) return;
+              if (aimMode) {
+                if (onAim) onAim(label);
+              } else if (onFire) onFire(label);
             }}
             onPointerLeave={() => setHover(null)}
           >
@@ -1107,13 +1145,13 @@ function Scene({
               const c = ringHot ? "#ff5a3c" : "#9fd8ef";
               return (
                 <group position={[ringAt.tile.cx + loc.x, 0.07, loc.z]}>
-                  <mesh rotation={[-Math.PI / 2, 0, 0]}>
-                    <ringGeometry args={[0.36, 0.44, 32]} />
-                    <meshBasicMaterial map={glowTexture()} color={c} blending={AdditiveBlending} depthWrite={false} transparent opacity={0.9} />
+                  <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>
+                    <ringGeometry args={[0.36, 0.46, 32]} />
+                    <meshBasicMaterial color={c} toneMapped={false} depthWrite={false} depthTest={false} transparent opacity={0.95} />
                   </mesh>
                   <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
                     <planeGeometry args={[0.92, 0.92]} />
-                    <meshBasicMaterial color={c} transparent opacity={0.14} depthWrite={false} />
+                    <meshBasicMaterial color={c} transparent opacity={0.18} depthWrite={false} />
                   </mesh>
                 </group>
               );
@@ -1128,7 +1166,7 @@ function Scene({
         {anim && !still ? <ShotFx anim={anim} world={world} onDone={() => setAnim(null)} /> : null}
       </group>
       <Sparkles count={50} scale={[30, 4, 14]} position={[0, 2.4, 0]} size={1.5} speed={still ? 0 : 0.22} opacity={0.45} color="#7dd3fc" />
-      <EffectComposer multisampling={2}>
+      <EffectComposer multisampling={q.msaa}>
         <>
           <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.72} luminanceSmoothing={0.3} />
           <Vignette offset={0.2} darkness={0.55} />
@@ -1142,12 +1180,25 @@ function Scene({
    two-tile span fits the horizontal fov when the camera distance
    scales as 1/aspect. About 10% further back than first shipped
    (1.48 vs 1.34 per unit span): perspective makes the near edge the
-   widest, and the near rows' outer columns were cropped. */
-function bsHome(w: number, aspect: number): Home {
+   widest, and the near rows' outer columns were cropped.
+   A phone-width host shows ONE ocean (see BsArena3D), framed from a
+   steeper angle and fitted to the tile with its labels, so cells are
+   big enough to tap (about 30 px on a 390 px phone, against 8-12 px
+   for two oceans side by side). */
+function bsHome(w: number, h: number, aspect: number, single: boolean): Home {
+  if (single) {
+    // Looking a little past the centre toward the near edge lifts the
+    // ocean on screen, clearing the bottom strip where the Fire button
+    // and the tap tip sit, so they do not cover the column letters.
+    const f = fitHome(w + 1.4, h + 3.6, 62, 48, aspect, 1.03);
+    const tz = 1.1;
+    return { pos: [f.pos[0], f.pos[1], f.pos[2] + tz], fov: f.fov, tz };
+  }
   const span = 2 * w + 4;
   const cd = Math.min(44, Math.max(21, (span * 1.48) / Math.max(0.7, aspect)));
   return { pos: [0, cd * 0.76, cd * 0.65], fov: aspect < 1.3 ? 56 : 46 };
 }
+const SINGLE_BELOW = 560; // host width in CSS px
 
 export default function BsArena3D({
   g,
@@ -1163,6 +1214,8 @@ export default function BsArena3D({
   onReady?: () => void;
 }) {
   const still = useReducedMotion();
+  const q = useQuality(still);
+  const aimMode = q.lite;
   const w = g.w || 10;
   const h = g.h || 10;
   const tiles = useMemo(() => buildTiles(g, me), [g, me]);
@@ -1183,9 +1236,32 @@ export default function BsArena3D({
   const [say, setSay] = useState("");
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
-  const home = (a: number) => bsHome(w, a);
-  const first = home(aspect ?? 1.44);
-  const cd = first.pos[1] / 0.76;
+
+  /* The host's live size: a phone-width host shows one ocean. */
+  const [hostW, setHostW] = useState(() => (aspect && aspect < 1.2 ? 390 : 700));
+  const single = hostW < SINGLE_BELOW;
+  /* Which ocean a single view shows: the enemy's on your turn, yours
+     while you wait; a spectator sees the ocean the last shot landed
+     in. A tap on the switch overrides that until the turn changes. */
+  const lm = g.last_move as GL;
+  const lastShotIdx = lm ? Math.max(0, tiles.findIndex((t) => t.name !== lm.by)) : 0;
+  const autoIdx = player ? (canFire ? 1 : 0) : lastShotIdx;
+  const [manualIdx, setManualIdx] = useState<number | null>(null);
+  useEffect(() => {
+    setManualIdx(null);
+  }, [canFire]);
+  const shownIdx = Math.min(tiles.length - 1, manualIdx ?? autoIdx);
+  const shown = useMemo(() => {
+    if (!single) return tiles;
+    const t = tiles[shownIdx];
+    // Nudged right so the ocean plus its row-number column (west of
+    // it) sits centred under the camera.
+    return t ? [{ ...t, cx: 0.45 }] : [];
+  }, [tiles, single, shownIdx]);
+
+  const home = (a: number, width: number) => bsHome(w, h, a, width < SINGLE_BELOW);
+  const first = home(aspect ?? 1.44, hostW);
+  const cd = Math.hypot(first.pos[1], first.pos[2]);
 
   /* The in-flight marker clears when the shot lands in state, when
      the turn moves on, or after 10 s (a refused shot changes nothing
@@ -1201,7 +1277,6 @@ export default function BsArena3D({
 
   /* Spoken updates for screen readers: each new shot, and the start
      of your turn. Nothing is announced for the state at open. */
-  const lm = g.last_move as GL;
   const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const seen = useRef<{ lm: string; turn: boolean } | null>(null);
   useEffect(() => {
@@ -1230,12 +1305,17 @@ export default function BsArena3D({
       return;
     }
     setPending(label);
+    if (aimMode) setAim(null);
     setSay("Firing at " + label + ".");
     onFire(label);
   };
+  const aimAt = (label: string) => {
+    setAim(label);
+    setSay(describe(label));
+  };
   /* Keyboard play: arrow keys move an aim marker over the enemy
      ocean (row 1 is the far edge, as on screen), Enter or Space
-     fires at it. */
+     fires at it. In a single-ocean view the enemy ocean comes up. */
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!foe) return;
     const k = e.key;
@@ -1248,26 +1328,59 @@ export default function BsArena3D({
     else if (k === "ArrowDown") row++;
     else if (k === "Enter" || k === " ") {
       e.preventDefault();
+      if (single) setManualIdx(1);
       const label = String.fromCharCode(65 + col) + (row + 1);
       if (aim) fire(label);
-      else {
-        setAim(label);
-        setSay(describe(label));
-      }
+      else aimAt(label);
       return;
     } else return;
     e.preventDefault();
+    if (single) setManualIdx(1);
     col = Math.max(0, Math.min(w - 1, col));
     row = Math.max(0, Math.min(h - 1, row));
-    const label = String.fromCharCode(65 + col) + (row + 1);
-    setAim(label);
-    setSay(describe(label));
+    aimAt(String.fromCharCode(65 + col) + (row + 1));
   };
 
   const spectatorLabel = "Battleship, 3D view of " + tiles.map((t) => t.name + "'s").join(" and ") + " waters.";
+  const overlay = (
+    <>
+      {single && tiles.length > 1 ? (
+        <div className="arena3d-swap" role="group" aria-label="Which ocean to show">
+          {tiles.map((t, i) => (
+            <button
+              key={t.name}
+              type="button"
+              aria-pressed={i === shownIdx}
+              className={i === shownIdx ? "on" : ""}
+              onClick={() => setManualIdx(i)}
+            >
+              <span className="arena3d-swap-dot" style={{ background: t.hex }} />
+              {player ? (i === 0 ? "Yours" : t.name + "'s") : t.name + "'s"}
+              {player && i === 1 && canFire ? " · fire" : ""}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {aimMode && canFire && aim && !taken.has(aim) && (!single || shownIdx === 1) ? (
+        <button type="button" className="arena3d-fire" onClick={() => fire(aim)}>
+          Fire at {aim}
+        </button>
+      ) : null}
+      {aimMode && canFire && !aim && !pending && (!single || shownIdx === 1) ? (
+        <div className="arena3d-tip">Tap a cell to aim</div>
+      ) : null}
+      {foe ? (
+        <div className="sr-only" aria-live="polite">
+          {say}
+        </div>
+      ) : null}
+    </>
+  );
   return (
     <ArenaFrame
       onReset={() => goHome(ctl, homeRef.current || first, !still)}
+      onSize={(width) => setHostW(width)}
+      overlay={overlay}
       frameProps={
         foe
           ? {
@@ -1275,7 +1388,11 @@ export default function BsArena3D({
               role: "application",
               "aria-label": "Battleship, 3D view. " + foe.name + "'s waters: arrow keys aim, Enter fires.",
               onKeyDown: onKey,
-              onBlur: () => setAim(null),
+              onBlur: (e) => {
+                // Leaving for the frame's own buttons (Fire, the ocean
+                // switch) keeps the aim; leaving the arena drops it.
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAim(null);
+              },
             }
           : undefined
       }
@@ -1283,15 +1400,19 @@ export default function BsArena3D({
       <Canvas
         role={foe ? undefined : "img"}
         aria-label={foe ? undefined : spectatorLabel}
-        dpr={[1, 1.75]}
+        frameloop="demand"
+        dpr={q.dpr}
         camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 600 }}
-        gl={{ antialias: true }}
+        gl={{ antialias: !q.lite }}
       >
         <Still.Provider value={still}>
           <Scene
             g={g}
-            tiles={tiles}
+            tiles={shown}
+            foeName={foe ? foe.name : null}
             onFire={foe ? fire : undefined}
+            onAim={foe ? aimAt : undefined}
+            aimMode={aimMode}
             cd={cd}
             aim={aim}
             pending={pending}
@@ -1299,14 +1420,10 @@ export default function BsArena3D({
             home={home}
             homeRef={homeRef}
             onReady={onReady}
+            q={q}
           />
         </Still.Provider>
       </Canvas>
-      {foe ? (
-        <div className="sr-only" aria-live="polite">
-          {say}
-        </div>
-      ) : null}
     </ArenaFrame>
   );
 }

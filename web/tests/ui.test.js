@@ -416,6 +416,30 @@ let FAILURES = 0;
     if (!moves.length || !/"F5"/.test(moves[0])) throw new Error('Enter should fire at F5, calls: ' + JSON.stringify(moves));
     return { aimed, fired: moves[0] };
   });
+  /* Phone (touch, 390 px): the 3D arena shows one ocean - the enemy's
+     on your turn - and a tap only aims; the Fire button fires. */
+  await run('battleship-3d-phone-aim-fire', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page, S, calls) => {
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.tap('.game-card');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
+    await page.waitForTimeout(800);
+    const swap = await page.$$eval('#viewer .arena3d-swap button', (bs) => bs.map((b) => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? '*' : '')));
+    if (swap.length !== 2 || !/\*$/.test(swap[1] || '')) throw new Error('the enemy ocean should be the one shown on your turn: ' + JSON.stringify(swap));
+    const box = await (await page.$('#viewer .lc-3d-host canvas')).boundingBox();
+    const before = calls.length;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height * 0.55);
+    await page.waitForTimeout(500);
+    if (calls.slice(before).some((c) => /\/moves/.test(c))) throw new Error('a tap must aim, not fire');
+    const fireText = await page.$eval('#viewer .arena3d-fire', (e) => e.textContent).catch(() => null);
+    if (!fireText || !/^Fire at [A-J]\d+$/.test(fireText)) throw new Error('a tap should offer a Fire button, got ' + fireText);
+    await page.tap('#viewer .arena3d-fire');
+    await page.waitForTimeout(600);
+    const moves = calls.slice(before).filter((c) => /\/games\/6\/moves/.test(c));
+    const cell = fireText.slice(8);
+    if (moves.length !== 1 || moves[0].indexOf('"' + cell + '"') < 0) throw new Error('Fire should send one move at ' + cell + ': ' + JSON.stringify(moves));
+    await shot(page, 'bs-3d-phone-aimed.png');
+    return { swap, fired: moves[0] };
+  });
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
