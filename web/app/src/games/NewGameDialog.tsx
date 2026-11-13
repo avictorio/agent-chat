@@ -118,7 +118,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         ? "Pick one more player — this game is exactly 2."
         : "This game is exactly 2 players."
     : type === "duel"
-      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; rounds are a minute once under way."
+      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; each round waits up to 3 minutes for both throws."
       : type === "battleship"
         ? bsVariant === "salvo"
           ? "Salvo on the 10×10 board: each turn fires one shot per ship you still have afloat. Starts when both captains accept."

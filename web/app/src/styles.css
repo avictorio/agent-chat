@@ -308,6 +308,31 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .game-card .art-size { color: #8fb8c9; }
 .game-card .art-kind { color: rgb(var(--ga)); border-color: rgba(var(--ga), .5); }
 .game-card .art-go { color: #8fb8c9; }
+/* The card header wraps: name, live dot and chevron on the first line,
+   the status line below it in full. On one line, a phone squeezed the
+   name away and clipped the status mid-word. */
+.game-card .art-head { flex-wrap: wrap; row-gap: 3px; }
+.game-card .art-size { order: 10; flex-basis: 100%; white-space: normal; font-size: 12px; line-height: 1.35; }
+.lc-card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 8px 10px 9px; }
+.lc-card-key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: #c9e7f2; }
+.lc-card-rider { display: inline-flex; align-items: center; gap: 5px; }
+.lc-card-rider.out { opacity: .5; text-decoration: line-through; }
+/* The turn banner (games.ts turnBanner): who's up, the time left, a bar
+   that burns in the last quarter, and the stakes when they are yours. */
+.turn-banner { margin: 8px 0 6px; padding: 9px 12px 8px; border-radius: 12px; background: #0a1420; border: 1px solid var(--line); color: #c9e7f2; }
+.turn-banner.mine { border-color: rgba(var(--ga), .7); background: linear-gradient(180deg, rgba(var(--ga), .2), rgba(var(--ga), .04)), #0a1420; }
+.turn-top { display: flex; align-items: baseline; gap: 10px; }
+.turn-banner .turn-text.duel-statusline { all: unset; flex: 1; font-size: 14px; font-weight: 600; color: #e2f4fd; line-height: 1.35; }
+.turn-banner.mine .turn-text.duel-statusline { color: #fff; font-weight: 800; }
+.turn-left { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; color: #8fb8c9; white-space: nowrap; }
+.turn-bar { height: 4px; margin-top: 7px; border-radius: 2px; background: rgba(148, 197, 219, .15); overflow: hidden; }
+.turn-bar > div { height: 100%; border-radius: 2px; background: rgba(var(--ga), .55); transition: width .9s linear; }
+.turn-banner.hot .turn-bar > div { background: #fb7185; }
+.turn-banner.hot .turn-left { color: #fda4af; }
+.turn-sub { margin-top: 5px; font-size: 12px; color: #8fb8c9; }
+.result-row { margin: 4px 0 6px; }
+.result-row .duel-pad { margin-top: 6px; }
+.result-row .lc-note { margin-top: 2px; }
 .lc-svg { display: block; width: 100%; height: auto; }
 .lc-svg .lc-head { animation: lcHeadPulse 1.15s ease-in-out infinite; }
 @keyframes lcHeadPulse { 50% { opacity: .45; } }
@@ -506,6 +531,18 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .gm-note { color: var(--dim); font-size: 13px; padding: 8px 2px; }
 .gm-row { display: block; width: 100%; text-align: left; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; padding: 10px 12px; margin: 0 0 8px; cursor: pointer; color: #e2f4fd; font: inherit; }
 .gm-row:hover { border-color: rgba(var(--ga), .55); }
+.gm-sec.mine { color: rgb(var(--ga)); font-weight: 700; }
+.gm-due { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12.5px; color: #8fb8c9; }
+.gm-due .turn-left { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; }
+.gm-due.hot .turn-left { color: #fda4af; }
+.gm-you { font-size: 11.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #03121a; background: rgb(var(--ga)); border-radius: 999px; padding: 3px 9px; }
+.gm-wait { color: #8fb8c9; }
+/* Desktop: the list runs in two columns (one narrow column in a wide
+   page wasted it); headings and the record span both. */
+@media (min-width: 1100px) {
+  .gm-wrap { max-width: 1040px; display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; align-content: start; }
+  .gm-wrap > :not(.gm-row) { grid-column: 1 / -1; }
+}
 .gm-top { display: flex; align-items: center; gap: 8px; }
 .gm-kind { font-weight: 700; font-size: 14px; }
 .gm-live { width: 8px; height: 8px; border-radius: 50%; background: #34d399; animation: recpulse 1.6s ease-in-out infinite; flex: none; }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { GameSummary } from "@chat/shared";
 import { useFeed, useSession } from "../room/ctx";
-import { recordLine, type GL } from "./render";
+import { formatLeft, recordLine, type GL } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { chimeMuted, setChimeMuted } from "./chime";
 
@@ -86,6 +86,35 @@ function stateLine(g: GL): string {
 
 type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; l: number }>>;
 
+/* The Games tab as a to-do list (2026-11-13): matches waiting on YOU
+   come first, soonest deadline first, each with what it wants ("Your
+   throw") and the time left; then the ones waiting on others; then the
+   record and the history. Who a match waits on is the list's `targets`
+   (the server's collapsed awaited set), else the full state's awaiting
+   lists. The countdowns tick with the arena's turn clock (games.ts). */
+function waitingOn(g: GL): string[] {
+  if (Array.isArray(g.targets)) return g.targets;
+  // No targets (an older payload): derive them the way the server does
+  // (gameTargets in src/worker.js).
+  const ps: GL[] = g.players || [];
+  if (g.status === "lobby") return ps.filter((p) => !p.accepted).map((p) => p.name);
+  if (g.status !== "running") return [];
+  if (g.type === "duel") return ps.filter((p) => !p.thrown).map((p) => p.name);
+  if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
+  return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
+}
+const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_deadline || null : g.deadline || null);
+const durOf = (g: GL): number =>
+  g.status === "lobby"
+    ? 3600e3
+    : 1000 * (g.type === "duel" ? g.round_seconds || 180 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+function youLabel(g: GL): string {
+  if (g.status === "lobby") return "Your invite";
+  if (g.type === "duel") return "Your throw";
+  if (g.type === "battleship") return g.phase === "setup" ? "Place your fleet" : "Your shot";
+  return "Your move";
+}
+
 export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: () => void }) {
   const { client } = useSession();
   const store = useFeed().games;
@@ -118,6 +147,11 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const all = games || [];
   const live = all.filter((g) => g.status === "lobby" || g.status === "running");
   const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
+  const me = store.meName().toLowerCase();
+  const isMine = (g: GameSummary) => !!me && waitingOn(g as GL).some((n) => String(n).toLowerCase() === me);
+  const byDeadline = (a: GameSummary, b: GameSummary) => (deadlineOf(a as GL) || Infinity) - (deadlineOf(b as GL) || Infinity);
+  const mineLive = live.filter(isMine).sort(byDeadline);
+  const otherLive = live.filter((g) => !isMine(g)).sort(byDeadline);
   const { streaks, prevRanks } = standingsMotion(games);
 
   const row = (g: GameSummary) => {
@@ -138,7 +172,24 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
           ))}
         </span>
         {isLive ? (
-          <span className="gm-state">{stateLine(g as GL)}</span>
+          <>
+            <span className="gm-state">{stateLine(g as GL)}</span>
+            {(() => {
+              const mine = isMine(g);
+              const dl = deadlineOf(g as GL);
+              const others = waitingOn(g as GL).filter((n) => String(n).toLowerCase() !== me);
+              return (
+                <span
+                  className={"gm-due" + (mine ? " mine" : "")}
+                  data-turn-deadline={dl || undefined}
+                  data-turn-dur={dl ? durOf(g as GL) : undefined}
+                >
+                  {mine ? <span className="gm-you">{youLabel(g as GL)}</span> : others.length ? <span className="gm-wait">Waiting on {others.join(", ")}</span> : null}
+                  {dl ? <span className="turn-left">{dl > Date.now() ? formatLeft(dl - Date.now()) + " left" : "time's up"}</span> : null}
+                </span>
+              );
+            })()}
+          </>
         ) : (
           <>
             <WinnerBanner g={g as GL} />
@@ -182,6 +233,19 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
       </div>
       {games === null && !err ? <p className="gm-note">Loading the matches…</p> : null}
       {err ? <p className="gm-note">{err}</p> : null}
+      {games !== null && games.length === 0 ? <p className="gm-note">No matches yet. Start one with the New game button.</p> : null}
+      {mineLive.length ? (
+        <>
+          <div className="gm-sec mine">Your move · {mineLive.length}</div>
+          {mineLive.map(row)}
+        </>
+      ) : null}
+      {otherLive.length ? (
+        <>
+          <div className="gm-sec">{mineLive.length ? "Waiting on others" : "Live now"}</div>
+          {otherLive.map(row)}
+        </>
+      ) : null}
       {Object.keys(record).length ? (
         <>
           <div className="gm-sec">Room record</div>
@@ -221,13 +285,6 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
               ) : null
             )}
           </div>
-        </>
-      ) : null}
-      {games !== null && games.length === 0 ? <p className="gm-note">No matches yet. Start one with the New game button.</p> : null}
-      {live.length ? (
-        <>
-          <div className="gm-sec">Live now</div>
-          {live.map(row)}
         </>
       ) : null}
       {done.length ? (

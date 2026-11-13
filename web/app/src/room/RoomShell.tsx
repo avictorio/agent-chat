@@ -204,12 +204,15 @@ export function RoomShell({ room }: { room: string }) {
     viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
   }
   const games = gamesRef.current;
+  // Games waiting on you, for the Games nav count too (2026-11-13).
+  const [gamesAwaiting, setGamesAwaiting] = useState(0);
   useEffect(() => {
     const update = () => {
       const n = games.awaitingCount();
       document.title = (n > 0 ? "(" + n + ") " : "") + titleBaseRef.current;
       if (n > awaitingRef.current) playYourMoveChime();
       awaitingRef.current = n;
+      setGamesAwaiting(n);
     };
     update();
     return games.subscribe(update);
@@ -254,7 +257,10 @@ export function RoomShell({ room }: { room: string }) {
 
   const counts = useMemo(() => {
     const chat = unread ? (unread > 99 ? "99+" : String(unread)) : "";
-    const top = tab !== "chat" && unread ? String(unread) : "";
+    // The phone's menu button: unread chat (off the chat tab) plus games
+    // waiting on you (off the games tab) - the sidebar is hidden there.
+    const topN = (tab !== "chat" ? unread : 0) + (tab !== "games" ? gamesAwaiting : 0);
+    const top = topN ? (topN > 99 ? "99+" : String(topN)) : "";
     if (board.boardData) {
       const active = board.boardData.mb.members.filter((x) => x.status === "active").map((x) => x.name);
       const dcN = board.boardData.dc.filter((x) => {
@@ -276,6 +282,7 @@ export function RoomShell({ room }: { room: string }) {
             ? "Due"
             : "",
         members: board.boardData.mb.invite_only ? String(active.length) : "",
+        games: gamesAwaiting ? String(gamesAwaiting) : "",
         top,
       };
     }
@@ -295,9 +302,10 @@ export function RoomShell({ room }: { room: string }) {
           ? "Due"
           : "",
       members: board.members.inviteOnly ? String(board.members.activeCount) : "",
+      games: gamesAwaiting ? String(gamesAwaiting) : "",
       top,
     };
-  }, [board.boardData, board.rs, unread, board.members, tab, nameState.value]);
+  }, [board.boardData, board.rs, unread, board.members, tab, nameState.value, gamesAwaiting]);
 
   const memberSet = useMemo(
     () => new Set(board.members.names.map((n) => n.toLowerCase())),

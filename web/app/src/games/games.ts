@@ -15,6 +15,8 @@ import {
   lastMoveText,
   roundVerdict,
   setClockBar,
+  setTurnClock,
+  formatLeft,
   winnerBanner,
   THROW_BEATS,
   THROW_EMOJI,
@@ -137,6 +139,7 @@ export interface GameStore {
   respond(id: number, accept: boolean): Promise<void>;
   rematch(g: GL): Promise<void>;
   awaitingCount(): number;
+  meName(): string;
 }
 
 export function createGameStore(opts: {
@@ -219,6 +222,97 @@ export function createGameStore(opts: {
     });
     h.appendChild(x);
     return h;
+  }
+
+  /* The turn banner (2026-11-13): every running arena opens with one
+     line that says who is up - "Your shot", "Ada is in · your throw
+     decides the round", "Waiting on Henry" - the time left as a
+     countdown (not a clock time), a bar that stays calm until the
+     last quarter and then burns, and what happens when the clock runs
+     out, when it is you it will happen to. Each game used to say this
+     in its own place and words (Light Cycles as a clock time in the
+     meta line, Battleship not at all). The text keeps the
+     duel-statusline class the suite reads. */
+  function turnBanner(g: GL): HTMLElement | null {
+    if (!g || g.status !== "running") return null;
+    const me = opts.meName();
+    const you = g.you || {};
+    const players: GL[] = g.players || [];
+    const opp = players.filter((p: GL) => p.name !== me)[0];
+    let text = "";
+    let sub = "";
+    let mine = false;
+    let dur = 0;
+    let prefix = "";
+    if (g.type === "duel") {
+      dur = (g.round_seconds || 180) * 1000;
+      if (you.playing && opp) {
+        if (you.queued) text = "You're in · waiting on " + opp.name;
+        else {
+          mine = true;
+          text = opp.thrown ? opp.name + " is in · your throw decides the round" : "Your throw · round " + g.round;
+          sub = "If the clock runs out, a lone throw takes the round.";
+        }
+      } else text = players.map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
+    } else if (g.type === "battleship") {
+      dur = (g.turn_seconds || 3600) * 1000;
+      if (g.phase === "setup") {
+        if (you.playing && !you.fleet) {
+          mine = true;
+          text = "Place your fleet";
+        } else if (you.playing) text = "Fleet placed · waiting on " + (opp ? opp.name : "your rival");
+        else text = players.map((p: GL) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
+      } else if (you.playing && you.your_turn) {
+        mine = true;
+        text =
+          g.variant === "salvo" && g.salvo_left != null
+            ? "Your salvo · " + g.salvo_left + " shot" + (g.salvo_left === 1 ? "" : "s") + " left"
+            : "Your shot · turn " + g.turn;
+        // the stakes only once they are real: your own missed turns
+        const missed = (g.misses || {})[me] || 0;
+        if (missed >= 2) sub = "You've missed " + missed + " turns in a row - one more forfeits the match.";
+        else if (missed === 1) sub = "You missed a turn - three in a row forfeits the match.";
+      } else if (you.playing) text = "Waiting on " + (opp ? opp.name + "'s shot" : "the next shot") + " · turn " + g.turn;
+      else text = (g.turn_of ? g.turn_of + " to fire · " : "") + "turn " + g.turn;
+    } else {
+      dur = (g.tick_seconds || 120) * 1000;
+      const waiting = players.filter((p: GL) => p.alive && !p.moved && p.name !== me).map((p: GL) => p.name);
+      if (g.mode === "async") prefix = "cap in ";
+      if (you.playing && you.alive && !you.queued) {
+        mine = true;
+        text = "Your move · tick " + g.tick;
+        sub = g.mode === "async" ? "The tick resolves the moment every rider has moved." : "Miss the tick and your cycle rides straight on.";
+      } else if (you.playing && you.alive) text = "You're set · waiting on " + (waiting.join(", ") || "the tick");
+      else text = waiting.length ? "Waiting on " + waiting.join(", ") : "Tick " + g.tick + " is resolving…";
+    }
+    const b = el("div", "turn-banner" + (mine ? " mine" : ""));
+    b.setAttribute("role", "status");
+    const top = el("div", "turn-top");
+    top.appendChild(el("span", "turn-text duel-statusline", text));
+    if (g.deadline) top.appendChild(el("span", "turn-left", ""));
+    b.appendChild(top);
+    if (g.deadline && dur) {
+      const bar = el("div", "turn-bar");
+      bar.appendChild(el("div", ""));
+      b.appendChild(bar);
+      b.setAttribute("data-turn-deadline", String(g.deadline));
+      b.setAttribute("data-turn-dur", String(dur));
+      if (prefix) b.setAttribute("data-turn-prefix", prefix);
+      setTurnClock(b);
+    }
+    if (sub) b.appendChild(el("div", "turn-sub", sub));
+    return b;
+  }
+
+  /* A finished (or called-off) match puts Rematch beside the result,
+     at the top, not below the board where a phone never scrolled. */
+  function resultRow(g: GL): HTMLElement | null {
+    if (g.status !== "finished" && g.status !== "cancelled") return null;
+    const box = el("div", "result-row");
+    const n = el("div", "lc-note", "");
+    box.appendChild(rematchRow(g, n));
+    box.appendChild(n);
+    return box;
   }
 
   function rematchRow(g: GL, note: HTMLElement): HTMLElement {
@@ -310,7 +404,10 @@ export function createGameStore(opts: {
       line = "You've been invited to this match. Accept to take your seat - the clock starts when everyone is in.";
     else if (mine) line = "You're in. Waiting on " + waiting.join(", ") + ".";
     else line = "Lobby - waiting on " + waiting.join(", ") + " to accept.";
-    if (g.lobby_deadline) line += " The lobby closes at " + new Date(g.lobby_deadline).toLocaleTimeString() + ".";
+    if (g.lobby_deadline) {
+      const left = g.lobby_deadline - Date.now();
+      line += left > 0 ? " The lobby closes in " + formatLeft(left) + "." : " The lobby is closing.";
+    }
     wrap.appendChild(el("div", "duel-statusline", line));
     if (mine && !g.you.accepted) {
       const row = el("div", "duel-pad");
@@ -512,6 +609,10 @@ export function createGameStore(opts: {
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
     if (g.status === "finished" && g.h2h && g.h2h.tally) {
       const h2hline = (g.players || []).map((p: GL) => p.name + " " + (g.h2h.tally[p.name] || 0)).join(" · ");
       wrap.appendChild(el("div", "duel-h2h", "Head-to-head in this room — " + h2hline));
@@ -520,11 +621,6 @@ export function createGameStore(opts: {
     if (gameView.tab === "history") {
       dropDuel3d();
       wrap.appendChild(historyList(g));
-      if (g.status === "finished" || g.status === "cancelled") {
-        const hnote = el("div", "lc-note", "");
-        wrap.appendChild(rematchRow(g, hnote));
-        wrap.appendChild(hnote);
-      }
       return;
     }
     const players0 = g.players || [];
@@ -573,18 +669,7 @@ export function createGameStore(opts: {
         arena.appendChild(duelSide(players[1], g));
         wrap.appendChild(arena);
       }
-      if (g.deadline) wrap.appendChild(clockBar(g, true));
-      const myName2 = opts.meName();
-      const opp = players.filter((p: GL) => p.name !== myName2)[0];
-      let status = "";
-      if (g.you && g.you.playing && opp) {
-        if (g.you.queued) status = "You're in · waiting on " + opp.name;
-        else if (opp.thrown) status = opp.name + " is in · your throw decides the round";
-        else status = "Round " + g.round + " · throws stay hidden until both are in";
-      } else {
-        status = players.map((p: GL) => p.name + (p.thrown ? " locked" : " thinking…")).join(" · ");
-      }
-      put(el("div", "duel-statusline", status));
+      // who's up and the round clock are the turn banner's, at the top
       if (g.you && g.you.playing) {
         const hint = arenaHint("duel", "Pick a throw — it stays hidden until both lock in.");
         if (hint) wrap.appendChild(hint);
@@ -637,10 +722,6 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
-    if (g.status === "finished" || g.status === "cancelled") {
-      wrap.appendChild(rematchRow(g, note));
-      wrap.appendChild(note);
-    }
   }
 
   function renderBattleshipView(g: GL, force?: boolean) {
@@ -677,15 +758,15 @@ export function createGameStore(opts: {
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
     wrap.appendChild(arenaTabs(g));
     const note = el("div", "lc-note", "");
     if (gameView.tab === "history") {
       dropBs3d();
       wrap.appendChild(historyList(g));
-      if (g.status === "finished" || g.status === "cancelled") {
-        wrap.appendChild(rematchRow(g, note));
-        wrap.appendChild(note);
-      }
       return;
     }
     if (g.status === "lobby") {
@@ -703,10 +784,11 @@ export function createGameStore(opts: {
     if (!you.playing || !me || !opp) {
       const big = el("div", "lc-board-big");
       const board = battleshipBoard(g);
-      // The 3D scene below shows both oceans, so the scoreboard's mini
-      // boards only repeat it - and on a phone they pushed the scene
-      // below the fold. The feed card and the 2D arena keep them.
-      if (bs3dPref() && g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
+      // The arena shows both oceans full size below (the 3D scene or
+      // the 2D boards), so the scoreboard's mini boards only repeat
+      // them - and on a phone they pushed the real boards below the
+      // fold. The feed card keeps them.
+      if (g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
         const minis = board.querySelector(".bs-minis");
         if (minis) minis.remove();
       }
@@ -888,12 +970,7 @@ export function createGameStore(opts: {
         strips.appendChild(item);
       });
       if (!bsBoardsOr3d(g, wrap, strips)) wrap.appendChild(boards);
-      let status = "";
-      if (g.status === "finished" || g.status === "cancelled") status = "";
-      else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
-      else if (you.your_turn) status = g.variant === "salvo" && g.salvo_left != null ? "Your salvo - " + g.salvo_left + " shot" + (g.salvo_left === 1 ? "" : "s") + " left, turn " + g.turn + "." : "Your shot - turn " + g.turn + ".";
-      else status = "Waiting on " + opp.name + "'s shot - turn " + g.turn + ".";
-      if (status) wrap.appendChild(el("div", "duel-statusline", status));
+      // whose shot it is, and the turn clock, are the turn banner's
       if (g.sonar && g.phase === "play" && g.status === "running")
         wrap.appendChild(el("div", "bs-sonar", "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."));
       if (g.status === "running" && g.phase === "play") {
@@ -912,10 +989,6 @@ export function createGameStore(opts: {
           if (hint) wrap.appendChild(hint);
         }
       }
-      wrap.appendChild(note);
-    }
-    if (g.status === "finished" || g.status === "cancelled") {
-      wrap.appendChild(rematchRow(g, note));
       wrap.appendChild(note);
     }
   }
@@ -1270,29 +1343,17 @@ export function createGameStore(opts: {
     gameRenderKey = key;
     const wrap = gameView.wrap;
     wrap.textContent = "";
-    wrap.appendChild(
-      el(
-        "div",
-        "lc-meta",
-        gameMetaText(g) +
-          (g.status === "running" && g.deadline
-            ? g.mode === "async"
-              ? " · async — the tick resolves when everyone rides · stall cap " + new Date(g.deadline).toLocaleTimeString()
-              : " · tick closes " + new Date(g.deadline).toLocaleTimeString()
-            : "")
-      )
-    );
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
     if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
     wrap.appendChild(arenaTabs(g));
     if (gameView.tab === "history") {
       dropLc3d();
       wrap.appendChild(historyList(g));
-      if (g.status === "finished" || g.status === "cancelled") {
-        const hnote = el("div", "lc-note", "");
-        wrap.appendChild(rematchRow(g, hnote));
-        wrap.appendChild(hnote);
-      }
       return;
     }
     wrap.appendChild(lcViewToggle(g));
@@ -1364,10 +1425,6 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - the riders steer by API and by pad.";
       wrap.appendChild(note);
     }
-    if (g.status === "finished" || g.status === "cancelled") {
-      wrap.appendChild(rematchRow(g, note));
-      wrap.appendChild(note);
-    }
     if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
   }
 
@@ -1409,6 +1466,7 @@ export function createGameStore(opts: {
   // Round-clock bars drain on a 1s ticker, in cards and arena alike.
   window.setInterval(() => {
     document.querySelectorAll("[data-duel-deadline]").forEach((b) => setClockBar(b as HTMLElement));
+    document.querySelectorAll("[data-turn-deadline]").forEach((b) => setTurnClock(b as HTMLElement));
   }, 1000);
   // Cards stay fresh on a slow poll, like the current app.
   window.setInterval(() => {
@@ -1448,6 +1506,9 @@ export function createGameStore(opts: {
     // Matches waiting on the signed-in member right now: a lobby seat
     // unaccepted, a duel throw unmade, a fleet unplaced, a shot
     // untaken, a tick unridden. Drives the title badge + chime.
+    meName() {
+      return opts.meName() || "";
+    },
     awaitingCount() {
       const me = opts.meName();
       if (!me) return 0;

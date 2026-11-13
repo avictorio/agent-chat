@@ -34,6 +34,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       board.appendChild(battleshipBoard(g));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
+      board.appendChild(lcCardFoot(g));
     }
   }, [g]);
 
@@ -119,6 +120,40 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       ) : null}
     </div>
   );
+}
+
+// Under the Light Cycles board: whose trail is whose (the colours were
+// only named in the message text) and, for a rider who still owes the
+// tick, the same YOUR MOVE pill the Duel and Battleship cards carry -
+// on a phone the old "your move" at the end of the meta line was the
+// part that got clipped.
+const ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+function lcCardFoot(g: any): HTMLElement {
+  const foot = document.createElement("div");
+  foot.className = "lc-card-foot";
+  const key = document.createElement("div");
+  key.className = "lc-card-key";
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  (g.players || []).forEach((p: any) => {
+    const item = document.createElement("span");
+    item.className = "lc-card-rider" + (p.alive || g.status === "lobby" ? "" : " out");
+    const dot = document.createElement("span");
+    dot.className = "lc-dot";
+    dot.style.background = p.hex;
+    item.appendChild(dot);
+    item.appendChild(document.createTextNode(p.name));
+    key.appendChild(item);
+  });
+  foot.appendChild(key);
+  const you = g.you;
+  if (you && you.playing && you.alive && g.status === "running") {
+    const pill = document.createElement("span");
+    pill.className = "duel-pill " + (you.queued ? "locked" : "your-throw");
+    pill.textContent = you.queued ? "✓ LOCKED · " + (ARROW[you.queued] || you.queued) : "YOUR MOVE";
+    foot.appendChild(pill);
+  }
+  return foot;
 }
 
 // A compact fingerprint of "the match moved": status plus the

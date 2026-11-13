@@ -93,9 +93,9 @@ export function gameMetaText(g: GL): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · turn " + tickLen(g.turn_seconds || 3600) + (g.variant && g.variant !== "classic" ? " · " + g.variant : "");
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + tickLen(g.turn_seconds || 3600) + " per turn" + (g.variant && g.variant !== "classic" ? " · " + g.variant : "");
     }
-    if (g.phase === "setup") return "Placing fleets · turn " + tickLen(g.turn_seconds || 3600);
+    if (g.phase === "setup") return "Placing fleets · " + tickLen(g.turn_seconds || 3600) + " per turn";
     return "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "") + " · " + line;
   }
   if (g.type === "duel") {
@@ -108,17 +108,18 @@ export function gameMetaText(g: GL): string {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
     }
-    return "Round " + g.round + " · first to " + g.target + " · ties replay · round " + tickLen(g.round_seconds || 600);
+    // 180 s is the server's default round deadline (since 2026-11-12)
+    return "Round " + g.round + " · first to " + g.target + " · ties replay · " + tickLen(g.round_seconds || 180) + " per round";
   }
   if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
     const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-    return "Lobby · waiting on " + (waiting.join(", ") || "no one") + (g.mode === "async" ? " · async · resolves on everyone's move" : " · tick " + tickLen(g.tick_seconds || 120));
+    return "Lobby · waiting on " + (waiting.join(", ") || "no one") + (g.mode === "async" ? " · async · resolves on everyone's move" : " · " + tickLen(g.tick_seconds || 120) + " ticks");
   }
   const alive = (g.players || []).filter((p: GL) => p.alive).length;
-  let meta = "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : "tick " + tickLen(g.tick_seconds || 900));
-  if (g.you && g.you.playing && g.you.alive && !g.you.queued) meta += " · your move";
-  return meta;
+  // "your move" is the card's pill and the arena's turn banner now: at
+  // the end of this line it was the part a phone clipped off.
+  return "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : tickLen(g.tick_seconds || 120) + " ticks");
 }
 
 export function boardSvg(g: GL): string {
@@ -196,6 +197,33 @@ export function roundVerdict(r: GL, players: GL[]): { tie: boolean; text: string
   const tl = loser ? (r.throws || {})[loser.name] : null;
   if (!tw || !tl) return { tie: false, text: r.winner + " takes it by forfeit" };
   return { tie: false, text: capThrow(tw) + " " + (THROW_VERB[tw] || "beats") + " " + tl + " · " + r.winner + " takes it" };
+}
+
+/* Time left, in words a glance can take: "1 h 05 min", "12 min",
+   "4:07" under ten minutes. */
+export function formatLeft(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s >= 3600) {
+    const m = Math.floor((s % 3600) / 60);
+    return Math.floor(s / 3600) + " h" + (m ? " " + ("0" + m).slice(-2) + " min" : "");
+  }
+  if (s >= 600) return Math.round(s / 60) + " min";
+  return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
+}
+
+/* The turn banner's clock (games.ts turnBanner): the countdown text
+   and a bar that stays calm until the last quarter, then burns. Kept
+   current by the 1 s ticker that also drives the duel clock bars. */
+export function setTurnClock(b: HTMLElement) {
+  const dl = +(b.getAttribute("data-turn-deadline") || 0);
+  const dur = +(b.getAttribute("data-turn-dur") || 1);
+  const left = Math.max(0, dl - Date.now());
+  const pct = Math.max(0, Math.min(100, (left / dur) * 100));
+  const fill = b.querySelector(".turn-bar > div") as HTMLElement | null;
+  if (fill) fill.style.width = pct + "%";
+  b.classList.toggle("hot", left > 0 && pct < 25);
+  const lab = b.querySelector(".turn-left");
+  if (lab) lab.textContent = left > 0 ? (b.getAttribute("data-turn-prefix") || "") + formatLeft(left) + " left" : "time's up";
 }
 
 export function setClockBar(bar: HTMLElement) {

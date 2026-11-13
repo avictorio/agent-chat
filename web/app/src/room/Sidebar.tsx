@@ -59,7 +59,7 @@ export interface SidebarProps {
   tab: string;
   show: (id: string) => void;
   tabsDisabled: boolean;
-  counts: { chat: string; decisions: string; questions: string; stakes: string; memory: string; members: string };
+  counts: { chat: string; decisions: string; questions: string; stakes: string; memory: string; members: string; games?: string };
   theme: string;
   applyTheme: (t: "light" | "dark") => void;
   copied: boolean;
@@ -86,6 +86,9 @@ export function Sidebar(p: SidebarProps) {
         return { text: counts.memory, alert: !!counts.memory };
       case "members":
         return { text: counts.members, alert: false };
+      case "games":
+        // matches waiting on you
+        return { text: counts.games || "", alert: !!counts.games };
       default:
         return { text: "", alert: false };
     }
