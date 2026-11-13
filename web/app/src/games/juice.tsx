@@ -64,6 +64,12 @@ export class Juice {
   invalidate: (() => void) | null = null;
   onFlash: ((color: string, a: number) => void) | null = null;
   onTitle: ((t: Title) => void) | null = null;
+  onWord: ((text: string, hex?: string) => void) | null = null;
+
+  /* A single word on the beat ("Rock", "Paper"...), short and big. */
+  word(text: string, hex?: string): void {
+    if (this.onWord) this.onWord(text, hex);
+  }
 
   hit(i: Impact): void {
     const now = performance.now();
@@ -278,6 +284,7 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
   const [card, setCard] = useState<(Title & { k: number }) | null>(null);
+  const [word, setWord] = useState<{ text: string; hex?: string; k: number } | null>(null);
   useEffect(() => {
     juice.onFlash = (color, a) => {
       const el = flashRef.current;
@@ -291,9 +298,11 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
     };
     let k = 0;
     juice.onTitle = (t) => setCard({ ...t, k: ++k });
+    juice.onWord = (text, hex) => setWord({ text, hex, k: ++k });
     return () => {
       juice.onFlash = null;
       juice.onTitle = null;
+      juice.onWord = null;
     };
   }, [juice]);
   useEffect(() => {
@@ -301,6 +310,11 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
     const t = setTimeout(() => setCard(null), 2300);
     return () => clearTimeout(t);
   }, [card]);
+  useEffect(() => {
+    if (!word) return;
+    const t = setTimeout(() => setWord(null), 520);
+    return () => clearTimeout(t);
+  }, [word]);
   return (
     <div className="impact-layer" aria-hidden="true">
       {intro && irisOn ? (
@@ -309,6 +323,11 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
         </div>
       ) : null}
       <div ref={flashRef} className="impact-flash" />
+      {word ? (
+        <div key={word.k} className={"impact-word" + (juice.still ? " calm" : "")} style={word.hex ? ({ "--tc": word.hex } as CSSProperties) : undefined}>
+          {word.text}
+        </div>
+      ) : null}
       {card ? (
         <div
           key={card.k}

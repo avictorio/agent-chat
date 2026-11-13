@@ -11,7 +11,9 @@ contract before relying on a field. All values are derived starting points.
 What shipped (2026-11-13) and where to tune it: Battleship's `shotImpact()`
 (the shell falls 0.85 s; the impact fires on its frame from `ShotFx`, a
 sinking adds `SinkFx`), Light Cycles' `useLcMoments()` (derez on a crash),
-and the Duel's `Reveal` (prime → flip → clash → verdict → KO). Buzz values
+and the Duel's `Reveal` (count-in → flip → matchup at contact → verdict →
+KO; `planFor()` holds the timings; forfeits and catch-up replays of missed
+rounds, remembered per game in localStorage, run through the same path). Buzz values
 use the named `BUZZ` patterns in `sfx.ts`, not inline arrays. Under reduced
 motion each arena skips the flight and calls `juice.hit` at once: title,
 sound and buzz stay.

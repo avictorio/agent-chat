@@ -28,7 +28,14 @@ export type SfxName =
   | "shatter"
   | "win"
   | "lose"
-  | "enter";
+  | "enter"
+  | "beat"
+  | "shoot"
+  | "snip"
+  | "tear"
+  | "wrap"
+  | "smash"
+  | "buzzer";
 
 const KEY = "ac-sfx-muted";
 
@@ -59,6 +66,7 @@ function isMuted(): boolean {
    the opposite outcome, short (.claude/skills/immersive-3d-games).
    Derived starting values - tune on a real Android phone. */
 export const BUZZ = {
+  commit: 18, // you threw / locked in
   nearMiss: 15, // a shot splashed near your fleet
   scored: 25, // you hit them / took the round
   hitYou: [30, 40, 30], // you were hit / lost the round
@@ -260,6 +268,64 @@ function play(name: SfxName, ac: AudioContext, t: number, o: AudioNode) {
         const g = env(ac, t + i * 0.22, 0.15, 0.01, 0.9, o);
         osc(ac, "triangle", t + i * 0.22, 1, f, f * 0.985, filt(ac, "lowpass", 1400, 0.5, g));
       });
+      break;
+    }
+    case "beat": {
+      // the count-in's kick: a falling sine thump with a click on top
+      const k = env(ac, t, 0.55, 0.003, 0.2, o);
+      osc(ac, "sine", t, 0.24, 170, 48, k);
+      const c = env(ac, t, 0.12, 0.001, 0.025, o);
+      noiseSrc(ac, t, 0.05, filt(ac, "highpass", 3200, 0.7, c));
+      break;
+    }
+    case "shoot": {
+      const k = env(ac, t, 0.7, 0.003, 0.3, o);
+      osc(ac, "sine", t, 0.32, 190, 42, k);
+      [0, 0.011, 0.024].forEach((d) => {
+        const g = env(ac, t + d, 0.32, 0.001, 0.09, o);
+        noiseSrc(ac, t + d, 0.14, filt(ac, "bandpass", 1500, 0.9, g));
+      });
+      break;
+    }
+    case "snip": {
+      [0, 0.07].forEach((d) => {
+        const g = env(ac, t + d, 0.3, 0.001, 0.035, o);
+        noiseSrc(ac, t + d, 0.06, filt(ac, "highpass", 5200, 1, g));
+        const r = env(ac, t + d, 0.06, 0.001, 0.09, o);
+        osc(ac, "sine", t + d, 0.1, 3400 - d * 3000, null, r);
+      });
+      break;
+    }
+    case "tear": {
+      const g = env(ac, t, 0.28, 0.02, 0.3, o);
+      const bp = filt(ac, "bandpass", 1800, 1.6, g);
+      bp.frequency.setValueAtTime(1800, t);
+      bp.frequency.exponentialRampToValueAtTime(4600, t + 0.3);
+      noiseSrc(ac, t, 0.36, bp);
+      break;
+    }
+    case "wrap": {
+      const g = env(ac, t, 0.22, 0.08, 0.32, o);
+      const lp = filt(ac, "lowpass", 300, 0.8, g);
+      lp.frequency.setValueAtTime(300, t);
+      lp.frequency.exponentialRampToValueAtTime(1400, t + 0.3);
+      noiseSrc(ac, t, 0.45, lp);
+      const th = env(ac, t + 0.28, 0.4, 0.004, 0.28, o);
+      osc(ac, "sine", t + 0.28, 0.3, 95, 55, th);
+      break;
+    }
+    case "smash": {
+      const th = env(ac, t, 0.85, 0.003, 0.42, o);
+      osc(ac, "sine", t, 0.45, 80, 32, th);
+      const cr = env(ac, t, 0.4, 0.002, 0.26, o);
+      noiseSrc(ac, t, 0.32, filt(ac, "bandpass", 900, 0.8, cr));
+      break;
+    }
+    case "buzzer": {
+      const g = env(ac, t, 0.16, 0.01, 0.45, o);
+      const lp = filt(ac, "lowpass", 900, 0.7, g);
+      osc(ac, "square", t, 0.5, 98, null, lp);
+      osc(ac, "square", t, 0.5, 104, null, lp);
       break;
     }
     case "enter": {

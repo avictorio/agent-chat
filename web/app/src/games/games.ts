@@ -164,6 +164,7 @@ export function createGameStore(opts: {
     bs3dSeq?: number;
     duel3d?: Host3d | null;
     duel3dSeq?: number;
+    duelCommit?: ((t: string) => void) | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -622,6 +623,7 @@ export function createGameStore(opts: {
         b.appendChild(el("span", "t-beats", THROW_BEATS[t] || ""));
         b.appendChild(el("span", "t-lock", g.you.queued === t ? "LOCKED" : ""));
         b.addEventListener("click", () => {
+          if (gameView && gameView.duelCommit) gameView.duelCommit(t);
           void sendMove(g.id, t, note);
         });
         pad.appendChild(b);
@@ -1160,7 +1162,9 @@ export function createGameStore(opts: {
      sides; the throw pad, the verdict banner and the scoreboard stay
      in the page - the scene shows, the page acts. */
   const DUEL3D_KEY = "ac:duel3d";
-  let duel3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void }>> | null = null;
+  let duel3dComp: Promise<
+    ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: ((t: string) => void) | null) => void }>
+  > | null = null;
   function duel3dPref(): boolean {
     try {
       return localStorage.getItem(DUEL3D_KEY) !== "0";
@@ -1190,6 +1194,7 @@ export function createGameStore(opts: {
     if (gv && gv.duel3d) {
       const m = gv.duel3d;
       gv.duel3d = null;
+      gv.duelCommit = null;
       m.root.unmount();
     }
   }
@@ -1207,6 +1212,10 @@ export function createGameStore(opts: {
             me: opts.meName(),
             aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
             onReady: () => ready3d(h),
+            // the scene seals a tapped throw at once, before the request
+            registerCommit: (fn: ((t: string) => void) | null) => {
+              if (gameView === gv) gv.duelCommit = fn;
+            },
           })
         );
       },

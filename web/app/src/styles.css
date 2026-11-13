@@ -349,6 +349,11 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 }
 .impact-title.calm { animation-name: impact-title-calm; }
 @keyframes impact-title-calm { 0% { opacity: 0; } 12% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+.impact-word { --tc: #c4b5fd; position: absolute; left: 0; right: 0; top: 16%; text-align: center; font-size: clamp(22px, 6.5vw, 46px); font-weight: 900; letter-spacing: .08em; text-transform: uppercase; color: #fff; text-shadow: 0 0 6px var(--tc), 0 0 20px var(--tc); animation: impact-word .52s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes impact-word { 0% { opacity: 0; transform: scale(1.6); } 18% { opacity: 1; transform: scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: scale(.94); } }
+.impact-word.calm { animation-name: impact-word-calm; }
+@keyframes impact-word-calm { 0% { opacity: 0; } 18% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+.duel-catchup { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 190px); padding: 5px 11px; border-radius: 999px; background: rgba(8, 4, 20, .74); border: 1px solid rgba(167, 139, 250, .45); color: #ddd6fe; font-size: 12px; font-weight: 600; pointer-events: none; }
 .arena3d-sound { border: 1px solid rgba(var(--ga), .35); background: rgba(4, 8, 14, .72); color: #a5d8ea; font: inherit; font-size: 13px; line-height: 1; padding: 5px 9px; border-radius: 999px; cursor: pointer; }
 .arena3d-sound:hover { border-color: rgba(var(--ga), .7); }
 .arena3d-sound[aria-pressed="false"] { opacity: .7; }
