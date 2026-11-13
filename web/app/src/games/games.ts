@@ -162,6 +162,8 @@ export function createGameStore(opts: {
     lc3dSeq?: number;
     bs3d?: Host3d | null;
     bs3dSeq?: number;
+    duel3d?: Host3d | null;
+    duel3dSeq?: number;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -515,6 +517,7 @@ export function createGameStore(opts: {
     }
     wrap.appendChild(arenaTabs(g));
     if (gameView.tab === "history") {
+      dropDuel3d();
       wrap.appendChild(historyList(g));
       if (g.status === "finished" || g.status === "cancelled") {
         const hnote = el("div", "lc-note", "");
@@ -523,7 +526,22 @@ export function createGameStore(opts: {
       }
       return;
     }
-    const big = el("div", "lc-board-big");
+    const players0 = g.players || [];
+    const in3d = duel3dPref() && players0.length === 2 && g.status !== "lobby";
+    if (players0.length === 2 && g.status !== "lobby") wrap.appendChild(duelViewToggle(g));
+    // In 3D the status line and the throw pad sit right under the scene
+    // (the action next to the view - on a phone the pad must stay on
+    // screen); the scoreboard and the rest follow.
+    let slot: HTMLElement | null = null;
+    if (in3d) {
+      if (!gameView.duel3d) gameView.duel3d = makeHost3d("lc-board-big lc-3d-host duel-3d-host");
+      wrap.appendChild(gameView.duel3d.host);
+      paintDuel3d(g, gameView.duel3d);
+      slot = el("div", "duel-slot");
+      wrap.appendChild(slot);
+    } else dropDuel3d();
+    const put = (n: HTMLElement) => (slot || wrap).appendChild(n);
+    const big = el("div", "lc-board-big" + (in3d ? " duel-board-under" : ""));
     big.appendChild(duelBoard(g, true));
     wrap.appendChild(big);
     const tends = duelTendencies(g);
@@ -547,11 +565,13 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
     }
     if (g.status === "running" && players.length === 2) {
-      const arena = el("div", "duel-arena");
-      arena.appendChild(duelSide(players[0], g));
-      arena.appendChild(el("div", "duel-vs", "VS"));
-      arena.appendChild(duelSide(players[1], g));
-      wrap.appendChild(arena);
+      if (!in3d) {
+        const arena = el("div", "duel-arena");
+        arena.appendChild(duelSide(players[0], g));
+        arena.appendChild(el("div", "duel-vs", "VS"));
+        arena.appendChild(duelSide(players[1], g));
+        wrap.appendChild(arena);
+      }
       if (g.deadline) wrap.appendChild(clockBar(g, true));
       const myName2 = opts.meName();
       const opp = players.filter((p: GL) => p.name !== myName2)[0];
@@ -563,7 +583,7 @@ export function createGameStore(opts: {
       } else {
         status = players.map((p: GL) => p.name + (p.thrown ? " locked" : " thinking…")).join(" · ");
       }
-      wrap.appendChild(el("div", "duel-statusline", status));
+      put(el("div", "duel-statusline", status));
       if (g.you && g.you.playing) {
         const hint = arenaHint("duel", "Pick a throw — it stays hidden until both lock in.");
         if (hint) wrap.appendChild(hint);
@@ -606,11 +626,11 @@ export function createGameStore(opts: {
         });
         pad.appendChild(b);
       });
-      wrap.appendChild(pad);
+      put(pad);
       note.textContent = g.you.queued
         ? "Thrown: " + g.you.queued + " - tap another to change it before the round resolves."
         : "Your throw: pick one. It stays hidden until your rival has thrown too.";
-      wrap.appendChild(note);
+      put(note);
     } else if (g.status === "running") {
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
       wrap.appendChild(note);
@@ -950,7 +970,7 @@ export function createGameStore(opts: {
   }
 
   const LC3D_KEY = "ac:lc3d";
-  let lc3dComp: Promise<ComponentType<{ g: GL; aspect?: number; onReady?: () => void }>> | null = null;
+  let lc3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void }>> | null = null;
   function lc3dPref(): boolean {
     try {
       return localStorage.getItem(LC3D_KEY) !== "0";
@@ -994,7 +1014,12 @@ export function createGameStore(opts: {
       (Comp) => {
         if (!current() || h.failed) return;
         h.root.render(
-          createElement(Comp, { g, aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight), onReady: () => ready3d(h) })
+          createElement(Comp, {
+            g,
+            me: opts.meName(),
+            aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
+            onReady: () => ready3d(h),
+          })
         );
       },
       (err) => {
@@ -1125,6 +1150,89 @@ export function createGameStore(opts: {
     if (under) wrap.appendChild(under);
     paintBs3d(g, gameView.bs3d);
     return true;
+  }
+
+  /* ---- Duel 3D arena (2026-11-13) ----
+     Same bridge as the other two: ./DuelArena3D is a dynamic import,
+     the preference persists per device and defaults to 3D (a stored
+     "0" is an explicit opt-out), and the React root lives on gameView
+     so repaints keep the canvas. The scene replaces the two DOM duel
+     sides; the throw pad, the verdict banner and the scoreboard stay
+     in the page - the scene shows, the page acts. */
+  const DUEL3D_KEY = "ac:duel3d";
+  let duel3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void }>> | null = null;
+  function duel3dPref(): boolean {
+    try {
+      return localStorage.getItem(DUEL3D_KEY) !== "0";
+    } catch {
+      return false;
+    }
+  }
+  function setDuel3dPref(on: boolean) {
+    try {
+      localStorage.setItem(DUEL3D_KEY, on ? "1" : "0");
+    } catch {
+      // storage unavailable: the toggle still works for this view
+    }
+  }
+  function loadDuel3d() {
+    if (!duel3dComp)
+      duel3dComp = import("./DuelArena3D")
+        .then((m) => m.default)
+        .catch((e) => {
+          duel3dComp = null;
+          throw e;
+        });
+    return duel3dComp;
+  }
+  function dropDuel3d() {
+    const gv = gameView;
+    if (gv && gv.duel3d) {
+      const m = gv.duel3d;
+      gv.duel3d = null;
+      m.root.unmount();
+    }
+  }
+  function paintDuel3d(g: GL, h: Host3d) {
+    const gv = gameView;
+    if (!gv || h.failed) return;
+    const seq = (gv.duel3dSeq = (gv.duel3dSeq || 0) + 1);
+    const current = () => !!gameView && gameView === gv && gv.duel3dSeq === seq && gv.duel3d === h;
+    loadDuel3d().then(
+      (Comp) => {
+        if (!current() || h.failed) return;
+        h.root.render(
+          createElement(Comp, {
+            g,
+            me: opts.meName(),
+            aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
+            onReady: () => ready3d(h),
+          })
+        );
+      },
+      (err) => {
+        if (current()) fail3d(h, err);
+      }
+    );
+  }
+  function duelViewToggle(g: GL): HTMLElement {
+    const row = el("div", "lc-view-toggle");
+    const on = duel3dPref();
+    const mk = (label: string, is3d: boolean) => {
+      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
+      b.type = "button";
+      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (duel3dPref() === is3d) return;
+        setDuel3dPref(is3d);
+        if (!is3d) dropDuel3d();
+        renderGameView(g, true);
+      });
+      return b;
+    };
+    row.appendChild(mk("2D", false));
+    row.appendChild(mk("3D", true));
+    return row;
   }
 
   function renderGameView(g: GL, force?: boolean) {
@@ -1269,6 +1377,7 @@ export function createGameStore(opts: {
   function openGame(id: number, type?: string) {
     dropLc3d();
     dropBs3d();
+    dropDuel3d();
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(

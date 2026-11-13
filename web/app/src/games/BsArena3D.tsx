@@ -28,8 +28,10 @@ import {
   type Home,
   type Quality,
 } from "./arena3d";
+import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "./juice";
+import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
+import { BUZZ, sfx } from "./sfx";
 import { CameraControls, MeshReflectorMaterial, Sparkles, Trail } from "@react-three/drei";
-import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import {
   AdditiveBlending,
   CanvasTexture,
@@ -594,9 +596,27 @@ function ShipModel({
 
 /* ---------- shot effects: the bomb drops, then the burst ---------- */
 
-type Anim = { id: string; x: number; z: number; result: string; sunk: number | null };
+type Anim = { id: string; x: number; z: number; result: string; sunk: number | null; impact: Impact; sink: Sink | null };
+type Sink = { id: string; at: [number, number, number]; box: [number, number, number] };
 
-function ShotFx({ anim, world, onDone }: { anim: Anim; world: GL; onDone: () => void }) {
+/* A ship going down: fire and debris thrown up, a ring racing out
+   over the water, a column of flame. On the juice clock. */
+function SinkFx({ sink, lite, onDone }: { sink: Sink; lite: boolean; onDone: () => void }) {
+  return (
+    <group>
+      <Burst at={sink.at} hex="#ff8a3c" box={sink.box} count={lite ? 46 : 90} power={2.3} piece={0.12} dur={1.9} onDone={onDone} />
+      <Shockwave at={[sink.at[0], 0.06, sink.at[2]]} hex="#9fdcff" radius={6} dur={1.2} />
+      <LightPillar at={sink.at} hex="#ff6a1f" height={7} width={0.8} dur={1.3} />
+    </group>
+  );
+}
+
+const SHIP_NAME = (size: number, variant: number) =>
+  size === 5 ? "carrier" : size === 4 ? "battleship" : size === 3 ? (variant === 0 ? "cruiser" : "destroyer") : size === 2 ? "patrol boat" : size + "-ship";
+
+function ShotFx({ anim, onImpact, onDone }: { anim: Anim; onImpact: () => void; onDone: () => void }) {
+  const j = useJuice();
+  const impacted = useRef(false);
   const bomb = useRef<Group>(null);
   const burst = useRef<Group>(null);
   const parts = useRef<(GL | null)[]>([]);
@@ -620,12 +640,19 @@ function ShotFx({ anim, world, onDone }: { anim: Anim; world: GL; onDone: () => 
   }, [anim]);
   const FALL = 0.85;
   const BURST = anim.result === "hit" ? 1.7 : 1.25;
-  useFrame((state, dt) => {
+  useFrame((state, delta) => {
     if (!done.current) state.invalidate();
-    const t = state.clock.elapsedTime;
+    // The juice clock: the burst freezes in a hit-stop and crawls in
+    // slow motion with the rest of the world.
+    const t = j.t;
+    const dt = Math.min(delta, 0.1) * j.scale;
     if (start.current === null) start.current = t;
     const el = t - start.current;
     const hit = anim.result === "hit";
+    if (el >= FALL && !impacted.current) {
+      impacted.current = true;
+      onImpact();
+    }
     if (el < FALL) {
       const p = el / FALL;
       if (bomb.current) {
@@ -664,16 +691,9 @@ function ShotFx({ anim, world, onDone }: { anim: Anim; world: GL; onDone: () => 
         (flash.current.material as SpriteMaterial).opacity = hit ? (1 - fp) * 0.95 : 0;
         flash.current.position.set(anim.x, 0.7, anim.z);
       }
-      if (world && world.current) {
-        if (hit && bp < 0.22) {
-          const k = (1 - bp / 0.22) * 0.055;
-          world.current.position.set((hash01(anim.id + Math.floor(t * 40)) - 0.5) * 2 * k, 0, (hash01(anim.id + "z" + Math.floor(t * 40)) - 0.5) * 2 * k);
-        } else world.current.position.set(0, 0, 0);
-      }
     }
     if (bp >= 1 && !done.current) {
       done.current = true;
-      if (world && world.current) world.current.position.set(0, 0, 0);
       onDone();
     }
   });
@@ -994,6 +1014,68 @@ function LightPatch({ seed }: { seed: number }) {
 
 /* ---------- the scene ---------- */
 
+/* The Battleship world (2026-11-13): open ocean at night under
+   aurora. Green and violet curtains move slowly over a starfield;
+   the horizon glows sea-green and the fog is that colour, so the
+   water runs out to meet the sky. The reflective sea (desktop)
+   mirrors the aurora. */
+const BS_FOG = "#081723";
+const BS_SKY: SkySpec = {
+  top: "#010309",
+  mid: "#030c17",
+  horizon: BS_FOG,
+  ground: "#03070c",
+  glow: "#14b8a6",
+  glowAmt: 0.3,
+  stars: 0.09,
+  aurora: 0.6,
+  auroraA: "#2dd4bf",
+  auroraB: "#8b5cf6",
+};
+
+/* How hard a shot lands, by who fired and who was hit (the five-tier
+   ladder in .claude/skills/immersive-3d-games): a miss is a splash; a
+   hit is a medium beat - heavier when it is your ship; a sinking is a
+   large one with a title card; the shot that ends the match adds slow
+   motion. "You hit them" and "you were hit" never share a buzz. */
+function shotImpact(lm: GL, me: string, target: string, shipName: string, final: boolean): Impact {
+  const meL = (me || "").toLowerCase();
+  const mine = String(lm.by || "").toLowerCase() === meL;
+  const atMe = target.toLowerCase() === meL;
+  if (lm.result !== "hit") return { sound: "splash", trauma: atMe ? 0.12 : 0.06, buzz: atMe ? BUZZ.nearMiss : undefined };
+  if (!lm.sunk)
+    return atMe
+      ? { trauma: 0.45, stop: 110, pulse: 0.6, flash: "#ff4a3c", flashA: 0.22, buzz: BUZZ.hitYou, sound: "boom" }
+      : { trauma: mine ? 0.35 : 0.25, stop: mine ? 100 : 70, pulse: 0.55, buzz: mine ? BUZZ.scored : undefined, sound: "boom" };
+  const slow = final ? { slow: 1, stop: 260 } : {};
+  if (atMe)
+    return {
+      trauma: 0.85,
+      stop: 240,
+      slow: 0.8,
+      pulse: 1,
+      flash: "#ff3344",
+      flashA: 0.45,
+      buzz: final ? BUZZ.lostMatch : BUZZ.lostOne,
+      sound: "bigboom",
+      title: { big: "Your " + shipName + " is down", small: "Sunk by " + lm.by, tone: "bad" },
+      ...slow,
+    };
+  if (mine)
+    return {
+      trauma: 0.6,
+      stop: 200,
+      pulse: 0.9,
+      flash: "#ffd36b",
+      flashA: 0.3,
+      buzz: final ? BUZZ.wonMatch : BUZZ.sankTheirs,
+      sound: "bigboom",
+      title: { big: shipName + " sunk", small: target + "'s fleet is burning", tone: "good" },
+      ...slow,
+    };
+  return { trauma: 0.5, stop: 180, pulse: 0.8, sound: "bigboom", title: { big: target + "'s " + shipName + " sunk", tone: "neutral" }, ...slow };
+}
+
 function Scene({
   g,
   tiles,
@@ -1009,7 +1091,13 @@ function Scene({
   homeRef,
   onReady,
   q,
+  me,
+  intro,
+  ready,
 }: {
+  me: string;
+  intro: boolean;
+  ready: boolean;
   g: GL;
   tiles: TileT[];
   foeName: string | null;
@@ -1047,7 +1135,10 @@ function Scene({
   const lm = g.last_move as GL;
   const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const seenLm = useRef<string | null>(null);
+  const seenStatus = useRef<string | null>(null);
   const [anim, setAnim] = useState<Anim | null>(null);
+  const [sinks, setSinks] = useState<Sink[]>([]);
+  const juice = useJuice();
 
   useEffect(() => {
     const fresh: Record<string, number> = {};
@@ -1060,17 +1151,47 @@ function Scene({
       }
     });
     if (any) setFreshWrecks((f) => ({ ...f, ...fresh }));
+    const status = String(g.status || "");
     if (seenLm.current === null) {
       seenLm.current = lmKey;
+      seenStatus.current = status;
       return;
     }
+    const ended = status === "finished" && seenStatus.current !== "finished";
+    seenStatus.current = status;
+    let shot = false;
     if (lmKey && lmKey !== seenLm.current) {
       seenLm.current = lmKey;
+      shot = true;
+      const target = (g.players || []).map((p: GL) => p.name).filter((n: string) => n !== lm.by)[0] || "";
       const tt = tiles.filter((t) => t.name !== lm.by)[0];
+      const ship = tt && lm.sunk ? tt.ships.filter((sh) => sh.cells.includes(lm.cell))[0] : undefined;
+      const imp = shotImpact(lm, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm.sunk ? SHIP_NAME(lm.sunk, 0) : "", ended);
+      let sink: Sink | null = null;
+      if (tt && ship) {
+        const pts = ship.cells.map((c) => cellLocal(c, w, h));
+        const xs = pts.map((p) => p.x);
+        const zs = pts.map((p) => p.z);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+        sink = { id: lmKey, at: [tt.cx + cx, 0.1, cz], box: [Math.max(...xs) - Math.min(...xs) + 0.7, 0.7, Math.max(...zs) - Math.min(...zs) + 0.7] };
+      }
       if (tt && !still) {
         const loc = cellLocal(lm.cell, w, h);
-        setAnim({ id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk });
-      }
+        sfx("whistle");
+        setAnim({ id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink });
+      } else juice.hit(imp);
+    }
+    if (ended) {
+      const winner = String(g.winner || "");
+      const meL = (me || "").toLowerCase();
+      const delay = shot && !still ? 2600 : 0;
+      const players = (g.players || []).map((p: GL) => String(p.name).toLowerCase());
+      if (winner && winner.toLowerCase() === meL)
+        juice.hit({ sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Enemy fleet destroyed", tone: "good" }, titleDelay: delay });
+      else if (winner && players.includes(meL))
+        juice.hit({ sound: "lose", soundDelay: delay / 1000, title: { big: "Fleet lost", small: winner + " wins", tone: "bad" }, titleDelay: delay });
+      else if (winner) juice.hit({ sound: "win", soundDelay: delay / 1000, title: { big: winner + " wins", small: "Fleet destroyed", tone: "neutral" }, titleDelay: delay });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g, tiles]);
@@ -1109,8 +1230,10 @@ function Scene({
     <>
       <FirstFrame onReady={onReady} />
       <Ticker fps={q.ambientFps} />
-      <fog attach="fog" args={[SEA, cd * 1.9, cd * 4.2]} />
-      <color attach="background" args={[SEA]} />
+      <JuiceRig ctl={ctl} />
+      <fog attach="fog" args={[BS_FOG, cd * 1.9, cd * 4.6]} />
+      <color attach="background" args={[BS_FOG]} />
+      <SkyDome spec={BS_SKY} />
       <hemisphereLight args={["#8fb8d8", "#0a0f14", 0.85]} />
       <directionalLight position={[14, 20, 8]} intensity={1.45} color="#cfe6ff" />
       <directionalLight position={[-12, 9, -10]} intensity={0.4} color="#7fa8cc" />
@@ -1118,12 +1241,13 @@ function Scene({
       <CameraControls ref={ctl} makeDefault minDistance={6} maxDistance={80} maxPolarAngle={1.38} />
       <TouchControls ctl={ctl} />
       <Framer home={home} ctl={ctl} homeRef={homeRef} />
+      <Intro ctl={ctl} homeRef={homeRef} enabled={intro && !still} ready={ready} />
       <group ref={world}>
         {/* one sea under the tiles: reflective on desktop; plain on
             touch devices, where the reflection (a second render of the
             whole scene) costs most */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-          <planeGeometry args={[130, 130]} />
+          <planeGeometry args={[400, 400]} />
           {q.lite ? (
             <meshStandardMaterial color="#070d16" roughness={0.6} metalness={0.5} />
           ) : (
@@ -1286,15 +1410,23 @@ function Scene({
               return <PendingMark x={aimTile.cx + loc.x} z={loc.z} />;
             })()
           : null}
-        {anim && !still ? <ShotFx anim={anim} world={world} onDone={() => setAnim(null)} /> : null}
+        {anim && !still ? (
+          <ShotFx
+            anim={anim}
+            onImpact={() => {
+              juice.hit(anim.impact);
+              const sk = anim.sink;
+              if (sk) setSinks((l) => [...l, sk]);
+            }}
+            onDone={() => setAnim(null)}
+          />
+        ) : null}
+        {sinks.map((sk) => (
+          <SinkFx key={sk.id} sink={sk} lite={q.lite} onDone={() => setSinks((l) => l.filter((x) => x.id !== sk.id))} />
+        ))}
       </group>
       <Sparkles count={50} scale={[30, 4, 14]} position={[0, 2.4, 0]} size={1.5} speed={still ? 0 : 0.22} opacity={0.45} color="#7dd3fc" />
-      <EffectComposer multisampling={q.msaa}>
-        <>
-          <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.72} luminanceSmoothing={0.3} />
-          <Vignette offset={0.2} darkness={0.55} />
-        </>
-      </EffectComposer>
+      <ArenaPost q={q} bloom={1.15} threshold={0.72} smoothing={0.3} vignette={0.55} />
     </>
   );
 }
@@ -1338,6 +1470,9 @@ export default function BsArena3D({
 }) {
   const still = useReducedMotion();
   const q = useQuality(still);
+  const juice = useJuiceStore(still);
+  const firstVisit = useFirstVisit("bs:" + String(g.id || ""));
+  const [ready, setReady] = useState(false);
   const aimMode = q.lite;
   const w = g.w || 10;
   const h = g.h || 10;
@@ -1368,7 +1503,24 @@ export default function BsArena3D({
      in. A tap on the switch overrides that until the turn changes. */
   const lm = g.last_move as GL;
   const lastShotIdx = lm ? Math.max(0, tiles.findIndex((t) => t.name !== lm.by)) : 0;
-  const autoIdx = player ? (canFire ? 1 : 0) : lastShotIdx;
+  /* A new shot holds the view on the ocean it landed in for a few
+     seconds - you watch your shell land (or theirs hit you) before the
+     view swaps to whichever ocean the turn needs. Derived during
+     render, so the scene sees the right ocean on the shot's frame. */
+  const lmK = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
+  const [prevLm, setPrevLm] = useState(lmK);
+  const [landing, setLanding] = useState<number | null>(null);
+  if (prevLm !== lmK) {
+    setPrevLm(lmK);
+    if (lmK) setLanding(lastShotIdx);
+  }
+  useEffect(() => {
+    if (landing === null) return;
+    // long enough for the shell, a sinking and its slow motion
+    const t = setTimeout(() => setLanding(null), 4600);
+    return () => clearTimeout(t);
+  }, [landing, lmK]);
+  const autoIdx = landing !== null ? landing : player ? (canFire ? 1 : 0) : lastShotIdx;
   const [manualIdx, setManualIdx] = useState<number | null>(null);
   useEffect(() => {
     setManualIdx(null);
@@ -1465,6 +1617,7 @@ export default function BsArena3D({
   };
 
   const spectatorLabel = "Battleship, 3D view of " + tiles.map((t) => t.name + "'s").join(" and ") + " waters.";
+  const intro = firstVisit ? { title: "Battleship", sub: tiles.map((t) => t.name).join(" vs ") || "Fleets at sea", color: "#2dd4bf" } : null;
   const overlay = (
     <>
       {single && tiles.length > 1 ? (
@@ -1497,13 +1650,16 @@ export default function BsArena3D({
           {say}
         </div>
       ) : null}
+      <ImpactLayer juice={juice} intro={intro} ready={ready} />
     </>
   );
   return (
+    <JuiceProvider juice={juice}>
     <ArenaFrame
       onReset={() => goHome(ctl, homeRef.current || first, !still)}
       onSize={(width) => setHostW(width)}
       overlay={overlay}
+      tools={<SoundToggle />}
       frameProps={
         foe
           ? {
@@ -1542,11 +1698,18 @@ export default function BsArena3D({
             ctl={ctl}
             home={home}
             homeRef={homeRef}
-            onReady={onReady}
+            onReady={() => {
+              setReady(true);
+              if (onReady) onReady();
+            }}
             q={q}
+            me={me}
+            intro={!!intro}
+            ready={ready}
           />
         </Still.Provider>
       </Canvas>
     </ArenaFrame>
+    </JuiceProvider>
   );
 }

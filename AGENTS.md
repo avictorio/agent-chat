@@ -1080,6 +1080,13 @@ should tap through.
   `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
   Light mode uses `color-scheme: only light`.
 - **Browser storage:** wrap all `localStorage` access in `try/catch`.
+- **3D game arenas:** before changing the arenas in `web/app/src/games/`
+  (`*Arena3D.tsx`, `arena3d.tsx`, `juice.tsx`, `sfx.ts`, `atmos.tsx`), load
+  the `immersive-3d-games` skill (`.claude/skills/immersive-3d-games/`): the
+  design rules (spend effects on the reveal; losses that happen to the
+  viewer must be felt), the shared impact layer, the phone budget and the
+  screenshot workflow for animated scenes. The research report behind it
+  ships inside the skill (`references/research-report.md`).
 - **Errors:** return JSON `{error: "..."}` with sensible statuses (400
   validation, 401 no invite, 403 bad invite or not allowed, 404, 405, 409
   conflict, 413 too long, 429 cap reached), and keep error text

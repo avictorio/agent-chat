@@ -1,7 +1,6 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls, MeshReflectorMaterial, Sparkles } from "@react-three/drei";
-import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { Color } from "three";
 import type * as THREE from "three";
 import {
@@ -17,6 +16,9 @@ import {
   type Ctl,
   type Home,
 } from "./arena3d";
+import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuiceStore, type Juice } from "./juice";
+import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
+import { BUZZ } from "./sfx";
 
 // Light Cycles in 3D — the R3F spike (2026-11-12). Renders the same
 // full game state the 2D SVG board consumes (GET /games/:id):
@@ -300,9 +302,125 @@ function lcHome(w: number, h: number, aspect: number, width: number): Home {
   return { pos: [0, cd * 0.74, cd * 0.9], fov: narrow ? 60 : 40 };
 }
 
-export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: number; onReady?: () => void }) {
+/* The Light Cycles world (2026-11-13): a synthwave night. A striped
+   sun sits on the far horizon behind the board, stars and faint
+   aurora above; the board is one lit patch of an endless grid that
+   runs off to the horizon in violet, with a slow pulse rolling out
+   from the centre. The fog is the horizon's colour, so the floor
+   melts into the sky. */
+const LC_FOG = "#0e0820";
+const LC_SKY: SkySpec = {
+  top: "#010207",
+  mid: "#05081a",
+  horizon: LC_FOG,
+  ground: "#020308",
+  glow: "#ff2d95",
+  glowAmt: 0.32,
+  stars: 0.07,
+  aurora: 0.28,
+  auroraA: "#22d3ee",
+  auroraB: "#a855f7",
+  sun: { size: 0.3, az: Math.PI, el: 0.05, a: "#ffd36b", b: "#ff2d95" },
+};
+
+type Fx = { id: string; at: [number, number, number]; hex: string; mine: boolean };
+
+/* A rider derezzing: the bike comes apart into voxels of its colour,
+   a ring races out over the floor and a column of light marks the
+   spot. Removed when the voxels are gone. */
+function Derez({ fx, lite, onDone }: { fx: Fx; lite: boolean; onDone: () => void }) {
+  return (
+    <group>
+      <Burst at={fx.at} hex={fx.hex} count={lite ? 48 : 90} box={[1.9, 1.1, 0.6]} power={fx.mine ? 3.2 : 2.6} dur={1.8} onDone={onDone} />
+      <Shockwave at={[fx.at[0], 0.04, fx.at[2]]} hex={fx.hex} radius={fx.mine ? 11 : 7} dur={1.1} />
+      <LightPillar at={fx.at} hex={fx.hex} height={fx.mine ? 22 : 14} dur={1.7} />
+    </group>
+  );
+}
+
+/* Big moments, off state diffs (never for the state at open): a rider
+   falls - yours lands on every channel, slow motion included; anyone
+   else's is a medium beat. The match ending names the winner. */
+function useLcMoments(g: any, me: string, juice: Juice, cellAt: (i: number) => [number, number, number] | null) {
+  const prev = useRef<{ alive: Record<string, boolean>; status: string } | null>(null);
+  const [fx, setFx] = useState<Fx[]>([]);
+  const [say, setSay] = useState("");
+  useEffect(() => {
+    const players: any[] = (g && g.players) || [];
+    const alive: Record<string, boolean> = {};
+    players.forEach((p) => (alive[p.name] = !!p.alive));
+    const status = String((g && g.status) || "");
+    const was = prev.current;
+    prev.current = { alive, status };
+    if (!was) return;
+    const meKey = (me || "").toLowerCase();
+    const fallen = players.map((p, i) => ({ p, i })).filter(({ p }) => was.alive[p.name] && !alive[p.name]);
+    const add: Fx[] = [];
+    const lines: string[] = [];
+    fallen.forEach(({ p, i }) => {
+      const at = cellAt(i);
+      const mine = String(p.name).toLowerCase() === meKey;
+      if (at) add.push({ id: (g.tick || 0) + ":" + p.name, at, hex: p.hex, mine });
+      lines.push(mine ? "You crashed - you're out." : p.name + " crashed.");
+    });
+    const mineFell = fallen.some(({ p }) => String(p.name).toLowerCase() === meKey);
+    if (mineFell) {
+      juice.hit({
+        trauma: 0.9,
+        stop: 230,
+        slow: 1,
+        pulse: 1,
+        flash: fallen.find(({ p }) => String(p.name).toLowerCase() === meKey)!.p.hex,
+        flashA: 0.55,
+        buzz: BUZZ.lostOne,
+        sound: ["derez", "lose"],
+        title: { big: "Derezzed", small: "You're out of the race", tone: "bad" },
+      });
+    } else if (fallen.length) {
+      const first = fallen[0]!.p;
+      juice.hit({
+        trauma: 0.4,
+        stop: 110,
+        pulse: 0.7,
+        sound: "derez",
+        title: { big: fallen.length > 1 ? "Derezzed ×" + fallen.length : first.name + " derezzed", tone: "neutral", hex: first.hex },
+      });
+    }
+    if (status === "finished" && was.status !== "finished") {
+      const winner = g.winner ? String(g.winner) : "";
+      const wp = players.find((p) => p.name === winner);
+      const iWon = !!winner && winner.toLowerCase() === meKey;
+      const delay = fallen.length ? 1500 : 0;
+      if (iWon) {
+        juice.hit({ pulse: 0.8, buzz: BUZZ.wonMatch, sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Last rider standing", tone: "good" }, titleDelay: delay });
+        const wi = players.findIndex((p) => p.name === winner);
+        const at = wi >= 0 ? cellAt(wi) : null;
+        if (at) add.push({ id: "win:" + winner, at, hex: "#ffd36b", mine: false });
+      } else if (winner) {
+        const inIt = players.some((p) => String(p.name).toLowerCase() === meKey);
+        juice.hit({
+          title: { big: winner + " wins", small: inIt ? "Better luck next race" : undefined, tone: inIt ? "bad" : "neutral", hex: inIt ? undefined : wp ? wp.hex : undefined },
+          titleDelay: delay,
+          sound: inIt ? "lose" : "win",
+          soundDelay: delay / 1000,
+          buzz: inIt && !mineFell ? BUZZ.lostMatch : undefined,
+        });
+      } else juice.hit({ title: { big: "Draw", small: "No rider survived", tone: "neutral" }, titleDelay: delay });
+      lines.push(winner ? (iWon ? "You won the match." : winner + " won the match.") : "The match ended in a draw.");
+    }
+    if (add.length) setFx((f) => [...f, ...add]);
+    if (lines.length) setSay(lines.join(" "));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [g]);
+  return { fx, done: (id: string) => setFx((f) => f.filter((x) => x.id !== id)), say };
+}
+
+export default function LcArena3D({ g, me = "", aspect, onReady }: { g: any; me?: string; aspect?: number; onReady?: () => void }) {
   const still = useReducedMotion();
   const q = useQuality(still);
+  const juice = useJuiceStore(still);
+  const first_ = useFirstVisit("lc:" + String((g && g.id) || ""));
+  const [ready, setReady] = useState(false);
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const w = (g && g.w) || 30;
@@ -318,32 +436,63 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
   const dist = Math.max(w, h);
   const home = (a: number, width: number) => lcHome(w, h, a, width);
   const first = home(aspect || 1.4, 9999);
+  const cellAt = (i: number): [number, number, number] | null => {
+    const p = players[i];
+    const cells = byPlayer[i] || [];
+    const last = cells[cells.length - 1];
+    if (last) return [wx(last[0] ?? 0), 0.05, wz(last[1] ?? 0)];
+    if (p && typeof p.x === "number") return [wx(p.x), 0.05, wz(p.y)];
+    return null;
+  };
+  const moments = useLcMoments(g, me, juice, cellAt);
   const label =
     "Light Cycles board, 3D view: " +
     (players.map((p) => p.name + (p.alive ? " riding" : " out")).join(", ") || "no riders") +
     ".";
+  const intro = first_ ? { title: "Light Cycles", sub: players.map((p) => p.name).join(" · ") || "The grid is live", color: "#ff2d95" } : null;
   return (
-    <ArenaFrame onReset={() => goHome(ctl, homeRef.current || first, !still)}>
+    <JuiceProvider juice={juice}>
+    <ArenaFrame
+      onReset={() => goHome(ctl, homeRef.current || first, !still)}
+      tools={<SoundToggle />}
+      overlay={
+        <>
+          <ImpactLayer juice={juice} intro={intro} ready={ready} />
+          <div className="sr-only" aria-live="polite">
+            {moments.say}
+          </div>
+        </>
+      }
+    >
       <Canvas
         role="img"
         aria-label={label}
         frameloop="demand"
         dpr={q.dpr}
         gl={{ antialias: false, powerPreference: "high-performance" }}
-        camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 500 }}
+        camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 800 }}
       >
-        <FirstFrame onReady={onReady} />
+        <FirstFrame
+          onReady={() => {
+            setReady(true);
+            if (onReady) onReady();
+          }}
+        />
         <Ticker fps={q.ambientFps} />
-        <color attach="background" args={["#04060d"]} />
-        <fog attach="fog" args={["#04060d", dist * 2.1, dist * 4.4]} />
+        <JuiceRig ctl={ctl} />
+        <color attach="background" args={[LC_FOG]} />
+        <fog attach="fog" args={[LC_FOG, dist * 2.1, dist * 5]} />
+        <SkyDome spec={LC_SKY} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[w / 2, 18, h / 3]} intensity={0.55} color="#bfe9ff" />
 
         {/* The floor: dark glass over the grid - reflective on
-            desktop; a plain dark floor on touch devices, where the
-            reflection (a second render of the scene) costs most. */}
+            desktop (the sky and riders shine in it); a plain dark
+            floor on touch devices, where the reflection (a second
+            render of the scene) costs most. It runs to the horizon
+            under the endless grid. */}
         <mesh rotation-x={-Math.PI / 2} position={[0, -0.02, 0]}>
-          <planeGeometry args={[w + 16, h + 16]} />
+          <planeGeometry args={[400, 400]} />
           {q.lite ? (
             <meshStandardMaterial color="#05080f" roughness={0.55} metalness={0.4} />
           ) : (
@@ -362,8 +511,8 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
           />
           )}
         </mesh>
+        <HorizonGrid half={[w / 2, h / 2]} off={[(w / 2) % 1, (h / 2) % 1]} cell={2} a="#6d28d9" b="#db2777" fade={30} line={0.16} y={-0.01} />
         <BoardGrid w={w} h={h} />
-
         {/* Trails: continuous light ribbons, one per rider. */}
         {players.map((p, i) => {
           const live = !!p.alive && typeof p.x === "number";
@@ -400,19 +549,20 @@ export default function LcArena3D({ g, aspect, onReady }: { g: any; aspect?: num
           );
         })}
 
+        {moments.fx.map((f) => (
+          <Derez key={f.id} fx={f} lite={q.lite} onDone={() => moments.done(f.id)} />
+        ))}
+
         <Sparkles count={70} scale={[w + 8, 5, h + 8]} position={[0, 2.6, 0]} size={2.2} speed={still ? 0 : 0.25} opacity={0.55} color="#7dd3fc" />
 
         <CameraControls ref={ctl} makeDefault minDistance={7} maxDistance={140} maxPolarAngle={Math.PI / 2.15} />
         <TouchControls ctl={ctl} />
         <Framer home={home} ctl={ctl} homeRef={homeRef} />
+        <Intro ctl={ctl} homeRef={homeRef} enabled={!!intro && !still} ready={ready} />
 
-        <EffectComposer multisampling={q.msaa}>
-          <>
-            <Bloom mipmapBlur intensity={1.25} luminanceThreshold={1} luminanceSmoothing={0.25} />
-            <Vignette offset={0.2} darkness={0.58} />
-          </>
-        </EffectComposer>
+        <ArenaPost q={q} bloom={1.25} threshold={1} vignette={0.58} />
       </Canvas>
     </ArenaFrame>
+    </JuiceProvider>
   );
 }

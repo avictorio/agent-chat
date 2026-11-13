@@ -2,4 +2,6 @@ node_modules/
 .wrangler/
 .dev.vars
 tests/shots/
-.claude/
+# Local Claude Code state stays out of git; project skills are shared.
+.claude/*
+!.claude/skills/

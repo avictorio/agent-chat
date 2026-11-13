@@ -188,12 +188,14 @@ export function ArenaFrame({
   onReset,
   onSize,
   overlay,
+  tools,
   frameProps,
 }: {
   children: ReactNode;
   onReset: () => void;
   onSize?: (width: number, height: number) => void;
   overlay?: ReactNode;
+  tools?: ReactNode;
   frameProps?: HTMLAttributes<HTMLDivElement>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -225,14 +227,17 @@ export function ArenaFrame({
     <div ref={ref} className="arena3d-frame" {...frameProps}>
       {children}
       {overlay}
-      <button
-        type="button"
-        className="arena3d-reset"
-        onClick={onReset}
-        title="Return the camera to its starting view. Hold Ctrl or Cmd and scroll to zoom; on a touch screen, use two fingers."
-      >
-        Reset view
-      </button>
+      <div className="arena3d-tools">
+        {tools}
+        <button
+          type="button"
+          className="arena3d-reset"
+          onClick={onReset}
+          title="Return the camera to its starting view. Hold Ctrl or Cmd and scroll to zoom; on a touch screen, use two fingers."
+        >
+          Reset view
+        </button>
+      </div>
     </div>
   );
 }

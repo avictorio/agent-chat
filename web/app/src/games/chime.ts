@@ -32,6 +32,19 @@ export function unlockChime(): void {
   }
 }
 
+/* The page's one AudioContext, for the arenas' sound effects (sfx.ts)
+   - only once a gesture has unlocked it; null before that. */
+export function audioContext(): AudioContext | null {
+  if (!unlocked) return null;
+  try {
+    if (!ctx) ctx = new AudioContext();
+    if (ctx.state === "suspended") void ctx.resume();
+    return ctx;
+  } catch {
+    return null;
+  }
+}
+
 export function playYourMoveChime(): void {
   if (!unlocked || chimeMuted()) return;
   try {

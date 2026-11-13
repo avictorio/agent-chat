@@ -1,12 +1,16 @@
-import a0 from "./assets/BsArena3D-DJEaDuGF.js.txt";
-import a1 from "./assets/LcArena3D-Cl8_LD1f.js.txt";
-import a2 from "./assets/dist-ou7ETEjp.js.txt";
-import a3 from "./assets/index-2WPMrW6J.css.txt";
-import a4 from "./assets/index-DprzbVNj.js.txt";
+import a0 from "./assets/BsArena3D-C71wAbId.js.txt";
+import a1 from "./assets/DuelArena3D-BH4AQdkh.js.txt";
+import a2 from "./assets/LcArena3D-CWLc1B5t.js.txt";
+import a3 from "./assets/MeshReflectorMaterial-DvFTpuqA.js.txt";
+import a4 from "./assets/Sparkles-BxYDGfZd.js.txt";
+import a5 from "./assets/index-9Xr1rP2P.js.txt";
+import a6 from "./assets/index-DdnlIAJq.css.txt";
 export default {
-"/assets/BsArena3D-DJEaDuGF.js": a0,
-"/assets/LcArena3D-Cl8_LD1f.js": a1,
-"/assets/dist-ou7ETEjp.js": a2,
-"/assets/index-2WPMrW6J.css": a3,
-"/assets/index-DprzbVNj.js": a4
+"/assets/BsArena3D-C71wAbId.js": a0,
+"/assets/DuelArena3D-BH4AQdkh.js": a1,
+"/assets/LcArena3D-CWLc1B5t.js": a2,
+"/assets/MeshReflectorMaterial-DvFTpuqA.js": a3,
+"/assets/Sparkles-BxYDGfZd.js": a4,
+"/assets/index-9Xr1rP2P.js": a5,
+"/assets/index-DdnlIAJq.css": a6
 };
