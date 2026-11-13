@@ -440,6 +440,27 @@ let FAILURES = 0;
     await shot(page, 'bs-3d-phone-aimed.png');
     return { swap, fired: moves[0] };
   });
+  // Touch screens: the page owns touch until Move is on (two-finger camera
+  // gestures were unreliable - a drifting first finger handed the gesture to
+  // the browser, which scrolled or, on iOS, zoomed the page).
+  await run('arena-3d-phone-move-mode', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.tap('.game-card');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
+    const ta = () => page.$eval('#viewer .lc-3d-host canvas', (e) => getComputedStyle(e).touchAction);
+    const btn = () => page.$eval('#viewer .arena3d-move', (e) => e.getAttribute('aria-pressed') + ' ' + e.textContent.trim());
+    const before = { btn: await btn(), ta: await ta() };
+    if (!/^false .*Move$/.test(before.btn) || before.ta !== 'pan-y') throw new Error('Move should start off with the page owning touch: ' + JSON.stringify(before));
+    await page.tap('#viewer .arena3d-move');
+    await page.waitForTimeout(200);
+    const on = { btn: await btn(), ta: await ta() };
+    if (!/^true .*Done$/.test(on.btn) || on.ta !== 'none') throw new Error('Move should hand touch to the scene: ' + JSON.stringify(on));
+    await page.tap('#viewer .arena3d-move');
+    await page.waitForTimeout(200);
+    const off = { btn: await btn(), ta: await ta() };
+    if (!/^false/.test(off.btn) || off.ta !== 'pan-y') throw new Error('Done should hand touch back to the page: ' + JSON.stringify(off));
+    return { before, on, off };
+  });
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });

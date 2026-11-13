@@ -17,14 +17,23 @@
      so a host that changes shape (a phone rotating) kept the first
      framing and could clip the board. Framer re-applies the home
      framing when the host's shape moves it by more than a little.
-   - TouchControls: one finger scrolls the page (the canvas is
-     touch-action pan-y, see styles.css) and taps the board; two
-     fingers pinch to zoom and turn the view.
+   - TouchControls and the Move mode (2026-11-13): on a touch screen
+     the page owns the touch by default - one finger scrolls past the
+     arena (the canvas is touch-action pan-y, see styles.css) and taps
+     the board. The old two-finger turn/zoom only worked when both
+     fingers landed at once: a first finger that drifted handed the
+     gesture to the browser (it scrolled, and iOS zoomed the page). So
+     the camera moves only in Move mode, entered from a button on the
+     frame: one finger turns the view, two pinch to zoom and drag to
+     pan, the canvas is touch-action none and iOS's page zoom is held
+     off. Done hands touch back to the page. A two-finger touch outside
+     Move mode shows a hint pointing at the button. The mouse keeps its
+     drag-to-orbit.
    - ArenaFrame: the box around a Canvas. The mouse wheel scrolls the
      page unless Ctrl or Cmd is held (then the scene zooms - a
      trackpad pinch arrives as Ctrl+wheel), a Reset view button
      returns the camera home, and scenes can lay controls over it. */
-import { useEffect, useRef, useState, type ComponentRef, type HTMLAttributes, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ComponentRef, type HTMLAttributes, type ReactNode, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { CameraControls } from "@react-three/drei";
 import type { PerspectiveCamera } from "three";
@@ -168,18 +177,22 @@ export function Framer({
   return null;
 }
 
-/* One finger never orbits (it scrolls the page or taps the board);
-   two fingers pinch to zoom and twist/drag to turn the view. The
-   mouse keeps its drag-to-orbit. */
+/* Move mode, provided by ArenaFrame (the Canvas bridges context). */
+const MoveCtx = createContext(false);
+
+/* Touch: outside Move mode the camera ignores touch (the page scrolls,
+   taps reach the board); in Move mode one finger turns the view and two
+   pinch to zoom and drag to pan. The mouse keeps its drag-to-orbit. */
 export function TouchControls({ ctl }: { ctl: RefObject<Ctl | null> }) {
+  const move = useContext(MoveCtx);
   useEffect(() => {
     const c = ctl.current as unknown as { touches: { one: number; two: number; three: number }; constructor: { ACTION: Record<string, number> } } | null;
     if (!c) return;
     const A = c.constructor.ACTION;
-    c.touches.one = A.NONE ?? 0;
-    c.touches.two = A.TOUCH_DOLLY_ROTATE ?? c.touches.two;
-    c.touches.three = A.NONE ?? 0;
-  }, [ctl]);
+    c.touches.one = move ? (A.TOUCH_ROTATE ?? c.touches.one) : (A.NONE ?? 0);
+    c.touches.two = move ? (A.TOUCH_DOLLY_TRUCK ?? c.touches.two) : (A.NONE ?? 0);
+    c.touches.three = move ? (A.TOUCH_TRUCK ?? c.touches.three) : (A.NONE ?? 0);
+  }, [ctl, move]);
   return null;
 }
 
@@ -201,6 +214,41 @@ export function ArenaFrame({
   const ref = useRef<HTMLDivElement>(null);
   const sizeCb = useRef(onSize);
   sizeCb.current = onSize;
+  const coarse = useCoarsePointer();
+  const [move, setMove] = useState(false);
+  const [hint, setHint] = useState(false);
+  /* Move mode on touch: hold off the page's own pinch-zoom and scroll
+     while the arena has the gesture (iOS needs its gesture events and
+     a non-passive touchmove on top of touch-action none). Outside it, a
+     two-finger touch on the arena points at the Move button. */
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !coarse) return;
+    const stop = (e: Event) => e.preventDefault();
+    const tm = (e: TouchEvent) => {
+      if (move && e.cancelable) e.preventDefault();
+    };
+    const ts = (e: TouchEvent) => {
+      if (!move && e.touches.length >= 2) setHint(true);
+    };
+    node.addEventListener("touchstart", ts, { passive: true });
+    node.addEventListener("touchmove", tm, { passive: false });
+    if (move) {
+      node.addEventListener("gesturestart", stop);
+      node.addEventListener("gesturechange", stop);
+    }
+    return () => {
+      node.removeEventListener("touchstart", ts);
+      node.removeEventListener("touchmove", tm);
+      node.removeEventListener("gesturestart", stop);
+      node.removeEventListener("gesturechange", stop);
+    };
+  }, [coarse, move]);
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => setHint(false), 2600);
+    return () => clearTimeout(t);
+  }, [hint]);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
@@ -224,9 +272,28 @@ export function ArenaFrame({
     };
   }, []);
   return (
-    <div ref={ref} className="arena3d-frame" {...frameProps}>
-      {children}
+    <div ref={ref} {...frameProps} className={"arena3d-frame" + (move ? " moving" : "")}>
+      <MoveCtx.Provider value={move}>{children}</MoveCtx.Provider>
       {overlay}
+      {coarse ? (
+        <button
+          type="button"
+          className={"arena3d-move" + (move ? " on" : "")}
+          aria-pressed={move}
+          title={move ? "Done moving: one finger scrolls the page again" : "Move the view: one finger turns it, two fingers zoom and pan"}
+          onClick={() => {
+            setMove((m) => !m);
+            setHint(false);
+          }}
+        >
+          {move ? "✓ Done" : "✥ Move"}
+        </button>
+      ) : null}
+      {hint && !move ? (
+        <div className="arena3d-movehint" role="status">
+          Tap ✥ Move to turn and zoom the view
+        </div>
+      ) : null}
       <div className="arena3d-tools">
         {tools}
         <button

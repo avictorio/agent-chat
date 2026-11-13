@@ -383,6 +383,12 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
    touch-action: none inline on the scene's container, which made a
    swipe on the board tip the camera and trap the page. */
 .arena3d-frame > div, .arena3d-frame canvas { touch-action: pan-y !important; }
+/* Move mode (arena3d.tsx): the arena owns every touch. */
+.arena3d-frame.moving > div, .arena3d-frame.moving canvas { touch-action: none !important; }
+.arena3d-frame.moving::after { content: ""; position: absolute; inset: 0; border: 2px solid rgba(var(--ga), .8); border-radius: inherit; pointer-events: none; }
+.arena3d-move { position: absolute; left: 8px; bottom: 10px; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(var(--ga), .45); background: rgba(4, 8, 14, .78); color: #c7eefa; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.arena3d-move.on { background: rgba(var(--ga), .9); color: #03121a; border-color: transparent; }
+.arena3d-movehint { position: absolute; left: 50%; top: 48px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 6px 12px; border-radius: 999px; background: rgba(4, 8, 14, .82); color: #c7eefa; font-size: 12.5px; text-align: center; pointer-events: none; }
 .arena3d-swap { position: absolute; top: 8px; left: 8px; display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(4, 8, 14, .72); border: 1px solid rgba(var(--ga), .3); }
 .arena3d-swap button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #8fb8c9; font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 11px; min-height: 32px; border-radius: 999px; cursor: pointer; }
 .arena3d-swap button.on { background: rgba(var(--ga), .18); color: #e0faff; }
