@@ -189,8 +189,8 @@ function hullTexture(): CanvasTexture {
     const H = 256;
     const vy = (y: number) => (1 - (y - V_LO) / V_SPAN) * H; // waterline-relative y -> canvas row
     const g = x.createLinearGradient(0, 0, 0, vy(0));
-    g.addColorStop(0, "#a3b0bb");
-    g.addColorStop(1, "#76838f");
+    g.addColorStop(0, "#d3d9de");
+    g.addColorStop(1, "#a7b1ba");
     x.fillStyle = g;
     x.fillRect(0, 0, 1024, vy(0));
     // plating: strakes and frames
@@ -223,20 +223,20 @@ function deckTexture(kind: "teak" | "grey" | "flight" | "sub"): CanvasTexture {
   if (TEX[kind]) return TEX[kind]!;
   const t = canvasTex(1024, 256, (x) => {
     if (kind === "teak") {
-      x.fillStyle = "#8a7457";
+      x.fillStyle = "#b0916b";
       x.fillRect(0, 0, 1024, 256);
       for (let r = 0; r < 256; r += 9) {
-        x.fillStyle = r % 18 ? "#7b664c" : "#94805f";
+        x.fillStyle = r % 18 ? "#a2845f" : "#bb9c74";
         x.globalAlpha = 0.5;
         x.fillRect(0, r, 1024, 8);
         x.globalAlpha = 0.6;
-        x.fillStyle = "#3d3326";
+        x.fillStyle = "#5a4836";
         x.fillRect(0, r + 8, 1024, 1);
         for (let c = rand() * 120; c < 1024; c += 90 + rand() * 80) x.fillRect(c, r, 1, 8);
       }
       x.globalAlpha = 1;
     } else if (kind === "grey" || kind === "sub") {
-      x.fillStyle = kind === "sub" ? "#22282e" : "#535c64";
+      x.fillStyle = kind === "sub" ? "#3f474f" : "#7d868e";
       x.fillRect(0, 0, 1024, 256);
       for (let i = 0; i < 4000; i++) {
         x.globalAlpha = 0.08;
@@ -261,7 +261,7 @@ function deckTexture(kind: "teak" | "grey" | "flight" | "sub"): CanvasTexture {
     } else {
       // the flight deck: dark non-skid, centreline, edge lines, the
       // angled landing area and its markings
-      x.fillStyle = "#2c3137";
+      x.fillStyle = "#4b5259";
       x.fillRect(0, 0, 1024, 256);
       for (let i = 0; i < 5000; i++) {
         x.globalAlpha = 0.07;
@@ -616,10 +616,11 @@ export type ShipMats = { hull: MeshStandardMaterial; deck: MeshStandardMaterial;
    mid-sinking); hull and deck draw both faces so the break shows the
    inside of the hull, not a hole through it. */
 export function shipMaterials(geo: ShipGeo, hex: string, dmg: Damage, clip?: Plane[]): ShipMats {
-  const hull = new MeshStandardMaterial({ map: geo.sub ? null : hullTexture(), color: geo.sub ? "#2a3138" : "#ffffff", metalness: 0.45, roughness: 0.55, side: DoubleSide });
+  // painted steel: barely metallic (metal with nothing to reflect rendered dark)
+  const hull = new MeshStandardMaterial({ map: geo.sub ? null : hullTexture(), color: geo.sub ? "#4b5560" : "#ffffff", metalness: 0.12, roughness: 0.62, side: DoubleSide });
   const deck = new MeshStandardMaterial({ map: deckTexture(geo.deckKind), metalness: 0.05, roughness: 0.85, side: DoubleSide });
-  const steel = new MeshStandardMaterial({ color: geo.sub ? "#39424b" : "#8d99a4", metalness: 0.5, roughness: 0.5 });
-  const dark = new MeshStandardMaterial({ color: "#1d2329", metalness: 0.6, roughness: 0.45 });
+  const steel = new MeshStandardMaterial({ color: geo.sub ? "#5c6670" : "#bcc5cd", metalness: 0.12, roughness: 0.58 });
+  const dark = new MeshStandardMaterial({ color: "#424b54", metalness: 0.2, roughness: 0.5 });
   [hull, deck, steel, dark].forEach((m) => patch(m, dmg, geo.D));
   const rim = new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(hex), emissiveIntensity: 2.2, toneMapped: false });
   const lights = new MeshBasicMaterial({ vertexColors: true, toneMapped: false });

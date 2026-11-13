@@ -1001,43 +1001,39 @@ function buildTiles(g: GL, me: string): TileT[] {
 /* Drifting patches of moonlight on the water - cheap ocean life. */
 /* ---------- the scene ---------- */
 
-/* The Battleship world (2026-11-13): open ocean at night under
-   aurora. Green and violet curtains move slowly over a starfield;
-   the horizon glows sea-green and the fog is that colour, so the
-   water runs out to meet the sky. The reflective sea (desktop)
-   mirrors the aurora. */
-const BS_FOG = "#081723";
+/* The Battleship world (2026-11-13, dusk since the owner found the
+   night fleet too dark - lit from behind, the hulls read as
+   silhouettes): the sun just setting low on the far left horizon, the
+   sky peach at the horizon through lavender to deep blue overhead, the
+   first stars. The fog is the horizon's colour, so the far sea melts
+   into the sky; the water reflects the dusk (desktop: a mirror of the
+   scene) with a golden glitter path toward the sun. */
+const BS_SUN: [number, number, number] = [-0.62, 0.11, -0.78];
+const BS_HAZE = "#e3a27e";
+const BS_FOG = BS_HAZE;
 const BS_SKY: SkySpec = {
-  top: "#010309",
-  mid: "#030c17",
-  horizon: BS_FOG,
-  ground: "#03070c",
-  glow: "#14b8a6",
-  glowAmt: 0.3,
-  stars: 0.09,
-  aurora: 0.6,
-  auroraA: "#2dd4bf",
-  auroraB: "#8b5cf6",
-  moon: { dir: [0.25, 0.47, -0.85], size: 0.045, color: "#e7f0ff" },
+  top: "#18224a",
+  mid: "#5a5b97",
+  horizon: "#e89a6a",
+  ground: "#2a2433",
+  glow: "#ff8a4c",
+  glowAmt: 0.32,
+  stars: 0.03,
+  aurora: 0,
+  moon: { dir: BS_SUN, size: 0.052, color: "#ffd7a0" },
 };
-
-/* The water under that sky: a deep green-black body, crests lit from
-   inside, the aurora in its reflection, and a moon low behind the
-   boards laying a glitter path on the far water. */
-const BS_MOON: [number, number, number] = [0.25, 0.47, -0.85];
-const BS_HAZE = "#0c4650";
 const BS_OCEAN: OceanLook = {
-  deep: "#020b12",
-  scatter: "#0c3c48",
-  horizon: BS_FOG,
-  mid: "#030c17",
-  top: "#010309",
-  glow: "#14b8a6",
-  auroraA: "#2dd4bf",
-  auroraB: "#8b5cf6",
-  aurora: 0.6,
-  moonDir: BS_MOON,
-  moon: "#dbeaff",
+  deep: "#13253a",
+  scatter: "#3b6d84",
+  horizon: "#e89a6a",
+  mid: "#5a5b97",
+  top: "#18224a",
+  glow: "#ff8a4c",
+  auroraA: "#000000",
+  auroraB: "#000000",
+  aurora: 0,
+  moonDir: BS_SUN,
+  moon: "#ffcf8f",
 };
 
 /* How hard a shot lands, by who fired and who was hit (the five-tier
@@ -1246,10 +1242,14 @@ function Scene({
       <fog attach="fog" args={[BS_HAZE, cd * 1.9, cd * 4.6]} />
       <color attach="background" args={[BS_FOG]} />
       <SkyDome spec={BS_SKY} />
-      <hemisphereLight args={["#8fb8d8", "#0a0f14", 0.85]} />
-      <directionalLight position={[14, 20, 8]} intensity={1.45} color="#cfe6ff" />
-      <directionalLight position={[-12, 9, -10]} intensity={0.4} color="#7fa8cc" />
-      <ambientLight intensity={0.3} />
+      {/* dusk light: a cool sky over warm-tinted water, the low sun's
+          warm light raking in from the far left (rim light on the
+          hulls), and a soft front fill so the ships read as painted
+          steel from the player's side, not as silhouettes */}
+      <hemisphereLight args={["#b8c4ee", "#3b3142", 1.25]} />
+      <directionalLight position={[BS_SUN[0] * 30, BS_SUN[1] * 30 + 2, BS_SUN[2] * 30]} intensity={2.2} color="#ffb47a" />
+      <directionalLight position={[14, 16, 12]} intensity={0.9} color="#dfe6ff" />
+      <ambientLight intensity={0.35} />
       <CameraControls ref={ctl} makeDefault minDistance={6} maxDistance={80} maxPolarAngle={1.38} />
       <TouchControls ctl={ctl} />
       <Framer home={home} ctl={ctl} homeRef={homeRef} />
