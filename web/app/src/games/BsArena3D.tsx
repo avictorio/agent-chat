@@ -12,8 +12,9 @@
    never render. Shot animations replay from last_move diffs and are
    presentation only. Mounted by games.ts through a dynamic import so
    three.js stays in the lazy chunk. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
+import { ArenaFrame, FirstFrame, Framer, goHome, useReducedMotion, type Ctl, type Home } from "./arena3d";
 import { CameraControls, MeshReflectorMaterial, Sparkles, Trail } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import {
@@ -34,6 +35,12 @@ type GL = any;
 
 const SEA = "#04070d";
 const GRID_C = "#22d3ee";
+
+/* prefers-reduced-motion, provided inside the Canvas: under it the
+   scene freezes decorative motion (flame flicker, the flickering
+   firelight, pulses, the swell, drifting light, sparkles) and skips
+   the bomb-drop and camera-shake shot animation entirely. */
+const Still = createContext(false);
 
 /* ---------- small helpers ---------- */
 
@@ -84,10 +91,19 @@ function textTexture(text: string, color: string, wide?: boolean): CanvasTexture
   const hit = textTexCache.get(key);
   if (hit) return hit;
   const c = document.createElement("canvas");
-  c.width = wide ? 512 : 96;
+  const font = "700 52px system-ui, sans-serif";
+  let width = 96;
+  if (wide) {
+    // Wide labels size to their text, so a longer title ("Ada's
+    // waters - tap to fire") is not clipped; sprites scale by aspect.
+    const m = c.getContext("2d")!;
+    m.font = font;
+    width = Math.max(192, Math.ceil(m.measureText(text).width + 48));
+  }
+  c.width = width;
   c.height = 96;
   const ctx = c.getContext("2d")!;
-  ctx.font = "700 52px system-ui, sans-serif";
+  ctx.font = font;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.shadowColor = color;
@@ -97,6 +113,11 @@ function textTexture(text: string, color: string, wide?: boolean): CanvasTexture
   const tex = new CanvasTexture(c);
   textTexCache.set(key, tex);
   return tex;
+}
+/* Sprite scale for a text texture at a given world height. */
+function textScale(tex: CanvasTexture, height: number): [number, number, number] {
+  const img = tex.image as { width: number; height: number };
+  return [height * (img.width / img.height), height, 1];
 }
 
 /* ---------- fire: flames + smoke + embers, one animated bundle ---------- */
@@ -115,6 +136,8 @@ function FireFx({
   const smokes = useRef<(GL | null)[]>([]);
   const embers = useRef<Points>(null);
   const lightRef = useRef<GL>(null);
+  const still = useContext(Still);
+  const frozen = useRef(false);
   const seed = useMemo(() => Math.random() * 100, []);
   const emberGeo = useMemo(() => {
     const n = 12;
@@ -127,6 +150,32 @@ function FireFx({
     return { pos, n };
   }, []);
   useFrame((state) => {
+    if (still) {
+      // One settled pose: steady flames, smoke held, no embers, no
+      // flickering firelight (it ran at 13-31 Hz).
+      if (frozen.current) return;
+      frozen.current = true;
+      flames.current.forEach((s, i) => {
+        if (!s) return;
+        s.scale.set(0.55 * scale * (1 - i * 0.16), (0.95 - i * 0.2) * scale, 1);
+        (s.material as SpriteMaterial).opacity = 0.85 - i * 0.22;
+      });
+      smokes.current.forEach((s, i) => {
+        if (!s) return;
+        const p = 0.15 + i * 0.2;
+        s.position.set(p * 0.5, 0.55 + p * 1.7 * scale, 0);
+        const sc = (0.5 + p * 1.5) * scale;
+        s.scale.set(sc, sc, 1);
+        (s.material as SpriteMaterial).opacity = 0.42 * (1 - p);
+      });
+      if (embers.current) embers.current.visible = false;
+      if (lightRef.current) lightRef.current.intensity = 5.2;
+      return;
+    }
+    if (frozen.current) {
+      frozen.current = false;
+      if (embers.current) embers.current.visible = true;
+    }
     const t = state.clock.elapsedTime + seed;
     flames.current.forEach((s, i) => {
       if (!s) return;
@@ -209,9 +258,13 @@ function hullGeometry(len: number, beam: number): ExtrudeGeometry {
   return geo;
 }
 
-const HULL_ALIVE = new Color("#4b5966");
+/* Live steel is lighter than it first shipped (#4b5966): against the
+   night water it measured about 1.2:1, and a captain could barely
+   find their own fleet. The captain-colour footprint under live
+   ships (Scene) carries the rest. */
+const HULL_ALIVE = new Color("#7b8b99");
 const HULL_CHAR = new Color("#131518");
-const DECK_ALIVE = new Color("#3a4550");
+const DECK_ALIVE = new Color("#5d6a76");
 const DECK_CHAR = new Color("#101114");
 
 function Turret({ x, flip }: { x: number; flip?: boolean }) {
@@ -262,12 +315,15 @@ function ShipModel({
   const len = size * 0.94;
   const beam = size === 5 ? 0.88 : size === 2 ? 0.48 : 0.66;
   const hullGeo = useMemo(() => (size === 2 ? null : hullGeometry(len, beam)), [len, beam, size]);
+  const still = useContext(Still);
   useFrame((state, dt) => {
     const grp = group.current;
     if (!grp) return;
     const t = state.clock.elapsedTime;
     const target = sunk ? 1 : 0;
-    if (wreckAt !== undefined && sunk) {
+    if (still) {
+      wreck.current = target;
+    } else if (wreckAt !== undefined && sunk) {
       /* wreckAt is a performance.now() wall stamp taken when the
          sinking first appeared in state: settle over ~2.4 s. */
       const p = Math.min(1, Math.max(0, (performance.now() - wreckAt) / 2400));
@@ -276,7 +332,7 @@ function ShipModel({
       wreck.current += (target - wreck.current) * Math.min(1, dt * 2);
     }
     const wk = wreck.current;
-    const bob = 1 - wk;
+    const bob = still ? 0 : 1 - wk;
     grp.position.set(center.x, waveH(center.x, center.z, t) * 0.8 * bob - wk * 0.17, center.z);
     grp.rotation.set(
       Math.sin(0.5 * center.z + 0.8 * t) * 0.014 * bob,
@@ -531,19 +587,47 @@ function MissMarker({ x, z }: { x: number; z: number }) {
   );
 }
 
+/* The last shot's cell. White, like the 2D board's outline: an orange
+   ring vanished into the fire glow whenever the shot was a hit. */
 function LastShotRing({ x, z }: { x: number; z: number }) {
   const r = useRef<Mesh>(null);
+  const still = useContext(Still);
   useFrame((state) => {
     if (!r.current) return;
-    const p = 1 + Math.sin(state.clock.elapsedTime * 3.2) * 0.1;
+    const s = still ? 0 : Math.sin(state.clock.elapsedTime * 3.2);
+    const p = 1 + s * 0.08;
     r.current.scale.set(p, p, p);
-    (r.current.material as Material & { opacity: number }).opacity = 0.65 + Math.sin(state.clock.elapsedTime * 3.2) * 0.2;
+    (r.current.material as Material & { opacity: number }).opacity = 0.85 + s * 0.12;
+  });
+  // Drawn over everything: a hit lands on a ship, and the hull used to
+  // hide the ring at exactly the moment it mattered.
+  return (
+    <mesh ref={r} position={[x, 0.09, z]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={8}>
+      <ringGeometry args={[0.36, 0.47, 32]} />
+      <meshBasicMaterial color="#ffffff" toneMapped={false} depthWrite={false} depthTest={false} transparent opacity={0.85} />
+    </mesh>
+  );
+}
+
+/* A shot in flight: shown on the tapped cell from the tap until the
+   server's answer lands, so a slow round trip does not invite a
+   second tap (in a salvo, a second shot). */
+function PendingMark({ x, z }: { x: number; z: number }) {
+  const r = useRef<Group>(null);
+  const still = useContext(Still);
+  useFrame((state) => {
+    if (!r.current || still) return;
+    r.current.rotation.y = state.clock.elapsedTime * 1.6;
   });
   return (
-    <mesh ref={r} position={[x, 0.07, z]} rotation={[-Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[0.34, 0.42, 32]} />
-      <meshBasicMaterial map={glowTexture()} color="#ffb066" blending={AdditiveBlending} depthWrite={false} transparent opacity={0.7} />
-    </mesh>
+    <group ref={r} position={[x, 0.1, z]}>
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={i} rotation={[-Math.PI / 2, 0, (i * Math.PI) / 2]} position={[Math.cos((i * Math.PI) / 2) * 0.3, 0, -Math.sin((i * Math.PI) / 2) * 0.3]}>
+          <planeGeometry args={[0.2, 0.06]} />
+          <meshBasicMaterial color="#ffffff" toneMapped={false} depthWrite={false} transparent opacity={0.95} />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -559,10 +643,12 @@ function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; s
   const isRow = sonar.axis === "row";
   const idx = isRow ? parseInt(String(sonar.label).slice(4), 10) - 1 : String(sonar.label).charCodeAt(7) - 65;
   const span = isRow ? w : h;
+  const still = useContext(Still);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    if (bandMat.current) bandMat.current.opacity = 0.14 + 0.08 * (0.5 + 0.5 * Math.sin(t * 2.2));
+    if (bandMat.current) bandMat.current.opacity = still ? 0.2 : 0.14 + 0.08 * (0.5 + 0.5 * Math.sin(t * 2.2));
     if (sweep.current) {
+      sweep.current.visible = !still;
       const p = ((t % 2.8) / 2.8) * (span + 2) - (span / 2 + 1);
       if (isRow) sweep.current.position.x = tile.cx + p;
       else sweep.current.position.z = p;
@@ -572,6 +658,18 @@ function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; s
   const bandPos: [number, number, number] = isRow
     ? [tile.cx, 0.07, idx - (h - 1) / 2]
     : [tile.cx + idx - (w - 1) / 2, 0.07, 0];
+  /* The label lies low at the band's end, outside the tile: floating
+     above the band it projected onto the row behind it. A row's
+     label sits in the gap between the two oceans (east of the left
+     tile, west of the right one); a column's sits past the near
+     edge's letters. */
+  const tex = textTexture("SONAR · " + String(sonar.label).toUpperCase(), "#67e8f9", true);
+  const sc = textScale(tex, 0.62);
+  // The right tile's row numbers also sit in the gap (on its west
+  // edge), so its label stops short of them.
+  const labelPos: [number, number, number] = isRow
+    ? [tile.cx < 0 ? tile.cx + w / 2 + 0.25 + sc[0] / 2 : tile.cx - w / 2 - 1.0 - sc[0] / 2, 0.22, bandPos[2]]
+    : [bandPos[0], 0.22, h / 2 + 1.55];
   return (
     <group>
       <mesh position={bandPos}>
@@ -584,8 +682,8 @@ function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; s
           <meshBasicMaterial color="#a5f3fc" toneMapped={false} transparent opacity={0.9} depthWrite={false} />
         </mesh>
       </group>
-      <sprite position={[bandPos[0], 1.2, bandPos[2]]} scale={[3.6, 0.68, 1]}>
-        <spriteMaterial map={textTexture("SONAR · " + String(sonar.label).toUpperCase(), "#67e8f9", true)} depthWrite={false} transparent opacity={0.95} />
+      <sprite position={labelPos} scale={sc} renderOrder={10}>
+        <spriteMaterial map={tex} depthWrite={false} depthTest={false} transparent opacity={0.95} />
       </sprite>
     </group>
   );
@@ -596,12 +694,27 @@ function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; s
 type ShipT = { key: string; size: number; variant: number; sunk: boolean; cells: string[]; hits: string[] };
 type TileT = {
   name: string;
+  /* What the tile's heading says: "Your waters" for a captain's own
+     ocean, "<name>'s waters - tap to fire" for the enemy's on their
+     turn, "<name>'s waters" otherwise. */
+  title: string;
   hex: string;
   cx: number;
   ships: ShipT[];
   water: { label: string; result: string }[];
   canFire: boolean;
 };
+
+/* Coordinate labels and titles draw over everything (no depth test):
+   a ship near the edge used to hide its row's number. */
+function Label({ text, color, position, height, wide }: { text: string; color: string; position: [number, number, number]; height: number; wide?: boolean }) {
+  const tex = textTexture(text, color, wide);
+  return (
+    <sprite position={position} scale={wide ? textScale(tex, height) : [height, height, 1]} renderOrder={10}>
+      <spriteMaterial map={tex} depthWrite={false} depthTest={false} transparent opacity={0.92} />
+    </sprite>
+  );
+}
 
 function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
   const lines = useMemo(() => {
@@ -610,6 +723,16 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
     for (let j = 0; j <= h; j++) pts.push(tile.cx - w / 2, 0.06, j - h / 2, tile.cx + w / 2, 0.06, j - h / 2);
     return new Float32Array(pts);
   }, [tile.cx, w, h]);
+  /* The enemy ocean's frame brightens (and, motion allowing, breathes)
+     while it is your turn to fire there - the scene's turn cue. */
+  const still = useContext(Still);
+  const frameMat = useMemo(
+    () => new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(tile.hex), emissiveIntensity: 1.5, toneMapped: false }),
+    [tile.hex]
+  );
+  useFrame(({ clock }) => {
+    frameMat.emissiveIntensity = tile.canFire ? (still ? 3.2 : 2.6 + 0.9 * Math.sin(clock.elapsedTime * 3)) : 1.5;
+  });
   return (
     <group>
       <lineSegments>
@@ -625,25 +748,23 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
         { p: [tile.cx - w / 2, 0.05, 0] as const, s: [0.06, 0.035, h + 0.12] as const },
         { p: [tile.cx + w / 2, 0.05, 0] as const, s: [0.06, 0.035, h + 0.12] as const },
       ].map((b, i) => (
-        <mesh key={i} position={[b.p[0], b.p[1], b.p[2]]}>
+        <mesh key={i} position={[b.p[0], b.p[1], b.p[2]]} material={frameMat}>
           <boxGeometry args={[b.s[0], b.s[1], b.s[2]]} />
-          <meshStandardMaterial color="#0b0e12" emissive={tile.hex} emissiveIntensity={1.5} toneMapped={false} />
         </mesh>
       ))}
-      {/* coordinate labels: letters along the near edge, numbers along the west edge */}
+      {/* Coordinates: letters along the near AND far edges (in
+          perspective a near-edge letter alone sat under the wrong
+          column of far rows), numbers along the west edge. */}
       {Array.from({ length: w }, (_, i) => (
-        <sprite key={"L" + i} position={[tile.cx + i - (w - 1) / 2, 0.12, h / 2 + 0.62]} scale={[0.52, 0.52, 1]}>
-          <spriteMaterial map={textTexture(String.fromCharCode(65 + i), "#9fd8ef")} depthWrite={false} transparent opacity={0.9} />
-        </sprite>
+        <group key={"L" + i}>
+          <Label text={String.fromCharCode(65 + i)} color="#9fd8ef" position={[tile.cx + i - (w - 1) / 2, 0.12, h / 2 + 0.62]} height={0.52} />
+          <Label text={String.fromCharCode(65 + i)} color="#9fd8ef" position={[tile.cx + i - (w - 1) / 2, 0.12, -h / 2 - 0.55]} height={0.46} />
+        </group>
       ))}
       {Array.from({ length: h }, (_, j) => (
-        <sprite key={"N" + j} position={[tile.cx - w / 2 - 0.62, 0.12, j - (h - 1) / 2]} scale={[0.52, 0.52, 1]}>
-          <spriteMaterial map={textTexture(String(j + 1), "#9fd8ef")} depthWrite={false} transparent opacity={0.9} />
-        </sprite>
+        <Label key={"N" + j} text={String(j + 1)} color="#9fd8ef" position={[tile.cx - w / 2 - 0.62, 0.12, j - (h - 1) / 2]} height={0.52} />
       ))}
-      <sprite position={[tile.cx, 0.12, -h / 2 - 0.72]} scale={[4.8, 0.9, 1]}>
-        <spriteMaterial map={textTexture(tile.name + "'s waters", tile.hex, true)} depthWrite={false} transparent opacity={0.95} />
-      </sprite>
+      <Label text={tile.title} color={tile.hex} position={[tile.cx, 0.12, -h / 2 - 1.5]} height={0.9} wide />
     </group>
   );
 }
@@ -664,8 +785,11 @@ function buildTiles(g: GL, me: string): TileT[] {
   const you = g.you || { playing: false };
   if (you.playing) {
     const players = g.players || [];
-    const meP = players.filter((p: GL) => p.name === me)[0] || players[0] || { name: me, hex: "#22d3ee" };
-    const foeP = players.filter((p: GL) => p.name !== me)[0] || players[1] || { name: "?", hex: "#fb923c" };
+    // The server matches names case-insensitively; so does the scene.
+    const isMe = (p: GL) => String(p.name).toLowerCase() === String(me).toLowerCase();
+    const meP = players.filter(isMe)[0] || players[0] || { name: me, hex: "#22d3ee" };
+    const foeP = players.filter((p: GL) => p !== meP)[0] || players[1] || { name: "?", hex: "#fb923c" };
+    const canFire = !!(g.status === "running" && g.phase === "play" && you.your_turn);
     const fleetCells = new Set<string>();
     (you.fleet || []).forEach((s: GL) => s.cells.forEach((c: string) => fleetCells.add(c)));
     const ownWater = Object.keys(you.incoming || {})
@@ -677,14 +801,23 @@ function buildTiles(g: GL, me: string): TileT[] {
       .filter((c) => !sunkCells.has(c))
       .map((c) => ({ label: c, result: you.shots[c] }));
     return [
-      { name: meP.name, hex: meP.hex, cx: cxOf(0), ships: mkShips(you.fleet || [], (s) => !!s.sunk), water: ownWater, canFire: false },
+      {
+        name: meP.name,
+        title: "Your waters",
+        hex: meP.hex,
+        cx: cxOf(0),
+        ships: mkShips(you.fleet || [], (s) => !!s.sunk),
+        water: ownWater,
+        canFire: false,
+      },
       {
         name: foeP.name,
+        title: foeP.name + "'s waters" + (canFire ? " · tap to fire" : ""),
         hex: foeP.hex,
         cx: cxOf(1),
         ships: mkShips(you.sunk_ships || [], () => true),
         water: foeWater,
-        canFire: !!(g.status === "running" && g.phase === "play" && you.your_turn),
+        canFire,
       },
     ];
   }
@@ -694,17 +827,27 @@ function buildTiles(g: GL, me: string): TileT[] {
     const water = Object.keys(b.incoming || {})
       .filter((c) => !sunkCells.has(c))
       .map((c) => ({ label: c, result: b.incoming[c] }));
-    return { name: b.name, hex: b.hex, cx: cxOf(i), ships: mkShips(b.sunk_ships || [], () => true), water, canFire: false };
+    return {
+      name: b.name,
+      title: b.name + "'s waters",
+      hex: b.hex,
+      cx: cxOf(i),
+      ships: mkShips(b.sunk_ships || [], () => true),
+      water,
+      canFire: false,
+    };
   });
 }
 
 /* Drifting patches of moonlight on the water - cheap ocean life. */
 function LightPatch({ seed }: { seed: number }) {
   const m = useRef<Mesh>(null);
+  const still = useContext(Still);
   useFrame((s) => {
     if (!m.current) return;
-    m.current.position.x = Math.sin(s.clock.elapsedTime * 0.03 + seed) * 15;
-    m.current.position.z = Math.cos(s.clock.elapsedTime * 0.021 + seed * 2.3) * 5;
+    const t = still ? 0 : s.clock.elapsedTime;
+    m.current.position.x = Math.sin(t * 0.03 + seed) * 15;
+    m.current.position.z = Math.cos(t * 0.021 + seed * 2.3) * 5;
   });
   return (
     <mesh ref={m} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
@@ -716,10 +859,32 @@ function LightPatch({ seed }: { seed: number }) {
 
 /* ---------- the scene ---------- */
 
-function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: string) => void; cd: number }) {
+function Scene({
+  g,
+  tiles,
+  onFire,
+  cd,
+  aim,
+  pending,
+  ctl,
+  home,
+  homeRef,
+  onReady,
+}: {
+  g: GL;
+  tiles: TileT[];
+  onFire?: (label: string) => void;
+  cd: number;
+  aim: string | null;
+  pending: string | null;
+  ctl: RefObject<Ctl | null>;
+  home: (aspect: number) => Home;
+  homeRef: { current: Home | null };
+  onReady?: () => void;
+}) {
+  const still = useContext(Still);
   const w = g.w || 10;
   const h = g.h || 10;
-  const tiles = useMemo(() => buildTiles(g, me), [g, me]);
   const sonar = g && g.sonar && g.phase === "play" && g.status === "running" ? g.sonar : null;
   const world = useRef<Group>(null);
   const [hover, setHover] = useState<string | null>(null);
@@ -731,7 +896,9 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
   const seenWrecks = useRef<Set<string>>(new Set(wreckKeys));
   const [freshWrecks, setFreshWrecks] = useState<Record<string, number>>({});
 
-  /* Shot animations replay off last_move diffs (never on mount). */
+  /* Shot animations replay off last_move diffs (never on mount, and
+     never under reduced motion - the bomb drop and the camera shake
+     are exactly what that setting asks to skip). */
   const lm = g.last_move as GL;
   const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const seenLm = useRef<string | null>(null);
@@ -756,7 +923,7 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
       seenLm.current = lmKey;
       const ti = tiles.findIndex((t) => t.name !== lm.by);
       const tt = ti >= 0 ? tiles[ti] : undefined;
-      if (tt) {
+      if (tt && !still) {
         const loc = cellLocal(lm.cell, w, h);
         setAnim({ id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk });
       }
@@ -765,6 +932,9 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
   }, [g]);
 
   const foeTile = tiles.filter((t) => t.canFire)[0];
+  /* The tile a captain aims at with the keyboard - the enemy's, on or
+     off their turn (Enter only fires on it). */
+  const aimTile = g.you && g.you.playing ? tiles[1] : undefined;
   const foeShotCells = useMemo(() => {
     const s = new Set<string>();
     if (foeTile) {
@@ -788,16 +958,20 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
 
   const lightBudget = { n: 0 };
   const lmTileIdx = lm ? tiles.findIndex((t) => t.name !== lm.by) : -1;
+  const ringAt = foeTile && hover ? { tile: foeTile, label: hover } : aimTile && aim ? { tile: aimTile, label: aim } : null;
+  const ringHot = !!(ringAt && ringAt.tile.canFire);
 
   return (
     <>
+      <FirstFrame onReady={onReady} />
       <fog attach="fog" args={[SEA, cd * 1.9, cd * 4.2]} />
       <color attach="background" args={[SEA]} />
       <hemisphereLight args={["#8fb8d8", "#0a0f14", 0.85]} />
       <directionalLight position={[14, 20, 8]} intensity={1.45} color="#cfe6ff" />
       <directionalLight position={[-12, 9, -10]} intensity={0.4} color="#7fa8cc" />
       <ambientLight intensity={0.3} />
-      <CameraControls makeDefault minDistance={7} maxDistance={80} maxPolarAngle={1.38} />
+      <CameraControls ref={ctl} makeDefault minDistance={7} maxDistance={80} maxPolarAngle={1.38} />
+      <Framer home={home} ctl={ctl} homeRef={homeRef} />
       <group ref={world}>
         {/* one reflective sea under both tiles */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
@@ -821,6 +995,7 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
         {tiles.map((tile, ti) => {
           const shipEls: GL[] = [];
           const fireEls: GL[] = [];
+          const footEls: GL[] = [];
           tile.ships.forEach((s) => {
             const c0 = s.cells[0] ?? "A1";
             const cN = s.cells[s.cells.length - 1] ?? c0;
@@ -840,6 +1015,21 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
                 vertical={vertical}
               />
             );
+            if (!s.sunk) {
+              /* A live ship is always the viewer's own (the server
+                 never sends an un-sunk enemy hull): a faint footprint
+                 in the captain's colour under each of its cells keeps
+                 the fleet findable, as the 2D board's tinted cells do. */
+              s.cells.forEach((c) => {
+                const loc = cellLocal(c, w, h);
+                footEls.push(
+                  <mesh key={"fp" + c} position={[tile.cx + loc.x, 0.045, loc.z]} rotation={[-Math.PI / 2, 0, 0]}>
+                    <planeGeometry args={[0.9, 0.9]} />
+                    <meshBasicMaterial color={tile.hex} transparent opacity={0.24} depthWrite={false} />
+                  </mesh>
+                );
+              });
+            }
             if (s.sunk) {
               fireEls.push(<GlowDisc key={"gd" + s.key} position={[center.x, 0.03, center.z]} radius={s.size * 0.42} opacity={0.2} />);
               const idxs = s.size >= 4 ? [0, Math.floor(s.cells.length / 2), s.cells.length - 1] : [0, s.cells.length - 1];
@@ -864,6 +1054,7 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
             <group key={tile.name + ti}>
               <GridHolo tile={tile} w={w} h={h} />
               {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
+              {footEls}
               {shipEls}
               {fireEls}
               {tile.water.map((m) => {
@@ -910,26 +1101,33 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>
         ) : null}
-        {foeTile && hover
+        {ringAt
           ? (() => {
-              const loc = cellLocal(hover, w, h);
+              const loc = cellLocal(ringAt.label, w, h);
+              const c = ringHot ? "#ff5a3c" : "#9fd8ef";
               return (
-                <group position={[foeTile.cx + loc.x, 0.07, loc.z]}>
+                <group position={[ringAt.tile.cx + loc.x, 0.07, loc.z]}>
                   <mesh rotation={[-Math.PI / 2, 0, 0]}>
                     <ringGeometry args={[0.36, 0.44, 32]} />
-                    <meshBasicMaterial map={glowTexture()} color="#ff5a3c" blending={AdditiveBlending} depthWrite={false} transparent opacity={0.9} />
+                    <meshBasicMaterial map={glowTexture()} color={c} blending={AdditiveBlending} depthWrite={false} transparent opacity={0.9} />
                   </mesh>
                   <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
                     <planeGeometry args={[0.92, 0.92]} />
-                    <meshBasicMaterial color="#ff5a3c" transparent opacity={0.14} depthWrite={false} />
+                    <meshBasicMaterial color={c} transparent opacity={0.14} depthWrite={false} />
                   </mesh>
                 </group>
               );
             })()
           : null}
-        {anim ? <ShotFx anim={anim} world={world} onDone={() => setAnim(null)} /> : null}
+        {pending && aimTile
+          ? (() => {
+              const loc = cellLocal(pending, w, h);
+              return <PendingMark x={aimTile.cx + loc.x} z={loc.z} />;
+            })()
+          : null}
+        {anim && !still ? <ShotFx anim={anim} world={world} onDone={() => setAnim(null)} /> : null}
       </group>
-      <Sparkles count={50} scale={[30, 4, 14]} position={[0, 2.4, 0]} size={1.5} speed={0.22} opacity={0.45} color="#7dd3fc" />
+      <Sparkles count={50} scale={[30, 4, 14]} position={[0, 2.4, 0]} size={1.5} speed={still ? 0 : 0.22} opacity={0.45} color="#7dd3fc" />
       <EffectComposer multisampling={2}>
         <>
           <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.72} luminanceSmoothing={0.3} />
@@ -940,34 +1138,175 @@ function Scene({ g, me, onFire, cd }: { g: GL; me: string; onFire?: (label: stri
   );
 }
 
+/* Frame by host aspect, not by a portrait/landscape guess: the
+   two-tile span fits the horizontal fov when the camera distance
+   scales as 1/aspect. About 10% further back than first shipped
+   (1.48 vs 1.34 per unit span): perspective makes the near edge the
+   widest, and the near rows' outer columns were cropped. */
+function bsHome(w: number, aspect: number): Home {
+  const span = 2 * w + 4;
+  const cd = Math.min(44, Math.max(21, (span * 1.48) / Math.max(0.7, aspect)));
+  return { pos: [0, cd * 0.76, cd * 0.65], fov: aspect < 1.3 ? 56 : 46 };
+}
+
 export default function BsArena3D({
   g,
   me,
   aspect,
   onFire,
+  onReady,
 }: {
   g: GL;
   me: string;
   aspect?: number;
   onFire?: (label: string) => void;
+  onReady?: () => void;
 }) {
+  const still = useReducedMotion();
   const w = g.w || 10;
-  const span = 2 * w + 4;
-  /* Frame by host aspect, not by a portrait/landscape guess: the
-     two-tile span fits the horizontal fov when the camera distance
-     scales as 1/aspect (anchored on the verified desktop framing,
-     aspect 1.44 at cd ~22). A wide-but-short host (a phone with the
-     shortened BS host) needs the same pullback as a portrait one. */
-  const aspectV = aspect ?? 1.44;
-  const narrow = aspectV < 1.3;
-  const cd = Math.min(40, Math.max(19, (span * 1.34) / Math.max(0.7, aspectV)));
+  const h = g.h || 10;
+  const tiles = useMemo(() => buildTiles(g, me), [g, me]);
+  const player = !!(g.you && g.you.playing);
+  const foe = player ? tiles[1] : undefined;
+  const canFire = !!(foe && foe.canFire);
+  /* Cells already fired at on the enemy ocean, and what they are. */
+  const taken = useMemo(() => {
+    const m = new Map<string, string>();
+    if (foe) {
+      foe.water.forEach((x) => m.set(x.label, x.result === "hit" ? "a hit" : "a miss"));
+      foe.ships.forEach((s) => s.cells.forEach((c) => m.set(c, "a sunk ship")));
+    }
+    return m;
+  }, [foe]);
+  const [aim, setAim] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const [say, setSay] = useState("");
+  const ctl = useRef<Ctl | null>(null);
+  const homeRef = useRef<Home | null>(null);
+  const home = (a: number) => bsHome(w, a);
+  const first = home(aspect ?? 1.44);
+  const cd = first.pos[1] / 0.76;
+
+  /* The in-flight marker clears when the shot lands in state, when
+     the turn moves on, or after 10 s (a refused shot changes nothing
+     in state; its error shows in the arena's note). */
+  useEffect(() => {
+    if (pending && (taken.has(pending) || !canFire)) setPending(null);
+  }, [taken, canFire, pending]);
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => setPending(null), 10000);
+    return () => clearTimeout(t);
+  }, [pending]);
+
+  /* Spoken updates for screen readers: each new shot, and the start
+     of your turn. Nothing is announced for the state at open. */
+  const lm = g.last_move as GL;
+  const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
+  const seen = useRef<{ lm: string; turn: boolean } | null>(null);
+  useEffect(() => {
+    if (!seen.current) {
+      seen.current = { lm: lmKey, turn: canFire };
+      return;
+    }
+    const parts: string[] = [];
+    if (lm && lmKey && lmKey !== seen.current.lm)
+      parts.push(lm.by + " fired at " + lm.cell + ": " + (lm.result === "hit" ? (lm.sunk ? "hit, and a " + lm.sunk + "-ship sank" : "hit") : "miss") + ".");
+    if (canFire && !seen.current.turn) parts.push("Your shot.");
+    seen.current = { lm: lmKey, turn: canFire };
+    if (parts.length) setSay(parts.join(" "));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lmKey, canFire]);
+
+  const describe = (label: string) =>
+    label + ", " + (taken.has(label) ? "already " + taken.get(label) : "open water") + (canFire ? "" : ", not your turn") + ".";
+  const fire = (label: string) => {
+    if (!canFire || !onFire) {
+      setSay("Not your turn yet.");
+      return;
+    }
+    if (taken.has(label)) {
+      setSay(label + " is already " + taken.get(label) + ".");
+      return;
+    }
+    setPending(label);
+    setSay("Firing at " + label + ".");
+    onFire(label);
+  };
+  /* Keyboard play: arrow keys move an aim marker over the enemy
+     ocean (row 1 is the far edge, as on screen), Enter or Space
+     fires at it. */
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!foe) return;
+    const k = e.key;
+    const cur = aim ? labelXY(aim) : { col: Math.floor((w - 1) / 2), row: Math.floor((h - 1) / 2) };
+    let col = cur.col;
+    let row = cur.row;
+    if (k === "ArrowLeft") col--;
+    else if (k === "ArrowRight") col++;
+    else if (k === "ArrowUp") row--;
+    else if (k === "ArrowDown") row++;
+    else if (k === "Enter" || k === " ") {
+      e.preventDefault();
+      const label = String.fromCharCode(65 + col) + (row + 1);
+      if (aim) fire(label);
+      else {
+        setAim(label);
+        setSay(describe(label));
+      }
+      return;
+    } else return;
+    e.preventDefault();
+    col = Math.max(0, Math.min(w - 1, col));
+    row = Math.max(0, Math.min(h - 1, row));
+    const label = String.fromCharCode(65 + col) + (row + 1);
+    setAim(label);
+    setSay(describe(label));
+  };
+
+  const spectatorLabel = "Battleship, 3D view of " + tiles.map((t) => t.name + "'s").join(" and ") + " waters.";
   return (
-    <Canvas
-      dpr={[1, 1.75]}
-      camera={{ position: [0, cd * 0.76, cd * 0.65], fov: narrow ? 56 : 46, near: 0.1, far: 600 }}
-      gl={{ antialias: true }}
+    <ArenaFrame
+      onReset={() => goHome(ctl, homeRef.current || first, !still)}
+      frameProps={
+        foe
+          ? {
+              tabIndex: 0,
+              role: "application",
+              "aria-label": "Battleship, 3D view. " + foe.name + "'s waters: arrow keys aim, Enter fires.",
+              onKeyDown: onKey,
+              onBlur: () => setAim(null),
+            }
+          : undefined
+      }
     >
-      <Scene g={g} me={me} onFire={onFire} cd={cd} />
-    </Canvas>
+      <Canvas
+        role={foe ? undefined : "img"}
+        aria-label={foe ? undefined : spectatorLabel}
+        dpr={[1, 1.75]}
+        camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 600 }}
+        gl={{ antialias: true }}
+      >
+        <Still.Provider value={still}>
+          <Scene
+            g={g}
+            tiles={tiles}
+            onFire={foe ? fire : undefined}
+            cd={cd}
+            aim={aim}
+            pending={pending}
+            ctl={ctl}
+            home={home}
+            homeRef={homeRef}
+            onReady={onReady}
+          />
+        </Still.Provider>
+      </Canvas>
+      {foe ? (
+        <div className="sr-only" aria-live="polite">
+          {say}
+        </div>
+      ) : null}
+    </ArenaFrame>
   );
 }

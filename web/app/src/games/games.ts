@@ -22,6 +22,10 @@ import {
 } from "./render";
 import type { ViewerApi } from "../shell/viewer";
 
+/* A 3D arena's host element, its React root and its status layer
+   (see makeHost3d). */
+type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean };
+
 // Games — Light Cycles and Duel — ported from the current app. The
 // card board and the arena render from game state (GET /games/:id,
 // kept fresh by stream "game" frames and slow polls). Cards are
@@ -154,9 +158,9 @@ export function createGameStore(opts: {
     wrap: HTMLElement;
     lastRounds?: number;
     tab?: string;
-    lc3d?: { root: Root; host: HTMLElement } | null;
+    lc3d?: Host3d | null;
     lc3dSeq?: number;
-    bs3d?: { root: Root; host: HTMLElement } | null;
+    bs3d?: Host3d | null;
     bs3dSeq?: number;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
@@ -841,7 +845,19 @@ export function createGameStore(opts: {
       const banner = bsBanner(g, freshMove);
       if (banner) wrap.appendChild(banner);
       if (gameView) gameView.bsFire = canFire ? (label: string) => { void sendMove(g.id, label, note); } : null;
-      if (!bsBoardsOr3d(g, wrap)) wrap.appendChild(boards);
+      // In 3D the fleet strips (sizes still afloat) sit under the scene:
+      // the 2D boards that carry them are not built.
+      const strips = el("div", "bs-strips3d");
+      [
+        { label: "Your fleet", hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
+        { label: opp.name + "'s fleet", hex: opp.hex, sunk: (you.sunk_ships || []).map((s: GL) => s.size) },
+      ].forEach((f) => {
+        const item = el("div", "bs-strip3d");
+        item.appendChild(el("span", "bs-strip3d-label", f.label));
+        item.appendChild(fleetStrip(f.hex, f.sunk, undefined, g.fleet_sizes));
+        strips.appendChild(item);
+      });
+      if (!bsBoardsOr3d(g, wrap, strips)) wrap.appendChild(boards);
       let status = "";
       if (g.status === "finished" || g.status === "cancelled") status = "";
       else if (g.phase === "setup") status = "Fleet placed - waiting on " + opp.name + " to place theirs.";
@@ -857,7 +873,12 @@ export function createGameStore(opts: {
           else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row forfeits the match."));
         });
         if (you.playing) {
-          const hint = arenaHint("bs-play", "Tap a cell in their waters to fire — ✕ is a hit, · is a miss, dark hulls are sunk.");
+          const hint = bs3dPref()
+            ? arenaHint(
+                "bs-play-3d",
+                "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."
+              )
+            : arenaHint("bs-play", "Tap a cell in their waters to fire — ✕ is a hit, · is a miss, dark hulls are sunk.");
           if (hint) wrap.appendChild(hint);
         }
       }
@@ -879,8 +900,49 @@ export function createGameStore(opts: {
      gameView object: renderGameView clears and rebuilds the wrap
      on every state change, and re-appending the same host element
      keeps the canvas (and the camera) alive across repaints. */
+  /* The 3D host (2026-11-12): a mount for the scene's React root plus
+     a status layer over it - "Loading the 3D arena…" until the scene
+     draws its first frame, or what went wrong with a Reload button.
+     There is no 2D fallback by design (3D is the arena view): a
+     failure says so and offers the reload that cures the usual cause
+     - a deploy deleted the hashed chunk this page was built against.
+     A WebGL failure reaches onUncaughtError (R3F rethrows it into the
+     tree) instead of surfacing as an uncaught page error over a blank
+     box. A failed host stops repainting until it is rebuilt. */
+  function makeHost3d(cls: string): Host3d {
+    const host = el("div", cls);
+    const mount = el("div", "arena3d-mount");
+    const status = el("div", "arena3d-status");
+    status.setAttribute("role", "status");
+    host.appendChild(mount);
+    host.appendChild(status);
+    const h: Host3d = { root: null as unknown as Root, host, status, failed: false };
+    h.root = createRoot(mount, { onUncaughtError: (err) => fail3d(h, err) });
+    status.textContent = "Loading the 3D arena…";
+    return h;
+  }
+  function ready3d(h: Host3d) {
+    if (!h.failed) h.status.hidden = true;
+  }
+  function fail3d(h: Host3d, err: unknown) {
+    h.failed = true;
+    const msg = String((err && (err as Error).message) || err || "");
+    const text = /webgl/i.test(msg)
+      ? "This device couldn't start 3D graphics (WebGL)."
+      : /import|module|fetch|load/i.test(msg)
+        ? "The 3D arena didn't load - the site was probably just updated."
+        : "The 3D arena hit an error.";
+    h.status.textContent = "";
+    h.status.appendChild(el("div", "", text));
+    const b = el("button", "btn sm", "Reload") as HTMLButtonElement;
+    b.type = "button";
+    b.addEventListener("click", () => location.reload());
+    h.status.appendChild(b);
+    h.status.hidden = false;
+  }
+
   const LC3D_KEY = "ac:lc3d";
-  let lc3dComp: Promise<ComponentType<{ g: GL; aspect?: number }>> | null = null;
+  let lc3dComp: Promise<ComponentType<{ g: GL; aspect?: number; onReady?: () => void }>> | null = null;
   function lc3dPref(): boolean {
     try {
       return localStorage.getItem(LC3D_KEY) !== "0";
@@ -896,7 +958,14 @@ export function createGameStore(opts: {
     }
   }
   function loadLc3d() {
-    if (!lc3dComp) lc3dComp = import("./LcArena3D").then((m) => m.default);
+    // A failed import is not remembered: the next paint tries again.
+    if (!lc3dComp)
+      lc3dComp = import("./LcArena3D")
+        .then((m) => m.default)
+        .catch((e) => {
+          lc3dComp = null;
+          throw e;
+        });
     return lc3dComp;
   }
   function dropLc3d() {
@@ -907,15 +976,23 @@ export function createGameStore(opts: {
       m.root.unmount();
     }
   }
-  function paintLc3d(g: GL, host: HTMLElement) {
+  function paintLc3d(g: GL, h: Host3d) {
     const gv = gameView;
-    if (!gv) return;
+    if (!gv || h.failed) return;
     const seq = (gv.lc3dSeq = (gv.lc3dSeq || 0) + 1);
-    void loadLc3d().then((Comp) => {
-      // A newer paint, a closed viewer or a toggle-off supersedes us.
-      if (!gameView || gameView !== gv || gv.lc3dSeq !== seq || !gv.lc3d || gv.lc3d.host !== host) return;
-      gv.lc3d.root.render(createElement(Comp, { g, aspect: host.clientWidth / Math.max(1, host.clientHeight) }));
-    });
+    // A newer paint, a closed viewer or a toggle-off supersedes us.
+    const current = () => !!gameView && gameView === gv && gv.lc3dSeq === seq && gv.lc3d === h;
+    loadLc3d().then(
+      (Comp) => {
+        if (!current() || h.failed) return;
+        h.root.render(
+          createElement(Comp, { g, aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight), onReady: () => ready3d(h) })
+        );
+      },
+      (err) => {
+        if (current()) fail3d(h, err);
+      }
+    );
   }
   function lcViewToggle(g: GL): HTMLElement {
     const row = el("div", "lc-view-toggle");
@@ -946,7 +1023,9 @@ export function createGameStore(opts: {
      across repaints. The component receives the same per-viewer state
      as the 2D boards plus a fire callback wired to sendMove. */
   const BS3D_KEY = "ac:bs3d";
-  let bs3dComp: Promise<ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void }>> | null = null;
+  let bs3dComp: Promise<
+    ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void; onReady?: () => void }>
+  > | null = null;
   function bs3dPref(): boolean {
     try {
       return localStorage.getItem(BS3D_KEY) !== "0";
@@ -962,7 +1041,14 @@ export function createGameStore(opts: {
     }
   }
   function loadBs3d() {
-    if (!bs3dComp) bs3dComp = import("./BsArena3D").then((m) => m.default);
+    // A failed import is not remembered: the next paint tries again.
+    if (!bs3dComp)
+      bs3dComp = import("./BsArena3D")
+        .then((m) => m.default)
+        .catch((e) => {
+          bs3dComp = null;
+          throw e;
+        });
     return bs3dComp;
   }
   function dropBs3d() {
@@ -974,24 +1060,31 @@ export function createGameStore(opts: {
       m.root.unmount();
     }
   }
-  function paintBs3d(g: GL, host: HTMLElement) {
+  function paintBs3d(g: GL, h: Host3d) {
     const gv = gameView;
-    if (!gv) return;
+    if (!gv || h.failed) return;
     const seq = (gv.bs3dSeq = (gv.bs3dSeq || 0) + 1);
-    void loadBs3d().then((Comp) => {
-      // A newer paint, a closed viewer or a toggle-off supersedes us.
-      if (!gameView || gameView !== gv || gv.bs3dSeq !== seq || !gv.bs3d || gv.bs3d.host !== host) return;
-      gv.bs3d.root.render(
-        createElement(Comp, {
-          g,
-          me: opts.meName(),
-          aspect: host.clientWidth / Math.max(1, host.clientHeight),
-          onFire: (label: string) => {
-            if (gameView && gameView.bsFire) gameView.bsFire(label);
-          },
-        })
-      );
-    });
+    // A newer paint, a closed viewer or a toggle-off supersedes us.
+    const current = () => !!gameView && gameView === gv && gv.bs3dSeq === seq && gv.bs3d === h;
+    loadBs3d().then(
+      (Comp) => {
+        if (!current() || h.failed) return;
+        h.root.render(
+          createElement(Comp, {
+            g,
+            me: opts.meName(),
+            aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
+            onFire: (label: string) => {
+              if (gameView && gameView.bsFire) gameView.bsFire(label);
+            },
+            onReady: () => ready3d(h),
+          })
+        );
+      },
+      (err) => {
+        if (current()) fail3d(h, err);
+      }
+    );
   }
   function bsViewToggle(g: GL): HTMLElement {
     const row = el("div", "lc-view-toggle");
@@ -1015,16 +1108,14 @@ export function createGameStore(opts: {
   /* Append the toggle (and, when the pref is on, the 3D host in place
      of the 2D boards). Returns true when the caller should skip
      building its 2D boards. */
-  function bsBoardsOr3d(g: GL, wrap: HTMLElement): boolean {
+  function bsBoardsOr3d(g: GL, wrap: HTMLElement, under?: HTMLElement): boolean {
     wrap.appendChild(bsViewToggle(g));
     if (!bs3dPref()) return false;
     if (!gameView) return false;
-    if (!gameView.bs3d) {
-      const host = el("div", "lc-board-big lc-3d-host bs-3d-host");
-      gameView.bs3d = { root: createRoot(host), host };
-    }
+    if (!gameView.bs3d) gameView.bs3d = makeHost3d("lc-board-big lc-3d-host bs-3d-host");
     wrap.appendChild(gameView.bs3d.host);
-    paintBs3d(g, gameView.bs3d.host);
+    if (under) wrap.appendChild(under);
+    paintBs3d(g, gameView.bs3d);
     return true;
   }
 
@@ -1081,12 +1172,9 @@ export function createGameStore(opts: {
     }
     wrap.appendChild(lcViewToggle(g));
     if (lc3dPref()) {
-      if (!gameView.lc3d) {
-        const host = el("div", "lc-board-big lc-3d-host");
-        gameView.lc3d = { root: createRoot(host), host };
-      }
+      if (!gameView.lc3d) gameView.lc3d = makeHost3d("lc-board-big lc-3d-host");
       wrap.appendChild(gameView.lc3d.host);
-      paintLc3d(g, gameView.lc3d.host);
+      paintLc3d(g, gameView.lc3d);
     } else {
       const big = el("div", "lc-board-big");
       big.innerHTML = boardSvg(g);

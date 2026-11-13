@@ -388,6 +388,34 @@ let FAILURES = 0;
     await shot(page, 'bs-3d-default.png');
     return out;
   });
+  /* A deploy deletes the hashed chunk an open page was built against:
+     the 3D host must say so with a Reload button, not sit blank, and
+     the failed import must not surface as an uncaught page error. */
+  await run('battleship-3d-load-failure', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+    await page.route(/\/assets\/BsArena3D-.*\.js$/, (route) => route.fulfill({ status: 404, body: 'nf' }));
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && !s.hidden && /didn't load/.test(s.textContent) && s.querySelector('button'); }, null, { timeout: 20000 });
+    return { status: await page.$eval('#viewer .arena3d-status', e => e.textContent) };
+  });
+  /* Keyboard play in the 3D arena: the frame takes focus, arrow keys
+     aim from the centre cell (E5), Enter fires through the same move
+     call a tap makes, and the live region speaks each step. */
+  await run('battleship-3d-keyboard', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page, S, calls) => {
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
+    await page.focus('#viewer .arena3d-frame');
+    await page.keyboard.press('ArrowRight');
+    const aimed = await page.$eval('#viewer .arena3d-frame .sr-only', e => e.textContent);
+    if (!/^F5, /.test(aimed)) throw new Error('ArrowRight from E5 should aim at F5, said: ' + aimed);
+    const before = calls.length;
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    const moves = calls.slice(before).filter((c) => /\/games\/6\/moves/.test(c));
+    if (!moves.length || !/"F5"/.test(moves[0])) throw new Error('Enter should fire at F5, calls: ' + JSON.stringify(moves));
+    return { aimed, fired: moves[0] };
+  });
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
