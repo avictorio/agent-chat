@@ -15,7 +15,7 @@
    and request frames while they run (frameloop "demand"). */
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { AdditiveBlending, BackSide, CanvasTexture, Color, DoubleSide, Group, InstancedMesh, Mesh, Object3D, ShaderMaterial, type MeshBasicMaterial } from "three";
+import { AdditiveBlending, BackSide, CanvasTexture, Color, DoubleSide, Group, InstancedMesh, Mesh, Object3D, ShaderMaterial, Vector3, type MeshBasicMaterial } from "three";
 import { useJuice } from "./juice";
 
 export type SkySpec = {
@@ -31,6 +31,9 @@ export type SkySpec = {
   auroraB?: string;
   swirl?: number;
   sun?: { size: number; az: number; el: number; a: string; b: string };
+  /* a soft moon disc with a halo, in a world direction (the Battleship
+     water's glitter path comes from the same direction) */
+  moon?: { dir: [number, number, number]; size: number; color: string };
 };
 
 const SKY_V = /* glsl */ `
@@ -44,7 +47,8 @@ void main() {
 const SKY_F = /* glsl */ `
 uniform float uTime;
 uniform vec3 uTop, uMid, uHorizon, uGround, uGlow, uAuroraA, uAuroraB, uSunA, uSunB;
-uniform float uGlowAmt, uStars, uAurora, uSwirl, uSunSize, uSunAz, uSunEl;
+uniform float uGlowAmt, uStars, uAurora, uSwirl, uSunSize, uSunAz, uSunEl, uMoonSize;
+uniform vec3 uMoonDir, uMoonCol;
 varying vec3 vDir;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -106,6 +110,14 @@ void main() {
     col = mix(col, sc * 1.6, disc * (1.0 - cut) * step(-0.02, el));
     col += uSunB * exp(-a * 5.0 / max(0.01, uSunSize * 4.0)) * 0.35;
   }
+  if (uMoonSize > 0.0) {
+    float ma = acos(clamp(dot(d, normalize(uMoonDir)), -1.0, 1.0));
+    float disc = smoothstep(uMoonSize, uMoonSize * 0.86, ma);
+    // a little mottling on the face, then the halo
+    float face = 0.86 + 0.14 * sin(d.x * 140.0) * sin(d.y * 120.0 + 1.3);
+    col = mix(col, uMoonCol * 1.7 * face, disc);
+    col += uMoonCol * (exp(-ma / (uMoonSize * 2.2)) * 0.32 + exp(-ma * 5.0) * 0.08);
+  }
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
 }`;
@@ -138,6 +150,9 @@ export function SkyDome({ spec, radius = 300 }: { spec: SkySpec; radius?: number
           uSunSize: { value: 0 },
           uSunAz: { value: 0 },
           uSunEl: { value: 0 },
+          uMoonSize: { value: 0 },
+          uMoonDir: { value: new Vector3(0, 1, 0) },
+          uMoonCol: { value: new Color() },
         },
       }),
     []
@@ -161,6 +176,11 @@ export function SkyDome({ spec, radius = 300 }: { spec: SkySpec; radius?: number
     u.uSunSize!.value = spec.sun ? spec.sun.size : 0;
     u.uSunAz!.value = spec.sun ? spec.sun.az : 0;
     u.uSunEl!.value = spec.sun ? spec.sun.el : 0;
+    u.uMoonSize!.value = spec.moon ? spec.moon.size : 0;
+    if (spec.moon) {
+      (u.uMoonDir!.value as unknown as Vector3).set(...spec.moon.dir).normalize();
+      c("uMoonCol", spec.moon.color);
+    }
   }, [mat, spec]);
   useFrame(() => {
     // Sky time follows the juice clock: a slow-motion beat slows the

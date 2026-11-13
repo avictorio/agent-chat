@@ -13,7 +13,7 @@
    presentation only. Mounted by games.ts through a dynamic import so
    three.js stays in the lazy chunk. */
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
-import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   ArenaFrame,
   FirstFrame,
@@ -31,7 +31,14 @@ import {
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "./juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
 import { BUZZ, sfx } from "./sfx";
-import { CameraControls, MeshReflectorMaterial, Sparkles, Trail } from "@react-three/drei";
+import { NO_MIRROR, OCEAN_Y, Ocean, OceanStore, oceanHeight, type OceanLook } from "./ocean";
+import { ShipBody, newDamage, shipGeometry, shipMaterials } from "./ships";
+
+/* The water, for anything that floats on it (ships ride the swell the
+   shader draws; shells send ripples across it). */
+const OceanCtx = createContext<OceanStore | null>(null);
+const NOMIR = { [NO_MIRROR]: true };
+import { CameraControls, Sparkles, Trail } from "@react-three/drei";
 import {
   AdditiveBlending,
   CanvasTexture,
@@ -40,7 +47,9 @@ import {
   ExtrudeGeometry,
   MeshStandardMaterial,
   Object3D,
+  Plane,
   Quaternion,
+  Vector3,
   Shape,
   type BufferAttribute,
   type Group,
@@ -76,13 +85,6 @@ function cellLocal(label: string, w: number, h: number): { x: number; z: number 
   return { x: col - (w - 1) / 2, z: row - (h - 1) / 2 };
 }
 /* The swell the ships ride (A's ocean motion, kept gentle so the board reads). */
-function waveH(x: number, z: number, t: number): number {
-  return (
-    0.055 * Math.sin(0.55 * x + 0.9 * t) +
-    0.045 * Math.sin(0.7 * z - 0.7 * t) +
-    0.03 * Math.sin(0.35 * (x + z) + 0.5 * t)
-  );
-}
 function hash01(s: string): number {
   let n = 0;
   for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0;
@@ -391,50 +393,21 @@ function FlatField({
   );
 }
 
-/* ---------- ships: procedural hulls with class silhouettes ---------- */
+/* ---------- ships (ships.tsx builds them) ---------- */
 
-function hullGeometry(len: number, beam: number): ExtrudeGeometry {
-  const s = new Shape();
-  const hl = len / 2, hb = beam / 2;
-  s.moveTo(-hl, -hb);
-  s.lineTo(hl - len * 0.24, -hb);
-  s.lineTo(hl, 0);
-  s.lineTo(hl - len * 0.24, hb);
-  s.lineTo(-hl, hb);
-  s.closePath();
-  const geo = new ExtrudeGeometry(s, { depth: 0.3, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.045, bevelSegments: 1 });
-  geo.rotateX(Math.PI / 2);
-  geo.translate(0, 0.36, 0);
-  return geo;
-}
+/* One ship on the water. wreckAt: performance.now() stamp from when the
+   sinking first appeared in state (it goes down over ~3.2 s); a ship
+   already sunk when the view opened rests as a wreck at once. hitXs:
+   where along the hull (local x, bow +x) shells struck - each a scorched
+   hole with a glowing rim; every hit also sits the ship a little lower
+   and lists it a little further.
 
-/* Live steel is lighter than it first shipped (#4b5966): against the
-   night water it measured about 1.2:1, and a captain could barely
-   find their own fleet. The captain-colour footprint under live
-   ships (Scene) carries the rest. */
-const HULL_ALIVE = new Color("#7b8b99");
-const HULL_CHAR = new Color("#131518");
-const DECK_ALIVE = new Color("#5d6a76");
-const DECK_CHAR = new Color("#101114");
-
-function Turret({ x, flip }: { x: number; flip?: boolean }) {
-  return (
-    <group position={[x, 0.44, 0]} rotation={[0, flip ? Math.PI : 0, 0]}>
-      <mesh>
-        <cylinderGeometry args={[0.17, 0.19, 0.15, 10]} />
-        <meshStandardMaterial color="#4c5a68" metalness={0.55} roughness={0.5} />
-      </mesh>
-      <mesh position={[0.24, 0.03, 0]}>
-        <boxGeometry args={[0.46, 0.05, 0.06]} />
-        <meshStandardMaterial color="#4c5a68" metalness={0.55} roughness={0.5} />
-      </mesh>
-    </group>
-  );
-}
-
-/* One ship. wreckAt: performance.now() stamp from when the sinking
-   first appeared in state, or undefined when the ship was already a
-   wreck when the view opened (settled pose, no animation) / afloat. */
+   How each class dies: a carrier or battleship breaks in two - the bow
+   and stern rise as the halves part and settle, cut by a clipping plane
+   at the break (two bodies, each clipped to its half); a cruiser or
+   destroyer capsizes onto its side, red bottom up; a submarine goes
+   down until only its sail breaks the surface. The wreck stays where it
+   died: the board is the record. */
 function ShipModel({
   size,
   variant,
@@ -443,6 +416,7 @@ function ShipModel({
   wreckAt,
   center,
   vertical,
+  hitXs,
 }: {
   size: number;
   variant: number;
@@ -451,146 +425,176 @@ function ShipModel({
   wreckAt?: number;
   center: { x: number; z: number };
   vertical: boolean;
+  hitXs: number[];
 }) {
   const group = useRef<Group>(null);
-  const hullMat = useRef<MeshStandardMaterial>(null);
-  const deckMat = useRef<MeshStandardMaterial>(null);
-  const accentMatObj = useMemo(
-    () => new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(hex), emissiveIntensity: 2.3, toneMapped: false }),
-    [hex]
-  );
+  const pivotF = useRef<Group>(null);
+  const childF = useRef<Group>(null);
+  const pivotA = useRef<Group>(null);
+  const childA = useRef<Group>(null);
+  const geo = useMemo(() => shipGeometry(size, variant), [size, variant]);
+  const split = size >= 4 && !geo.sub;
+  const bx = geo.L * 0.06;
+  const planeF = useMemo(() => new Plane(new Vector3(1, 0, 0), 1e4), []);
+  const planeA = useMemo(() => new Plane(new Vector3(-1, 0, 0), 1e4), []);
+  const dmg = useMemo(newDamage, []);
+  const mats = useMemo(() => shipMaterials(geo, hex, dmg, split ? [planeF] : undefined), [geo, hex, dmg, split, planeF]);
+  const matsAft = useMemo(() => (split ? shipMaterials(geo, hex, dmg, [planeA]) : null), [geo, hex, dmg, split, planeA]);
+  const radarSpin = useRef(0);
   const wreck = useRef(sunk && wreckAt === undefined ? 1 : 0);
   const listSign = useMemo(() => (hash01(center.x + ":" + center.z) > 0.5 ? 1 : -1), [center]);
-  const listAmt = useMemo(() => 0.2 + hash01(center.z + ":" + center.x) * 0.1, [center]);
-  const len = size * 0.94;
-  const beam = size === 5 ? 0.88 : size === 2 ? 0.48 : 0.66;
-  const hullGeo = useMemo(() => (size === 2 ? null : hullGeometry(len, beam)), [len, beam, size]);
+  const seed = useMemo(() => hash01(center.x + "/" + center.z) * 6, [center]);
   const still = useContext(Still);
+  const ocean = useContext(OceanCtx);
+  const j = useJuice();
+  const gl = useThree((st) => st.gl);
+  useEffect(() => {
+    gl.localClippingEnabled = true;
+  }, [gl]);
+  useEffect(() => {
+    // the break itself is a burn too
+    const xs = split && sunk ? [...hitXs.slice(0, 5), bx] : hitXs.slice(0, 6);
+    xs.forEach((x, i) => (dmg.uHitX.value[i] = x));
+    dmg.uHitN.value = xs.length;
+  }, [hitXs, dmg, split, sunk, bx]);
+  const hitFrac = Math.min(1, hitXs.length / size);
+  const _n = useMemo(() => new Vector3(), []);
+  const _p = useMemo(() => new Vector3(), []);
+  const _q = useMemo(() => new Quaternion(), []);
   useFrame((state, dt) => {
     const grp = group.current;
     if (!grp) return;
-    const t = state.clock.elapsedTime;
     const target = sunk ? 1 : 0;
     if (still) {
       wreck.current = target;
     } else if (wreckAt !== undefined && sunk) {
-      /* wreckAt is a performance.now() wall stamp taken when the
-         sinking first appeared in state: settle over ~2.4 s. */
-      const p = Math.min(1, Math.max(0, (performance.now() - wreckAt) / 2400));
+      const p = Math.min(1, Math.max(0, (performance.now() - wreckAt) / 3200));
       wreck.current = p * p * (3 - 2 * p);
       if (p < 1) state.invalidate();
     } else {
       wreck.current += (target - wreck.current) * Math.min(1, dt * 2);
     }
     const wk = wreck.current;
-    const bob = still ? 0 : 1 - wk;
-    grp.position.set(center.x, waveH(center.x, center.z, t) * 0.8 * bob - wk * 0.17, center.z);
-    grp.rotation.set(
-      Math.sin(0.5 * center.z + 0.8 * t) * 0.014 * bob,
-      vertical ? Math.PI / 2 : 0,
-      listSign * listAmt * wk + Math.sin(0.45 * center.x + 0.6 * t) * 0.012 * bob
-    );
-    if (hullMat.current) {
-      hullMat.current.color.copy(HULL_ALIVE).lerp(HULL_CHAR, wk);
-      hullMat.current.roughness = 0.48 + wk * 0.47;
+    const bob = still ? 0 : 1 - wk * 0.7;
+    /* Ride the water the shader draws: height at the hull's centre,
+       pitch from the slope along its length, roll from the slope
+       across it (Euler YXZ: yaw, then roll about the keel, then
+       pitch). Damage sits it lower and lists it. */
+    const o = oceanHeight(center.x, center.z, still ? 7.3 : j.t, ocean ? ocean.calms : []);
+    const along = vertical ? -o.gz : o.gx;
+    const across = vertical ? o.gx : o.gz;
+    const hurt = hitFrac * (1 - wk);
+    let sinkY = 0;
+    let roll = 0;
+    let pitch = 0;
+    if (split) sinkY = -0.24 * wk;
+    else if (geo.sub) {
+      sinkY = -0.2 * wk;
+      pitch = -0.12 * wk;
+    } else {
+      // capsize: over onto the side, floating low
+      sinkY = -0.06 * wk;
+      roll = listSign * 1.25 * wk;
     }
-    if (deckMat.current) deckMat.current.color.copy(DECK_ALIVE).lerp(DECK_CHAR, wk);
-    accentMatObj.emissiveIntensity = 2.3 * (1 - wk) + 0.1;
+    grp.position.set(center.x, OCEAN_Y + (o.h - OCEAN_Y) * bob - 0.035 * hurt + sinkY, center.z);
+    grp.rotation.order = "YXZ";
+    grp.rotation.set(
+      -Math.atan(across) * 0.8 * bob + listSign * 0.07 * hurt + roll + (split ? listSign * 0.1 * wk : 0),
+      vertical ? Math.PI / 2 : 0,
+      Math.atan(along) * 0.8 * bob + pitch
+    );
+    if (split && pivotF.current && childF.current) {
+      // the halves part at the break and tip: bow up, stern up
+      pivotF.current.position.set(bx + 0.14 * wk, 0, 0);
+      pivotF.current.rotation.set(0, 0, 0.42 * wk);
+      childF.current.position.set(-bx, 0, 0);
+      if (pivotA.current && childA.current) {
+        pivotA.current.position.set(bx - 0.14 * wk, 0, 0);
+        pivotA.current.rotation.set(0, 0, -0.32 * wk);
+        childA.current.position.set(-bx, 0, 0);
+      }
+      grp.updateMatrixWorld(true);
+      if (wk > 0.001) {
+        // each half keeps its side of the break (planes in world space)
+        childF.current.getWorldQuaternion(_q);
+        _n.set(1, 0, 0).applyQuaternion(_q);
+        _p.set(bx, 0, 0);
+        childF.current.localToWorld(_p);
+        planeF.setFromNormalAndCoplanarPoint(_n, _p);
+        if (childA.current) {
+          childA.current.getWorldQuaternion(_q);
+          _n.set(-1, 0, 0).applyQuaternion(_q);
+          _p.set(bx, 0, 0);
+          childA.current.localToWorld(_p);
+          planeA.setFromNormalAndCoplanarPoint(_n, _p);
+        }
+      } else {
+        planeF.set(_n.set(1, 0, 0), 1e4);
+      }
+    }
+    radarSpin.current = still || wk > 0.5 ? seed : j.t * 1.4 + seed;
+    dmg.uTime.value = j.t;
+    dmg.uChar.value = wk;
+    mats.rim.emissiveIntensity = 2.2 * (1 - wk) + 0.04;
+    mats.lights.opacity = 1 - wk;
+    mats.lights.transparent = wk > 0;
+    if (matsAft) matsAft.rim.emissiveIntensity = mats.rim.emissiveIntensity;
   });
-  const steel: GL = { metalness: 0.55, roughness: 0.5 };
   return (
     <group ref={group} position={[center.x, 0, center.z]}>
-      {size === 2 ? (
-        /* submarine, surfaced: low capsule hull + sail */
-        <group>
-          <mesh position={[0, 0.1, 0]} rotation={[0, 0, Math.PI / 2]}>
-            <capsuleGeometry args={[0.21, len * 0.62, 4, 10]} />
-            <meshStandardMaterial ref={hullMat} color="#4b5966" {...steel} />
-          </mesh>
-          <mesh position={[0.1, 0.32, 0]}>
-            <boxGeometry args={[0.4, 0.26, 0.17]} />
-            <meshStandardMaterial ref={deckMat} color="#2c343d" {...steel} />
-          </mesh>
+      <group ref={pivotF}>
+        <group ref={childF}>
+          <ShipBody geo={geo} mats={mats} still={still} radarSpin={radarSpin} foam={!sunk} />
         </group>
-      ) : (
-        <group>
-          <mesh geometry={hullGeo!}>
-            <meshStandardMaterial ref={hullMat} color="#4b5966" {...steel} />
-          </mesh>
-          {/* lit rails in the captain's colour along both hull edges:
-              rim light, not a plate - a full-width strip reads as a
-              glowing surfboard under the ship */}
-          {[-1, 1].map((s) => (
-            <mesh key={s} position={[-len * 0.1, 0.3, s * (beam / 2 + 0.02)]} material={accentMatObj}>
-              <boxGeometry args={[len * 0.64, 0.04, 0.045]} />
-            </mesh>
-          ))}
-          {size === 5 ? (
-            <group>
-              <mesh position={[0, 0.42, 0]}>
-                <boxGeometry args={[len * 0.97, 0.05, beam * 1.04]} />
-                <meshStandardMaterial ref={deckMat} color="#2c343d" {...steel} />
-              </mesh>
-              <mesh position={[-len * 0.1, 0.62, -beam * 0.38]}>
-                <boxGeometry args={[0.52, 0.36, 0.3]} />
-                <meshStandardMaterial color="#4c5a68" {...steel} />
-              </mesh>
-              <mesh position={[-len * 0.1, 0.86, -beam * 0.38]}>
-                <boxGeometry args={[0.08, 0.16, 0.08]} />
-                <meshStandardMaterial color="#4c5a68" {...steel} />
-              </mesh>
-              <mesh position={[-len * 0.1, 0.68, -beam * 0.38]}>
-                <boxGeometry args={[0.54, 0.05, 0.32]} />
-                <meshStandardMaterial color="#0b0e12" emissive="#ffd9a0" emissiveIntensity={1.7} toneMapped={false} />
-              </mesh>
-            </group>
-          ) : size === 4 ? (
-            <group>
-              <Turret x={len * 0.27} />
-              <Turret x={-len * 0.27} flip />
-              <mesh position={[0, 0.58, 0]}>
-                <boxGeometry args={[0.55, 0.32, 0.42]} />
-                <meshStandardMaterial ref={deckMat} color="#2c343d" {...steel} />
-              </mesh>
-              <mesh position={[-0.05, 0.86, 0]}>
-                <boxGeometry args={[0.34, 0.26, 0.28]} />
-                <meshStandardMaterial color="#4c5a68" {...steel} />
-              </mesh>
-              <mesh position={[0.02, 0.66, 0]}>
-                <boxGeometry args={[0.57, 0.05, 0.44]} />
-                <meshStandardMaterial color="#0b0e12" emissive="#ffd9a0" emissiveIntensity={1.7} toneMapped={false} />
-              </mesh>
-            </group>
-          ) : variant === 0 ? (
-            /* cruiser (the first 3) */
-            <group>
-              <Turret x={len * 0.26} />
-              <mesh position={[-len * 0.12, 0.55, 0]}>
-                <cylinderGeometry args={[0.11, 0.13, 0.34, 10]} />
-                <meshStandardMaterial ref={deckMat} color="#2c343d" {...steel} />
-              </mesh>
-              <mesh position={[len * 0.02, 0.6, 0]}>
-                <boxGeometry args={[0.3, 0.24, 0.3]} />
-                <meshStandardMaterial color="#4c5a68" {...steel} />
-              </mesh>
-            </group>
-          ) : (
-            /* destroyer (the second 3) + any other size */
-            <group>
-              <Turret x={len * 0.24} />
-              <mesh position={[-len * 0.05, 0.52, 0]}>
-                <cylinderGeometry args={[0.09, 0.11, 0.28, 10]} />
-                <meshStandardMaterial ref={deckMat} color="#2c343d" {...steel} />
-              </mesh>
-              <mesh position={[-len * 0.28, 0.5, 0]}>
-                <cylinderGeometry args={[0.08, 0.1, 0.24, 10]} />
-                <meshStandardMaterial color="#4c5a68" {...steel} />
-              </mesh>
-            </group>
-          )}
+      </group>
+      {split && sunk && matsAft ? (
+        <group ref={pivotA}>
+          <group ref={childA}>
+            <ShipBody geo={geo} mats={matsAft} still={still} radarSpin={radarSpin} foam={false} />
+          </group>
         </group>
-      )}
+      ) : null}
     </group>
+  );
+}
+
+/* Debris around the wrecks: planks and plating bobbing on the swell and
+   drifting a little, one instanced draw for every wreck on the board. */
+type Debris = { x: number; z: number; s: number; r: number; k: string };
+function DebrisField({ pieces }: { pieces: Debris[] }) {
+  const ref = useRef<InstancedMesh>(null);
+  const still = useContext(Still);
+  const ocean = useContext(OceanCtx);
+  const j = useJuice();
+  const n = pieces.length;
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    pieces.forEach((p, i) => m.setColorAt(i, _c.set(hash01(p.k + "c") > 0.5 ? "#3a2c22" : "#2a2f35")));
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }, [pieces]);
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    const t = still ? 7.3 : j.t;
+    pieces.forEach((p, i) => {
+      const dx = still ? 0 : Math.sin(t * 0.07 + p.r * 6) * 0.08;
+      const dz = still ? 0 : Math.cos(t * 0.05 + p.r * 4) * 0.06;
+      const o = oceanHeight(p.x + dx, p.z + dz, t, ocean ? ocean.calms : []);
+      _o.position.set(p.x + dx, o.h + 0.006, p.z + dz);
+      _o.rotation.set(o.gz * 0.8, p.r * 6 + (still ? 0 : t * 0.04 * (p.r - 0.5)), -o.gx * 0.8);
+      _o.scale.set(p.s, 0.025, p.s * 0.32);
+      _o.updateMatrix();
+      m.setMatrixAt(i, _o.matrix);
+    });
+    m.instanceMatrix.needsUpdate = true;
+  });
+  if (!n) return null;
+  return (
+    <instancedMesh key={"d" + n} ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial roughness={0.9} metalness={0.1} />
+    </instancedMesh>
   );
 }
 
@@ -995,23 +999,6 @@ function buildTiles(g: GL, me: string): TileT[] {
 }
 
 /* Drifting patches of moonlight on the water - cheap ocean life. */
-function LightPatch({ seed }: { seed: number }) {
-  const m = useRef<Mesh>(null);
-  const still = useContext(Still);
-  useFrame((s) => {
-    if (!m.current) return;
-    const t = still ? 0 : s.clock.elapsedTime;
-    m.current.position.x = Math.sin(t * 0.03 + seed) * 15;
-    m.current.position.z = Math.cos(t * 0.021 + seed * 2.3) * 5;
-  });
-  return (
-    <mesh ref={m} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-      <planeGeometry args={[30, 15]} />
-      <meshBasicMaterial map={glowTexture()} color="#2e5a7d" blending={AdditiveBlending} depthWrite={false} transparent opacity={0.1} />
-    </mesh>
-  );
-}
-
 /* ---------- the scene ---------- */
 
 /* The Battleship world (2026-11-13): open ocean at night under
@@ -1031,6 +1018,26 @@ const BS_SKY: SkySpec = {
   aurora: 0.6,
   auroraA: "#2dd4bf",
   auroraB: "#8b5cf6",
+  moon: { dir: [0.25, 0.47, -0.85], size: 0.045, color: "#e7f0ff" },
+};
+
+/* The water under that sky: a deep green-black body, crests lit from
+   inside, the aurora in its reflection, and a moon low behind the
+   boards laying a glitter path on the far water. */
+const BS_MOON: [number, number, number] = [0.25, 0.47, -0.85];
+const BS_HAZE = "#0c4650";
+const BS_OCEAN: OceanLook = {
+  deep: "#020b12",
+  scatter: "#0c3c48",
+  horizon: BS_FOG,
+  mid: "#030c17",
+  top: "#010309",
+  glow: "#14b8a6",
+  auroraA: "#2dd4bf",
+  auroraB: "#8b5cf6",
+  aurora: 0.6,
+  moonDir: BS_MOON,
+  moon: "#dbeaff",
 };
 
 /* How hard a shot lands, by who fired and who was hit (the five-tier
@@ -1139,6 +1146,9 @@ function Scene({
   const [anim, setAnim] = useState<Anim | null>(null);
   const [sinks, setSinks] = useState<Sink[]>([]);
   const juice = useJuice();
+  const ocean = useMemo(() => new OceanStore(), []);
+  // calm water over each shown board (and its labels)
+  ocean.calms = tiles.map((t) => ({ x: t.cx, z: 0, hw: w / 2 + 0.7, hh: h / 2 + 0.7 }));
 
   useEffect(() => {
     const fresh: Record<string, number> = {};
@@ -1231,7 +1241,9 @@ function Scene({
       <FirstFrame onReady={onReady} />
       <Ticker fps={q.ambientFps} />
       <JuiceRig ctl={ctl} />
-      <fog attach="fog" args={[BS_FOG, cd * 1.9, cd * 4.6]} />
+      {/* the fog takes the sky's colour at the horizon (its glow included),
+          so the far sea melts into the sky with no dark seam */}
+      <fog attach="fog" args={[BS_HAZE, cd * 1.9, cd * 4.6]} />
       <color attach="background" args={[BS_FOG]} />
       <SkyDome spec={BS_SKY} />
       <hemisphereLight args={["#8fb8d8", "#0a0f14", 0.85]} />
@@ -1243,31 +1255,8 @@ function Scene({
       <Framer home={home} ctl={ctl} homeRef={homeRef} />
       <Intro ctl={ctl} homeRef={homeRef} enabled={intro && !still} ready={ready} />
       <group ref={world}>
-        {/* one sea under the tiles: reflective on desktop; plain on
-            touch devices, where the reflection (a second render of the
-            whole scene) costs most */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-          <planeGeometry args={[400, 400]} />
-          {q.lite ? (
-            <meshStandardMaterial color="#070d16" roughness={0.6} metalness={0.5} />
-          ) : (
-            <MeshReflectorMaterial
-              blur={[280, 60]}
-              resolution={512}
-              mixBlur={0.9}
-              mixStrength={9}
-              roughness={0.6}
-              depthScale={1.1}
-              minDepthThreshold={0.4}
-              maxDepthThreshold={1.4}
-              color="#070d16"
-              metalness={0.6}
-              mirror={0.7}
-            />
-          )}
-        </mesh>
-        <LightPatch seed={1.7} />
-        <LightPatch seed={4.9} />
+        {/* the sea: real waves, calm over the boards (ocean.tsx) */}
+        <Ocean store={ocean} look={BS_OCEAN} lite={q.lite} still={still} />
         {(() => {
           /* Effects are gathered across the shown oceans and drawn
              batched (FireField, GlowField, FlatField): one draw per
@@ -1276,6 +1265,8 @@ function Scene({
           const glows: GlowSpec[] = [];
           const misses: Spot[] = [];
           const feet: Spot[] = [];
+          const slicks: { x: number; z: number; r: number; s: number }[] = [];
+          const debris: Debris[] = [];
           let lights = 0;
           const groups = tiles.map((tile) => {
             const shipEls: GL[] = [];
@@ -1286,6 +1277,12 @@ function Scene({
               const last = cellLocal(cN, w, h);
               const center = { x: tile.cx + (first.x + last.x) / 2, z: (first.z + last.z) / 2 };
               const vertical = c0[0] === cN[0] && s.cells.length > 1;
+              // where along the hull each shell struck (local x, bow +x)
+              const localX = (c: string) => {
+                const l = cellLocal(c, w, h);
+                return vertical ? -(l.z - center.z) : tile.cx + l.x - center.x;
+              };
+              const deckY = shipGeometry(s.size, s.variant).D;
               shipEls.push(
                 <ShipModel
                   key={s.key}
@@ -1296,6 +1293,7 @@ function Scene({
                   wreckAt={freshWrecks[tile.name + ":" + s.key]}
                   center={center}
                   vertical={vertical}
+                  hitXs={s.sunk ? s.cells.map(localX) : s.hits.map(localX)}
                 />
               );
               if (!s.sunk) {
@@ -1309,10 +1307,25 @@ function Scene({
                 });
                 s.hits.forEach((c) => {
                   const loc = cellLocal(c, w, h);
-                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: 0.5, z: loc.z, scale: 0.8, light: false });
+                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: deckY + 0.16, z: loc.z, scale: 0.8, light: false });
                 });
+                // a holed hull bleeds oil
+                if (s.hits.length) slicks.push({ x: center.x, z: center.z, r: 0.25 + 0.15 * s.hits.length, s: 0.7 });
               } else {
                 glows.push({ x: center.x, y: 0.03, z: center.z, r: s.size * 0.42, a: 0.2 });
+                slicks.push({ x: center.x, z: center.z, r: 0.45 + s.size * 0.22, s: 0.9 });
+                for (let k = 0; k < 6 + s.size; k++) {
+                  const key = s.key + ":" + k;
+                  const along = (hash01(key + "a") - 0.5) * (s.size + 1.2);
+                  const off = (hash01(key + "b") - 0.5) * 1.5;
+                  debris.push({
+                    x: center.x + (vertical ? off : along),
+                    z: center.z + (vertical ? along : off),
+                    s: 0.08 + hash01(key + "s") * 0.14,
+                    r: hash01(key + "r"),
+                    k: key,
+                  });
+                }
                 const idxs = s.size >= 4 ? [0, Math.floor(s.cells.length / 2), s.cells.length - 1] : [0, s.cells.length - 1];
                 idxs.forEach((ci, fi) => {
                   const cell = s.cells[ci];
@@ -1320,7 +1333,8 @@ function Scene({
                   const loc = cellLocal(cell, w, h);
                   const light = lights < 3 && fi === 0;
                   if (fi === 0) lights++;
-                  fires.push({ key: tile.name + ":w:" + s.key + ":" + ci, x: tile.cx + loc.x, y: 0.42, z: loc.z, scale: 1.05, light });
+                  // burning on the water around the wreck, not in the air
+                  fires.push({ key: tile.name + ":w:" + s.key + ":" + ci, x: tile.cx + loc.x, y: 0.14, z: loc.z, scale: 1.05, light });
                 });
               }
             });
@@ -1330,34 +1344,49 @@ function Scene({
               if (m.result === "hit") {
                 fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.14, z: loc.z, scale: 0.85, light: false });
                 glows.push({ x, y: 0.035, z: loc.z, r: 0.6, a: 0.33 });
+                slicks.push({ x, z: loc.z, r: 0.32, s: 0.55 });
               } else misses.push({ x, z: loc.z });
             });
             return (
               <group key={tile.name}>
-                <GridHolo tile={tile} w={w} h={h} />
-                {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
+                <group userData={NOMIR}>
+                  <GridHolo tile={tile} w={w} h={h} />
+                  {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
+                  {lm && lmTile === tile ? (
+                    <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
+                  ) : null}
+                </group>
                 {shipEls}
-                {lm && lmTile === tile ? (
-                  <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
-                ) : null}
               </group>
             );
           });
           return (
-            <>
-              <FlatField spots={feet} y={0.045} geometry="cell" opacity={0.24} />
+            <OceanCtx.Provider value={ocean}>
+              <group userData={NOMIR}>
+                {/* a faint tint in the captain's colour under their own hulls
+                    (the lit rims on the ships carry identity now; a strong
+                    tint read as orange slabs under every hull) */}
+                <FlatField spots={feet} y={0.045} geometry="cell" opacity={0.07} />
+                <GlowField glows={glows} />
+                <FlatField spots={misses} y={0.05} geometry="ring" color="#a9c6de" opacity={0.55} />
+                <FlatField spots={misses} y={0.052} geometry="dot" color="#a9c6de" opacity={0.5} />
+              </group>
               {groups}
-              <GlowField glows={glows} />
-              <FlatField spots={misses} y={0.05} geometry="ring" color="#a9c6de" opacity={0.55} />
-              <FlatField spots={misses} y={0.052} geometry="dot" color="#a9c6de" opacity={0.5} />
               <FireField fires={fires} />
-            </>
+              <DebrisField pieces={debris} />
+              {(() => {
+                // oil on the water: the biggest slicks win the ten slots
+                ocean.setSlicks(slicks.sort((a, b) => b.r * b.s - a.r * a.s).slice(0, 10));
+                return null;
+              })()}
+            </OceanCtx.Provider>
           );
         })()}
         {/* the pick surface over the enemy tile: a click fires on
             desktop; on touch a tap aims and the Fire button fires */}
         {pickTile ? (
           <mesh
+            userData={NOMIR}
             position={[pickTile.cx, 0.08, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             onPointerMove={(e) => {
@@ -1391,7 +1420,7 @@ function Scene({
               const loc = cellLocal(ringAt.label, w, h);
               const c = ringHot ? "#ff5a3c" : "#9fd8ef";
               return (
-                <group position={[ringAt.tile.cx + loc.x, 0.07, loc.z]}>
+                <group position={[ringAt.tile.cx + loc.x, 0.07, loc.z]} userData={NOMIR}>
                   <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>
                     <ringGeometry args={[0.36, 0.46, 32]} />
                     <meshBasicMaterial color={c} toneMapped={false} depthWrite={false} depthTest={false} transparent opacity={0.95} />
@@ -1415,8 +1444,13 @@ function Scene({
             anim={anim}
             onImpact={() => {
               juice.hit(anim.impact);
+              ocean.ripple(anim.x, anim.z, anim.result === "hit" ? 0.7 : 1);
               const sk = anim.sink;
-              if (sk) setSinks((l) => [...l, sk]);
+              if (sk) {
+                setSinks((l) => [...l, sk]);
+                // a ship going down heaves the water around it
+                ocean.ripple(sk.at[0], sk.at[2], 1.5);
+              }
             }}
             onDone={() => setAnim(null)}
           />
