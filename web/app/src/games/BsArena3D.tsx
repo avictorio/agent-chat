@@ -12,7 +12,7 @@
    never render. Shot animations replay from last_move diffs and are
    presentation only. Mounted by games.ts through a dynamic import so
    three.js stays in the lazy chunk. */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
   ArenaFrame,
@@ -34,12 +34,18 @@ import {
   AdditiveBlending,
   CanvasTexture,
   Color,
+  Euler,
   ExtrudeGeometry,
   MeshStandardMaterial,
+  Object3D,
+  Quaternion,
   Shape,
+  type BufferAttribute,
   type Group,
+  type InstancedMesh,
   type Material,
   type Mesh,
+  type PointLight,
   type Points,
   type SpriteMaterial,
 } from "three";
@@ -133,124 +139,253 @@ function textScale(tex: CanvasTexture, height: number): [number, number, number]
   return [height * (img.width / img.height), height, 1];
 }
 
-/* ---------- fire: flames + smoke + embers, one animated bundle ---------- */
+/* ---------- batched effects (2026-11-13) ----------
+   A late game spent ~760 draw calls a frame, mostly on effects: every
+   fire was 3 flame sprites, smoke sprites and an ember cloud; every
+   miss two meshes; every glow pool and fleet footprint a mesh - and
+   the reflective sea draws the whole scene twice. Each kind is now ONE
+   instanced draw: flames and smoke as camera-facing quads (billboards,
+   like the sprites they replace), embers as one point cloud. The look
+   and the motion are the same; reduced motion freezes it as before. */
 
-function FireFx({
-  position,
-  scale = 1,
-  light = false,
-}: {
-  position: [number, number, number];
-  scale?: number;
-  light?: boolean;
-}) {
-  const g = useRef<Group>(null);
-  const flames = useRef<(GL | null)[]>([]);
-  const smokes = useRef<(GL | null)[]>([]);
-  const embers = useRef<Points>(null);
-  const lightRef = useRef<GL>(null);
+type FireSpec = { key: string; x: number; y: number; z: number; scale: number; light: boolean };
+type GlowSpec = { x: number; y: number; z: number; r: number; a: number };
+type Spot = { x: number; z: number; hex?: string };
+
+const _o = new Object3D();
+const _c = new Color();
+/* Additive blending adds colour x alpha, so each flame layer's old
+   sprite opacity is folded into its colour. */
+const FLAME_C = ["#ffd9a0", "#ff9a3c", "#ff5a1f"].map((c, i) => new Color(c).multiplyScalar(0.85 - i * 0.22));
+const SMOKE_C = new Color("#23272c");
+const SEA_C = new Color(SEA);
+const EMBERS = 12;
+const FLAT = new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0));
+
+function FireField({ fires }: { fires: FireSpec[] }) {
   const still = useContext(Still);
-  const frozen = useRef(false);
-  const seed = useMemo(() => Math.random() * 100, []);
-  const emberGeo = useMemo(() => {
-    const n = 12;
-    const pos = new Float32Array(n * 3);
+  // Stable across re-renders that do not change the fires (a hover
+  // re-renders the scene; the embers must not restart).
+  const sig = fires.map((f) => f.key + "@" + f.x.toFixed(2) + "," + f.z.toFixed(2)).join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const list = useMemo(() => fires, [sig]);
+  const n = list.length;
+  const flames = useRef<InstancedMesh>(null);
+  const smokes = useRef<InstancedMesh>(null);
+  const embers = useRef<Points>(null);
+  const lightRefs = useRef<(PointLight | null)[]>([]);
+  const seeds = useMemo(() => list.map((f) => hash01(f.key) * 100), [list]);
+  const ember = useMemo(() => {
+    const rel = new Float32Array(Math.max(1, n) * EMBERS * 3);
+    const abs = new Float32Array(rel.length);
     for (let i = 0; i < n; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 0.3;
-      pos[i * 3 + 1] = Math.random() * 1.1;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 0.3;
+      const f = list[i]!;
+      for (let k = 0; k < EMBERS; k++) {
+        const b = (i * EMBERS + k) * 3;
+        rel[b] = (Math.random() - 0.5) * 0.3;
+        rel[b + 1] = Math.random() * 1.1;
+        rel[b + 2] = (Math.random() - 0.5) * 0.3;
+        abs[b] = f.x + (rel[b] ?? 0);
+        abs[b + 1] = f.y + (rel[b + 1] ?? 0);
+        abs[b + 2] = f.z + (rel[b + 2] ?? 0);
+      }
     }
-    return { pos, n };
-  }, []);
-  useFrame((state) => {
-    if (still) {
-      // One settled pose: steady flames, smoke held, no embers, no
-      // flickering firelight (it ran at 13-31 Hz).
-      if (frozen.current) return;
-      frozen.current = true;
-      flames.current.forEach((s, i) => {
-        if (!s) return;
-        s.scale.set(0.55 * scale * (1 - i * 0.16), (0.95 - i * 0.2) * scale, 1);
-        (s.material as SpriteMaterial).opacity = 0.85 - i * 0.22;
-      });
-      smokes.current.forEach((s, i) => {
-        if (!s) return;
-        const p = 0.2 + i * 0.35;
-        s.position.set(p * 0.5, 0.55 + p * 1.7 * scale, 0);
-        const sc = (0.5 + p * 1.5) * scale;
-        s.scale.set(sc, sc, 1);
-        (s.material as SpriteMaterial).opacity = 0.42 * (1 - p);
-      });
-      if (embers.current) embers.current.visible = false;
-      if (lightRef.current) lightRef.current.intensity = 5.2;
-      return;
+    return { rel, abs };
+  }, [n, list]);
+  useLayoutEffect(() => {
+    const fm = flames.current;
+    if (fm) {
+      for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) fm.setColorAt(i * 3 + j, FLAME_C[j]!);
+      if (fm.instanceColor) fm.instanceColor.needsUpdate = true;
     }
-    if (frozen.current) {
-      frozen.current = false;
-      if (embers.current) embers.current.visible = true;
+    const sm = smokes.current;
+    if (sm) {
+      for (let i = 0; i < n * 2; i++) sm.setColorAt(i, SMOKE_C);
+      if (sm.instanceColor) sm.instanceColor.needsUpdate = true;
     }
-    const t = state.clock.elapsedTime + seed;
-    flames.current.forEach((s, i) => {
-      if (!s) return;
-      const f = 0.82 + 0.28 * Math.sin(t * 11 + i * 2.4) * Math.sin(t * 5.3 + i);
-      s.scale.set(0.55 * scale * f * (1 - i * 0.16), (0.95 - i * 0.2) * scale * (0.9 + 0.25 * Math.sin(t * 9 + i * 1.7)), 1);
-      (s.material as SpriteMaterial).opacity = 0.85 - i * 0.22;
-    });
-    smokes.current.forEach((s, i) => {
-      if (!s) return;
-      const p = (t * 0.16 + i / smokes.current.length + seed) % 1;
-      s.position.set(Math.sin(p * 5 + i) * 0.14 + p * 0.5, 0.55 + p * 1.7 * scale, Math.cos(p * 4 + i) * 0.1);
-      const sc = (0.5 + p * 1.5) * scale;
-      s.scale.set(sc, sc, 1);
-      (s.material as SpriteMaterial).opacity = 0.42 * (1 - p) * Math.min(1, p * 6);
-    });
-    if (embers.current) {
-      const arr = (embers.current.geometry.attributes.position as GL).array as Float32Array;
-      for (let i = 0; i < emberGeo.n; i++) {
-        const ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
-        arr[iy] = (arr[iy] ?? 0) + 0.011 + (i % 3) * 0.004;
-        arr[ix] = (arr[ix] ?? 0) + Math.sin(t * 3 + i * 2.1) * 0.0016;
-        if ((arr[iy] ?? 0) > 1.25 * scale) {
-          arr[iy] = 0.05;
-          arr[ix] = (Math.random() - 0.5) * 0.3;
-          arr[iz] = (Math.random() - 0.5) * 0.3;
+  }, [n, list]);
+  const lit = list.map((f, i) => (f.light ? i : -1)).filter((i) => i >= 0);
+  useFrame((state, delta) => {
+    const fm = flames.current;
+    const sm = smokes.current;
+    const em = embers.current;
+    if (!fm || !sm || !em) return;
+    const q = state.camera.quaternion;
+    const T = state.clock.elapsedTime;
+    for (let i = 0; i < n; i++) {
+      const f = list[i]!;
+      const s = f.scale;
+      const t = T + (seeds[i] ?? 0);
+      for (let j = 0; j < 3; j++) {
+        const fl = still ? 1 : 0.82 + 0.28 * Math.sin(t * 11 + j * 2.4) * Math.sin(t * 5.3 + j);
+        const hy = still ? 1 : 0.9 + 0.25 * Math.sin(t * 9 + j * 1.7);
+        _o.position.set(f.x, f.y + 0.34 * s - j * 0.04, f.z);
+        _o.quaternion.copy(q);
+        _o.scale.set(0.55 * s * fl * (1 - j * 0.16), (0.95 - j * 0.2) * s * hy, 1);
+        _o.updateMatrix();
+        fm.setMatrixAt(i * 3 + j, _o.matrix);
+      }
+      for (let j = 0; j < 2; j++) {
+        const p = still ? 0.2 + j * 0.35 : (t * 0.16 + j / 2 + (seeds[i] ?? 0)) % 1;
+        _o.position.set(f.x + Math.sin(p * 5 + j) * 0.14 + p * 0.5, f.y + 0.55 + p * 1.7 * s, f.z + Math.cos(p * 4 + j) * 0.1);
+        _o.quaternion.copy(q);
+        const sc = (0.5 + p * 1.5) * s;
+        _o.scale.set(sc, sc, 1);
+        _o.updateMatrix();
+        sm.setMatrixAt(i * 2 + j, _o.matrix);
+        // Smoke fades in fast and out slowly. Instances share one
+        // opacity, so the fade runs through colour, toward the sea.
+        _c.copy(SEA_C).lerp(SMOKE_C, (1 - p) * Math.min(1, p * 6));
+        sm.setColorAt(i * 2 + j, _c);
+      }
+    }
+    fm.instanceMatrix.needsUpdate = true;
+    sm.instanceMatrix.needsUpdate = true;
+    if (sm.instanceColor) sm.instanceColor.needsUpdate = true;
+    em.visible = !still;
+    if (!still) {
+      // Rates were per frame at 60 fps; scale by the real step so the
+      // embers rise at the same speed under the slower ambient ticker.
+      const step = Math.min(3, delta * 60);
+      const { rel, abs } = ember;
+      for (let i = 0; i < n; i++) {
+        const f = list[i]!;
+        const t = T + (seeds[i] ?? 0);
+        for (let k = 0; k < EMBERS; k++) {
+          const b = (i * EMBERS + k) * 3;
+          rel[b + 1] = (rel[b + 1] ?? 0) + (0.011 + (k % 3) * 0.004) * step;
+          rel[b] = (rel[b] ?? 0) + Math.sin(t * 3 + k * 2.1) * 0.0016 * step;
+          if ((rel[b + 1] ?? 0) > 1.25 * f.scale) {
+            rel[b + 1] = 0.05;
+            rel[b] = (Math.random() - 0.5) * 0.3;
+            rel[b + 2] = (Math.random() - 0.5) * 0.3;
+          }
+          abs[b] = f.x + (rel[b] ?? 0);
+          abs[b + 1] = f.y + (rel[b + 1] ?? 0);
+          abs[b + 2] = f.z + (rel[b + 2] ?? 0);
         }
       }
-      (embers.current.geometry.attributes.position as GL).needsUpdate = true;
+      (em.geometry.attributes.position as BufferAttribute).needsUpdate = true;
     }
-    if (lightRef.current) lightRef.current.intensity = 5.2 + Math.sin(t * 13.7) * 1.5 + Math.sin(t * 31.3) * 0.9;
+    lit.forEach((fi, li) => {
+      const L = lightRefs.current[li];
+      if (!L) return;
+      const t = T + (seeds[fi] ?? 0);
+      L.intensity = still ? 5.2 : 5.2 + Math.sin(t * 13.7) * 1.5 + Math.sin(t * 31.3) * 0.9;
+    });
   });
+  if (!n) return null;
   const tex = glowTexture();
   return (
-    <group ref={g} position={position}>
-      {[0, 1, 2].map((i) => (
-        <sprite key={"f" + i} ref={(r) => (flames.current[i] = r)} position={[0, 0.34 * scale - i * 0.04, 0]}>
-          <spriteMaterial map={tex} color={i === 0 ? "#ffd9a0" : i === 1 ? "#ff9a3c" : "#ff5a1f"} blending={AdditiveBlending} depthWrite={false} transparent opacity={0.8} />
-        </sprite>
-      ))}
-      {[0, 1].map((i) => (
-        <sprite key={"s" + i} ref={(r) => (smokes.current[i] = r)}>
-          <spriteMaterial map={tex} color="#23272c" depthWrite={false} transparent opacity={0.3} />
-        </sprite>
-      ))}
-      <points ref={embers}>
+    <group>
+      <instancedMesh key={"f" + n} ref={flames} args={[undefined, undefined, n * 3]} frustumCulled={false}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial map={tex} blending={AdditiveBlending} depthWrite={false} transparent />
+      </instancedMesh>
+      <instancedMesh key={"s" + n} ref={smokes} args={[undefined, undefined, n * 2]} frustumCulled={false}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial map={tex} depthWrite={false} transparent opacity={0.42} />
+      </instancedMesh>
+      <points key={"e" + n} ref={embers} frustumCulled={false}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[emberGeo.pos, 3]} />
+          <bufferAttribute attach="attributes-position" args={[ember.abs, 3]} />
         </bufferGeometry>
         <pointsMaterial size={0.05} map={tex} color="#ffb066" blending={AdditiveBlending} depthWrite={false} transparent opacity={0.9} sizeAttenuation />
       </points>
-      {light ? <pointLight ref={lightRef} position={[0, 0.7, 0]} color="#ff8a3c" intensity={5} distance={4.5} decay={2} /> : null}
+      {lit.map((fi, li) => {
+        const f = list[fi]!;
+        return (
+          <pointLight
+            key={f.key}
+            ref={(r) => {
+              lightRefs.current[li] = r;
+            }}
+            position={[f.x, f.y + 0.7, f.z]}
+            color="#ff8a3c"
+            intensity={5}
+            distance={4.5}
+            decay={2}
+          />
+        );
+      })}
     </group>
   );
 }
 
-/* A soft pool of firelight on the water under a fire. */
-function GlowDisc({ position, radius = 0.62, opacity = 0.33 }: { position: [number, number, number]; radius?: number; opacity?: number }) {
+/* Pools of firelight on the water under fires (additive: each pool's
+   old opacity is folded into its colour). */
+function GlowField({ glows }: { glows: GlowSpec[] }) {
+  const ref = useRef<InstancedMesh>(null);
+  const n = glows.length;
+  const sig = glows.map((g) => g.x.toFixed(2) + "," + g.z.toFixed(2) + "," + g.r + "," + g.a).join("|");
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    glows.forEach((g, i) => {
+      _o.position.set(g.x, g.y, g.z);
+      _o.quaternion.copy(FLAT);
+      _o.scale.set(g.r, g.r, 1);
+      _o.updateMatrix();
+      m.setMatrixAt(i, _o.matrix);
+      m.setColorAt(i, _c.set("#ff7a26").multiplyScalar(g.a));
+    });
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+  if (!n) return null;
   return (
-    <mesh position={position} rotation={[-Math.PI / 2, 0, 0]}>
-      <circleGeometry args={[radius, 24]} />
-      <meshBasicMaterial map={glowTexture()} color="#ff7a26" blending={AdditiveBlending} depthWrite={false} transparent opacity={opacity} />
-    </mesh>
+    <instancedMesh key={"g" + n} ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
+      <circleGeometry args={[1, 24]} />
+      <meshBasicMaterial map={glowTexture()} blending={AdditiveBlending} depthWrite={false} transparent />
+    </instancedMesh>
+  );
+}
+
+/* Flat instanced markers on the water: one draw for every cell. */
+function FlatField({
+  spots,
+  y,
+  geometry,
+  color,
+  opacity,
+}: {
+  spots: Spot[];
+  y: number;
+  geometry: "ring" | "dot" | "cell";
+  color?: string;
+  opacity: number;
+}) {
+  const ref = useRef<InstancedMesh>(null);
+  const n = spots.length;
+  const sig = spots.map((p) => p.x.toFixed(2) + "," + p.z.toFixed(2) + (p.hex || "")).join("|");
+  useLayoutEffect(() => {
+    const m = ref.current;
+    if (!m) return;
+    spots.forEach((p, i) => {
+      _o.position.set(p.x, y, p.z);
+      _o.quaternion.copy(FLAT);
+      _o.scale.set(1, 1, 1);
+      _o.updateMatrix();
+      m.setMatrixAt(i, _o.matrix);
+      if (p.hex) m.setColorAt(i, _c.set(p.hex));
+    });
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, y]);
+  if (!n) return null;
+  return (
+    <instancedMesh key={geometry + n} ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
+      {geometry === "ring" ? (
+        <ringGeometry args={[0.15, 0.21, 24]} />
+      ) : geometry === "dot" ? (
+        <circleGeometry args={[0.05, 12]} />
+      ) : (
+        <planeGeometry args={[0.9, 0.9]} />
+      )}
+      <meshBasicMaterial color={color || "#ffffff"} transparent opacity={opacity} depthWrite={false} />
+    </instancedMesh>
   );
 }
 
@@ -586,21 +721,6 @@ function ShotFx({ anim, world, onDone }: { anim: Anim; world: GL; onDone: () => 
 }
 
 /* ---------- markers ---------- */
-
-function MissMarker({ x, z }: { x: number; z: number }) {
-  return (
-    <group position={[x, 0.05, z]}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.15, 0.21, 24]} />
-        <meshBasicMaterial color="#a9c6de" transparent opacity={0.55} depthWrite={false} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]}>
-        <circleGeometry args={[0.05, 12]} />
-        <meshBasicMaterial color="#a9c6de" transparent opacity={0.5} depthWrite={false} />
-      </mesh>
-    </group>
-  );
-}
 
 /* The last shot's cell. White, like the 2D board's outline: an orange
    ring vanished into the fire glow whenever the shot was a hit. */
@@ -981,7 +1101,6 @@ function Scene({
     return { x: n.clientX || 0, y: n.clientY || 0 };
   };
 
-  const lightBudget = { n: 0 };
   const lmTile = lm ? tiles.filter((t) => t.name !== lm.by)[0] : undefined;
   const ringAt = !aimMode && foeTile && hover ? { tile: foeTile, label: hover } : aimTile && aim ? { tile: aimTile, label: aim } : null;
   const ringHot = !!(ringAt && ringAt.tile.canFire);
@@ -1025,88 +1144,92 @@ function Scene({
         </mesh>
         <LightPatch seed={1.7} />
         <LightPatch seed={4.9} />
-        {tiles.map((tile) => {
-          const shipEls: GL[] = [];
-          const fireEls: GL[] = [];
-          const footEls: GL[] = [];
-          tile.ships.forEach((s) => {
-            const c0 = s.cells[0] ?? "A1";
-            const cN = s.cells[s.cells.length - 1] ?? c0;
-            const first = cellLocal(c0, w, h);
-            const last = cellLocal(cN, w, h);
-            const center = { x: tile.cx + (first.x + last.x) / 2, z: (first.z + last.z) / 2 };
-            const vertical = c0[0] === cN[0] && s.cells.length > 1;
-            shipEls.push(
-              <ShipModel
-                key={s.key}
-                size={s.size}
-                variant={s.variant}
-                hex={tile.hex}
-                sunk={s.sunk}
-                wreckAt={freshWrecks[tile.name + ":" + s.key]}
-                center={center}
-                vertical={vertical}
-              />
+        {(() => {
+          /* Effects are gathered across the shown oceans and drawn
+             batched (FireField, GlowField, FlatField): one draw per
+             kind instead of one per fire, pool, marker or cell. */
+          const fires: FireSpec[] = [];
+          const glows: GlowSpec[] = [];
+          const misses: Spot[] = [];
+          const feet: Spot[] = [];
+          let lights = 0;
+          const groups = tiles.map((tile) => {
+            const shipEls: GL[] = [];
+            tile.ships.forEach((s) => {
+              const c0 = s.cells[0] ?? "A1";
+              const cN = s.cells[s.cells.length - 1] ?? c0;
+              const first = cellLocal(c0, w, h);
+              const last = cellLocal(cN, w, h);
+              const center = { x: tile.cx + (first.x + last.x) / 2, z: (first.z + last.z) / 2 };
+              const vertical = c0[0] === cN[0] && s.cells.length > 1;
+              shipEls.push(
+                <ShipModel
+                  key={s.key}
+                  size={s.size}
+                  variant={s.variant}
+                  hex={tile.hex}
+                  sunk={s.sunk}
+                  wreckAt={freshWrecks[tile.name + ":" + s.key]}
+                  center={center}
+                  vertical={vertical}
+                />
+              );
+              if (!s.sunk) {
+                /* A live ship is always the viewer's own (the server
+                   never sends an un-sunk enemy hull): a faint footprint
+                   in the captain's colour under each of its cells keeps
+                   the fleet findable, as the 2D board's tinted cells do. */
+                s.cells.forEach((c) => {
+                  const loc = cellLocal(c, w, h);
+                  feet.push({ x: tile.cx + loc.x, z: loc.z, hex: tile.hex });
+                });
+                s.hits.forEach((c) => {
+                  const loc = cellLocal(c, w, h);
+                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: 0.5, z: loc.z, scale: 0.8, light: false });
+                });
+              } else {
+                glows.push({ x: center.x, y: 0.03, z: center.z, r: s.size * 0.42, a: 0.2 });
+                const idxs = s.size >= 4 ? [0, Math.floor(s.cells.length / 2), s.cells.length - 1] : [0, s.cells.length - 1];
+                idxs.forEach((ci, fi) => {
+                  const cell = s.cells[ci];
+                  if (!cell) return;
+                  const loc = cellLocal(cell, w, h);
+                  const light = lights < 3 && fi === 0;
+                  if (fi === 0) lights++;
+                  fires.push({ key: tile.name + ":w:" + s.key + ":" + ci, x: tile.cx + loc.x, y: 0.42, z: loc.z, scale: 1.05, light });
+                });
+              }
+            });
+            tile.water.forEach((m) => {
+              const loc = cellLocal(m.label, w, h);
+              const x = tile.cx + loc.x;
+              if (m.result === "hit") {
+                fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.14, z: loc.z, scale: 0.85, light: false });
+                glows.push({ x, y: 0.035, z: loc.z, r: 0.6, a: 0.33 });
+              } else misses.push({ x, z: loc.z });
+            });
+            return (
+              <group key={tile.name}>
+                <GridHolo tile={tile} w={w} h={h} />
+                {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
+                {shipEls}
+                {lm && lmTile === tile ? (
+                  <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
+                ) : null}
+              </group>
             );
-            if (!s.sunk) {
-              /* A live ship is always the viewer's own (the server
-                 never sends an un-sunk enemy hull): a faint footprint
-                 in the captain's colour under each of its cells keeps
-                 the fleet findable, as the 2D board's tinted cells do. */
-              s.cells.forEach((c) => {
-                const loc = cellLocal(c, w, h);
-                footEls.push(
-                  <mesh key={"fp" + c} position={[tile.cx + loc.x, 0.045, loc.z]} rotation={[-Math.PI / 2, 0, 0]}>
-                    <planeGeometry args={[0.9, 0.9]} />
-                    <meshBasicMaterial color={tile.hex} transparent opacity={0.24} depthWrite={false} />
-                  </mesh>
-                );
-              });
-            }
-            if (s.sunk) {
-              fireEls.push(<GlowDisc key={"gd" + s.key} position={[center.x, 0.03, center.z]} radius={s.size * 0.42} opacity={0.2} />);
-              const idxs = s.size >= 4 ? [0, Math.floor(s.cells.length / 2), s.cells.length - 1] : [0, s.cells.length - 1];
-              idxs.forEach((ci, fi) => {
-                const cell = s.cells[ci];
-                if (!cell) return;
-                const loc = cellLocal(cell, w, h);
-                const useLight = lightBudget.n < 3 && fi === 0;
-                if (fi === 0) lightBudget.n++;
-                fireEls.push(
-                  <FireFx key={"wf" + s.key + ci} position={[tile.cx + loc.x, 0.42, loc.z]} scale={1.05} light={useLight} />
-                );
-              });
-            } else {
-              s.hits.forEach((c) => {
-                const loc = cellLocal(c, w, h);
-                fireEls.push(<FireFx key={"hf" + s.key + c} position={[tile.cx + loc.x, 0.5, loc.z]} scale={0.8} />);
-              });
-            }
           });
           return (
-            <group key={tile.name}>
-              <GridHolo tile={tile} w={w} h={h} />
-              {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
-              {footEls}
-              {shipEls}
-              {fireEls}
-              {tile.water.map((m) => {
-                const loc = cellLocal(m.label, w, h);
-                return m.result === "hit" ? (
-                  <group key={m.label}>
-                    <FireFx position={[tile.cx + loc.x, 0.14, loc.z]} scale={0.85} />
-                    <GlowDisc position={[tile.cx + loc.x, 0.035, loc.z]} radius={0.6} />
-                  </group>
-                ) : (
-                  <MissMarker key={m.label} x={tile.cx + loc.x} z={loc.z} />
-                );
-              })}
-              {lm && lmTile === tile ? (
-                <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
-              ) : null}
-            </group>
+            <>
+              <FlatField spots={feet} y={0.045} geometry="cell" opacity={0.24} />
+              {groups}
+              <GlowField glows={glows} />
+              <FlatField spots={misses} y={0.05} geometry="ring" color="#a9c6de" opacity={0.55} />
+              <FlatField spots={misses} y={0.052} geometry="dot" color="#a9c6de" opacity={0.5} />
+              <FireField fires={fires} />
+            </>
           );
-        })}
+        })()}
         {/* the pick surface over the enemy tile: a click fires on
             desktop; on touch a tap aims and the Fire button fires */}
         {pickTile ? (

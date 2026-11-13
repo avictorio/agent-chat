@@ -680,7 +680,15 @@ export function createGameStore(opts: {
     if (!(you.playing && me && opp && g.phase === "setup" && !you.fleet)) bsDrafts.delete(g.id);
     if (!you.playing || !me || !opp) {
       const big = el("div", "lc-board-big");
-      big.appendChild(battleshipBoard(g));
+      const board = battleshipBoard(g);
+      // The 3D scene below shows both oceans, so the scoreboard's mini
+      // boards only repeat it - and on a phone they pushed the scene
+      // below the fold. The feed card and the 2D arena keep them.
+      if (bs3dPref() && g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
+        const minis = board.querySelector(".bs-minis");
+        if (minis) minis.remove();
+      }
+      big.appendChild(board);
       wrap.appendChild(big);
       if (g.boards && g.boards.length && (g.phase === "play" || g.status === "finished")) {
         const banner = bsBanner(g, freshMove);
