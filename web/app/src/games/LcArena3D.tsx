@@ -105,6 +105,11 @@ class Race {
   waveAt: number[] = new Array(MAX_RIDERS).fill(-1);
   push: null | { until: number; pos: [number, number, number]; tgt: [number, number, number] } = null;
   chase: number | null = null;
+  /* a replay of a finished match from the start line */
+  replay = false;
+  replayDur = 0.3;
+  run = 0;
+  lastZap = 0;
 }
 
 function wrapPi(a: number): number {
@@ -140,6 +145,9 @@ function Director({
   say,
   onCatch,
   onChaseLost,
+  onReplayEnd,
+  progress,
+  bar,
 }: {
   race: MutableRefObject<Race>;
   wx: (x: number) => number;
@@ -151,6 +159,9 @@ function Director({
   say: (s: string) => void;
   onCatch: (c: { from: number; to: number } | null) => void;
   onChaseLost: () => void;
+  onReplayEnd: () => void;
+  progress: RefObject<HTMLSpanElement | null>;
+  bar: RefObject<HTMLSpanElement | null>;
 }) {
   const j = useJuice();
   const lastJ = useRef(j.t);
@@ -165,7 +176,7 @@ function Director({
     const R = race.current;
     const out = r.out!;
     const at = world(r, impactAt(r)! - 1e-4);
-    const fx: Fx[] = [{ id: "x" + r.i + ":" + out.tick, kind: "derez", at, hex: r.hex, mine: r.me }];
+    const fx: Fx[] = [{ id: R.run + "x" + r.i + ":" + out.tick, kind: "derez", at, hex: r.hex, mine: r.me }];
     const group = out.kind === "headon" ? [r.i, ...out.with].sort() : [r.i];
     // a head-on is staged once, by its lowest rider
     if (out.kind === "headon" && group[0] !== r.i) {
@@ -178,7 +189,7 @@ function Director({
       j.hit({
         pulse: 0.3,
         sound: "derez",
-        buzz: r.me ? BUZZ.lostOne : undefined,
+        buzz: r.me && !R.replay ? BUZZ.lostOne : undefined,
         title: { big: r.me ? "Timed out" : r.name + " timed out", small: "Three ticks without a move", tone: r.me ? "bad" : "neutral", hex: r.me ? undefined : r.hex },
       });
       say(r.me ? "You were taken out for missing three ticks." : r.name + " was taken out for missing three ticks.");
@@ -190,7 +201,7 @@ function Director({
         pulse: 1,
         flash: "#ffffff",
         flashA: 0.45,
-        buzz: mineIn ? BUZZ.lostOne : undefined,
+        buzz: mineIn && !R.replay ? BUZZ.lostOne : undefined,
         sound: mineIn ? ["derez", "lose"] : ["derez", "clash"],
         title: { big: "Head-on", small: names.join(" and ") + " derezzed", tone: mineIn ? "bad" : "neutral" },
       });
@@ -203,7 +214,7 @@ function Director({
         pulse: 1,
         flash: r.hex,
         flashA: 0.55,
-        buzz: BUZZ.lostOne,
+        buzz: R.replay ? undefined : BUZZ.lostOne,
         sound: ["derez", "lose"],
         title: { big: "Derezzed", small: out.kind === "wall" ? "You hit the edge of the grid" : "You're out of the race", tone: "bad" },
       });
@@ -215,7 +226,7 @@ function Director({
     group.forEach((i) => {
       if (i !== r.i) {
         const o = R.list[i]!;
-        fx.push({ id: "x" + o.i + ":" + out.tick, kind: "derez", at: world(o, impactAt(o)! - 1e-4), hex: o.hex, mine: o.me });
+        fx.push({ id: R.run + "x" + o.i + ":" + out.tick, kind: "derez", at: world(o, impactAt(o)! - 1e-4), hex: o.hex, mine: o.me });
       }
     });
     addFx(fx);
@@ -231,7 +242,7 @@ function Director({
     const delay = anyCrash ? 1500 : 0;
     const meIn = R.list.some((r) => r.me);
     if (wr && wr.me) {
-      j.hit({ pulse: 0.8, buzz: BUZZ.wonMatch, sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Last rider standing", tone: "good" }, titleDelay: delay });
+      j.hit({ pulse: 0.8, buzz: R.replay ? undefined : BUZZ.wonMatch, sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Last rider standing", tone: "good" }, titleDelay: delay });
       say("You won the match.");
     } else if (wr) {
       const iLost = meIn && !R.list.find((r) => r.me && r.out && r.out.tick === R.target);
@@ -240,7 +251,7 @@ function Director({
         titleDelay: delay,
         sound: meIn ? "lose" : "win",
         soundDelay: delay / 1000,
-        buzz: iLost ? BUZZ.lostMatch : undefined,
+        buzz: iLost && !R.replay ? BUZZ.lostMatch : undefined,
       });
       say(wr.name + " won the match.");
     } else {
@@ -285,11 +296,13 @@ function Director({
     }
     if (R.T < R.target && now >= R.startAt) {
       const prev = R.T;
-      if (still) R.T = R.target;
+      // (a replay the viewer asked for plays even under reduced motion,
+      // without the camera moves, slow motion or sparks)
+      if (still && !R.replay) R.T = R.target;
       else {
         const k = Math.floor(R.T) + 1;
         const crashing = R.list.some((r) => r.out && r.out.kind !== "taken" && r.out.tick === k);
-        const dur = crashing ? CRASH_TICK : R.fast && R.target - R.T > 1.0001 ? FAST : SPRINT;
+        const dur = crashing ? CRASH_TICK : R.replay ? R.replayDur : R.fast && R.target - R.T > 1.0001 ? FAST : SPRINT;
         R.T = Math.min(R.target, R.T + dJ / dur);
       }
       R.played = true;
@@ -299,7 +312,7 @@ function Director({
         if (prev < m - 1 + 1e-6 && cur >= m - 1) {
           if (!R.fired.has("t" + m)) {
             R.fired.add("t" + m);
-            if (!still && !(R.fast && R.target - (m - 1) > 1)) sfx("whoosh");
+            if (!still && !R.replay && !(R.fast && R.target - (m - 1) > 1)) sfx("whoosh");
             pushIn(m);
           }
         }
@@ -316,18 +329,26 @@ function Director({
       // ticks completed: near misses (live play only - not the fast
       // catch-up, where they would rattle past)
       for (let m = Math.floor(prev) + 1; m <= Math.floor(cur); m++) {
-        if (still || (R.fast && R.target - m > 0)) continue;
+        if (still || (!R.replay && R.fast && R.target - m > 0)) continue;
         const g = R.g;
         const nm = nearMisses(R.list, m, (g && g.w) || 30, (g && g.h) || 22);
         if (nm.length) {
           const fx: Fx[] = nm.map((n) => {
             const v = DV[n.side];
-            return { id: "s" + n.i + ":" + m, kind: "spark", at: [wx(n.x) + v[0] * 0.5, 0.35, wz(n.y) + v[1] * 0.5], hex: R.list[n.i]!.hex };
+            return { id: R.run + "s" + n.i + ":" + m, kind: "spark", at: [wx(n.x) + v[0] * 0.5, 0.35, wz(n.y) + v[1] * 0.5], hex: R.list[n.i]!.hex };
           });
           addFx(fx);
-          sfx("zap");
+          // a replay races past: one zap at most every half second
+          if (!R.replay || now - R.lastZap > 450) {
+            sfx("zap");
+            R.lastZap = now;
+          }
           j.hit({ pulse: 0.15 });
         }
+      }
+      if (R.replay) {
+        if (progress.current) progress.current.textContent = "Tick " + Math.min(R.target, Math.floor(cur)) + " of " + R.target;
+        if (bar.current) bar.current.style.width = ((100 * cur) / Math.max(1, R.target)).toFixed(1) + "%";
       }
       if (cur >= R.target) {
         R.fast = false;
@@ -336,6 +357,10 @@ function Director({
         if (R.g && R.g.status === "finished" && !R.fired.has("fin")) {
           R.fired.add("fin");
           finish();
+        }
+        if (R.replay) {
+          R.replay = false;
+          onReplayEnd();
         }
       }
       state.invalidate();
@@ -747,6 +772,37 @@ export default function LcArena3D({
     juice.invalidate?.();
   };
 
+  /* Replay a finished race from the start line: the clock rewinds to
+     tick 0 and the whole match plays again (~16 s plus its crashes,
+     whatever its length), staged as it happened, ending on the winner. */
+  const [replaying, setReplaying] = useState(false);
+  const progressEl = useRef<HTMLSpanElement>(null);
+  const barEl = useRef<HTMLSpanElement>(null);
+  const startReplay = () => {
+    const Rr = race.current;
+    if (Rr.push && ctl.current) {
+      void ctl.current.setLookAt(...Rr.push.pos, ...Rr.push.tgt, false);
+      Rr.push = null;
+    }
+    Rr.fired.clear();
+    Rr.waveAt.fill(-1);
+    Rr.live.fill(1);
+    Rr.run++;
+    Rr.T = 0;
+    Rr.target = tick;
+    Rr.fast = false;
+    Rr.replay = true;
+    Rr.replayDur = Math.min(0.4, Math.max(0.14, 16 / Math.max(1, tick)));
+    Rr.startAt = performance.now() + 500;
+    setFx([]);
+    setCatching(null);
+    setReplaying(true);
+    setSaid("Replaying the race from the start.");
+    if (chase === null) goHome(ctl, homeRef.current || first, !still);
+    sfx("whoosh");
+    juice.invalidate?.();
+  };
+
   const [fx, setFx] = useState<Fx[]>([]);
   const tagEls = useRef<(HTMLDivElement | null)[]>([]);
   const [said, setSaid] = useState("");
@@ -758,9 +814,10 @@ export default function LcArena3D({
   const [chase, setChase] = useState<number | null>(null);
   R.chase = chase;
   const meR = list.find((r) => r.me);
+  const onGrid = () => list.filter((r) => poseAt(r, race.current.T).shown).map((r) => r.i);
   const nextChase = () => {
-    const order = list.filter((r) => r.alive).map((r) => r.i);
-    if (meR && meR.alive) order.sort((a, b) => (a === meR.i ? -1 : b === meR.i ? 1 : 0));
+    const order = onGrid();
+    if (meR && order.indexOf(meR.i) >= 0) order.sort((a, b) => (a === meR.i ? -1 : b === meR.i ? 1 : 0));
     if (!order.length) return null;
     if (chase === null) return order[0]!;
     const k = order.indexOf(chase);
@@ -778,7 +835,7 @@ export default function LcArena3D({
     : undefined;
 
   const status = (p: any): string => {
-    if (!g) return "";
+    if (!g || replaying) return "";
     if (g.status === "lobby") return p.accepted ? "✓" : "…";
     if (g.status === "running" && p.alive) return p.moved ? "✓" : "…";
     if (g.status === "finished" && g.winner === p.name) return "★";
@@ -808,7 +865,7 @@ export default function LcArena3D({
             >
               Zones
             </button>
-            {list.some((r) => r.alive) ? (
+            {list.some((r) => r.alive) || replaying ? (
               <button
                 type="button"
                 className={"arena3d-reset arena3d-toggle" + (chase !== null ? " on" : "")}
@@ -828,6 +885,23 @@ export default function LcArena3D({
         overlay={
           <>
             <ImpactLayer juice={juice} intro={intro} ready={ready} />
+            {replaying ? (
+              <div className="lc-catchup lc-replay" role="status">
+                <span className="lc-replay-txt">
+                  ▶ Replay · <span ref={progressEl}>Tick 0 of {tick}</span>
+                </span>
+                <span className="lc-replay-bar">
+                  <span ref={barEl} />
+                </span>
+                <button type="button" onClick={skip}>
+                  End
+                </button>
+              </div>
+            ) : g && g.status === "finished" && ready && !catching ? (
+              <button type="button" className="lc-replay-btn" onClick={startReplay} title="Watch the whole race again from the start line">
+                ▶ Replay race
+              </button>
+            ) : null}
             {catching ? (
               <div className="lc-catchup" role="status">
                 <span>
@@ -891,9 +965,18 @@ export default function LcArena3D({
             say={setSaid}
             onCatch={(c) => setCatching(c)}
             onChaseLost={() => {
-              setChase(null);
-              goHome(ctl, homeRef.current || first, !still);
+              // the chased cycle went out: ride with the next one on the
+              // grid, or come home when none is left
+              const order = onGrid();
+              if (order.length) setChase(order[0]!);
+              else {
+                setChase(null);
+                goHome(ctl, homeRef.current || first, !still);
+              }
             }}
+            onReplayEnd={() => setReplaying(false)}
+            progress={progressEl}
+            bar={barEl}
           />
           <color attach="background" args={[LC_FOG]} />
           <fog attach="fog" args={[LC_FOG, dist * 1.5, dist * 4.4]} />
@@ -928,7 +1011,7 @@ export default function LcArena3D({
             )}
           </mesh>
           <HorizonGrid half={[w / 2, h / 2]} off={[(w / 2) % 1, (h / 2) % 1]} cell={2} a="#0d3550" b="#1a6a96" fade={34} line={0.12} y={-0.01} />
-          <GridFloor w={w} h={h} own={own} hexes={list.map((r) => r.hex)} terr={zones ? 1 : 0} />
+          <GridFloor w={w} h={h} own={own} hexes={list.map((r) => r.hex)} terr={zones && !replaying ? 1 : 0} />
           <EdgeWall w={w} h={h} />
 
           <TrailSystem list={list} wx={wx} wz={wz} u={u.current} />

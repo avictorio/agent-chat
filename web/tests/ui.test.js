@@ -889,6 +889,36 @@ let FAILURES = 0;
     await shot(page, 'lc-3d-arena.png');
     return out;
   });
+  /* Light Cycles 3D replay (2026-11-14): a finished match offers Replay
+     race; it plays the race from the start line with a tick counter and
+     End, and hands back the button when it's over. */
+  await run('lc-3d-replay', { state: { game: true }, init: () => { try { localStorage.removeItem('ac:lc3d'); } catch (e) {} } }, async (page, S) => {
+    const out = {};
+    const g = S.game;
+    g.status = 'finished';
+    g.winner = 'Ada';
+    g.players.forEach((p) => { if (p.name !== 'Ada') { p.alive = false; g.log.push({ tick: g.tick, text: p.name + ' is out at tick ' + g.tick + ' - the trail holds.' }); } });
+    g.you.alive = false;
+    const card = S.msgs.find((m) => m.id === 9);
+    card.game.status = 'finished';
+    card.game.winner = 'Ada';
+    await page.reload();
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
+    await page.waitForSelector('#viewer .lc-replay-btn', { timeout: 30000 });
+    await page.click('#viewer .lc-replay-btn');
+    await page.waitForSelector('#viewer .lc-replay', { timeout: 4000 });
+    out.banner = await page.$eval('#viewer .lc-replay', (e) => e.textContent);
+    if (!/Replay/.test(out.banner) || !/of 3/.test(out.banner)) throw new Error('the replay banner should count ticks of 3: ' + out.banner);
+    if (await page.$('#viewer .lc-replay-btn')) throw new Error('the Replay button should give way to the banner while it plays');
+    await page.click('#viewer .lc-replay button');
+    await page.waitForSelector('#viewer .lc-replay-btn', { timeout: 20000 });
+    out.after = await page.$$eval('#viewer .lc-replay', (els) => els.length);
+    if (out.after !== 0) throw new Error('End should close the replay banner');
+    await shot(page, 'lc-3d-replay.png');
+    return out;
+  });
   // Duel UX: the card carries identity-colored pips and score numerals, the
   // last round's face-off with its verdict, a YOUR THROW pill and the round
   // clock bar; the viewer is a face-off arena with big throw tiles (beats

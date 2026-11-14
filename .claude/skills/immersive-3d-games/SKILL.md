@@ -356,7 +356,9 @@ Details: `references/async-presentation.md`.
   tick rides every cycle into its new cell together (~0.6 s), missed ticks
   replay fast-forwarded with Skip, a crash races into what it hit with the
   camera closing in and slow motion at the impact, a skimmed wall throws
-  sparks, the winner's trail lights end to end. A crashed rider's trail
+  sparks, the winner's trail lights end to end; a finished match offers
+  Replay race (the whole match from tick 0 in ~16 s plus its crashes, no
+  vibration - the viewer asked to watch). A crashed rider's trail
   stays (the server keeps it as a wall): dim it, never collapse it. The
   viewer's options float over their cells (safe chevron, magenta X for
   deadly, the queued turn lit; tap to steer), DOM tags de-overlap over the
