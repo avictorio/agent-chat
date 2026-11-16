@@ -39,6 +39,11 @@ export type FireSpec = {
   spread?: number;
   dir?: [number, number];
   kind?: FireKind;
+  /* How freshly the fire was struck, 1 (just hit) to 0 (long cold).
+     Old hits cool to embers - low flame, thin smoke, a few sparks -
+     so a board full of damage stays readable instead of turning into
+     one bonfire (the room's complaint, 2026-11-16). Default 1. */
+  heat?: number;
 };
 
 const KIND_ID: Record<FireKind, number> = { ship: 0, water: 1, wreck: 2 };
@@ -50,9 +55,11 @@ attribute vec3 aBase;
 attribute vec2 aDir;
 attribute vec4 aP; // seed, phase, spread, scale
 attribute float aKind;
+attribute float aHeat;
 varying vec2 vUv;
 varying float vLife;
 varying float vSeed;
+varying float vHeat;
 float h(float s, float k) { return fract(sin(s * 91.7 + k * 47.3) * 43758.5453); }
 vec3 startAt(float seed, float across) {
   float a = (h(seed, 2.0) - 0.5) * 2.0 * aP.z;
@@ -97,13 +104,15 @@ void main() {
   p.y += life * 0.16 * sc;
   p += uWind * life * 0.2 * sc;
   float w = sc * (0.32 + 0.24 * h(seed, 5.0)) * mix(1.0, 1.4, water);
-  float tall = w * mix(1.55, 1.05, water) * (0.7 + 0.55 * sin(min(life * 1.4, 1.0) * 3.14159 * 0.5 + life * 1.2));
+  // a cooled fire keeps only a low lick of flame over the embers
+  float tall = w * mix(1.55, 1.05, water) * (0.7 + 0.55 * sin(min(life * 1.4, 1.0) * 3.14159 * 0.5 + life * 1.2)) * (0.22 + 0.78 * aHeat);
   float up = position.y + 0.5; // 0 at the foot, 1 at the tip
   vec3 wp = billboard(p, vec2(position.x * w, up * tall));
   wp += uWind * up * up * tall * 0.4; // the tip leans downwind
   vUv = uv;
   vLife = life;
   vSeed = seed;
+  vHeat = aHeat;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
 
@@ -112,6 +121,7 @@ uniform float uTime;
 varying vec2 vUv;
 varying float vLife;
 varying float vSeed;
+varying float vHeat;
 ${NOISE}
 float fbm(vec2 p) {
   float s = 0.0, a = 0.5;
@@ -137,6 +147,7 @@ void main() {
   // thins it, the flame tears into licks and loose tips
   float I = env * (1.05 - y * 0.5) * (0.55 + 0.8 * n) - y * 0.3;
   I *= smoothstep(0.0, 0.12, vLife) * (1.0 - smoothstep(0.5, 1.0, vLife));
+  I *= 0.08 + 0.92 * vHeat; // embers glow; they do not blaze
   I = clamp(I * 1.6, 0.0, 1.0);
   // linear light, by intensity: dull red, orange, yellow (overlapping
   // sheets add, so a fire's heart builds toward white on its own)
@@ -170,6 +181,7 @@ void main() {
   vUv = uv;
   vLife = life;
   vSeed = seed;
+  vHeat = aHeat;
   vKind = aKind;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
@@ -181,6 +193,7 @@ varying vec2 vUv;
 varying float vLife;
 varying float vSeed;
 varying float vKind;
+varying float vHeat;
 ${NOISE}
 void main() {
   float n = vnoise(vUv * 3.0 + vSeed * 5.0 + vec2(0.0, -uTime * 0.18)) * 0.6 + vnoise(vUv * 6.5 - vSeed * 3.0) * 0.4;
@@ -196,7 +209,8 @@ void main() {
   // dense over the fire, thinning as it climbs; oil burning on the
   // water (an unseen hull) smokes lighter so the board stays readable
   float k = vKind > 1.5 ? 1.0 : vKind > 0.5 ? 0.6 : 0.92;
-  float alpha = puff * smoothstep(0.0, 0.06, l) * (1.0 - smoothstep(0.35, 1.0, l)) * uSmoke * k;
+  // a cooled fire smokes thin - the plume is what hides the board
+  float alpha = puff * smoothstep(0.0, 0.06, l) * (1.0 - smoothstep(0.35, 1.0, l)) * uSmoke * k * (0.25 + 0.75 * vHeat);
   gl_FragColor = vec4(col, alpha);
 }`;
 
@@ -217,6 +231,7 @@ void main() {
   vUv = uv;
   vLife = life;
   vSeed = seed;
+  vHeat = aHeat;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }`;
 
@@ -225,10 +240,12 @@ uniform float uTime;
 varying vec2 vUv;
 varying float vLife;
 varying float vSeed;
+varying float vHeat;
 void main() {
   float d = length(vUv - 0.5);
   float a = smoothstep(0.5, 0.0, d) * (0.6 + 0.4 * sin(uTime * 23.0 + vSeed * 40.0));
-  gl_FragColor = vec4(vec3(1.0, 0.6, 0.25) * 3.0, a * (1.0 - vLife));
+  // embers still throw the odd spark, just fewer and dimmer
+  gl_FragColor = vec4(vec3(1.0, 0.6, 0.25) * 3.0, a * (1.0 - vLife) * (0.2 + 0.8 * vHeat));
 }`;
 
 /* A fire's seeds come from its key, so its flames keep their rhythm
@@ -251,6 +268,7 @@ function particles(fires: FireSpec[], per: (f: FireSpec) => number, salt: number
   const dir = new Float32Array(n * 2);
   const p = new Float32Array(n * 4);
   const kind = new Float32Array(n);
+  const heat = new Float32Array(n);
   let j = 0;
   fires.forEach((f) => {
     const d = f.dir || [1, 0];
@@ -263,12 +281,14 @@ function particles(fires: FireSpec[], per: (f: FireSpec) => number, salt: number
       // phases spread evenly through the cycle, so the fire never gutters
       p.set([seed * 10, k / count + s0 * 0.13, f.spread ?? 0.2, f.scale], j * 4);
       kind[j] = KIND_ID[f.kind || "ship"];
+      heat[j] = f.heat ?? 1;
     }
   });
   g.setAttribute("aBase", new InstancedBufferAttribute(base, 3));
   g.setAttribute("aDir", new InstancedBufferAttribute(dir, 2));
   g.setAttribute("aP", new InstancedBufferAttribute(p, 4));
   g.setAttribute("aKind", new InstancedBufferAttribute(kind, 1));
+  g.setAttribute("aHeat", new InstancedBufferAttribute(heat, 1));
   g.instanceCount = total;
   return g;
 }
@@ -278,7 +298,7 @@ const WIND = new Vector3(0.55, 0, -0.22);
 export function FireSystem({ fires, lite, still }: { fires: FireSpec[]; lite: boolean; still: boolean }) {
   const j = useJuice();
   // stable across re-renders that do not change the fires
-  const sig = fires.map((f) => f.key + "@" + f.x.toFixed(2) + "," + f.y.toFixed(2) + "," + f.z.toFixed(2) + (f.kind || "")).join("|");
+  const sig = fires.map((f) => f.key + "@" + f.x.toFixed(2) + "," + f.y.toFixed(2) + "," + f.z.toFixed(2) + (f.kind || "") + "#" + (f.heat ?? 1).toFixed(2)).join("|");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const list = useMemo(() => fires, [sig]);
   /* Particles per fire. Burning oil over an unseen hull - the most
@@ -326,7 +346,10 @@ export function FireSystem({ fires, lite, still }: { fires: FireSpec[]; lite: bo
       const L = lights.current[li];
       if (!L) return;
       const s = (fi + 1) * 1.7;
-      L.intensity = still ? 5.2 : 5.2 + Math.sin(t * 13.7 + s) * 1.6 + Math.sin(t * 31.3 + s * 2) * 1.0;
+      // a cooled wreck glows instead of lighting the whole ocean
+      const heat = list[fi]?.heat ?? 1;
+      const base = (still ? 5.2 : 5.2 + Math.sin(t * 13.7 + s) * 1.6 + Math.sin(t * 31.3 + s * 2) * 1.0) * (0.25 + 0.75 * heat);
+      L.intensity = base;
     });
   });
   if (!list.length) return null;

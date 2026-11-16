@@ -960,6 +960,34 @@ function Scene({
   const w = g.w || 10;
   const h = g.h || 10;
   const sonar = g && g.sonar && g.phase === "play" && g.status === "running" ? g.sonar : null;
+  /* Fire heat by strike recency, from the ordered shot record: the
+     latest hit on a board burns at full heat and each older hit steps
+     down, so by endgame only the freshest few fires blaze and the rest
+     sit at embers - the board stays readable (room feedback, 2026-11-16:
+     Matheo and Jen could not see the squares through the fire). A cell
+     with no recorded shot keeps full heat. */
+  const heatAt = (() => {
+    const m = new Map<string, number>();
+    const shots = (g.shots || []) as GL[];
+    const names = ((g.players || []) as GL[]).map((p) => String(p.name).toLowerCase());
+    if (names.length === 2 && shots.length) {
+      const perBoard = new Map<string, string[]>();
+      for (const s of shots) {
+        if (!s || s.result !== "hit") continue;
+        const owner = names.find((n) => n !== String(s.by).toLowerCase());
+        if (!owner) continue;
+        const arr = perBoard.get(owner) || [];
+        arr.push(String(s.cell));
+        perBoard.set(owner, arr);
+      }
+      perBoard.forEach((cells, owner) => {
+        cells.forEach((cell, i) => {
+          m.set(owner + "|" + cell, Math.max(0, 1 - (cells.length - 1 - i) * 0.22));
+        });
+      });
+    }
+    return (tileName: string, cell: string): number => m.get(tileName.toLowerCase() + "|" + cell) ?? 1;
+  })();
   const world = useRef<Group>(null);
   const [hover, setHover] = useState<string | null>(null);
   const downAt = useRef<{ x: number; y: number } | null>(null);
@@ -1149,7 +1177,7 @@ function Scene({
                 const dir: [number, number] = vertical ? [0, 1] : [1, 0];
                 s.hits.forEach((c) => {
                   const loc = cellLocal(c, w, h);
-                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: deckY - 0.04, z: loc.z, scale: 0.8, light: false, spread: 0.3, dir, kind: "ship" });
+                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: deckY - 0.04, z: loc.z, scale: 0.8, light: false, spread: 0.3, dir, kind: "ship", heat: heatAt(tile.name, c) });
                 });
                 // a holed hull bleeds oil
                 if (s.hits.length) slicks.push({ x: center.x, z: center.z, r: 0.25 + 0.15 * s.hits.length, s: 0.7 });
@@ -1169,6 +1197,9 @@ function Scene({
                   });
                 }
                 const idxs = s.size >= 4 ? [0, Math.floor(s.cells.length / 2), s.cells.length - 1] : [0, s.cells.length - 1];
+                // the wreck burns at the heat of its sinking shot - the
+                // most recent strike on that hull
+                const wreckHeat = Math.max(...s.cells.map((cc) => heatAt(tile.name, cc)));
                 idxs.forEach((ci, fi) => {
                   const cell = s.cells[ci];
                   if (!cell) return;
@@ -1186,6 +1217,7 @@ function Scene({
                     spread: 0.45,
                     dir: vertical ? [0, 1] : [1, 0],
                     kind: "wreck",
+                    heat: wreckHeat,
                   });
                 });
               }
@@ -1195,7 +1227,7 @@ function Scene({
               const x = tile.cx + loc.x;
               if (m.result === "hit") {
                 // burning oil on the water where an unseen hull was holed
-                fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.05, z: loc.z, scale: 0.85, light: false, spread: 0.26, kind: "water" });
+                fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.05, z: loc.z, scale: 0.85, light: false, spread: 0.26, kind: "water", heat: heatAt(tile.name, m.label) });
                 glows.push({ x, y: 0.035, z: loc.z, r: 0.6, a: 0.33 });
                 slicks.push({ x, z: loc.z, r: 0.32, s: 0.55 });
               } else misses.push({ x, z: loc.z });
