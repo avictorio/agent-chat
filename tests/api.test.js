@@ -889,7 +889,17 @@ async function waitUp() {
     const toolNames = ((r.json && r.json.result && r.json.result.tools) || []).map(t => t.name);
     check('mcp catalog lists the surface', toolNames.includes('post_message') && toolNames.includes('begin_upload') && toolNames.includes('submit_move') && toolNames.includes('react') && toolNames.length >= 25, toolNames.join(',').slice(0, 200));
     const toolByName = {}; for (const t of ((r.json && r.json.result && r.json.result.tools) || [])) toolByName[t.name] = t;
-    check('mcp reads carry readOnlyHint, writes do not', !!(toolByName.list_messages && toolByName.list_messages.annotations && toolByName.list_messages.annotations.readOnlyHint === true && toolByName.post_message && !toolByName.post_message.annotations), JSON.stringify(toolByName.list_messages && toolByName.list_messages.annotations));
+    check('mcp reads carry readOnlyHint, writes do not', !!(toolByName.list_messages && toolByName.list_messages.annotations && toolByName.list_messages.annotations.readOnlyHint === true && toolByName.post_message && toolByName.post_message.annotations && toolByName.post_message.annotations.readOnlyHint === false), JSON.stringify(toolByName.list_messages && toolByName.list_messages.annotations));
+    check('mcp every tool is annotated', toolNames.length > 0 && toolNames.every(n => { const a = toolByName[n].annotations; return a && typeof a.readOnlyHint === 'boolean' && typeof a.idempotentHint === 'boolean' && typeof a.openWorldHint === 'boolean' && (a.readOnlyHint || typeof a.destructiveHint === 'boolean'); }), toolNames.filter(n => !toolByName[n].annotations).join(','));
+    check('mcp destructive hints land on deletes', !!(toolByName.delete_message && toolByName.delete_message.annotations.destructiveHint === true && toolByName.fetch_url && toolByName.fetch_url.annotations.openWorldHint === true && toolByName.react && toolByName.react.annotations.idempotentHint === true), JSON.stringify(toolByName.delete_message && toolByName.delete_message.annotations));
+    const catBlock = r.json && r.json.result && r.json.result.catalog;
+    check('mcp tools/list carries catalog version + digest', !!(catBlock && catBlock.version && /^[0-9a-f]{16}$/.test(catBlock.digest || '')), JSON.stringify(catBlock));
+    r = await mcp(R2, 'tools/list', {}, { token: TP });
+    check('mcp catalog digest is stable across calls', !!catBlock && !!(r.json && r.json.result && r.json.result.catalog && r.json.result.catalog.digest === catBlock.digest), JSON.stringify(r.json && r.json.result && r.json.result.catalog));
+    r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });
+    check('mcp initialize carries the same catalog pin', !!(r.json && r.json.result && r.json.result.catalog && catBlock && r.json.result.catalog.digest === catBlock.digest && r.json.result.serverInfo && r.json.result.serverInfo.version === catBlock.version), JSON.stringify(r.json && r.json.result && r.json.result.catalog));
+    r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} }, { token: 'bogus-token-value' });
+    check('mcp bad token refusal names itself', !!(r.json && r.json.error && r.json.error.code === -32001 && /isn't valid/.test(r.json.error.message || '')), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} }, { token: TP });
     check('mcp whoami names the invite holder', !!(r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.name === 'Poc'), JSON.stringify(r.json).slice(0, 160));
     r = await mcp(R2, 'tools/call', { name: 'post_message', arguments: { text: 'hello over mcp', as: 'Rex' } }, { token: TP });

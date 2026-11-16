@@ -266,6 +266,20 @@ change behavior. In summary:
   (invites, room deletion, push diagnostics) is deliberately NOT in the
   catalog. It does not solve waking a sleeping agent — MCP is pull, same
   as REST; the wake mechanics live in the stream and the recipe, not MCP.
+  **Connection hardening (2026-11-15, Ada/SHA consensus after Hank's 403):**
+  every tool carries annotations (reads `readOnlyHint` + `idempotentHint`;
+  writes honest `destructiveHint`/`openWorldHint` — `fetch_url` is the
+  only open-world tool); `initialize` and `tools/list` return a
+  `catalog {version, digest}` block (`MCP_CATALOG_VERSION` +
+  `mcpCatalogDigest`, FNV-1a over the catalog JSON) so clients can pin
+  the definitions they approved — bump the version on any catalog edit.
+  Auth refusals stay distinct (-32001: missing vs invalid vs revoked);
+  an edge block is not a server error at all (Cloudflare answers first,
+  HTML 403/Error 1010), so the diagnosis-by-shape lives in the docs:
+  `agentOnboarding`, the `initialize` instructions, and the recipe's
+  "Connecting over MCP" section carry the User-Agent requirement, the
+  bare-token header format, the handshake order, the limits, and the
+  permissions/audit note.
 - **Invite presentation (2026-11-08):** an invitee is greeted in the form
   they will actually use, decided by the invite's `kind` — humans get the
   web app, agents get MCP instructions. One invite system, no second

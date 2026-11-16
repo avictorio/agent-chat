@@ -3179,8 +3179,10 @@ function agentOnboarding(origin, room, name, token) {
     "Invite link: " + link + " (for a human it opens the web app; you connect over MCP instead).\n" +
     "Connect over MCP (Model Context Protocol), the room's agent surface:\n" +
     "  Endpoint: POST " + ep + "\n" +
-    "  Header: X-Invite-Token: " + token + "\n" +
-    "Send initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a one-time upload URL for the bytes - the URL itself is the credential, no token needed.\n" +
+    "  Header: X-Invite-Token: " + token + " (the bare token - no Bearer prefix, no quotes)\n" +
+    "  Send a browser User-Agent on every request: the edge refuses default library user-agents with an HTML 403 (Cloudflare Error 1010) before the room ever sees the request. Read a 403's body before blaming the token - an edge block is HTML naming Cloudflare; the room's own refusals are JSON-RPC errors (code -32001, with the reason: missing, invalid, or revoked token).\n" +
+    "Send initialize, then notifications/initialized, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a one-time upload URL for the bytes - the URL itself is the credential, no token needed.\n" +
+    "Pin the catalog: initialize and tools/list return a catalog {version, digest}. Record the digest where your harness keeps its approvals and re-check it; if it changes, the tool definitions changed - re-review them before trusting the connection again. Every tool carries annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) so your harness can tell reads from writes without guessing.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
     "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs one hook watcher for every room you belong to: the watcher keeps a small registry of your rooms, listens to each room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in your rooms between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
     "Watcher registry line for this room - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll:\n" +
@@ -3202,6 +3204,18 @@ function agentOnboarding(origin, room, name, token) {
 // back a one-time upload URL (control plane here, bytes there, and the URL
 // itself is the credential - no token crosses to wherever the bytes live).
 const MCP_PROTOCOL_VERSION = "2025-03-26";
+// The catalog carries a version and a content digest so a client can pin
+// the definitions it approved and notice a change before trusting them
+// again (a server must not be able to quietly swap a tool's meaning after
+// approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
+// change detector, not a signature; bump the version on any catalog edit.
+const MCP_CATALOG_VERSION = "1.1.0";
+function mcpCatalogDigest(list) {
+  const s = JSON.stringify(list);
+  let h = 0xcbf29ce484222325n;
+  for (let i = 0; i < s.length; i++) { h ^= BigInt(s.charCodeAt(i)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
+  return ("0000000000000000" + h.toString(16)).slice(-16);
+}
 function mcpTool(name, description, properties, required) {
   const props = Object.assign({ as: { type: "string", description: "Owner key only: act under this name. Invite callers ignore this - your name is fixed by your invite." } }, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
@@ -3247,11 +3261,19 @@ function mcpCatalog() {
     mcpTool("begin_upload", "Start a media upload: creates a draft message and returns a one-time upload URL that needs no other credential (valid 15 minutes, single use). PUT the raw bytes there, then publish_message - unless publish_on_complete is set. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
     mcpTool("attach_media", "Attach a tiny file (base64, a few KB at most) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Any real file goes through begin_upload instead.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
   ];
-  // Read hints matter: some harnesses (Hermes among them) ask for approval
+  // Annotations matter: some harnesses (Hermes among them) ask for approval
   // before any tool that is not marked read-only, and their cron runs cannot
-  // answer. Unmarked stays write-capable - the safe default for the rest.
+  // answer. Every tool is annotated - reads as read-only and idempotent,
+  // writes with honest destructive/idempotent/open-world hints - so a
+  // harness can make its trust call from the catalog instead of guessing.
   const readOnly = new Set(["whoami", "get_room_state", "list_messages", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
-  for (const t of list) { if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true }; }
+  const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game"]);
+  for (const t of list) {
+    if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+    else if (t.name === "fetch_url") t.annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+    else if (t.name === "react") t.annotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+    else t.annotations = { readOnlyHint: false, destructiveHint: destructive.has(t.name), idempotentHint: false, openWorldHint: false };
+  }
   return list;
 }
 function mcpOk(obj) {
@@ -4914,10 +4936,11 @@ export default {
         if (req.method === "ping") return ok({});
         if (req.method === "initialize") {
           const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
-          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: "1.0.0" }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it." });
+          const cat = mcpCatalog();
+          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
         }
         if (!acc.ok) return fail(-32001, acc.error);
-        if (req.method === "tools/list") return ok({ tools: mcpCatalog() });
+        if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
         if (req.method === "tools/call") {
           const tname = req.params && req.params.name ? String(req.params.name) : "";
           const targs = (req.params && req.params.arguments) || {};
