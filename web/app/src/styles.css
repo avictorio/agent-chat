@@ -482,6 +482,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .lobby-panel { margin: 12px auto 4px; max-width: 520px; text-align: center; }
 .bs-boards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin: 10px auto 4px; }
 .bs-side { flex: 1 1 240px; max-width: 340px; }
+.bs-side.bs-wreck { opacity: .55; filter: saturate(.4); }
+.bs-side.bs-wreck .bs-title { color: #94a3b8; }
 .bs-title { color: #8fb8c9; font-size: 12px; margin: 0 0 6px; text-align: center; }
 .bs-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); border-radius: 8px; padding: 6px; }
 .bs-cell { aspect-ratio: 1; border-radius: 3px; background: rgba(56, 189, 248, .08); color: #fecaca; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; width: 100%; }

@@ -95,6 +95,9 @@ function bsCellAt(frame: HTMLElement, label: string): HTMLElement | null {
 function markLastShot(grid: HTMLElement, g: GL, ownerName: string, fresh: boolean) {
   const lm = g && g.last_move;
   if (!lm || lm.by === ownerName) return;
+  // In a free-for-all the shot names its target: ring it only on
+  // that captain's board, not on every rival's.
+  if (lm.target && lm.target !== ownerName) return;
   const cell = bsCellAt(grid, lm.cell);
   if (!cell) return;
   cell.classList.add("bs-last");
@@ -736,11 +739,13 @@ export function createGameStore(opts: {
       "|" +
       (g.turn_of || "") +
       "|" +
-      (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.placed ? 1 : 0) + "" + (p.shots || 0) + "" + (p.afloat || 0)).join("") +
+      (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.placed ? 1 : 0) + "" + (p.shots || 0) + "" + (p.afloat || 0) + "" + (p.eliminated ? 1 : 0)).join("") +
       "|" +
       (you.fleet ? "fleet" : "") +
       "|" +
       (you.shots ? Object.keys(you.shots).length : 0) +
+      "|" +
+      (you.targets ? you.targets.map((t: GL) => Object.keys(t.shots || {}).length + "/" + (t.afloat || 0) + (t.eliminated ? "x" : "")).join(",") : "") +
       "|" +
       youSig(g) +
       "|" +
@@ -798,7 +803,10 @@ export function createGameStore(opts: {
         const banner = bsBanner(g, freshMove);
         if (banner) wrap.appendChild(banner);
         if (gameView) gameView.bsFire = null;
-        const use3d = bsBoardsOr3d(g, wrap);
+        // The 3D arena is a two-board scene: a free-for-all (3+
+        // captains) always spectates on the 2D boards below.
+        if (players.length > 2) dropBs3d();
+        const use3d = players.length > 2 ? false : bsBoardsOr3d(g, wrap);
         const boards = el("div", "bs-boards");
         g.boards.forEach((b: GL) => {
           const states: Record<string, string> = {};
@@ -810,8 +818,8 @@ export function createGameStore(opts: {
               states[c] = "sunk";
             });
           });
-          const side = el("div", "bs-side");
-          side.appendChild(el("div", "bs-title", b.name + "'s waters"));
+          const side = el("div", "bs-side" + (b.eliminated ? " bs-wreck" : ""));
+          side.appendChild(el("div", "bs-title", b.name + "'s waters" + (b.eliminated ? " — wreck" : "")));
           side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
           const grid = bsGrid(states, b.hex, null, b.sunk_ships || [], undefined, g);
           markLastShot(grid, g, b.name, freshMove);
@@ -916,6 +924,88 @@ export function createGameStore(opts: {
       }
       wrap.appendChild(row);
       if (!note.textContent) note.textContent = "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
+      wrap.appendChild(note);
+    } else if (players.length > 2) {
+      // Free-for-all (2026-11-17): your own waters plus one board
+      // per rival, each showing YOUR shots at that captain - the
+      // board you tap is the target, and the shot goes out as
+      // "Name:Cell". Eliminated captains render as wreck charts
+      // (no fire). The 3D arena is two-board only, so FFA never
+      // routes there: this branch is always the 2D boards.
+      dropBs3d();
+      if (gameView) gameView.bsFire = null;
+      const boards = el("div", "bs-boards");
+      const ownStates: Record<string, string> = {};
+      (you.fleet || []).forEach((s: GL) => {
+        s.cells.forEach((c: string) => {
+          ownStates[c] = s.hits.indexOf(c) >= 0 ? (s.sunk ? "sunk" : "hit") : "ship";
+        });
+      });
+      Object.keys(you.incoming || {}).forEach((c) => {
+        if (!ownStates[c]) ownStates[c] = "miss";
+      });
+      const ownWrap = el("div", "bs-side");
+      ownWrap.appendChild(el("div", "bs-title", "Your waters" + (you.eliminated ? " — wreck" : "")));
+      ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size), undefined, g.fleet_sizes));
+      const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || [], undefined, g);
+      markLastShot(ownGrid, g, myName, freshMove);
+      markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
+      ownWrap.appendChild(ownGrid);
+      boards.appendChild(ownWrap);
+      const canFire = g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated;
+      (you.targets || []).forEach((t: GL) => {
+        const tStates: Record<string, string> = {};
+        Object.keys(t.shots || {}).forEach((c) => {
+          tStates[c] = t.shots[c];
+        });
+        (t.sunk_ships || []).forEach((s: GL) => {
+          s.cells.forEach((c: string) => {
+            tStates[c] = "sunk";
+          });
+        });
+        const tWrap = el("div", "bs-side" + (t.eliminated ? " bs-wreck" : ""));
+        tWrap.appendChild(
+          el("div", "bs-title", t.name + "'s waters" + (t.eliminated ? " — wreck" : canFire ? " - tap a cell to fire" : ""))
+        );
+        tWrap.appendChild(fleetStrip(t.hex, (t.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
+        const tGrid = bsGrid(
+          tStates,
+          t.hex,
+          canFire && !t.eliminated ? (label) => { void sendMove(g.id, t.name + ":" + label, note); } : null,
+          t.sunk_ships || [],
+          undefined,
+          g
+        );
+        markLastShot(tGrid, g, t.name, freshMove);
+        markSinking(tGrid, t.sunk_ships || [], g, t.name, freshMove);
+        tWrap.appendChild(tGrid);
+        boards.appendChild(tWrap);
+      });
+      const banner = bsBanner(g, freshMove);
+      if (banner) wrap.appendChild(banner);
+      wrap.appendChild(boards);
+      if (g.sonar && g.phase === "play" && g.status === "running")
+        wrap.appendChild(
+          el(
+            "div",
+            "bs-sonar",
+            g.sonar.target
+              ? "📡 Sonar for " + g.sonar.for + ": a hull cell of " + g.sonar.target + "'s fleet - the leader - sits in " + g.sonar.label + "."
+              : "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."
+          )
+        );
+      if (g.status === "running" && g.phase === "play") {
+        (g.players || []).forEach((p: GL) => {
+          const m = (g.misses || {})[p.name] || 0;
+          if (m >= 2) wrap.appendChild(el("div", "bs-warn", "⚠ " + p.name + " has missed " + m + " turns in a row — one more and they're eliminated."));
+          else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row eliminates them."));
+        });
+        if (you.eliminated) note.textContent = "You are eliminated — your fleet is a wreck chart now. The sea fights on without you.";
+        else if (you.playing) {
+          const hint = arenaHint("bs-play-ffa", "Tap a cell on a rival's board to fire at that captain — ✕ is a hit, · is a miss, dark hulls are sunk. Wreck boards can't be fired at.");
+          if (hint) wrap.appendChild(hint);
+        }
+      }
       wrap.appendChild(note);
     } else {
       const boards = el("div", "bs-boards");

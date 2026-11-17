@@ -553,8 +553,8 @@ async function waitUp() {
     await req('POST', R2 + '/games/' + bsAbandon + '/accept', { token: TRex, json: {} });
     await req('POST', R2 + '/games/' + bsAbandon + '/moves', { token: TP, json: { dir: 'random' } });
     await req('POST', R2 + '/games/' + bsAbandon + '/moves', { token: TRex, json: { dir: 'random' } });
-    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
-    check('battleship with 3 players -> 400', r.status === 400, r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae', 'Poc', 'Rex', 'Rae', 'Poc'] } });
+    check('battleship with 7 players -> 400', r.status === 400, r.status);
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
     check('battleship created in its lobby', r.status === 201 && r.json.game.type === 'battleship' && r.json.game.status === 'lobby' && r.json.game.turn_seconds === 3600, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
     const bsId = r.json.game.id;
@@ -683,6 +683,134 @@ async function waitUp() {
     check('a closing volley passes the turn with a fresh salvo', r.status === 200 && r.json.game.turn_of !== svFirst && r.json.game.salvo_left >= 3 && r.json.game.salvo_left <= 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     r = await req('POST', R2 + '/games/' + svId + '/cancel', { token: TP, json: {} });
     check('salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
+
+    // Free-for-all (2026-11-17): three captains, per-target shot
+    // records, seat-order rotation, elimination, the salvo spread
+    // rule. Scripted fleets keep every outcome known in advance:
+    // Poc A10-E10 / C5-C8 / E6-G6 / G2-G4 / I2-J2; Rex A1-E1 /
+    // C3-C6 / E5-G5 / G7-G9 / I9-J9; Rae B2-B6 / D4-G4 / F6-F8 /
+    // H8-J8 / J1-J2.
+    const ffaTok = { Poc: TP, Rex: TRex, Rae: TRae };
+    const ffaState = async (id) => (await req('GET', R2 + '/games/' + id, { token: TP })).json.game;
+    const ffaFire = async (id, dir) => { const g = await ffaState(id); return req('POST', R2 + '/games/' + id + '/moves', { token: ffaTok[g.turn_of], json: { dir } }); };
+    // The abandoned-table game is set up FIRST so its 30s turns
+    // expire while the rest of the suite runs; the late checks at
+    // the end verify a fully silent table ends with no winner.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 30 } });
+    const bsFfaAbandon = r.json.game.id;
+    await req('POST', R2 + '/games/' + bsFfaAbandon + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + bsFfaAbandon + '/accept', { token: TRae, json: {} });
+    await req('POST', R2 + '/games/' + bsFfaAbandon + '/moves', { token: TP, json: { dir: 'random' } });
+    await req('POST', R2 + '/games/' + bsFfaAbandon + '/moves', { token: TRex, json: { dir: 'random' } });
+    await req('POST', R2 + '/games/' + bsFfaAbandon + '/moves', { token: TRae, json: { dir: 'random' } });
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', variant: 'skirmish', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    check('skirmish with 3 players -> 400 (a free-for-all is classic or salvo)', r.status === 400 && String(r.json.error || '').includes('skirmish'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 3600 } });
+    check('ffa created in its lobby with 3 captains', r.status === 201 && r.json.game.type === 'battleship' && r.json.game.status === 'lobby' && r.json.game.players.length === 3, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const ffaId = r.json.game.id;
+    await req('POST', R2 + '/games/' + ffaId + '/accept', { token: TRex, json: {} });
+    r = await req('POST', R2 + '/games/' + ffaId + '/accept', { token: TRae, json: {} });
+    check('ffa starts into placement when every captain accepts', r.status === 200 && r.json.game.status === 'running' && r.json.game.phase === 'setup', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    await req('POST', R2 + '/games/' + ffaId + '/moves', { token: TP, json: { dir: 'A10H,C5V,E6H,G2V,I2H' } });
+    await req('POST', R2 + '/games/' + ffaId + '/moves', { token: TRex, json: { dir: 'A1H,C3V,E5H,G7V,I9H' } });
+    r = await req('POST', R2 + '/games/' + ffaId + '/moves', { token: TRae, json: { dir: 'B2V,D4H,F6V,H8H,J1V' } });
+    check('ffa play opens when the last fleet lands, first seat is drawn', r.status === 200 && r.json.game.phase === 'play' && ['Poc', 'Rex', 'Rae'].includes(r.json.game.turn_of), r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    // Secrecy holds per board: Rex's view (legal_moves stripped, as
+    // in the two-player checks) never carries Poc's un-hit cells.
+    r = await req('GET', R2 + '/games/' + ffaId, { token: TRex });
+    const ffaRexObj = JSON.parse(JSON.stringify(r.json.game));
+    if (ffaRexObj.you) delete ffaRexObj.you.legal_moves;
+    check('ffa rival fleets stay secret', r.status === 200 && !JSON.stringify(ffaRexObj).includes('"A10"') && !JSON.stringify(ffaRexObj).includes('"B6"'), JSON.stringify(ffaRexObj).slice(0, 220));
+    check('ffa state is per-target (opponent_afloat is null, targets listed)', r.json.game.you.opponent_afloat === null && (r.json.game.you.targets || []).length === 2 && r.json.game.you.targets.every(t => typeof t.afloat === 'number' && t.shots && typeof t.shots === 'object'), JSON.stringify(r.json.game.you || {}).slice(0, 220));
+    // Rotation: one scripted miss per captain must cycle the turn
+    // in seat order and come back to the starter.
+    const rotShots = { Poc: 'Rex:J10', Rex: 'Rae:A10', Rae: 'Poc:J1' };
+    const seats = ['Poc', 'Rex', 'Rae'];
+    let rotOk = true, rotDetail = '';
+    let expectSeat = (await ffaState(ffaId)).turn_of;
+    for (let i = 0; i < 3; i++) {
+      const g0 = await ffaState(ffaId);
+      if (g0.turn_of !== expectSeat) { rotOk = false; rotDetail = 'turn ' + i + ' held by ' + g0.turn_of + ', expected ' + expectSeat; break; }
+      const mv = await ffaFire(ffaId, rotShots[g0.turn_of]);
+      if (mv.status !== 200) { rotOk = false; rotDetail = 'shot ' + i + ' -> ' + mv.status + ' ' + JSON.stringify(mv.json).slice(0, 120); break; }
+      expectSeat = seats[(seats.indexOf(g0.turn_of) + 1) % 3];
+      if (mv.json.game.turn_of !== expectSeat) { rotOk = false; rotDetail = 'after ' + g0.turn_of + ' the turn went to ' + mv.json.game.turn_of + ', expected ' + expectSeat; break; }
+    }
+    check('ffa turns rotate in seat order, shots name their target', rotOk, rotDetail);
+    // The drive: Poc hunts Rae's fleet, then Rex's; Rex and Rae
+    // answer with water. On Poc's first drive turn, the invalid
+    // targets are probed first (none of them may consume the turn).
+    const pocCells = ['A10', 'B10', 'C10', 'D10', 'E10', 'C5', 'C6', 'C7', 'C8', 'E6', 'F6', 'G6', 'G2', 'G3', 'G4', 'I2', 'J2'];
+    const rexCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'C3', 'C4', 'C5', 'C6', 'E5', 'F5', 'G5', 'G7', 'G8', 'G9', 'I9', 'J9'];
+    const waterAt = (fleetCells, n) => { const out = []; for (let row = 1; row <= 10 && out.length < n; row++) for (let col = 0; col < 10 && out.length < n; col++) { const c = String.fromCharCode(65 + col) + row; if (!fleetCells.includes(c)) out.push(c); } return out; };
+    const pocHuntRae = ['B2', 'B3', 'B4', 'B5', 'B6', 'D4', 'E4', 'F4', 'G4', 'F6', 'F7', 'F8', 'H8', 'I8', 'J8', 'J1', 'J2'].map(c => 'Rae:' + c);
+    const pocHuntRex = rexCells.map(c => 'Rex:' + c);
+    const rexWater = waterAt(pocCells, 40).map(c => 'Poc:' + c);
+    const raeWater = waterAt(rexCells, 40).map(c => 'Rex:' + c);
+    let probesDone = false, probeResults = [], elimSeen = null, wreckStatus = 0, finalFfa = null, driveErr = '';
+    for (let step = 0; step < 180 && !finalFfa; step++) {
+      const g = await ffaState(ffaId);
+      if (g.status === 'finished') { finalFfa = g; break; }
+      if (g.status !== 'running' || g.phase !== 'play') { driveErr = 'unexpected state ' + g.status + '/' + g.phase; break; }
+      const shooter = g.turn_of;
+      if (shooter === 'Poc' && !probesDone) {
+        probesDone = true;
+        probeResults.push((await ffaFire(ffaId, 'Poc:A1')).status);      // your own waters
+        probeResults.push((await ffaFire(ffaId, 'A1')).status);          // no target named
+        probeResults.push((await ffaFire(ffaId, 'Nobody:A1')).status);   // not a captain
+        probeResults.push((await ffaFire(ffaId, 'Rex:J10')).status);     // already fired at Rex
+        probeResults.push((await ffaFire(ffaId, 'Rae:J10')).status);     // same cell, another board: legal
+        continue;
+      }
+      let dir = null;
+      if (shooter === 'Poc') dir = pocHuntRae.length ? pocHuntRae.shift() : pocHuntRex.shift();
+      else if (shooter === 'Rex') {
+        if (elimSeen && !wreckStatus) wreckStatus = (await ffaFire(ffaId, 'Rae:A1')).status;
+        dir = rexWater.shift();
+      } else if (shooter === 'Rae') dir = raeWater.shift();
+      if (!dir) { driveErr = 'shot queue empty for ' + shooter; break; }
+      const mv = await ffaFire(ffaId, dir);
+      if (mv.status !== 200) { driveErr = shooter + ' ' + dir + ' -> ' + mv.status + ' ' + JSON.stringify(mv.json).slice(0, 140); break; }
+      const raeP = (mv.json.game.players || []).find(p => p.name === 'Rae');
+      if (!elimSeen && raeP && raeP.eliminated) elimSeen = mv.json.game;
+      if (mv.json.game.status === 'finished') finalFfa = mv.json.game;
+    }
+    check('ffa invalid targets refused; the same cell on another board is a new shot', probesDone && probeResults.join() === '400,400,400,400,200', probeResults.join() + ' ' + driveErr);
+    check('ffa elimination lands on the last ship and the sea fights on', !!elimSeen && elimSeen.status === 'running' && (elimSeen.eliminated || []).join() === 'Rae', JSON.stringify(elimSeen && elimSeen.eliminated) + ' ' + driveErr);
+    check('firing at an eliminated captain -> 400 (the wreck is not a target)', wreckStatus === 400, String(wreckStatus));
+    check('ffa ends with the last fleet floating', !!finalFfa && finalFfa.winner === 'Poc' && (finalFfa.eliminated || []).join() === 'Rae,Rex', JSON.stringify(finalFfa && { w: finalFfa.winner, e: finalFfa.eliminated }) + ' ' + driveErr);
+    r = await req('GET', R2 + '/games/' + ffaId, { token: TRex });
+    const rexTargets = (r.json.game.you && r.json.game.you.targets) || [];
+    const raeTarget = rexTargets.find(t => t.name === 'Rae');
+    check('ffa per-target records survive to the final state', rexTargets.length === 2 && !!raeTarget && raeTarget.eliminated === true && raeTarget.afloat === 0 && (raeTarget.shots || {}).A10 === 'miss', JSON.stringify(rexTargets).slice(0, 220));
+    r = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    check('referee posted the ffa result with the elimination order', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Battleship free-for-all #' + ffaId + ' is over') && x.text.includes('Poc takes the sea') && x.text.includes('Elimination order: Rae, Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 110))));
+    // FFA salvo: the spread rule. A volley dumped on one board is
+    // refused whole; the same shells spread across both rivals
+    // resolve.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', variant: 'salvo', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 3600 } });
+    check('ffa salvo created', r.status === 201 && r.json.game.variant === 'salvo' && r.json.game.players.length === 3, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
+    const ffaSv = r.json.game.id;
+    await req('POST', R2 + '/games/' + ffaSv + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + ffaSv + '/accept', { token: TRae, json: {} });
+    await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: TP, json: { dir: 'random' } });
+    await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: TRex, json: { dir: 'random' } });
+    await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: TRae, json: { dir: 'random' } });
+    const svG = await ffaState(ffaSv);
+    const svShooter = svG.turn_of;
+    const svRivals = seats.filter(n => n !== svShooter);
+    check('ffa salvo opens with a full salvo', svG.phase === 'play' && svG.salvo_left === 5, JSON.stringify(svG).slice(0, 160));
+    const conc = [1, 2, 3, 4, 5].map(i => svRivals[0] + ':A' + i).join(',');
+    r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: conc } });
+    check('ffa salvo: a concentrated volley is refused (spread rule)', r.status === 400 && String(r.json.error || '').includes('spread'), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    r = await req('GET', R2 + '/games/' + ffaSv, { token: ffaTok[svShooter] });
+    check('ffa salvo: the refused volley fired nothing', r.status === 200 && r.json.game.salvo_left === 5 && (r.json.game.you.targets || []).every(t => !Object.keys(t.shots || {}).length), r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 200));
+    const spread = [svRivals[0] + ':A1', svRivals[0] + ':A2', svRivals[0] + ':A3', svRivals[1] + ':A1', svRivals[1] + ':A2'].join(',');
+    r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: spread } });
+    const svT = (r.json.game && r.json.game.you && r.json.game.you.targets) || [];
+    check('ffa salvo: a spread volley resolves across both targets', r.status === 200 && r.json.game.turn_of !== svShooter && Object.keys((svT.find(t => t.name === svRivals[0]) || {}).shots || {}).length === 3 && Object.keys((svT.find(t => t.name === svRivals[1]) || {}).shots || {}).length === 2, r.status + ' ' + JSON.stringify(r.json).slice(0, 220));
+    r = await req('POST', R2 + '/games/' + ffaSv + '/cancel', { token: TP, json: {} });
+    check('ffa salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
@@ -1067,6 +1195,8 @@ async function waitUp() {
     check('an unthrown round 1 calls the duel off (no phantom 0-0)', !!r1Final && r1Final.status === 'cancelled' && !r1Final.winner, JSON.stringify(r1Final || null).slice(0, 200));
     const abFinal = await pollGame(bsAbandon, g => g.status === 'finished', 12, 15000);
     check('both captains abandoning ends with no winner', !!abFinal && abFinal.status === 'finished' && !abFinal.winner && (abFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(abFinal || null).slice(0, 240));
+    const ffaAbFinal = await pollGame(bsFfaAbandon, g => g.status === 'finished', 14, 15000);
+    check('a fully silent ffa table ends with no winner', !!ffaAbFinal && ffaAbFinal.status === 'finished' && !ffaAbFinal.winner && (ffaAbFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(ffaAbFinal || null).slice(0, 240));
 
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });

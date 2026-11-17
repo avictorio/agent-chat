@@ -33,6 +33,7 @@ function fresh(opts) {
       ...(opts.bs ? [{ id: 12, ts: now - 25e3, from: 'Henry', kind: 'agent', text: 'Battleship match #5 - Ada (cyan) vs Henry (orange). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 5, type: 'battleship', status: 'running', phase: 'play', turn: 80, turn_of: 'Henry', winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 }, { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 }] } }] : []),
       ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
       ...(opts.bsSetup ? [{ id: 14, ts: now - 15e3, from: 'Ada', kind: 'agent', text: 'Battleship match #8 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 8, type: 'battleship', status: 'running', phase: 'setup', turn: 0, turn_of: null, winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 0, hits: 0, sunk: 0, afloat: 5 }] } }] : []),
+      ...(opts.bsFfa ? [{ id: 15, ts: now - 10e3, from: 'Ada', kind: 'agent', text: 'Battleship free-for-all #9 - Anthony (orange), Ada (cyan), Henry (pink), Hank (lime). Every captain for themselves - last fleet floating wins. Tap the card for the arena.', game: { id: 9, type: 'battleship', status: 'running', phase: 'play', turn: 31, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 9, hits: 4, sunk: 1, afloat: 5, eliminated: false }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 8, hits: 3, sunk: 0, afloat: 5, eliminated: false }, { name: 'Henry', color: 'pink', hex: '#f472b6', accepted: true, placed: true, shots: 8, hits: 2, sunk: 0, afloat: 4, eliminated: false }, { name: 'Hank', color: 'lime', hex: '#a3e635', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 0, eliminated: true }] } }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -150,6 +151,39 @@ function fresh(opts) {
       awaiting: ['Anthony'], awaiting_accept: [],
       you: { playing: true, accepted: true, phase: 'setup', your_turn: false, fleet: null,
         legal_moves: ['place: A1H,C3V,E5H,G7V,I9H (fleet order 5,4,3,3,2) or place: random'] } } : null,
+    bsFfa: opts.bsFfa ? { id: 9, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 15, phase: 'play', turn: 31, turn_of: 'Anthony', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null, misses: { Henry: 1 }, variant: 'classic', salvo_left: null, sonar: null, fleet_sizes: [5, 4, 3, 3, 2], w: 10, h: 10,
+      last_move: { by: 'Ada', target: 'Anthony', cell: 'H5', result: 'hit', sunk: null, turn: 30 },
+      eliminated: ['Hank'],
+      players: [
+        { name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 9, hits: 4, sunk: 1, afloat: 5, eliminated: false },
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 8, hits: 3, sunk: 0, afloat: 5, eliminated: false },
+        { name: 'Henry', color: 'pink', hex: '#f472b6', accepted: true, placed: true, shots: 8, hits: 2, sunk: 0, afloat: 4, eliminated: false },
+        { name: 'Hank', color: 'lime', hex: '#a3e635', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 0, eliminated: true },
+      ],
+      boards: [
+        { name: 'Anthony', hex: '#fb923c', incoming: { H5: 'hit', A2: 'miss', J10: 'miss' }, sunk_ships: [], eliminated: false },
+        { name: 'Ada', hex: '#22d3ee', incoming: { C5: 'hit', D5: 'miss', B9: 'miss' }, sunk_ships: [], eliminated: false },
+        { name: 'Henry', hex: '#f472b6', incoming: { B2: 'hit', B3: 'hit', G8: 'miss' }, sunk_ships: [], eliminated: false },
+        { name: 'Hank', hex: '#a3e635', incoming: { J1: 'hit', J2: 'hit', E5: 'miss' }, sunk_ships: [{ size: 2, cells: ['J1', 'J2'] }], eliminated: true },
+      ],
+      log: [{ tick: 29, text: "Anthony fires J2 at Hank - hit, and Hank's 2-ship is sunk.", by: 'Anthony', target: 'Hank', cell: 'J2', result: 'hit', sunk: 2 }, { tick: 29, text: "Hank's last ship is gone - Hank is eliminated (1 of 3 out). Their board is a wreck chart now." }, { tick: 30, text: 'Ada fires H5 at Anthony - hit.', by: 'Ada', target: 'Anthony', cell: 'H5', result: 'hit', sunk: null }],
+      awaiting: ['Anthony'], awaiting_accept: [],
+      you: { playing: true, accepted: true, phase: 'play', your_turn: true, eliminated: false,
+        fleet: [
+          { size: 5, cells: ['B2', 'C2', 'D2', 'E2', 'F2'], hits: [], sunk: false },
+          { size: 4, cells: ['H4', 'H5', 'H6', 'H7'], hits: ['H5'], sunk: false },
+          { size: 3, cells: ['A9', 'B9', 'C9'], hits: [], sunk: false },
+          { size: 3, cells: ['J1', 'J2', 'J3'], hits: [], sunk: false },
+          { size: 2, cells: ['E5', 'F5'], hits: [], sunk: false },
+        ],
+        shots: {}, incoming: { H5: 'hit', A2: 'miss', J10: 'miss' },
+        sunk_ships: [], opponent_afloat: null,
+        targets: [
+          { name: 'Ada', hex: '#22d3ee', eliminated: false, afloat: 5, shots: { C5: 'hit', D5: 'miss' }, sunk_ships: [] },
+          { name: 'Henry', hex: '#f472b6', eliminated: false, afloat: 4, shots: { B2: 'hit', B3: 'hit' }, sunk_ships: [] },
+          { name: 'Hank', hex: '#a3e635', eliminated: true, afloat: 0, shots: { J1: 'hit', J2: 'hit' }, sunk_ships: [{ size: 2, cells: ['J1', 'J2'] }] },
+        ],
+        legal_moves: ['Ada:A1', 'Ada:A2', 'Henry:A1', 'Hank-free waters are not listed'] } } : null,
     mb: { invite_only: true, members: [
       { name: 'Anthony', kind: 'human', status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 5 * 60e3, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Anthony' },
       { name: 'Henry', kind: 'agent', avatar: 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=1', invited_by: null, status: 'active', invited: now - 2 * D, joined: now - D, last_seen: now - 2 * H, revoked: null, invite_link: 'https://chat.victorio.cloud/r/demo#invite=tok_Henry', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Henry".\nThen implement the wake recipe and post a short hello.' },
@@ -175,7 +209,7 @@ async function setup(page, S, calls) {
     calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
     const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
     S.av = S.av || {};
-    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup].find(g => g && g.id == id) || null;
+    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup, S.bsFfa].find(g => g && g.id == id) || null;
     let am;
     if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
     if (p.endsWith('/avatar')) {
@@ -373,6 +407,50 @@ let FAILURES = 0;
     await page.waitForTimeout(400);
     out.moveCall = calls.filter(c => c.includes('/games/6/moves')).pop() || '';
     if (!/"dir":"C7"/.test(out.moveCall)) throw new Error('fire call wrong: ' + out.moveCall);
+    return out;
+  });
+  // Free-for-all (2026-11-17): a four-captain match renders your own
+  // waters plus one board per rival, the eliminated captain as a
+  // wreck (no fire buttons), and NEVER the 3D arena - this scenario
+  // deliberately leaves the 3D preference at its default (on).
+  await run('battleship-ffa', { state: { bsFfa: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    out.cardText = await page.$eval('.game-card', e => e.textContent);
+    if (!/eliminated/.test(out.cardText)) throw new Error('card scoreboard should mark the eliminated captain: ' + out.cardText.slice(0, 200));
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
+    out.host3d = await page.$('#viewer .bs-3d-host');
+    out.wrecks = await page.$$eval('#viewer .bs-side.bs-wreck', els => els.length);
+    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
+    out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
+    if (out.grids !== 4) throw new Error('ffa arena should show four boards (yours + three rivals), got ' + out.grids);
+    if (out.host3d !== null) throw new Error('ffa must never route to the 3D arena');
+    if (out.wrecks !== 1) throw new Error('exactly one wreck board expected, got ' + out.wrecks);
+    if (out.ring !== 1) throw new Error('the last shot should ring only on its target board, got ' + out.ring);
+    if (!/Ada fires H5 · HIT/.test(out.banner)) throw new Error('ffa banner wrong: ' + out.banner);
+    const hankSide = page.locator('#viewer .bs-side').filter({ hasText: "Hank's waters" });
+    out.wreckButtons = await hankSide.locator('button.bs-cell').count();
+    if (out.wreckButtons !== 0) throw new Error('a wreck board must not offer fire buttons, got ' + out.wreckButtons);
+    await shot(page, 'bs-ffa-arena.png');
+    const adaSide = page.locator('#viewer .bs-side').filter({ hasText: "Ada's waters" });
+    await adaSide.locator('button.bs-cell[aria-label="Fire at C7"]').click();
+    await page.waitForTimeout(400);
+    out.moveCall = calls.filter(c => c.includes('/games/9/moves')).pop() || '';
+    if (!/"dir":"Ada:C7"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
+    return out;
+  });
+  await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
+    out.host3d = await page.$('#viewer .bs-3d-host');
+    if (out.grids !== 4) throw new Error('mobile ffa arena should show four boards, got ' + out.grids);
+    if (out.host3d !== null) throw new Error('mobile ffa must never route to the 3D arena');
+    await shot(page, 'bs-ffa-mobile-dark.png');
     return out;
   });
   await run('battleship-3d-default', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
@@ -733,6 +811,34 @@ let FAILURES = 0;
     if (out.duelCount !== '2 of 2') throw new Error('switching back to duel must trim to 2 players, got: ' + out.duelCount);
     if (!out.dlgClosed) throw new Error('dialog must close after a successful start');
     if (body.game !== 'duel' || body.best_of !== 5 || JSON.stringify(body.players) !== '["Anthony","Ada"]') throw new Error('create body wrong: ' + cc);
+    return out;
+  });
+  // Battleship seats 2-6 in the dialog: a third pick turns the
+  // match into a free-for-all (count and hint say so), and the
+  // create call carries all three captains.
+  await run('new-game-ffa', {}, async (page, S, calls) => {
+    const out = {};
+    await page.click('.tab[data-tab="games"]');
+    await page.waitForSelector('.gm-head .btn.primary', { timeout: 4000 });
+    await page.click('.gm-head .btn.primary');
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
+    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(3)');
+    await page.click('[data-player="Ada"]');
+    out.twoCount = await page.$eval('.ng-count', e => e.textContent.trim());
+    await page.click('[data-player="Henry"]');
+    out.threeCount = await page.$eval('.ng-count', e => e.textContent.trim());
+    out.hint = await page.$eval('.ng-note', e => e.textContent);
+    out.startEnabled = await page.$eval('#ngStart', e => !e.disabled);
+    await shot(page, 'new-game-ffa.png');
+    await page.click('#ngStart');
+    await page.waitForTimeout(600);
+    const cc = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
+    const body = JSON.parse(cc.slice(cc.indexOf('{')));
+    if (out.twoCount !== '2 of 2\u20136') throw new Error('two-captain count wrong: ' + out.twoCount);
+    if (out.threeCount !== '3 of 2\u20136') throw new Error('ffa count wrong: ' + out.threeCount);
+    if (!/Free-for-all/.test(out.hint)) throw new Error('three captains should read as a free-for-all: ' + out.hint);
+    if (!out.startEnabled) throw new Error('an ffa must be startable with 3 captains');
+    if (body.game !== 'battleship' || JSON.stringify(body.players) !== '["Anthony","Ada","Henry"]') throw new Error('ffa create body wrong: ' + cc);
     return out;
   });
   await run('new-game-mobile', { w: 390, h: 844, touch: true }, async (page) => {

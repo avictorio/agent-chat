@@ -381,7 +381,9 @@ export function lastMoveText(g: GL): string {
   if (!lm) return "";
   let t = lm.by + " fires " + lm.cell + " · " + (lm.result === "hit" ? "HIT" : "miss");
   if (lm.sunk) {
-    const foe = (g.players || []).filter((p: GL) => p.name !== lm.by)[0];
+    const foe = lm.target
+      ? (g.players || []).filter((p: GL) => p.name === lm.target)[0]
+      : (g.players || []).filter((p: GL) => p.name !== lm.by)[0];
     t += " · " + (foe ? foe.name + "'s " : "a ") + lm.sunk + "-ship is sunk";
   }
   return t;
@@ -409,7 +411,7 @@ export function bsMiniSvg(board: GL, lastMove: GL, w?: number, h?: number): stri
       s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.16" fill="rgba(186,230,253,.65)"/>';
     else s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.3" fill="#fb923c"/>';
   });
-  if (lastMove && lastMove.by !== board.name) {
+  if (lastMove && lastMove.by !== board.name && (!lastMove.target || lastMove.target === board.name)) {
     const xy = bsCellXY(lastMove.cell);
     s += '<circle cx="' + (xy[0] + 0.5) + '" cy="' + (xy[1] + 0.5) + '" r="0.46" fill="none" stroke="#ffffff" stroke-width="0.09"/>';
   }
@@ -446,7 +448,7 @@ export function battleshipBoard(g: GL): HTMLElement {
     dot.style.background = p.hex;
     row.appendChild(dot);
     row.appendChild(el("span", "duel-name", p.name));
-    const stats = el("span", "duel-state", (p.afloat != null ? p.afloat : 5) + " afloat · " + (p.hits || 0) + " hits · " + (p.sunk || 0) + " sunk");
+    const stats = el("span", "duel-state", (p.afloat != null ? p.afloat : 5) + " afloat · " + (p.hits || 0) + " hits · " + (p.sunk || 0) + " sunk" + (p.eliminated ? " · 💀 eliminated" : ""));
     stats.style.marginLeft = "8px";
     row.appendChild(stats);
     const bd = (g.boards || []).filter((b: GL) => b.name === p.name)[0];

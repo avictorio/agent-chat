@@ -44,8 +44,15 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const [busy, setBusy] = useState(false);
 
   const me = session.meName;
-  const max = type === "lightcycles" ? 4 : 2;
-  const valid = type === "lightcycles" ? picked.length >= 2 && picked.length <= 4 : picked.length === 2;
+  // Battleship seats 2 to 6 - 3+ is a free-for-all - except skirmish,
+  // which stays the two-captain duel on the small board.
+  const max = type === "lightcycles" ? 4 : type === "battleship" ? (bsVariant === "skirmish" ? 2 : 6) : 2;
+  const valid =
+    type === "lightcycles"
+      ? picked.length >= 2 && picked.length <= 4
+      : type === "battleship"
+        ? picked.length >= 2 && picked.length <= max
+        : picked.length === 2;
 
   useImperativeHandle(ref, () => ({
     open() {
@@ -76,7 +83,13 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
   const switchType = (t: GameType) => {
     setType(t);
     setNote("");
-    setPicked((cur) => cur.slice(0, t === "lightcycles" ? 4 : 2));
+    setPicked((cur) => cur.slice(0, t === "lightcycles" ? 4 : t === "battleship" ? 6 : 2));
+  };
+
+  const pickVariant = (v: "classic" | "salvo" | "skirmish") => {
+    setBsVariant(v);
+    setNote("");
+    if (v === "skirmish") setPicked((cur) => cur.slice(0, 2));
   };
 
   const start = async () => {
@@ -111,20 +124,29 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     }
   };
 
+  const ffa = type === "battleship" && bsVariant !== "skirmish" && picked.length > 2;
   const hint = !valid
     ? type === "lightcycles"
       ? "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
-      : picked.length < 2
-        ? "Pick one more player — this game is exactly 2."
-        : "This game is exactly 2 players."
+      : type === "battleship"
+        ? bsVariant === "skirmish"
+          ? "Pick one more captain — skirmish is exactly 2."
+          : "Pick " + (2 - picked.length) + " more — Battleship needs 2 to 6 captains (3+ is a free-for-all)."
+        : picked.length < 2
+          ? "Pick one more player — this game is exactly 2."
+          : "This game is exactly 2 players."
     : type === "duel"
       ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; each round waits up to 3 minutes for both throws."
       : type === "battleship"
-        ? bsVariant === "salvo"
-          ? "Salvo on the 10×10 board: each turn fires one shot per ship you still have afloat. Starts when both captains accept."
-          : bsVariant === "skirmish"
-            ? "Skirmish: a tight 8×8 board, fleets of four (4, 3, 3, 2) — the same hunt, compressed. Starts when both captains accept."
-            : "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
+        ? ffa
+          ? bsVariant === "salvo"
+            ? "Free-for-all salvo: " + picked.length + " captains, every captain for themselves — each turn fires one shot per ship you have afloat, and the volley must spread across rivals. Last fleet floating wins. Starts when every captain accepts."
+            : "Free-for-all: " + picked.length + " captains, every captain for themselves — turns rotate, each shot names its target, last fleet floating wins. Starts when every captain accepts."
+          : bsVariant === "salvo"
+            ? "Salvo on the 10×10 board: each turn fires one shot per ship you still have afloat. Starts when both captains accept."
+            : bsVariant === "skirmish"
+              ? "Skirmish: a tight 8×8 board, fleets of four (4, 3, 3, 2) — the same hunt, compressed. Starts when both captains accept."
+              : "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
         : lcMode === "async"
           ? "Starts when every rider accepts their seat; each tick resolves the moment everyone has ridden — a 1 h stall cap covers a vanished rider."
           : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
@@ -156,7 +178,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       <div className="ng-label">
         Players
         <span className="ng-count">
-          {picked.length} of {type === "lightcycles" ? "2–4" : "2"}
+          {picked.length} of {type === "lightcycles" ? "2–4" : type === "battleship" ? (bsVariant === "skirmish" ? "2" : "2–6") : "2"}
         </span>
       </div>
       <div className="ng-players">
@@ -194,13 +216,13 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         <>
           <div className="ng-label">Variant</div>
           <div className="seg full" role="group" aria-label="Battleship variant">
-            <button type="button" aria-pressed={bsVariant === "classic"} onClick={() => setBsVariant("classic")}>
+            <button type="button" aria-pressed={bsVariant === "classic"} onClick={() => pickVariant("classic")}>
               Classic 10×10
             </button>
-            <button type="button" aria-pressed={bsVariant === "salvo"} onClick={() => setBsVariant("salvo")}>
+            <button type="button" aria-pressed={bsVariant === "salvo"} onClick={() => pickVariant("salvo")}>
               Salvo
             </button>
-            <button type="button" aria-pressed={bsVariant === "skirmish"} onClick={() => setBsVariant("skirmish")}>
+            <button type="button" aria-pressed={bsVariant === "skirmish"} onClick={() => pickVariant("skirmish")}>
               Skirmish 8×8
             </button>
           </div>

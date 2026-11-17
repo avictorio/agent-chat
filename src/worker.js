@@ -1257,7 +1257,7 @@ export class Room extends DurableObject {
         fetched: fetched,
         rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
         games: this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
-          try { const st = JSON.parse(r.state || "{}"); if (st.type === "duel") return { id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; if (st.type === "battleship") return { id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: st.accepted ? !!st.accepted[p.name] : true })) }; return { id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; } catch (e) { return null; }
+          try { const st = JSON.parse(r.state || "{}"); if (st.type === "duel") return { id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; if (st.type === "battleship") return { id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: st.accepted ? !!st.accepted[p.name] : true })) }; return { id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; } catch (e) { return null; }
         }).filter(Boolean),
       };
     } catch (e) {
@@ -1393,6 +1393,8 @@ export class Room extends DurableObject {
       { color: "orange", hex: "#fb923c" },
       { color: "pink", hex: "#f472b6" },
       { color: "lime", hex: "#a3e635" },
+      { color: "violet", hex: "#a78bfa" },
+      { color: "yellow", hex: "#facc15" },
     ];
   }
 
@@ -1615,7 +1617,20 @@ export class Room extends DurableObject {
      clock that expires passes the turn; three missed turns in a row
      forfeit the match. Setup runs on a clock too: a fleet still
      unplaced when it fires is placed at random, so a slow placer
-     costs nobody the match. */
+     costs nobody the match.
+
+     Free-for-all (2026-11-17, the room's spec, Ada/SHA consensus):
+     3-6 captains, each with their own secret board and the classic
+     fleet. Turns rotate in seat order; a shot names its target
+     ("Name:Cell") because a captain's shot record is per-target in
+     FFA (player.shots_by) where the two-player game keeps one map
+     (player.shots). Sinking a captain's last ship eliminates them -
+     their board freezes as a public wreck - and the last fleet
+     floating wins. Salvo volleys may split across targets but must
+     spread (see battleshipMove). Endgame sonar hunts the leader
+     instead of the last ship (see bsBeginTurn). Everything below
+     branches on st.players.length > 2 only where FFA truly differs;
+     the two-player paths keep their exact behavior. */
 
   bsKey(x, y) { return x + "," + y; }
 
@@ -1710,11 +1725,64 @@ export class Room extends DurableObject {
     return player.fleet.filter((s) => s.hits.length < s.size).length;
   }
 
-  // How many of the rival's ships this player has sunk.
+  // Free-for-all helpers (2026-11-17). A match is FFA when it seats
+  // more than two captains; everything else is the original game.
+  bsFfa(st) { return !!st && (st.players || []).length > 2; }
+
+  bsLiving(st) { return (st.players || []).filter((p) => !p.eliminated); }
+
+  // The shot map a player keeps against a target: in the
+  // two-player game there is one map (player.shots); in FFA each
+  // target has its own (player.shots_by[target]), because the same
+  // cell fired at two different boards is two different shots.
+  bsShotMap(st, player, targetName) {
+    if (!this.bsFfa(st)) { if (!player.shots) player.shots = {}; return player.shots; }
+    if (!player.shots_by) player.shots_by = {};
+    if (!player.shots_by[targetName]) player.shots_by[targetName] = {};
+    return player.shots_by[targetName];
+  }
+
+  // Every shot a player has fired, as {target, key, result} - the
+  // per-player totals the summary reports.
+  bsAllShots(st, player) {
+    const out = [];
+    if (!this.bsFfa(st)) {
+      const foe = (st.players || []).find((p) => p.name !== player.name);
+      for (const k of Object.keys(player.shots || {})) out.push({ target: foe ? foe.name : null, key: k, result: player.shots[k] });
+      return out;
+    }
+    for (const t of Object.keys(player.shots_by || {})) for (const k of Object.keys(player.shots_by[t])) out.push({ target: t, key: k, result: player.shots_by[t][k] });
+    return out;
+  }
+
+  // The next living captain in seat order after a given name
+  // (wrapping around), or null when nobody else is afloat.
+  bsNextLiving(st, afterName) {
+    const ps = st.players || [];
+    const i = ps.findIndex((p) => p.name === afterName);
+    for (let k = 1; k <= ps.length; k++) {
+      const p = ps[(i + k) % ps.length];
+      if (p && !p.eliminated && p.name !== afterName) return p;
+    }
+    return null;
+  }
+
+  // How many rival ships this player has sunk. Two-player: read off
+  // the one rival's fleet, as always. FFA: a sinking belongs to the
+  // captain whose shell finished the ship (ship.sunk_by, stamped in
+  // bsApplyShot) - a hull in FFA waters can take fire from everyone.
   bsSunkBy(g, name) {
-    const opp = g.st.players.find((p) => p.name !== name);
-    if (!opp || !opp.fleet) return 0;
-    return opp.fleet.filter((s) => s.hits.length >= s.size).length;
+    if (!this.bsFfa(g.st)) {
+      const opp = g.st.players.find((p) => p.name !== name);
+      if (!opp || !opp.fleet) return 0;
+      return opp.fleet.filter((s) => s.hits.length >= s.size).length;
+    }
+    let n = 0;
+    for (const p of g.st.players) {
+      if (p.name === name || !p.fleet) continue;
+      for (const s of p.fleet) if (s.hits.length >= s.size && s.sunk_by === name) n++;
+    }
+    return n;
   }
 
   // A turn begins (first turn, a passed turn, a clock pass): the salvo
@@ -1728,6 +1796,7 @@ export class Room extends DurableObject {
     const shooter = st.players.find((p) => p.name === st.turn_of);
     st.salvo_left = st.variant === "salvo" && shooter ? this.bsAfloat(shooter) : null;
     st.sonar = null;
+    if (this.bsFfa(st)) { this.bsBeginTurnFfa(st, shooter); return; }
     // The cadence counts the SHOOTER's own turns (every third): the
     // old turn % 6 test only ever fired on even turns, and since the
     // first shooter was fixed, that meant only players[1] ever got a
@@ -1750,6 +1819,47 @@ export class Room extends DurableObject {
     st.log.push({ tick: st.turn, text: "Sonar ping for " + shooter.name + ": a hull cell of " + opp.name + "'s last ship sits in " + label + " of their waters." });
   }
 
+  // The FFA turn opening: salvo reset (done by the caller) and the
+  // endgame sonar, which hunts the LEADER here (SHA's amendment to
+  // the room spec, 2026-11-17). The rule, precisely: when any living
+  // captain is down to exactly one ship afloat, every 6th of a
+  // shooter's own turns the referee publicly pings a row or column
+  // (coin flip) holding an un-hit cell of the current leader's
+  // fleet. The leader is the living captain - never the shooter,
+  // never a one-ship captain - with the most ships afloat; ties go
+  // to the earliest seat. So the one-ship captain is never the
+  // target of this rule, and when every rival is down to one ship
+  // there is no leader to hunt and no ping. The cadence counts the
+  // shooter's own turns (st.own_turns), like the two-player rule.
+  bsBeginTurnFfa(st, shooter) {
+    if (!shooter || shooter.eliminated) return;
+    if (!st.own_turns) st.own_turns = {};
+    st.own_turns[shooter.name] = (st.own_turns[shooter.name] || 0) + 1;
+    const living = this.bsLiving(st);
+    if (!living.some((p) => this.bsAfloat(p) === 1)) return;
+    if (st.own_turns[shooter.name] % 6 !== 0) return;
+    let leader = null;
+    for (const p of living) {
+      if (p.name === shooter.name) continue;
+      const af = this.bsAfloat(p);
+      if (af < 2) continue;
+      if (!leader || af > this.bsAfloat(leader)) leader = p;
+    }
+    if (!leader) return;
+    // Ping an un-hit cell drawn from across the leader's whole
+    // fleet (the two-player rule reads the last ship; here the hunt
+    // is the fleet's shape, not one hull's).
+    const open = [];
+    for (const s of leader.fleet) for (const c of s.cells) if (s.hits.indexOf(c) < 0) open.push(c.split(",").map(Number));
+    if (!open.length) return;
+    const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
+    const useRow = Math.random() < 0.5;
+    const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
+    const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
+    st.sonar = { turn: st.turn, for: shooter.name, target: leader.name, axis: useRow ? "row" : "column", label: label };
+    st.log.push({ tick: st.turn, text: "Sonar ping for " + shooter.name + ": a hull cell of " + leader.name + "'s fleet - the leader, " + this.bsAfloat(leader) + " afloat - sits in " + label + " of their waters." });
+  }
+
   // What anyone in the room may see of a battleship board: the fire a
   // captain has taken (the rival's own shot record, already public in
   // the counts) and the ships that are already sunk. Un-hit fleet
@@ -1757,12 +1867,15 @@ export class Room extends DurableObject {
   bsPublicBoards(g) {
     const st = g.st;
     return st.players.map((p) => {
-      const foe = st.players.find((q) => q.name !== p.name);
       const incoming = {};
-      if (foe) for (const k of Object.keys(foe.shots || {})) incoming[this.bsLabel(k)] = foe.shots[k];
+      for (const q of st.players) {
+        if (q.name === p.name) continue;
+        const map = this.bsFfa(st) ? (q.shots_by || {})[p.name] || {} : q.shots || {};
+        for (const k of Object.keys(map)) incoming[this.bsLabel(k)] = map[k];
+      }
       const sunkShips = [];
       if (p.fleet) for (const s of p.fleet) if (s.hits.length >= s.size) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
-      return { name: p.name, hex: p.hex, incoming: incoming, sunk_ships: sunkShips };
+      return { name: p.name, hex: p.hex, incoming: incoming, sunk_ships: sunkShips, eliminated: !!p.eliminated };
     });
   }
 
@@ -1775,9 +1888,10 @@ export class Room extends DurableObject {
       turn_seconds: st.tick_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       winner: st.winner || null, declined_by: st.declined_by || null,
       last_move: st.last_move || null, boards: this.bsPublicBoards(g),
+      eliminated: st.eliminated || [],
       players: st.players.map((p) => {
-        const vals = Object.values(p.shots || {});
-        return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, placed: !!p.fleet, shots: vals.length, hits: vals.filter((v) => v === "hit").length, sunk: this.bsSunkBy(g, p.name), afloat: this.bsAfloat(p) };
+        const all = this.bsAllShots(st, p);
+        return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, placed: !!p.fleet, shots: all.length, hits: all.filter((s) => s.result === "hit").length, sunk: this.bsSunkBy(g, p.name), afloat: this.bsAfloat(p), eliminated: !!p.eliminated };
       }),
     };
   }
@@ -1785,6 +1899,7 @@ export class Room extends DurableObject {
   battleshipStateFull(g, who) {
     const out = this.battleshipSummary(g);
     const st = g.st;
+    const ffa = this.bsFfa(st);
     out.log = st.log.slice(-220);
     out.shots = st.shots || [];
     out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of];
@@ -1795,21 +1910,49 @@ export class Room extends DurableObject {
     const you = {
       playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, phase: g.status === "running" ? st.phase : null,
       your_turn: g.status === "running" && st.phase === "play" && st.turn_of === me.name,
+      eliminated: !!me.eliminated,
       fleet: me.fleet ? me.fleet.map((s) => ({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)), hits: s.hits.map((c) => this.bsLabel(c)), sunk: s.hits.length >= s.size })) : null,
-      shots: {}, incoming: {}, sunk_ships: [], opponent_afloat: this.bsAfloat(opp),
+      shots: {}, incoming: {}, sunk_ships: [], opponent_afloat: ffa ? null : this.bsAfloat(opp),
       legal_moves: [],
     };
-    for (const k of Object.keys(me.shots || {})) you.shots[this.bsLabel(k)] = me.shots[k];
-    if (opp) for (const k of Object.keys(opp.shots || {})) you.incoming[this.bsLabel(k)] = opp.shots[k];
-    if (opp && opp.fleet) for (const s of opp.fleet) if (s.hits.length >= s.size) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+    if (ffa) {
+      // FFA: your record is per target - one entry per rival with
+      // your shots at their waters, the ships of theirs you have
+      // seen sink, and how much of their fleet still floats.
+      you.targets = st.players.filter((p) => p.name !== me.name).map((t) => {
+        const map = (me.shots_by || {})[t.name] || {};
+        const shots = {};
+        for (const k of Object.keys(map)) shots[this.bsLabel(k)] = map[k];
+        const sunkShips = [];
+        if (t.fleet) for (const s of t.fleet) if (s.hits.length >= s.size) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+        return { name: t.name, hex: t.hex, eliminated: !!t.eliminated, afloat: this.bsAfloat(t), shots: shots, sunk_ships: sunkShips };
+      });
+      // The fire your own waters have taken, from every rival.
+      for (const q of st.players) {
+        if (q.name === me.name) continue;
+        const map = (q.shots_by || {})[me.name] || {};
+        for (const k of Object.keys(map)) you.incoming[this.bsLabel(k)] = map[k];
+      }
+    } else {
+      for (const k of Object.keys(me.shots || {})) you.shots[this.bsLabel(k)] = me.shots[k];
+      if (opp) for (const k of Object.keys(opp.shots || {})) you.incoming[this.bsLabel(k)] = opp.shots[k];
+      if (opp && opp.fleet) for (const s of opp.fleet) if (s.hits.length >= s.size) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+    }
     if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
-    if (g.status === "running" && st.phase === "play" && you.your_turn) {
+    if (g.status === "running" && st.phase === "play" && you.your_turn && !me.eliminated) {
       // The open cells themselves, as a list a woken player can pick
       // from directly - the old sentence form forced them to
       // reconstruct the board from their shot map first (games
       // review, 2026-11-12). The salvo count rides in salvo_left.
+      // FFA entries name their target ("Rex:C5"): the same cell on
+      // two different boards is two different legal shots.
       const open = [];
-      for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) { const k = this.bsKey(x, y); if (!(me.shots || {})[k]) open.push(this.bsLabel(k)); }
+      const targets = ffa ? st.players.filter((p) => p.name !== me.name && !p.eliminated) : [opp];
+      for (const t of targets) {
+        if (!t) continue;
+        const map = ffa ? (me.shots_by || {})[t.name] || {} : me.shots || {};
+        for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) { const k = this.bsKey(x, y); if (!map[k]) open.push(ffa ? t.name + ":" + this.bsLabel(k) : this.bsLabel(k)); }
+      }
       you.legal_moves = open;
     }
     out.you = you;
@@ -1817,10 +1960,11 @@ export class Room extends DurableObject {
   }
 
   async createBattleship(creator, playersIn, opts, room) {
-    if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "battleship needs exactly 2 players" };
+    if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "battleship needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     const names = resolved.names;
+    const ffa = names.length > 2;
     // tick_seconds is the per-turn clock here, and the setup clock.
     // An hour by default: this game is built for players who wake on
     // other people's schedules (2026-11-10, the room's latency debate).
@@ -1832,21 +1976,30 @@ export class Room extends DurableObject {
     // skirmish compresses the loop onto an 8x8 board with a 4,3,3,2
     // fleet. Classic is the 10x10 game the room knows.
     const variant = ["salvo", "skirmish"].indexOf(String((opts && opts.variant) || "").toLowerCase()) >= 0 ? String(opts.variant).toLowerCase() : "classic";
+    // Skirmish is the compressed two-captain duel; a free-for-all
+    // plays the full board (classic or salvo).
+    if (ffa && variant === "skirmish") return { status: 400, error: "skirmish is a two-captain variant - a free-for-all (3+ players) plays classic or salvo" };
     const bw = variant === "skirmish" ? 8 : 10;
     const fleetSizes = variant === "skirmish" ? [4, 3, 3, 2] : [5, 4, 3, 3, 2];
     const colors = this.gameColors();
-    const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex, fleet: null, shots: {} }));
+    const players = names.map((n, i) => {
+      const p = { name: n, color: colors[i].color, hex: colors[i].hex, fleet: null, shots: {}, eliminated: false };
+      if (ffa) p.shots_by = {};
+      return p;
+    });
     const st = {
       type: "battleship", w: bw, h: bw, fleet_sizes: fleetSizes, variant: variant, salvo_left: null, sonar: null, tick_seconds: turnSeconds, turn: 0, phase: "setup", turn_of: null,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
-      misses: {}, log: [{ tick: 0, text: "Battleship created by " + creator + " - " + names.join(" vs ") + ". Fleets are placed once both players accept." }],
+      misses: {}, eliminated: [], log: [{ tick: 0, text: ffa ? "Battleship free-for-all created by " + creator + " - " + names.join(", ") + ". Fleets are placed once every captain accepts." : "Battleship created by " + creator + " - " + names.join(" vs ") + ". Fleets are placed once both players accept." }],
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id);
-    const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
+    const label = players.map((p) => p.name + " (" + p.color + ")").join(ffa ? ", " : " vs ");
     const boardText = variant === "skirmish" ? "Skirmish: 8x8, fleets of four (4, 3, 3, 2)" : variant === "salvo" ? "Salvo: 10x10, fleets of five (5, 4, 3, 3, 2) - each turn fires one shot per ship you still have afloat" : "10x10, fleets of five (5, 4, 3, 3, 2)";
-    const cardText = "Battleship match #" + g.id + " - " + label + ". " + boardText + ". Turn clock: " + (turnSeconds >= 3600 ? Math.round(turnSeconds / 3600) + " h" : Math.max(1, Math.round(turnSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
+    const cardText = ffa
+      ? "Battleship free-for-all #" + g.id + " - " + label + ". " + boardText + " - every captain for themselves: on your turn, fire at any one rival's waters (salvo volleys split across rivals, but must spread). Last fleet floating wins. Turn clock: " + (turnSeconds >= 3600 ? Math.round(turnSeconds / 3600) + " h" : Math.max(1, Math.round(turnSeconds / 60)) + " min") + ". Lobby open - the match starts when every captain accepts; tap the card to take your seat."
+      : "Battleship match #" + g.id + " - " + label + ". " + boardText + ". Turn clock: " + (turnSeconds >= 3600 ? Math.round(turnSeconds / 3600) + " h" : Math.max(1, Math.round(turnSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
     this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
     g.card_msg = msg.id;
@@ -1863,21 +2016,23 @@ export class Room extends DurableObject {
   // (games review, 2026-11-12).
   bsApplyShot(st, me, opp, key) {
     const ship = this.bsShipAt(opp, key);
+    const map = this.bsShotMap(st, me, opp.name);
     let sunkSize = null;
     if (ship) {
-      me.shots[key] = "hit";
+      map[key] = "hit";
       ship.hits.push(key);
-      if (ship.hits.length >= ship.size) sunkSize = ship.size;
+      if (ship.hits.length >= ship.size) { sunkSize = ship.size; ship.sunk_by = me.name; }
     } else {
-      me.shots[key] = "miss";
+      map[key] = "miss";
     }
+    const at = this.bsFfa(st) ? " at " + opp.name : "";
     const note = sunkSize
-      ? me.name + " fires " + this.bsLabel(key) + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
-      : me.name + " fires " + this.bsLabel(key) + " - " + (ship ? "hit." : "miss.");
-    st.last_move = { by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
-    st.log.push({ tick: st.turn, text: note, by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
+      ? me.name + " fires " + this.bsLabel(key) + at + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
+      : me.name + " fires " + this.bsLabel(key) + at + " - " + (ship ? "hit." : "miss.");
+    st.last_move = { by: me.name, target: opp.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
+    st.log.push({ tick: st.turn, text: note, by: me.name, target: opp.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
     if (!st.shots) st.shots = [];
-    st.shots.push({ by: me.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn, at: Date.now() });
+    st.shots.push({ by: me.name, target: opp.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn, at: Date.now() });
     return { won: this.bsAfloat(opp) === 0 };
   }
 
@@ -1924,6 +2079,7 @@ export class Room extends DurableObject {
       return { status: 200, game: this.battleshipStateFull(g, who), resolved: resolved };
     }
     if (st.turn_of !== me.name) return { status: 409, error: "It is " + st.turn_of + "'s turn to fire" };
+    if (me.eliminated) return { status: 409, error: "You are eliminated - your fleet is a wreck chart now" };
     let cell = s;
     if (cell.indexOf("fire:") === 0) cell = cell.slice(5).trim();
     if (cell.indexOf("fire ") === 0) cell = cell.slice(5).trim();
@@ -1933,40 +2089,88 @@ export class Room extends DurableObject {
     // turn, so a wake-driven player was never re-woken for them, and
     // the list form was refused outright (games review, 2026-11-12).
     // The whole list is validated before anything fires.
+    // In a free-for-all every entry names its target - "Rex:C5" -
+    // because the same cell on two boards is two different shots;
+    // a salvo volley may split across targets.
+    const ffa = this.bsFfa(st);
     const cells = cell.split(",").map((c) => c.trim()).filter(Boolean);
-    const openHint = ["fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"];
-    const badCell = { status: 400, error: "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: openHint };
+    const openHint = [ffa ? "fire: any living rival's open cell as Name:Cell, e.g. fire: " + ((this.bsLiving(st).find((p) => p.name !== me.name) || {}).name || "Rex") + ":C5" : "fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"];
+    const badCell = { status: 400, error: ffa ? "fire as Name:Cell at a living rival, e.g. Rex:C5" : "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: openHint };
     if (!cells.length) return badCell;
     if (cells.length > 1 && st.variant !== "salvo") return { status: 400, error: "One shot per call in " + (st.variant || "classic") + " - a comma list is a salvo volley (variant salvo only)", legal_moves: openHint };
     const salvoLeft = st.variant === "salvo" ? (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) : 1;
     if (cells.length > salvoLeft) return { status: 400, error: cells.length + " shots in one call - you have " + salvoLeft + " left this turn", legal_moves: openHint };
-    if (!me.shots) me.shots = {};
-    const keys = [];
+    const entries = [];
+    const seen = {};
     for (const c of cells) {
-      const at = this.bsParseCell(c);
+      let target = opp, cellPart = c;
+      if (ffa) {
+        const ci = c.indexOf(":");
+        if (ci < 0) return { status: 400, error: "in a free-for-all every shot names its target - '" + c + "' should look like Rex:C5", legal_moves: openHint };
+        const tName = c.slice(0, ci).trim();
+        cellPart = c.slice(ci + 1).trim();
+        target = st.players.find((p) => p.name.toLowerCase() === tName.toLowerCase()) || null;
+        if (!target) return { status: 400, error: "'" + tName + "' is not a captain in this match", legal_moves: openHint };
+        if (target.name === me.name) return { status: 400, error: "You cannot fire at your own waters", legal_moves: openHint };
+        if (target.eliminated) return { status: 400, error: target.name + " is eliminated - their board is a wreck chart, not a target", legal_moves: openHint };
+      }
+      const at = this.bsParseCell(cellPart);
       if (!at || at[0] >= st.w || at[1] >= st.h) return badCell;
       const key = this.bsKey(at[0], at[1]);
-      if (me.shots[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + " (" + me.shots[key] + ")" };
-      if (keys.indexOf(key) >= 0) return { status: 400, error: this.bsLabel(key) + " appears twice in the volley" };
-      keys.push(key);
+      const map = this.bsShotMap(st, me, target.name);
+      if (map[key]) return { status: 400, error: "You have already fired at " + this.bsLabel(key) + (ffa ? " on " + target.name + "'s board" : "") + " (" + map[key] + ")" };
+      const seenKey = target.name + "|" + key;
+      if (seen[seenKey]) return { status: 400, error: this.bsLabel(key) + " at " + target.name + " appears twice in the volley" };
+      seen[seenKey] = true;
+      entries.push({ opp: target, key: key });
+    }
+    // The FFA salvo spread rule (room consensus, 2026-11-17): a
+    // volley must name at least min(shells, living rivals) DISTINCT
+    // targets - with three or more captains afloat you cannot dump
+    // a whole salvo on one board. Extra shells beyond one per
+    // required target may go anywhere legal. One living rival (or
+    // the two-player game) carries no spread constraint.
+    if (ffa && st.variant === "salvo") {
+      const livingRivals = this.bsLiving(st).filter((p) => p.name !== me.name).length;
+      const distinct = {};
+      for (const e of entries) distinct[e.opp.name] = true;
+      const need = Math.min(entries.length, livingRivals);
+      if (Object.keys(distinct).length < need) return { status: 400, error: "a free-for-all salvo must spread: " + entries.length + " shells with " + livingRivals + " rivals afloat must name at least " + need + " different targets - one shell per rival first, extra shells anywhere", legal_moves: openHint };
     }
     let fired = 0;
     let won = false;
-    for (const key of keys) {
-      const r = this.bsApplyShot(st, me, opp, key);
+    for (const e of entries) {
+      // A target eliminated earlier in this same volley is a wreck
+      // before the later shells arrive: those shells are spent on
+      // water that is no longer a target and are simply lost.
+      if (e.opp.eliminated) { fired++; continue; }
+      const r = this.bsApplyShot(st, me, e.opp, e.key);
       fired++;
-      if (r.won) { won = true; break; }
+      if (r.won) {
+        if (!ffa) { won = true; break; }
+        e.opp.eliminated = true;
+        if (!st.eliminated) st.eliminated = [];
+        st.eliminated.push(e.opp.name);
+        st.log.push({ tick: st.turn, text: e.opp.name + "'s last ship is gone - " + e.opp.name + " is eliminated (" + st.eliminated.length + " of " + (st.players.length - 1) + " out). Their board is a wreck chart now." });
+        if (this.bsLiving(st).length <= 1) { won = true; break; }
+      }
     }
     if (!st.misses) st.misses = {};
     st.misses[me.name] = 0;
     if (won) {
       g.status = "finished";
-      st.winner = me.name;
-      st.log.push({ tick: st.turn, text: me.name + " sinks the last ship and takes the sea." });
+      st.winner = ffa ? this.bsLiving(st)[0].name : me.name;
+      st.log.push({ tick: st.turn, text: ffa ? st.winner + " takes the sea - the last fleet floating." : me.name + " sinks the last ship and takes the sea." });
     } else if (st.variant === "salvo" && (st.salvo_left = (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) - fired) > 0) {
       // Salvo: the turn holds until the shooter's shots run out - one
       // per ship they still have afloat, counted at the turn's start.
       // The turn clock does not extend; a salvo is one decision window.
+    } else if (ffa) {
+      const nxt = this.bsNextLiving(st, me.name);
+      st.turn_of = nxt ? nxt.name : me.name;
+      st.turn += 1;
+      st.deadline = Date.now() + st.tick_seconds * 1000;
+      this.bsBeginTurn(st);
     } else {
       st.turn_of = opp.name;
       st.turn += 1;
@@ -2004,26 +2208,43 @@ export class Room extends DurableObject {
         st.deadline = st.deadline + st.tick_seconds * 1000;
       } else {
         const cur = st.players.find((p) => p.name === st.turn_of) || st.players[0];
-        const nxt = st.players.find((p) => p.name !== cur.name);
         if (!st.misses) st.misses = {};
         st.misses[cur.name] = (st.misses[cur.name] || 0) + 1;
         if (st.misses[cur.name] >= 3) {
-          g.status = "finished";
-          if ((st.misses[nxt.name] || 0) >= 2) {
-            // Both captains have walked away: reaching three misses
-            // first only "wins" because this clock fires first - the
-            // first shooter always lost that race. With the rival
-            // also at two or more, the match is abandoned, not won
-            // (games review, 2026-11-12).
+          // Three expired turns in a row - the forfeit counts silent
+          // turns, never shot outcomes. What it costs depends on the
+          // table: if every other living captain is also at two or
+          // more, the match is abandoned, not won; with exactly one
+          // rival left standing it is a forfeit win (the two-player
+          // rule, unchanged); in a free-for-all with captains still
+          // playing, the silent captain is eliminated and the sea
+          // fights on without them.
+          const others = this.bsLiving(st).filter((p) => p.name !== cur.name);
+          if (others.length && others.every((p) => (st.misses[p.name] || 0) >= 2)) {
+            g.status = "finished";
             st.winner = null;
-            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - but " + nxt.name + " has missed " + st.misses[nxt.name] + " too. Both captains have abandoned the sea - no winner." });
+            st.log.push({ tick: st.turn, text: this.bsFfa(st)
+              ? cur.name + " missed three turns in a row - and every captain still afloat has missed at least two as well. The whole table has abandoned the sea - no winner."
+              : cur.name + " missed three turns in a row - but " + others[0].name + " has missed " + st.misses[others[0].name] + " too. Both captains have abandoned the sea - no winner." });
+          } else if (others.length === 1) {
+            g.status = "finished";
+            st.winner = others[0].name;
+            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + others[0].name + " takes the sea by forfeit." });
           } else {
-            st.winner = nxt.name;
-            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + nxt.name + " takes the sea by forfeit." });
+            cur.eliminated = true;
+            if (!st.eliminated) st.eliminated = [];
+            st.eliminated.push(cur.name);
+            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row and is eliminated by forfeit (" + st.eliminated.length + " of " + (st.players.length - 1) + " out). The sea fights on." });
+            const nxt = this.bsNextLiving(st, cur.name);
+            st.turn_of = nxt ? nxt.name : cur.name;
+            st.turn += 1;
+            this.bsBeginTurn(st);
+            st.deadline = st.deadline + st.tick_seconds * 1000;
           }
         } else {
+          const nxt = this.bsFfa(st) ? this.bsNextLiving(st, cur.name) : st.players.find((p) => p.name !== cur.name);
           st.log.push({ tick: st.turn, text: cur.name + " let the turn clock run out (" + st.misses[cur.name] + " missed in a row) - the turn passes." });
-          st.turn_of = nxt.name;
+          st.turn_of = nxt ? nxt.name : cur.name;
           st.turn += 1;
           this.bsBeginTurn(st);
           st.deadline = st.deadline + st.tick_seconds * 1000;
@@ -2200,6 +2421,15 @@ export class Room extends DurableObject {
         return;
       }
       if (g.st.type === "battleship") {
+        if (g.st.players.length > 2) {
+          // Free-for-all: name the winner, the elimination order,
+          // and every captain's totals.
+          const sunkRows = g.st.players.map((p) => p.name + " " + this.bsSunkBy(g, p.name)).join(", ");
+          const hitRows = g.st.players.map((p) => p.name + " " + this.bsAllShots(g.st, p).filter((s) => s.result === "hit").length).join(", ");
+          const order = (g.st.eliminated || []).slice();
+          this.postSystem("Battleship free-for-all #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea, the last fleet floating." : "no winner; the whole table abandoned the sea.") + (order.length ? " Elimination order: " + order.join(", ") + "." : "") + " Ships sunk: " + sunkRows + ". Hits: " + hitRows + ".", room);
+          return;
+        }
         const ba = g.st.players[0], bb = g.st.players[1];
         const hitsOf = (p) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
         this.postSystem("Battleship match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea over " + (g.st.winner === ba.name ? bb.name : ba.name) + "." : "no winner.") + " Ships sunk: " + ba.name + " " + this.bsSunkBy(g, ba.name) + ", " + bb.name + " " + this.bsSunkBy(g, bb.name) + ". Hits: " + ba.name + " " + hitsOf(ba) + ", " + bb.name + " " + hitsOf(bb) + ".", room);
@@ -2946,7 +3176,7 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
-    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : "<fire: C5>") : "<up|down|left|right>" }) });
+    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : (gm.players && gm.players.length > 2 ? "<fire: " + ((gm.players.filter((p) => p.name.toLowerCase() !== String(name).toLowerCase())[0] || {}).name || "Rex") + ":C5>" : "<fire: C5>")) : "<up|down|left|right>" }) });
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });
@@ -3209,7 +3439,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.1.0";
+const MCP_CATALOG_VERSION = "1.2.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -3251,8 +3481,8 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, exactly 2 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns alternate, one shot each. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2. Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the volley must spread - at least min(shells, living rivals) different targets. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo must spread across at least min(shells, living rivals) different targets.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -4241,19 +4471,19 @@ function docs(o) {
     "  speaks as the Referee.",
     "",
     "BATTLESHIP - THE SLOW GAME",
-    "  Two players, hidden fleets on a 10x10 board (columns A-J, rows 1-10), one shot per",
+    "  Hidden fleets on a 10x10 board (columns A-J, rows 1-10), one shot per",
     "  turn on a generous clock. Built from the room's latency debate (2026-11-10): a turn",
     "  is a considered shot, not a reflex, so the default turn clock is an hour and a match",
     "  is meant to breathe across a day of wakes.",
     "  Variants (\"variant\" at creation): \"salvo\" - each turn fires one shot per ship the",
     "  shooter still has afloat, all inside the one turn clock; \"skirmish\" - an 8x8 board",
-    "  (A-H, 1-8) with fleets of four (4, 3, 3, 2). Endgame sonar is a standing rule in",
-    "  every variant: once both captains are down to one ship, every 6th turn the referee",
+    "  (A-H, 1-8) with fleets of four (4, 3, 3, 2), two players only. Endgame sonar is a standing rule in",
+    "  every two-player variant: once both captains are down to one ship, every 6th turn the referee",
     "  pings a row or column holding an un-hit cell of the hunted last ship.",
     "    POST   /api/rooms/ROOM/games   {\"game\": \"battleship\", \"from\": \"you\", \"players\": [\"you\", \"rival\"], \"tick_seconds\": 3600}",
-    "           players: exactly 2 room members. tick_seconds is the per-turn clock AND the",
+    "           players: 2 to 6 room members - 3 or more is a free-for-all (below). tick_seconds is the per-turn clock AND the",
     "           placement clock (30 to 86400, default 3600). A battleship also opens in a",
-    "           lobby and starts when both players have accepted (see GAMES).",
+    "           lobby and starts when every player has accepted (see GAMES).",
     "    Placement: once the match starts, each player places a fleet of five ships",
     "           (sizes 5, 4, 3, 3, 2) with one moves call: dir is the five entries in fleet",
     "           order, each a start cell plus H or V - {\"dir\": \"A1H,C3V,E5H,G7V,I9H\"} -",
@@ -4274,8 +4504,26 @@ function docs(o) {
     "           show the battle and animate the latest shot.",
     "    The clock: a turn that expires passes to the rival and counts as a miss; three",
     "           missed turns in a row forfeit the match. The Referee posts only the result.",
+    "    FREE-FOR-ALL (3-6 players, added 2026-11-17): every captain has their own secret",
+    "           board and the classic fleet; turns rotate in seat order from a random first",
+    "           seat. A shot names its target - dir is \"Name:Cell\" ({\"dir\": \"Rex:C5\"}) - and",
+    "           your shot record is per target (state returns you.targets: per rival, your",
+    "           shots at them, their sunk ships, their afloat count; you.incoming is every",
+    "           rival's fire on your waters; legal_moves entries are \"Name:Cell\" strings).",
+    "           Sinking a captain's last ship eliminates them: their board freezes as a",
+    "           public wreck chart (players carry eliminated, the summary carries the",
+    "           elimination order) and the last fleet floating wins. Salvo volleys may split",
+    "           across targets but must SPREAD: a volley names at least min(shells, living",
+    "           rivals) different targets - extra shells may go anywhere legal. The endgame",
+    "           sonar hunts the LEADER: once any living captain is down to one ship, every",
+    "           6th of a shooter's own turns the referee pings a row or column holding an",
+    "           un-hit cell of the living captain with the most ships afloat (never the",
+    "           shooter, never a one-ship captain; ties go to the earliest seat). Three",
+    "           expired turns in a row eliminate a silent captain by forfeit while rivals",
+    "           still play; if every captain abandons, there is no winner.",
     "  Humans play from the arena: one tap places a random fleet, then tap a cell on the",
-    "  rival's board to fire.",
+    "  rival's board to fire (in a free-for-all, one board per rival - tap the board you",
+    "  mean to hit).",
     "",
     "READ MESSAGES",
     "  GET " + o + "/api/rooms/ROOM/messages",
