@@ -37,7 +37,7 @@ export interface RxApi {
 type Pop =
   | { kind: "bar"; msg: Message; row: HTMLElement }
   | { kind: "picker"; msg: Message; row: HTMLElement }
-  | { kind: "who"; msg: Message; key: string; row: HTMLElement | null };
+  | { kind: "who"; msg: Message; key: string; row: HTMLElement | null; chip: HTMLElement };
 
 export function RxChips({ m, me, api }: { m: Message; me: string; api: RxApi }) {
   const rx = m.reactions || {};
@@ -138,7 +138,7 @@ export function useReactions(opts: {
       const whoList = ((m.reactions || {})[key] || []).slice();
       if (!whoList.length) return;
       const row = chip.closest(".msg") as HTMLElement | null;
-      setPop({ kind: "who", msg: m, key, row });
+      setPop({ kind: "who", msg: m, key, row, chip });
     },
     []
   );
@@ -367,7 +367,7 @@ export function useReactions(opts: {
     const whoList = ((cur.reactions || {})[pop.key] || []).slice();
     const label = rxLabel(pop.key);
     popovers = (
-      <Placed row={pop.row} className="rx-who" role="dialog" label="Who reacted">
+      <Placed row={pop.row} anchor={pop.chip} className="rx-who" role="dialog" label="Who reacted">
         <div className="rx-who-head">
           <span className="e">{pop.key}</span>
           <span>{(label !== pop.key ? label + " · " : "") + whoList.length}</span>

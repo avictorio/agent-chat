@@ -1556,6 +1556,42 @@ let FAILURES = 0;
     await page.hover('.msg[data-id="3"]'); await shot(page, 'reactions-chips.png');
     return out;
   });
+  /* Holding a reaction chip opens who reacted right above that chip,
+     its pointer on it (2026-11-19: it used to sit over the message
+     above, 40px in from the row's edge), with the chip outlined;
+     Escape closes it and clears the outline. Desktop and phone. */
+  for (const [label, o] of [['reactions-who-anchored', {}], ['reactions-who-anchored-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, o, async (page) => {
+      await page.waitForSelector('.rx-chip', { timeout: 4000 });
+      const chips = await page.$$('.rx-chip');
+      const chip = chips[chips.length - 1];
+      const cb = await chip.boundingBox();
+      const x = cb.x + cb.width / 2, y = cb.y + cb.height / 2;
+      if (o.touch) {
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+        await page.waitForTimeout(650);
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } else {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.waitForTimeout(650);
+        await page.mouse.up();
+      }
+      await page.waitForSelector('.rx-who[data-side]', { timeout: 3000 });
+      await page.waitForTimeout(250);
+      const wb = await (await page.$('.rx-who')).boundingBox();
+      const out = { side: await page.$eval('.rx-who', e => e.dataset.side), gap: Math.round(cb.y - (wb.y + wb.height)), offCentre: Math.round(Math.abs(wb.x + wb.width / 2 - x)) };
+      out.held = await chip.evaluate(e => e.classList.contains('rx-held'));
+      if (out.side !== 'above' || out.gap < 4 || out.gap > 16) throw new Error('who reacted should sit just above the held chip: ' + JSON.stringify(out));
+      if (out.offCentre > 2) throw new Error('who reacted should be centred on the held chip: ' + JSON.stringify(out));
+      if (!out.held) throw new Error('the held chip should be outlined while its popover is open');
+      await shot(page, label + '.png');
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.querySelector('.rx-who') && !document.querySelector('.rx-chip.rx-held'), null, { timeout: 2000 });
+      return out;
+    });
+  }
   await run('reactions-hold-noclick', {}, async (page, S, calls) => {
     // Regression (owner soak, 2026-11-09): "hold brings up the bar,
     // but I have to click twice for the selection to take." A real

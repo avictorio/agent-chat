@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { emojiCache, loadEmoji, recents, type EmojiData } from "./emoji";
 
 // The full emoji picker: categories, search, recents. Rendered by
@@ -14,8 +14,31 @@ function placeCalc(pop: HTMLElement, row: HTMLElement): { top: number; left: num
   return { top: Math.max(8, top), left };
 }
 
+/* A popover over one small target (a reaction chip): centred above it
+   with its pointer on the target, or below it when there is no room
+   between the target and the top of the chat; kept on screen. */
+type Spot = { top: number; left: number; side?: "above" | "below"; caret?: number };
+function placeOver(pop: HTMLElement, anchor: HTMLElement): Spot {
+  const ar = anchor.getBoundingClientRect();
+  const bw = pop.offsetWidth;
+  const bh = pop.offsetHeight;
+  const gap = 9;
+  const list = anchor.closest(".msgs");
+  const ceiling = Math.max(8, list ? list.getBoundingClientRect().top + 4 : 8);
+  let side: "above" | "below" = "above";
+  let top = ar.top - bh - gap;
+  if (top < ceiling) {
+    side = "below";
+    top = Math.min(ar.bottom + gap, window.innerHeight - bh - 8);
+  }
+  const cx = ar.left + ar.width / 2;
+  const left = Math.max(8, Math.min(cx - bw / 2, window.innerWidth - bw - 8));
+  return { top: Math.max(8, top), left, side, caret: Math.max(16, Math.min(bw - 16, cx - left)) };
+}
+
 export function Placed({
   row,
+  anchor,
   className,
   role,
   label,
@@ -23,6 +46,8 @@ export function Placed({
   children,
 }: {
   row: HTMLElement | null;
+  /* place over this element (a reaction chip) instead of the message row */
+  anchor?: HTMLElement | null;
   className: string;
   role: string;
   label: string;
@@ -30,24 +55,36 @@ export function Placed({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<Spot | null>(null);
   useEffect(() => {
     const el = ref.current;
-    if (el && row) setPos(placeCalc(el, row));
+    if (el && anchor && anchor.isConnected) setPos(placeOver(el, anchor));
+    else if (el && row) setPos(placeCalc(el, row));
     if (el && focusRx) {
       const t =
         el.querySelector<HTMLButtonElement>("button.rx.on") ||
         el.querySelector<HTMLButtonElement>("button.rx");
       if (t) t.focus({ preventScroll: true });
     }
-  }, [row, focusRx]);
+  }, [row, anchor, focusRx]);
+  // the target stays marked while its popover is open
+  useEffect(() => {
+    if (!anchor) return;
+    anchor.classList.add("rx-held");
+    return () => anchor.classList.remove("rx-held");
+  }, [anchor]);
   return (
     <div
       ref={ref}
       className={className}
       role={role}
       aria-label={label}
-      style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}
+      data-side={pos && pos.side ? pos.side : undefined}
+      style={
+        pos
+          ? ({ top: pos.top, left: pos.left, ...(pos.caret != null ? { "--caret": pos.caret + "px" } : {}) } as CSSProperties)
+          : { visibility: "hidden", top: 0, left: 0 }
+      }
     >
       {children}
     </div>

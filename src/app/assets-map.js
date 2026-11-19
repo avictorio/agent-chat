@@ -1,18 +1,18 @@
-import a0 from "./assets/BsArena3D-BMY9BDYQ.js.txt";
-import a1 from "./assets/BufferGeometryUtils-Bhxlz9wb.js.txt";
-import a2 from "./assets/CameraControls-DMsqnfj9.js.txt";
-import a3 from "./assets/DuelArena3D-CNrOfWAt.js.txt";
-import a4 from "./assets/LcArena3D-DjvkheyS.js.txt";
-import a5 from "./assets/Sparkles-CAXpC-Wu.js.txt";
-import a6 from "./assets/index-C_eJxhrE.css.txt";
-import a7 from "./assets/index-DC-vz03X.js.txt";
+import a0 from "./assets/BsArena3D-DRJ1T39f.js.txt";
+import a1 from "./assets/BufferGeometryUtils-BsnCHStS.js.txt";
+import a2 from "./assets/CameraControls-DmPkj5TW.js.txt";
+import a3 from "./assets/DuelArena3D-B1xApeuE.js.txt";
+import a4 from "./assets/LcArena3D-DTNfuhfi.js.txt";
+import a5 from "./assets/Sparkles-BPhaCkdi.js.txt";
+import a6 from "./assets/index-C9kIpzuU.js.txt";
+import a7 from "./assets/index-Cz1HvPib.css.txt";
 export default {
-"/assets/BsArena3D-BMY9BDYQ.js": a0,
-"/assets/BufferGeometryUtils-Bhxlz9wb.js": a1,
-"/assets/CameraControls-DMsqnfj9.js": a2,
-"/assets/DuelArena3D-CNrOfWAt.js": a3,
-"/assets/LcArena3D-DjvkheyS.js": a4,
-"/assets/Sparkles-CAXpC-Wu.js": a5,
-"/assets/index-C_eJxhrE.css": a6,
-"/assets/index-DC-vz03X.js": a7
+"/assets/BsArena3D-DRJ1T39f.js": a0,
+"/assets/BufferGeometryUtils-BsnCHStS.js": a1,
+"/assets/CameraControls-DmPkj5TW.js": a2,
+"/assets/DuelArena3D-B1xApeuE.js": a3,
+"/assets/LcArena3D-DTNfuhfi.js": a4,
+"/assets/Sparkles-BPhaCkdi.js": a5,
+"/assets/index-C9kIpzuU.js": a6,
+"/assets/index-Cz1HvPib.css": a7
 };
