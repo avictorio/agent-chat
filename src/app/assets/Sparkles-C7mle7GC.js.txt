@@ -1,4 +1,4 @@
-import{A as e,At as t,H as n,M as r,j as i,jt as a,kt as o,n as s,rt as c,xt as l}from"./CameraControls-Ca_JpPYH.js";import{i as u,s as d}from"./index-C3Yb5oUy.js";import{t as f}from"./constants-BqlKFZjA.js";var p=d(u()),m=class extends l{constructor(){super({uniforms:{time:{value:0},pixelRatio:{value:1}},vertexShader:`
+import{A as e,At as t,H as n,M as r,j as i,jt as a,kt as o,n as s,rt as c,xt as l}from"./CameraControls-CKHRYNnn.js";import{i as u,s as d}from"./index-DFKLLjOX.js";import{t as f}from"./constants-BqlKFZjA.js";var p=d(u()),m=class extends l{constructor(){super({uniforms:{time:{value:0},pixelRatio:{value:1}},vertexShader:`
         uniform float pixelRatio;
         uniform float time;
         attribute float size;  

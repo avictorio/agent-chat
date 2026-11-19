@@ -42,6 +42,7 @@ export function finalScore(g: GL): string {
     return w && w.solved ? "round " + w.solved : "";
   }
   if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
+  if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
   if (g.type === "trust") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   return "";
 }
@@ -56,6 +57,10 @@ export function recordLine(g: GL): string {
   }
   if (g.type === "duel") return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
   if (g.type === "frontlines") return "Final · " + finalScore(g) + " · " + ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
+  if (g.type === "auction") {
+    const n = (g.rounds && g.rounds.length) || g.lots_total || 0;
+    return "Final · " + finalScore(g) + " lots won · " + n + " lots";
+  }
   if (g.type === "trust") {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
@@ -113,6 +118,14 @@ export function crWhat(g: GL): string {
 
 export function gameMetaText(g: GL): string {
   if (!g) return "";
+  if (g.type === "auction") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + g.lots_total + " lots · " + g.budget + " each";
+    }
+    return "Lot " + g.round + " of " + g.lots_total + " · " + tickLen(g.round_seconds || 180) + " per lot";
+  }
   if (g.type === "trust") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {

@@ -7,6 +7,7 @@ import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./fron
 import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
 import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
 import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
+import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction";
 import {
   battleshipBoard,
   boardSvg,
@@ -191,6 +192,8 @@ export function createGameStore(opts: {
     crDraft?: { round: number; v: string } | null;
     // Trust: the choices being made (kept across repaints, reset each round)
     trDraft?: { round: number; d: TrDraft } | null;
+    // Auction: the bid being made (kept across repaints, reset each lot)
+    auDraft?: { round: number; v: number } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -287,6 +290,16 @@ export function createGameStore(opts: {
           sub = "If the clock runs out, a lone split takes the round.";
         }
       } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
+    } else if (g.type === "auction") {
+      dur = (g.round_seconds || 180) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && (p.budget || 0) > 0 && p.name !== me).map((p: GL) => p.name);
+      if (you.playing && (you.budget || 0) <= 0) text = "You've spent out · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+      else if (you.playing && you.queued != null) text = "Your bid is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+      else if (you.playing) {
+        mine = true;
+        text = "Your bid · lot " + g.round + " of " + g.lots_total;
+        sub = "If the clock runs out, you pass on this lot.";
+      } else text = "Lot " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
     } else if (g.type === "trust") {
       dur = (g.round_seconds || 180) * 1000;
       const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
@@ -415,6 +428,11 @@ export function createGameStore(opts: {
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
       if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    } else if (g.type === "auction") {
+      body.game = "auction";
+      body.lots = g.lots_total;
+      body.budget = g.budget;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "trust") {
       body.game = "trust";
       body.rounds = g.rounds_about;
@@ -545,7 +563,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
@@ -600,6 +618,8 @@ export function createGameStore(opts: {
       n = c4HistoryRows(g, row, histWho, list);
     } else if (g.type === "trust") {
       n = trHistoryRows(g, row, histWho, list);
+    } else if (g.type === "auction") {
+      n = auHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1139,6 +1159,90 @@ export function createGameStore(opts: {
         f.setSelectionRange(n, n);
       }
     }
+  }
+
+  /* The auction (2026-11-19): the lot under the hammer, the bidders, your
+     sealed bid, then the last lot's result. The draft lives on gameView
+     so a poll never wipes it; it resets each lot. */
+  function renderAuctionView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const queued: number | null = you.queued == null ? null : Number(you.queued);
+    if (!gv.auDraft || gv.auDraft.round !== g.round) gv.auDraft = { round: g.round, v: queued != null ? queued : 0 };
+    const key = [
+      g.status,
+      g.round,
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.budget || 0) + ":" + (p.won || 0)).join(","),
+      queued == null ? "" : queued,
+      gv.auDraft.v,
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    if (KIND3D.auction) {
+      wrap.appendChild(viewToggle3d("auction", g));
+      if (pref3d("auction")) {
+        const h = host3d("auction");
+        wrap.appendChild(h.host);
+        paint3d("auction", g, h);
+      } else drop3d();
+    }
+    wrap.appendChild(auLot(g));
+    if (g.status === "running" && you.playing && (you.budget || 0) > 0) {
+      const hint = arenaHint("auction", "Every lot is worth the same. Bid low on the ones others want; save for the ones they don't.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        auBid(
+          g,
+          gv.auDraft.v,
+          (v) => {
+            if (gameView !== gv) return;
+            gv.auDraft = { round: g.round, v };
+            renderAuctionView(g, true);
+          },
+          (v) => {
+            if (gameView !== gv) return;
+            gv.auDraft = { round: g.round, v };
+            if (gv.r3dCommit) gv.r3dCommit();
+            void sendMove(g.id, v ? String(v) : "pass", note);
+          }
+        )
+      );
+      note.textContent = queued != null ? "You can change your bid until the lot resolves." : "Bids are sealed until everyone has bid.";
+      wrap.appendChild(note);
+    } else if (g.status === "running" && !you.playing) {
+      note.textContent = "Spectating - bids are opened together when each lot resolves.";
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(auPlayers(g, me));
+    const last = auLastRound(g);
+    wrap.appendChild(auResult(g, last));
   }
 
   /* Trust (2026-11-19): the scoreboard, your choices (a Cooperate /
@@ -1998,6 +2102,10 @@ export function createGameStore(opts: {
       renderTrustView(g, force);
       return;
     }
+    if (g.type === "auction") {
+      renderAuctionView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2178,7 +2286,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2232,6 +2340,8 @@ export function createGameStore(opts: {
           if (g.turn_of === me) n++;
         } else if (g.type === "trust") {
           if (!mine.committed && !mine.out) n++;
+        } else if (g.type === "auction") {
+          if (!mine.committed && (mine.budget || 0) > 0) n++;
         } else if (g.type === "battleship") {
           if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
         } else if (mine.alive && !mine.moved) n++;
