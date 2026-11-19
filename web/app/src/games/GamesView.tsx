@@ -14,7 +14,7 @@ function standingsMotion(games: GameSummary[] | null) {
   const streaks: Record<string, Record<string, { kind: "W" | "L"; n: number }>> = {};
   const prevRanks: Record<string, Record<string, number>> = {};
   if (!games) return { streaks, prevRanks };
-  const kinds = ["battleship", "duel", "lightcycles"];
+  const kinds = GAMES.map((d) => d.id);
   kinds.forEach((t) => {
     const fin = games
       .filter((g) => g.type === t && g.status === "finished" && g.winner)
@@ -77,7 +77,7 @@ function stateLine(g: GL): string {
     const head = g.phase === "setup" ? "Placing fleets" : "Turn " + g.turn + (g.turn_of ? " · " + g.turn_of + " to fire" : "");
     return head + " · " + ps.map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
   }
-  if (g.type === "duel") return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
+  if (g.type === "duel" || g.type === "frontlines") return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
   const alive = ps.filter((p: GL) => p.alive).length;
   return "Tick " + (g.tick || 0) + " · " + alive + " still riding";
 }
@@ -98,6 +98,7 @@ function waitingOn(g: GL): string[] {
   if (g.status === "lobby") return ps.filter((p) => !p.accepted).map((p) => p.name);
   if (g.status !== "running") return [];
   if (g.type === "duel") return ps.filter((p) => !p.thrown).map((p) => p.name);
+  if (g.type === "frontlines") return ps.filter((p) => !p.committed).map((p) => p.name);
   if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
   return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
 }
@@ -105,10 +106,11 @@ const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_dea
 const durOf = (g: GL): number =>
   g.status === "lobby"
     ? 3600e3
-    : 1000 * (g.type === "duel" ? g.round_seconds || 180 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+    : 1000 * (g.type === "duel" || g.type === "frontlines" ? g.round_seconds || 180 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
 function youLabel(g: GL): string {
   if (g.status === "lobby") return "Your invite";
   if (g.type === "duel") return "Your throw";
+  if (g.type === "frontlines") return "Your split";
   if (g.type === "battleship") return g.phase === "setup" ? "Place your fleet" : "Your shot";
   return "Your move";
 }
@@ -157,6 +159,7 @@ function whenLabel(t: number, group: string): string {
 function lengthLine(g: GL): string {
   if (g.type === "battleship") return (g.turn || 0) + " turns";
   if (g.type === "duel") return (g.round || 0) + " rounds";
+  if (g.type === "frontlines") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
   return (g.tick || 0) + " ticks";
 }
 
@@ -344,7 +347,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   };
 
   // history: newest ending first, filtered by game
-  const kindsDone = (["battleship", "duel", "lightcycles"] as const).filter((t) => done.some((g) => g.type === t));
+  const kindsDone = GAMES.map((d) => d.id).filter((t) => done.some((g) => g.type === t));
   const filtered = useMemo(
     () => done.filter((g) => kind === "all" || g.type === kind).sort((a, b) => endedAt(b as GL) - endedAt(a as GL) || (b.id || 0) - (a.id || 0)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -453,7 +456,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
 
   const standings = Object.keys(record).length ? (
     <div className="gm-rec">
-      {(["battleship", "duel", "lightcycles"] as const).map((t) =>
+      {GAMES.map((d) => d.id).map((t) =>
         record[t] && record[t].length ? (
           <div className="gm-rec-kind" key={t}>
             <div className="gm-rec-title">{KIND[t]}</div>

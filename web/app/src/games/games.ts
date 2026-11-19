@@ -3,6 +3,7 @@ import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../lib";
 import { matchTitle } from "./catalog";
+import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
 import {
   battleshipBoard,
   boardSvg,
@@ -174,6 +175,10 @@ export function createGameStore(opts: {
     duel3d?: Host3d | null;
     duel3dSeq?: number;
     duelCommit?: ((t: string) => void) | null;
+    // Frontlines: the split being planned (kept across repaints) and the
+    // number of rounds already shown (a new one plays its reveal)
+    flDraft?: { round: number; vals: number[] } | null;
+    flShown?: number;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -260,6 +265,16 @@ export function createGameStore(opts: {
           sub = "If the clock runs out, a lone throw takes the round.";
         }
       } else text = players.map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
+    } else if (g.type === "frontlines") {
+      dur = (g.round_seconds || 180) * 1000;
+      if (you.playing && opp) {
+        if (you.queued) text = "Your split is in · waiting on " + opp.name;
+        else {
+          mine = true;
+          text = opp.committed ? opp.name + " has committed · your split decides round " + g.round : "Your split · round " + g.round;
+          sub = "If the clock runs out, a lone split takes the round.";
+        }
+      } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
     } else if (g.type === "battleship") {
       dur = (g.turn_seconds || 3600) * 1000;
       if (g.phase === "setup") {
@@ -351,6 +366,11 @@ export function createGameStore(opts: {
       body.game = "duel";
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
+    } else if (g.type === "frontlines") {
+      body.game = "frontlines";
+      body.best_of = g.best_of;
+      body.tick_seconds = g.round_seconds;
+      if (g.variant && g.variant !== "classic") body.variant = g.variant;
     } else if (g.type === "battleship") {
       body.game = "battleship";
       body.tick_seconds = g.turn_seconds;
@@ -467,7 +487,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
     return ticks.size;
@@ -513,7 +533,9 @@ export function createGameStore(opts: {
       return r;
     };
     let n = 0;
-    if (g.type === "duel") {
+    if (g.type === "frontlines") {
+      n = flHistoryRows(g, row, histWho, list);
+    } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
         const rw = row("Round " + r.n);
@@ -733,6 +755,98 @@ export function createGameStore(opts: {
       put(note);
     } else if (g.status === "running") {
       note.textContent = "Spectating - throws stay hidden until each round resolves.";
+      wrap.appendChild(note);
+    }
+  }
+
+  /* Frontlines (2026-11-19): the field (the last resolved round, or the
+     open field), the turn banner, and for a commander the planner. The
+     planner's draft lives on gameView so a poll or the rival's commit
+     never wipes a half-made plan; it resets when a new round opens. */
+  function renderFrontlinesView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const you = g.you || { playing: false };
+    const queued: number[] | null = Array.isArray(you.queued) ? you.queued : null;
+    if (!gv.flDraft || gv.flDraft.round !== g.round) {
+      gv.flDraft = { round: g.round, vals: queued ? queued.slice() : [0, 0, 0, 0, 0] };
+    }
+    const key = [
+      g.status,
+      g.round,
+      (g.players || []).map((p: GL) => (p.wins || 0) + "" + (p.committed ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
+      queued ? queued.join("/") : "",
+      gv.flDraft.vals.join("/"),
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    // the score, then the field: the last resolved round, played in when new
+    const score = el("div", "fl-score");
+    (g.players || []).forEach((p: GL, i: number) => {
+      if (i) score.appendChild(el("span", "fl-vs", "vs"));
+      const s = el("span", "fl-score-p");
+      const d = el("span", "hist-dot");
+      d.style.background = p.hex;
+      s.appendChild(d);
+      s.appendChild(el("span", "fl-score-name", p.name));
+      s.appendChild(el("span", "fl-score-n", String(p.wins || 0)));
+      if (g.status === "running") s.appendChild(el("span", "fl-score-st", p.committed ? "committed ✓" : "planning…"));
+      score.appendChild(s);
+    });
+    wrap.appendChild(score);
+    const rounds: GL[] = g.rounds || [];
+    const field = flField(g, { me: opts.meName() });
+    if (gv.flShown != null && rounds.length > gv.flShown) field.classList.add("reveal-in");
+    gv.flShown = rounds.length;
+    const last = flLastRound(g);
+    const fieldCap = el("div", "fl-cap", last ? "Round " + last.n + " on the field" : g.status === "running" ? "Round " + g.round + " · splits stay hidden until both are in" : "");
+    wrap.appendChild(fieldCap);
+    wrap.appendChild(field);
+    if (g.status === "running" && you.playing) {
+      const hint = arenaHint("frontlines", "Put your troops where you think your rival won't. Hold 3 of the 5 hills to take the round.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        flPlanner(
+          g,
+          gv.flDraft.vals,
+          (v) => {
+            if (gameView !== gv) return;
+            gv.flDraft = { round: g.round, vals: v };
+            renderFrontlinesView(g, true);
+          },
+          (v) => {
+            void sendMove(g.id, v.join(","), note);
+          }
+        )
+      );
+      note.textContent = queued
+        ? "Locked in: " + queued.join("/") + ". You can change it until your rival commits too."
+        : "Your split stays hidden until your rival has committed too.";
+      wrap.appendChild(note);
+    } else if (g.status === "running") {
+      note.textContent = "Spectating - splits stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
   }
@@ -1434,6 +1548,10 @@ export function createGameStore(opts: {
       renderBattleshipView(g, force);
       return;
     }
+    if (g.type === "frontlines") {
+      renderFrontlinesView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -1613,7 +1731,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -1659,6 +1777,8 @@ export function createGameStore(opts: {
         if (g.status !== "running") return;
         if (g.type === "duel") {
           if (!mine.thrown) n++;
+        } else if (g.type === "frontlines") {
+          if (!mine.committed) n++;
         } else if (g.type === "battleship") {
           if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
         } else if (mine.alive && !mine.moved) n++;

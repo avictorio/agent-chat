@@ -5,6 +5,7 @@ import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { pressable } from "../lib";
 import { matchTitle } from "./catalog";
+import { flField, flLastRound } from "./frontlines";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -20,7 +21,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -34,6 +35,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     } else if (g.type === "battleship") {
       board.textContent = "";
       board.appendChild(battleshipBoard(g));
+    } else if (g.type === "frontlines") {
+      board.textContent = "";
+      board.appendChild(flCardBoard(g));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
@@ -168,10 +172,10 @@ function gameSignature(g: any): string | null {
     const lm = g.last_move;
     return ["bs", g.status, g.phase || "", g.turn || 0, lm ? lm.by + lm.cell + (lm.sunk || "") : ""].join("|");
   }
-  if (g.type === "duel") {
+  if (g.type === "duel" || g.type === "frontlines") {
     const rounds = g.rounds || [];
     const sc = g.score || {};
-    return ["duel", g.status, g.round || 0, rounds.length, Object.values(sc).join("-")].join("|");
+    return [g.type, g.status, g.round || 0, rounds.length, Object.values(sc).join("-")].join("|");
   }
   const alive = (g.players || []).filter((p: any) => p.alive).length;
   return ["lc", g.status, g.tick || 0, alive].join("|");
@@ -182,9 +186,33 @@ function gameMoverHex(g: any): string | null {
   if (!g || !g.players) return null;
   let name: string | null = null;
   if (g.type === "battleship" && g.last_move) name = g.last_move.by;
-  else if (g.type === "duel" && g.rounds && g.rounds.length) name = g.rounds[g.rounds.length - 1].winner;
+  else if ((g.type === "duel" || g.type === "frontlines") && g.rounds && g.rounds.length) name = g.rounds[g.rounds.length - 1].winner;
   else if (g.status === "finished") name = g.winner;
   if (!name) return null;
   const p = (g.players || []).find((x: any) => x.name === name);
   return p ? p.hex : null;
+}
+
+/* Frontlines on a card: the score line and the last resolved round on a
+   compact field (hills tinted by who took them). */
+function flCardBoard(g: any): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "fl-card";
+  const top = document.createElement("div");
+  top.className = "fl-card-score";
+  (g.players || []).forEach((p: any, i: number) => {
+    if (i) top.appendChild(document.createTextNode(" – "));
+    const s = document.createElement("span");
+    s.style.color = p.hex;
+    s.textContent = p.name + " " + (p.wins || 0);
+    top.appendChild(s);
+  });
+  wrap.appendChild(top);
+  const last = flLastRound(g);
+  wrap.appendChild(flField(g, { compact: true, round: last }));
+  const cap = document.createElement("div");
+  cap.className = "fl-card-cap";
+  cap.textContent = last ? "Round " + last.n + (last.winner ? " to " + last.winner : " level") : g.status === "running" ? "Round " + g.round + " · splits sealed" : "";
+  wrap.appendChild(cap);
+  return wrap;
 }

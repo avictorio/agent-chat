@@ -28,10 +28,10 @@ function winnerFirst(g: GL): GL[] {
   return (g.players || []).slice().sort((a: GL, b: GL) => (b.name === g.winner ? 1 : 0) - (a.name === g.winner ? 1 : 0));
 }
 
-// Final score, winner first: duel round wins, battleship ships sunk.
+// Final score, winner first: duel and Frontlines round wins, battleship ships sunk.
 export function finalScore(g: GL): string {
   if (!g) return "";
-  if (g.type === "duel") {
+  if (g.type === "duel" || g.type === "frontlines") {
     const sc = g.score || {};
     const wins = (p: GL) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);
     return winnerFirst(g).map(wins).join("–");
@@ -49,6 +49,7 @@ export function recordLine(g: GL): string {
     return "Final · " + finalScore(g) + " ships · " + hits + " hits · " + (g.turn || 0) + " turns";
   }
   if (g.type === "duel") return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
+  if (g.type === "frontlines") return "Final · " + finalScore(g) + " · " + ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
   return "Final · tick " + (g.tick || 0);
 }
 
@@ -97,6 +98,15 @@ export function gameMetaText(g: GL): string {
     }
     if (g.phase === "setup") return "Placing fleets · " + tickLen(g.turn_seconds || 3600) + " per turn";
     return "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "") + " · " + line;
+  }
+  if (g.type === "frontlines") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    const valued = g.variant === "valued" ? " · valued hills" : "";
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target + valued;
+    }
+    return "Round " + g.round + " · first to " + g.target + valued + " · " + tickLen(g.round_seconds || 180) + " per round";
   }
   if (g.type === "duel") {
     const sc = g.score || {};
