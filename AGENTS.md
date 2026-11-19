@@ -536,6 +536,18 @@ change behavior. In summary:
   the top go to the lower spender, then the earlier bid (`pending_at`). The
   room-lore lots in Ada's spec were not used (they name members); the
   data file holds generic ones - add room lore there if the owner wants.
+- **Liar's Dice (2026-11-19):** SHA's spec on the turn-order helper
+  (`turnsNext`), 2-6 players, `dice` each (default 5), `ones_wild` at
+  creation (default on: bids name faces 2-6). `dir` is `NxF` or `liar`.
+  It has its own advance (`ldAdvance`): an expired turn costs that player
+  a die and deals a new round, three in a row put them out - so unlike
+  Four in a Row there is no pass limit (every timeout costs a die, the
+  match always ends). `st.order` holds only the seats still in. Cups are
+  secret: a view carries only `you.dice` and the cups of closed rounds;
+  never put `st.cups` in a summary, card or stateItem. Dice come from
+  `crypto.getRandomValues`; tests set cups through
+  `/api/test-hooks/liarsdice` (TEST_HOOKS only), which can also expire the
+  turn clock.
 - **Four in a Row (2026-11-19):** SHA's spec on a 7x6 board; `dir` is the
   column 1-7; who moves first is drawn at creation; turn clock default
   1 h; the Referee posts only the result (the house rule overrides the

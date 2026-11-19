@@ -1192,6 +1192,64 @@ async function waitUp() {
     check('most lots takes the season', rau.json.game.status === 'finished' && rau.json.game.winner === 'Poc' && JSON.stringify(rau.json.game.places) === '["Poc","Rex","Rae"]' && rau.json.game.players.find((p) => p.name === 'Poc').won === 2, JSON.stringify(rau.json.game).slice(0, 240));
     rau = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the auction result', (rau.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Auction #' + au.id + ' is over - Poc takes the season with 2 lots')), JSON.stringify((rau.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
+    // Liar's Dice (2026-11-19): hidden cups, raise or call liar, ones wild,
+    // an expired turn costs a die. Cups are set through the test hook.
+    const ldTok = { Poc: TP, Rex: TRex, Rae: TRae };
+    const ldHook = (id, json) => req('POST', '/api/test-hooks/liarsdice', { owner: true, json: Object.assign({ room: roomOf2, id }, json) });
+    const ldMove = (id, who, dir) => req('POST', R2 + '/games/' + id + '/moves', { token: ldTok[who], json: { dir } });
+    let rld = await req('POST', R2 + '/games', { token: TP, json: { game: 'liarsdice', from: 'Poc', players: ['Poc'] } });
+    check("liar's dice needs 2 to 6 -> 400", rld.status === 400 && /2 to 6/.test(rld.json.error), rld.status);
+    rld = await req('POST', R2 + '/games', { token: TP, json: { game: "Liar's Dice", from: 'Poc', players: ['Poc', 'Rex', 'Rae'], dice: 2 } });
+    const ld = rld.json.game || {};
+    check("liar's dice is created in a lobby (the spelled-out name works)", rld.status === 201 && ld.type === 'liarsdice' && ld.status === 'lobby' && ld.dice_each === 2 && ld.ones_wild === true && ld.dice_total === 6 && ld.turn_seconds === 3600 && ld.players.every((p) => p.dice === 2) && ld.you.dice.length === 2 && ld.order.length === 3, rld.status + ' ' + rld.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + ld.id + '/accept', { token: TRex, json: {} });
+    rld = await req('POST', R2 + '/games/' + ld.id + '/accept', { token: TRae, json: {} });
+    const [L1, L2, L3] = ld.order;
+    check("liar's dice starts with the first seat to bid", rld.json.game.status === 'running' && rld.json.game.turn_of === L1 && /Ones are wild/.test(rld.json.game.how_to_play || ''), JSON.stringify(rld.json.game).slice(0, 200));
+    rld = await req('GET', R2 + '/games/' + ld.id, { token: TRex });
+    check('a cup stays secret: only your own dice, no cups before a call', JSON.stringify(rld.json.game.you.dice) !== undefined && rld.json.game.you.dice.length === 2 && !/"cups"/.test(rld.text) && rld.json.game.players.every((p) => typeof p.dice === 'number'), rld.text.slice(0, 200));
+    await ldHook(ld.id, { cups: { Poc: [2, 3], Rex: [3, 1], Rae: [5, 6] } });
+    rld = await ldMove(ld.id, L2, '1x3');
+    check("liar's dice out of turn -> 409", rld.status === 409, rld.status);
+    rld = await ldMove(ld.id, L1, '1x1');
+    check('ones wild: a bid on ones -> 400', rld.status === 400 && /faces 2 to 6/.test(rld.json.error), rld.status + ' ' + rld.text.slice(0, 120));
+    rld = await ldMove(ld.id, L1, '7x3');
+    check('a bid over the dice on the table -> 400', rld.status === 400 && /1 to 6/.test(rld.json.error), rld.status + ' ' + rld.text.slice(0, 120));
+    rld = await ldMove(ld.id, L1, '2x3');
+    check('a bid passes the turn', rld.status === 200 && rld.json.resolved === false && rld.json.game.turn_of === L2 && rld.json.game.bid.qty === 2 && rld.json.game.bid.face === 3 && rld.json.game.bid.by === L1, rld.status + ' ' + rld.text.slice(0, 160));
+    rld = await ldMove(ld.id, L2, '2x2');
+    check('a raise that does not beat the bid -> 400 with the lowest raises', rld.status === 400 && /must beat 2 threes/.test(rld.json.error) && JSON.stringify(rld.json.legal_moves) === '["3x2","3x3","2x4","2x5","2x6","liar"]', rld.status + ' ' + rld.text.slice(0, 200));
+    rld = await ldMove(ld.id, L2, 'three 3s');
+    check('a raise in words', rld.status === 200 && rld.json.game.bid.qty === 3 && rld.json.game.bid.face === 3 && rld.json.game.turn_of === L3, rld.status + ' ' + rld.text.slice(0, 160));
+    rld = await ldMove(ld.id, L3, 'liar');
+    let ldR1 = ((rld.json.game || {}).rounds || [])[0] || {};
+    check('liar! the bid stands (a wild 1 counts), so the caller loses a die and opens', rld.json.resolved === true && ldR1.reason === 'call' && ldR1.count === 3 && ldR1.stands === true && ldR1.loser === L3 && ldR1.dice_left === 1 && JSON.stringify(ldR1.cups.Rex) === '[1,3]' && rld.json.game.round === 2 && rld.json.game.turn_of === L3 && rld.json.game.bid === null && rld.json.game.dice_total === 5, JSON.stringify(ldR1) + ' ' + JSON.stringify(rld.json.game).slice(0, 120));
+    await ldHook(ld.id, { expire: true });
+    rld = await req('GET', R2 + '/games/' + ld.id, { token: TP });
+    ldR1 = (rld.json.game.rounds || [])[1] || {};
+    check('an expired turn costs that player a die - their last puts them out', ldR1.reason === 'timeout' && ldR1.loser === L3 && ldR1.out === true && rld.json.game.players.find((p) => p.name === L3).out === true && rld.json.game.order.indexOf(L3) < 0 && rld.json.game.round === 3 && rld.json.game.turn_of === L1, JSON.stringify(ldR1).slice(0, 200) + ' ' + JSON.stringify(rld.json.game.order));
+    for (let k = 0; k < 2; k++) {
+      await ldHook(ld.id, { expire: true });
+      rld = await req('GET', R2 + '/games/' + ld.id, { token: TP });
+    }
+    check('the last player with dice wins; places run back through who went out', rld.json.game.status === 'finished' && rld.json.game.winner === L2 && JSON.stringify(rld.json.game.places) === JSON.stringify([L2, L1, L3]) && rld.json.game.you.dice.length === 0, JSON.stringify(rld.json.game).slice(0, 240));
+    rld = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check("the Referee posts the Liar's Dice result", (rld.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes("Liar's Dice #" + ld.id + ' is over - ' + L2 + ' wins with 2 dice left after 4 rounds.') && x.text.includes('Out in order: ' + L3 + ' (round 2), ' + L1 + ' (round 4)')), JSON.stringify((rld.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
+    // a 2-player match, played to the end by calls, counts on the ladder
+    rld = await req('POST', R2 + '/games', { token: TP, json: { game: 'liarsdice', from: 'Poc', players: ['Poc', 'Rex'], dice: 2, ones_wild: false } });
+    const ld2 = rld.json.game || {};
+    await req('POST', R2 + '/games/' + ld2.id + '/accept', { token: TRex, json: {} });
+    const [M1, M2] = ld2.order;
+    await ldHook(ld2.id, { cups: { [M1]: [4, 4], [M2]: [1, 5] } });
+    rld = await ldMove(ld2.id, M1, '3x4');
+    rld = await ldMove(ld2.id, M2, 'call');
+    check('ones not wild: a 1 counts only itself; a false bid costs the bidder', (rld.json.game.rounds[0] || {}).count === 2 && rld.json.game.rounds[0].loser === M1 && rld.json.game.turn_of === M1 && rld.json.game.players.find((p) => p.name === M1).dice === 1, JSON.stringify(rld.json.game.rounds[0]));
+    await ldHook(ld2.id, { cups: { [M1]: [2], [M2]: [3, 6] } });
+    await ldMove(ld2.id, M1, '1x1');
+    rld = await ldMove(ld2.id, M2, 'liar');
+    check('the last die gone ends the 2-player match', rld.json.game.status === 'finished' && rld.json.game.winner === M2 && (rld.json.game.rounds[1] || {}).count === 0, JSON.stringify(rld.json.game).slice(0, 200));
+    rld = await req('GET', R2 + '/games', { token: TP });
+    check("the ladder rates Liar's Dice", ((rld.json.ladder || {}).liarsdice || []).length === 2 && rld.json.ladder.liarsdice[0].name === M2, JSON.stringify((rld.json.ladder || {}).liarsdice));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -
