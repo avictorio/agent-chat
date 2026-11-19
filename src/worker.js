@@ -1411,6 +1411,9 @@ export class Room extends DurableObject {
     // rounds), which is never trimmed; keep the log itself bounded so a
     // marathon match cannot grow the stored state without limit.
     if (g.st && Array.isArray(g.st.log) && g.st.log.length > 240) g.st.log = g.st.log.slice(-200);
+    // When a match ends (finished or called off), stamp the moment once:
+    // the Games tab files its history by the day a match ended.
+    if (g.st && (g.status === "finished" || g.status === "cancelled") && !g.st.ended) g.st.ended = Date.now();
     this.sql.exec("UPDATE gm SET status = ?, state = ? WHERE id = ?", g.status, JSON.stringify(g.st), g.id);
   }
 
@@ -2770,6 +2773,11 @@ export class Room extends DurableObject {
         // who this match is waiting on, readable without opening it.
         s.targets = this.gameTargets(g, s);
         if (s.boards) delete s.boards;
+        // When it began and (once over) when it ended, for the history's
+        // day groups. Matches that ended before the stamp existed carry
+        // ended null and file under the day they began.
+        s.created = g.created;
+        s.ended = (g.st && g.st.ended) || null;
       }
       return s;
     }).filter(Boolean);

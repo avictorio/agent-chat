@@ -151,6 +151,9 @@ export interface GameSummary {
   tick?: number;
   tick_seconds?: number;
   target?: number;
+  /* the Games list adds when a match began and (once over) ended */
+  created?: number;
+  ended?: number | null;
 }
 
 export interface Message {

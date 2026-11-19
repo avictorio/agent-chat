@@ -1,8 +1,7 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import type { GameSummary } from "@chat/shared";
 import { useFeed, useSession } from "../room/ctx";
-import { formatLeft, recordLine, type GL } from "./render";
-import { WinnerBanner } from "./WinnerBanner";
+import { finalScore, formatLeft, type GL } from "./render";
 import { chimeMuted, setChimeMuted } from "./chime";
 
 // Standings with motion, from the finished list (newest first): each
@@ -56,12 +55,12 @@ function standingsMotion(games: GameSummary[] | null) {
   return { streaks, prevRanks };
 }
 
-// The Games tab: the room's matches without scrolling the chat -
-// live ones first, then the finished history as a standard record
-// (winner banner + record line + rematch, the same presentation as
-// the feed card and the arena). The New game button lives here
-// now. A tap on a row opens the arena; the list refreshes whenever
-// the store hears about a game.
+// The Games tab (2026-11-19): three tabs - Live (opens by default, and
+// whenever a match waits on you; matches waiting on YOU first), History
+// (every match that ended, as compact rows filed by the day it ended,
+// filterable by game) and Standings (the room record). The New game
+// button and the chime toggle sit above the tabs. A tap on a row opens
+// the arena; the list refreshes whenever the store hears about a game.
 
 const KIND: Record<string, string> = {
   battleship: "Battleship",
@@ -115,6 +114,53 @@ function youLabel(g: GL): string {
   return "Your move";
 }
 
+type Tab = "live" | "history" | "standings";
+const TABS: Tab[] = ["live", "history", "standings"];
+const TAB_LABEL: Record<Tab, string> = { live: "Live", history: "History", standings: "Standings" };
+const TAB_KEY = "ac-games-tab";
+const PAGE = 20;
+
+function savedTab(): Tab {
+  try {
+    const v = localStorage.getItem(TAB_KEY);
+    return v === "history" || v === "standings" ? v : "live";
+  } catch {
+    return "live";
+  }
+}
+
+/* When a past match ended (older matches: when it began). */
+const endedAt = (g: GL): number => Number(g.ended || g.created || 0);
+
+/* The history's day groups: Today, Yesterday, This week, then months. */
+function dayGroup(t: number, now: Date): string {
+  if (!t) return "Earlier";
+  const d = new Date(t);
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400e3);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return "This week";
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+/* A row's time: the clock today and yesterday, the weekday this week,
+   the date before that. */
+function whenLabel(t: number, group: string): string {
+  if (!t) return "";
+  const d = new Date(t);
+  if (group === "Today" || group === "Yesterday") return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (group === "This week") return d.toLocaleDateString(undefined, { weekday: "short" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/* How long a finished match ran, in its own unit. */
+function lengthLine(g: GL): string {
+  if (g.type === "battleship") return (g.turn || 0) + " turns";
+  if (g.type === "duel") return (g.round || 0) + " rounds";
+  return (g.tick || 0) + " ticks";
+}
+
 export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: () => void }) {
   const { client } = useSession();
   const store = useFeed().games;
@@ -123,6 +169,19 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const [record, setRecord] = useState<RecordTable>({});
   const [err, setErr] = useState("");
   const [muted, setMuted] = useState(() => chimeMuted());
+  const [tab, setTab] = useState<Tab>(() => savedTab());
+  // an explicit pick holds for the browser session (a trip to an arena
+  // and back keeps it); a new visit opens Live if something waits on you
+  const picked = useRef(((): boolean => {
+    try {
+      return sessionStorage.getItem(TAB_KEY) === "1";
+    } catch {
+      return false;
+    }
+  })());
+  const [kind, setKind] = useState<string>("all");
+  const [shown, setShown] = useState(PAGE);
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ live: null, history: null, standings: null });
 
   useEffect(() => {
     if (!active) return;
@@ -154,6 +213,41 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const otherLive = live.filter((g) => !isMine(g)).sort(byDeadline);
   const { streaks, prevRanks } = standingsMotion(games);
 
+  /* Something waiting on you always opens Live (unless you picked a tab
+     here): what needs you is never behind a tap. */
+  useEffect(() => {
+    if (!picked.current && mineLive.length && tab !== "live") setTab("live");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mineLive.length]);
+  const pick = (t: Tab, focus?: boolean) => {
+    picked.current = true;
+    setTab(t);
+    try {
+      localStorage.setItem(TAB_KEY, t);
+      sessionStorage.setItem(TAB_KEY, "1");
+    } catch {
+      // storage unavailable: the tab still switches for this visit
+    }
+    if (focus) tabRefs.current[t]?.focus();
+  };
+  const onTabKey = (e: KeyboardEvent<HTMLButtonElement>) => {
+    const i = TABS.indexOf(tab);
+    const next = e.key === "ArrowRight" ? TABS[(i + 1) % TABS.length] : e.key === "ArrowLeft" ? TABS[(i + TABS.length - 1) % TABS.length] : e.key === "Home" ? TABS[0] : e.key === "End" ? TABS[TABS.length - 1] : null;
+    if (next) {
+      e.preventDefault();
+      pick(next, true);
+    }
+  };
+
+  // history: newest ending first, filtered by game
+  const kindsDone = (["battleship", "duel", "lightcycles"] as const).filter((t) => done.some((g) => g.type === t));
+  const filtered = useMemo(
+    () => done.filter((g) => kind === "all" || g.type === kind).sort((a, b) => endedAt(b as GL) - endedAt(a as GL) || (b.id || 0) - (a.id || 0)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [games, kind]
+  );
+  useEffect(() => setShown(PAGE), [kind]);
+
   const row = (g: GameSummary) => {
     const isLive = g.status === "lobby" || g.status === "running";
     const players = g.players || [];
@@ -171,44 +265,122 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
             </span>
           ))}
         </span>
-        {isLive ? (
-          <>
-            <span className="gm-state">{stateLine(g as GL)}</span>
-            {(() => {
-              const mine = isMine(g);
-              const dl = deadlineOf(g as GL);
-              const others = waitingOn(g as GL).filter((n) => String(n).toLowerCase() !== me);
-              return (
-                <span
-                  className={"gm-due" + (mine ? " mine" : "")}
-                  data-turn-deadline={dl || undefined}
-                  data-turn-dur={dl ? durOf(g as GL) : undefined}
-                >
-                  {mine ? <span className="gm-you">{youLabel(g as GL)}</span> : others.length ? <span className="gm-wait">Waiting on {others.join(", ")}</span> : null}
-                  {dl ? <span className="turn-left">{dl > Date.now() ? formatLeft(dl - Date.now()) + " left" : "time's up"}</span> : null}
-                </span>
-              );
-            })()}
-          </>
-        ) : (
-          <>
-            <WinnerBanner g={g as GL} />
-            <span className="gm-state">{recordLine(g as GL)}</span>
-            <button
-              type="button"
-              className="gm-rematch"
-              onClick={(e) => {
-                e.stopPropagation();
-                void store.rematch(g as GL);
-              }}
-            >
-              Rematch
-            </button>
-          </>
-        )}
+        <span className="gm-state">{stateLine(g as GL)}</span>
+        {(() => {
+          const mine = isMine(g);
+          const dl = deadlineOf(g as GL);
+          const others = waitingOn(g as GL).filter((n) => String(n).toLowerCase() !== me);
+          return (
+            <span className={"gm-due" + (mine ? " mine" : "")} data-turn-deadline={dl || undefined} data-turn-dur={dl ? durOf(g as GL) : undefined}>
+              {mine ? <span className="gm-you">{youLabel(g as GL)}</span> : others.length ? <span className="gm-wait">Waiting on {others.join(", ")}</span> : null}
+              {dl ? <span className="turn-left">{dl > Date.now() ? formatLeft(dl - Date.now()) + " left" : "time's up"}</span> : null}
+            </span>
+          );
+        })()}
       </div>
     );
   };
+
+  /* A past match in two short lines: who won, the game, the score; then
+     the rest of the field, how long it ran and when. Your own result is
+     marked. The row opens the arena; Rematch sits beside it. */
+  const hrow = (g: GameSummary, group: string) => {
+    const gl = g as GL;
+    const players = g.players || [];
+    const w = players.find((p) => p.name === g.winner);
+    const others = players.filter((p) => p.name !== g.winner).map((p) => p.name);
+    const mineP = players.find((p) => String(p.name).toLowerCase() === me);
+    const off = g.status === "cancelled";
+    const score = off ? "" : finalScore(gl);
+    const kindName = (KIND[g.type] || g.type) + " #" + g.id;
+    const result = off ? "Called off" : w ? w.name + " won" : "No winner";
+    const label = kindName + ": " + result + (score ? " " + score : "") + (others.length && !off ? ", against " + others.join(", ") : "") + ". Open the arena.";
+    return (
+      <div className={"gm-hrow kind-" + g.type} key={g.id}>
+        <button type="button" className="gm-hrow-open" aria-label={label} onClick={() => store.openGame(g.id, g.type)}>
+          <span className="gm-hrow-l1">
+            {off ? (
+              <span className="gm-hrow-who off">Called off</span>
+            ) : w ? (
+              <span className="gm-hrow-who">
+                <span aria-hidden="true">🏆</span> <span className="gm-dot" style={{ background: w.hex }} /> {w.name}
+              </span>
+            ) : (
+              <span className="gm-hrow-who off">No winner</span>
+            )}
+            <span className="gm-hrow-game">{kindName}</span>
+            {score ? <span className="gm-hrow-score">{score}</span> : null}
+          </span>
+          <span className="gm-hrow-l2">
+            {mineP && !off && w ? <span className={"gm-hrow-me " + (w === mineP ? "won" : "lost")}>{w === mineP ? "Won" : "Lost"}</span> : null}
+            <span className="gm-hrow-meta">
+              {off
+                ? gl.declined_by
+                  ? gl.declined_by + " declined"
+                  : players.map((p) => p.name).join(" · ")
+                : (others.length ? "vs " + others.join(", ") + " · " : "") + lengthLine(gl)}
+            </span>
+            <span className="gm-hrow-when">{whenLabel(endedAt(gl), group)}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="gm-rematch gm-hrow-rematch"
+          aria-label={"Rematch " + kindName}
+          onClick={() => {
+            void store.rematch(gl);
+          }}
+        >
+          Rematch
+        </button>
+      </div>
+    );
+  };
+
+  const now = new Date();
+  const page = filtered.slice(0, shown);
+  const groups: { name: string; items: GameSummary[] }[] = [];
+  page.forEach((g) => {
+    const name = dayGroup(endedAt(g as GL), now);
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.items.push(g);
+    else groups.push({ name, items: [g] });
+  });
+
+  const standings = Object.keys(record).length ? (
+    <div className="gm-rec">
+      {(["battleship", "duel", "lightcycles"] as const).map((t) =>
+        record[t] && record[t].length ? (
+          <div className="gm-rec-kind" key={t}>
+            <div className="gm-rec-title">{KIND[t]}</div>
+            {record[t].map((r, ri) => {
+              const st = (streaks[t] || {})[r.name];
+              const prev = (prevRanks[t] || {})[r.name];
+              const delta = prev ? prev - (ri + 1) : 0;
+              return (
+                <div className="gm-rec-row" key={r.name}>
+                  <span className="gm-dot" style={{ background: r.hex }} />
+                  <span className="gm-rec-name">{r.name}</span>
+                  <span className="gm-rec-wl">
+                    {r.w}–{r.l}
+                  </span>
+                  <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
+                  {st && st.n >= 2 ? (
+                    <span className={"gm-rec-streak" + (st.kind === "W" ? " hot" : "")}>
+                      {st.kind === "W" ? "🔥 " : ""}
+                      {st.kind}
+                      {st.n}
+                    </span>
+                  ) : null}
+                  {delta !== 0 ? <span className={"gm-rec-move " + (delta > 0 ? "up" : "down")}>{delta > 0 ? "▲" + delta : "▼" + -delta}</span> : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null
+      )}
+    </div>
+  ) : null;
 
   return (
     <div className="gm-wrap">
@@ -231,67 +403,105 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
           New game
         </button>
       </div>
+      <div className="gm-tabbar">
+      <div className="gm-tabs" role="tablist" aria-label="Games">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            ref={(el) => {
+              tabRefs.current[t] = el;
+            }}
+            type="button"
+            role="tab"
+            id={"gm-tab-" + t}
+            aria-selected={tab === t}
+            aria-controls={"gm-panel-" + t}
+            tabIndex={tab === t ? 0 : -1}
+            className={"gm-tab" + (tab === t ? " on" : "")}
+            onClick={() => pick(t)}
+            onKeyDown={onTabKey}
+          >
+            {TAB_LABEL[t]}
+            {t === "live" && mineLive.length ? (
+              <span className="gm-tab-badge" aria-label={mineLive.length + " waiting on you"}>
+                {mineLive.length}
+              </span>
+            ) : t === "live" && live.length ? (
+              <span className="gm-tab-n">{live.length}</span>
+            ) : t === "history" && done.length ? (
+              <span className="gm-tab-n">{done.length}</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+      </div>
       {games === null && !err ? <p className="gm-note">Loading the matches…</p> : null}
       {err ? <p className="gm-note">{err}</p> : null}
-      {games !== null && games.length === 0 ? <p className="gm-note">No matches yet. Start one with the New game button.</p> : null}
-      {mineLive.length ? (
-        <>
-          <div className="gm-sec mine">Your move · {mineLive.length}</div>
-          {mineLive.map(row)}
-        </>
-      ) : null}
-      {otherLive.length ? (
-        <>
-          <div className="gm-sec">{mineLive.length ? "Waiting on others" : "Live now"}</div>
-          {otherLive.map(row)}
-        </>
-      ) : null}
-      {Object.keys(record).length ? (
-        <>
-          <div className="gm-sec">Room record</div>
-          <div className="gm-rec">
-            {(["battleship", "duel", "lightcycles"] as const).map((t) =>
-              record[t] && record[t].length ? (
-                <div className="gm-rec-kind" key={t}>
-                  <div className="gm-rec-title">{KIND[t]}</div>
-                  {record[t].map((r, ri) => {
-                    const st = (streaks[t] || {})[r.name];
-                    const prev = (prevRanks[t] || {})[r.name];
-                    const delta = prev ? prev - (ri + 1) : 0;
-                    return (
-                      <div className="gm-rec-row" key={r.name}>
-                        <span className="gm-dot" style={{ background: r.hex }} />
-                        <span className="gm-rec-name">{r.name}</span>
-                        <span className="gm-rec-wl">
-                          {r.w}–{r.l}
-                        </span>
-                        <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
-                        {st && st.n >= 2 ? (
-                          <span className={"gm-rec-streak" + (st.kind === "W" ? " hot" : "")}>
-                            {st.kind === "W" ? "🔥 " : ""}
-                            {st.kind}
-                            {st.n}
-                          </span>
-                        ) : null}
-                        {delta !== 0 ? (
-                          <span className={"gm-rec-move " + (delta > 0 ? "up" : "down")}>
-                            {delta > 0 ? "▲" + delta : "▼" + -delta}
-                          </span>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null
-            )}
-          </div>
-        </>
-      ) : null}
-      {done.length ? (
-        <>
-          <div className="gm-sec">Earlier</div>
-          {done.map(row)}
-        </>
+      {games !== null ? (
+        <div className={"gm-panel gm-panel-" + tab} role="tabpanel" id={"gm-panel-" + tab} aria-labelledby={"gm-tab-" + tab}>
+          {tab === "live" ? (
+            live.length ? (
+              <>
+                {mineLive.length ? (
+                  <>
+                    <div className="gm-sec mine">Your move · {mineLive.length}</div>
+                    {mineLive.map(row)}
+                  </>
+                ) : null}
+                {otherLive.length ? (
+                  <>
+                    <div className="gm-sec">{mineLive.length ? "Waiting on others" : "Live now"}</div>
+                    {otherLive.map(row)}
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <div className="gm-empty">
+                <p>Nothing live right now.</p>
+                <button type="button" className="btn primary" onClick={onNewGame}>
+                  Start a match
+                </button>
+                {done.length ? (
+                  <button type="button" className="btn quiet" onClick={() => pick("history")}>
+                    Browse history
+                  </button>
+                ) : null}
+              </div>
+            )
+          ) : tab === "history" ? (
+            done.length ? (
+              <>
+                {kindsDone.length > 1 ? (
+                  <div className="gm-chips" role="group" aria-label="Show matches of">
+                    {(["all", ...kindsDone] as string[]).map((k) => (
+                      <button key={k} type="button" className={"gm-chip" + (kind === k ? " on" : "")} aria-pressed={kind === k} onClick={() => setKind(k)}>
+                        {k === "all" ? "All" : KIND[k]}
+                        <span className="gm-chip-n">{k === "all" ? done.length : done.filter((g) => g.type === k).length}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {groups.map((gr) => (
+                  <section className="gm-day" key={gr.name} aria-label={gr.name}>
+                    <div className="gm-sec">{gr.name}</div>
+                    <div className="gm-hlist">{gr.items.map((g) => hrow(g, gr.name))}</div>
+                  </section>
+                ))}
+                {filtered.length > shown ? (
+                  <button type="button" className="btn quiet gm-more" onClick={() => setShown((n) => n + PAGE)}>
+                    Show more · {filtered.length - shown} older
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <p className="gm-note">No finished matches yet. They appear here, newest first, once a match ends.</p>
+            )
+          ) : standings ? (
+            standings
+          ) : (
+            <p className="gm-note">The room record appears after the first finished match.</p>
+          )}
+        </div>
       ) : null}
     </div>
   );
