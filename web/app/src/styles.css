@@ -315,6 +315,67 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .kind-fourinarow { --ga: 251, 113, 133; --gbg: #0c0610; }
 .kind-trust { --ga: 45, 212, 191; --gbg: #04100e; }
 .kind-auction { --ga: 129, 140, 248; --gbg: #07081a; }
+.kind-liarsdice { --ga: 239, 68, 68; --gbg: #0f0607; }
+/* Liar's Dice (liarsdice.ts): dice with pips, the standing bid, your cup,
+   the bid builder, the table and the opened cups. */
+.ld-die { --ds: 26px; display: inline-grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); width: var(--ds); height: var(--ds); padding: calc(var(--ds) * .13); box-sizing: border-box; border-radius: calc(var(--ds) * .2); background: #f8fafc; box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); flex: none; vertical-align: middle; }
+.ld-die i { display: block; width: 70%; height: 70%; margin: auto; border-radius: 50%; background: #111827; }
+.ld-die.big { --ds: 40px; }
+.ld-die.wild { background: #fde68a; }
+.ld-die.hit { background: #fecaca; box-shadow: 0 0 0 2px rgba(var(--ga), .95), 0 0 10px rgba(var(--ga), .6); }
+.ld-die.hit i { background: #7f1d1d; }
+.ld-die.dim { opacity: .35; }
+.ld-now { margin-top: 10px; text-align: center; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); color: #fee2e2; display: grid; gap: 5px; justify-items: center; }
+.ld-now-k { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #fca5a5; }
+.ld-now-bid { display: flex; align-items: center; gap: 10px; }
+.ld-now-q { font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.ld-now-by { font-weight: 800; font-size: 15px; }
+.ld-now-open { font-size: 18px; font-weight: 800; }
+.ld-now-sub { font-size: 12.5px; color: #fecaca; opacity: .85; }
+.ld-card .ld-now { margin: 6px 8px 0; padding: 8px; }
+.ld-card .ld-die.big { --ds: 30px; }
+.ld-card .ld-now-q { font-size: 20px; }
+.ld-cup { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px dashed rgba(var(--ga), .45); color: #fee2e2; display: grid; gap: 7px; }
+.ld-cup-k { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #fca5a5; }
+.ld-cup-dice { display: flex; flex-wrap: wrap; gap: 8px; }
+.ld-cup-dice .ld-die { --ds: 34px; }
+.ld-cup-note { font-size: 12px; color: #fde68a; }
+.ld-bidder { margin-top: 12px; display: grid; gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #fee2e2; }
+.ld-bidder.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.ld-bidder-title { font-weight: 700; font-size: 15px; }
+.ld-bid-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ld-qty { min-width: 40px; text-align: center; font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.ld-x { font-size: 18px; color: #fca5a5; }
+.ld-faces { display: flex; flex-wrap: wrap; gap: 6px; }
+.ld-face { padding: 4px; border-radius: 9px; border: 1px solid rgba(148, 163, 184, .3); background: transparent; cursor: pointer; line-height: 0; }
+.ld-face .ld-die { --ds: 30px; }
+.ld-face.on { border-color: rgba(var(--ga), 1); box-shadow: 0 0 0 2px rgba(var(--ga), .5); background: rgba(var(--ga), .15); }
+.ld-face:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-offset: 2px; }
+.ld-odds { font-size: 12.5px; color: #fecaca; }
+.ld-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.duel-btn.ld-liar { margin-left: auto; background: #b91c1c; border-color: #ef4444; color: #fff; }
+.duel-btn.ld-liar:hover { background: #dc2626; }
+.ld-why { font-size: 12px; color: #fca5a5; }
+.ld-table { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #fee2e2; }
+.ld-table.compact { margin: 6px 0 0; border: 0; border-radius: 0; padding: 6px 10px 10px; }
+.ld-seat { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; padding: 2px 4px; border-radius: 7px; }
+.ld-seat.turn { background: rgba(var(--ga), .14); box-shadow: inset 0 0 0 1px rgba(var(--ga), .45); }
+.ld-seat.out { opacity: .5; }
+.ld-seat.mine .ld-name { text-decoration: underline; text-decoration-color: rgba(var(--ga), .6); text-underline-offset: 3px; }
+.ld-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ld-left { display: inline-flex; gap: 3px; margin-left: auto; flex: none; }
+.ld-left i { width: 10px; height: 10px; border-radius: 3px; display: block; }
+.ld-left i.lost { background: transparent; box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .4); }
+.ld-st { font-size: 11.5px; color: #fca5a5; width: 76px; text-align: right; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ld-reveal { margin-top: 10px; display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #fee2e2; }
+.ld-reveal-head { font-size: 13.5px; color: #fecaca; }
+.ld-reveal-empty { text-align: center; color: #fca5a5; font-size: 13px; }
+.ld-verdict { font-size: 13.5px; }
+.ld-loser { font-weight: 800; }
+.ld-open-row { display: grid; grid-template-columns: minmax(0, 90px) 1fr; gap: 8px; align-items: center; }
+.ld-open-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ld-open-dice { display: flex; flex-wrap: wrap; gap: 5px; }
+.ld-open-dice .ld-die { --ds: 22px; }
 /* The auction (2026-11-19): the lot under the hammer, the bid box, the
    bidders' budgets and the last lot's opened bids. */
 .au-lot { margin-top: 10px; text-align: center; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); color: #e0e7ff; }

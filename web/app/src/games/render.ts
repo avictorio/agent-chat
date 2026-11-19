@@ -43,6 +43,10 @@ export function finalScore(g: GL): string {
   }
   if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
   if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
+  if (g.type === "liarsdice") {
+    const w = winnerOf(g);
+    return w ? (w.dice || 0) + (w.dice === 1 ? " die left" : " dice left") : "";
+  }
   if (g.type === "trust") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   return "";
 }
@@ -64,6 +68,10 @@ export function recordLine(g: GL): string {
   if (g.type === "trust") {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
+  }
+  if (g.type === "liarsdice") {
+    const n = (g.rounds && g.rounds.length) || g.round || 0;
+    return "Last with dice" + (g.forfeit ? " · " + g.forfeit + " timed out" : "") + " · " + n + (n === 1 ? " round" : " rounds");
   }
   if (g.type === "fourinarow") {
     const n = (g.moves && g.moves.length) || (g.last_move ? g.last_move.n : 0);
@@ -133,6 +141,14 @@ export function gameMetaText(g: GL): string {
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
     }
     return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
+  }
+  if (g.type === "liarsdice") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.dice_each || 5) + " dice each · ones " + (g.ones_wild ? "wild" : "not wild");
+    }
+    return "Round " + g.round + " · " + (g.dice_total || 0) + " dice on the table · " + tickLen(g.turn_seconds || 3600) + " per turn";
   }
   if (g.type === "fourinarow") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);

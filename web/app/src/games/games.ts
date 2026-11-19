@@ -8,6 +8,7 @@ import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
 import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
 import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
 import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction";
+import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice";
 import {
   battleshipBoard,
   boardSvg,
@@ -194,6 +195,7 @@ export function createGameStore(opts: {
     trDraft?: { round: number; d: TrDraft } | null;
     // Auction: the bid being made (kept across repaints, reset each lot)
     auDraft?: { round: number; v: number } | null;
+    ldDraft?: { turn: number; qty: number; face: number } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -310,6 +312,16 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "liarsdice") {
+      dur = (g.turn_seconds || 3600) * 1000;
+      if (you.playing && you.out) text = "You're out of this match" + (g.turn_of ? " · " + g.turn_of + " to bid" : "");
+      else if (you.playing && you.your_turn) {
+        mine = true;
+        text = (g.bid ? "Raise or call liar" : "Open the bidding") + " · round " + g.round;
+        const to = you.timeouts || 0;
+        sub = to >= 2 ? "You've timed out twice in a row - one more and you're out." : "If the clock runs out, you lose a die.";
+      } else if (you.playing) text = "Waiting on " + (g.turn_of || "the table") + " · round " + g.round;
+      else text = (g.turn_of ? g.turn_of + " to bid · " : "") + "round " + g.round;
     } else if (g.type === "fourinarow") {
       dur = (g.turn_seconds || 3600) * 1000;
       if (you.playing && you.your_turn) {
@@ -440,6 +452,11 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "liarsdice") {
+      body.game = "liarsdice";
+      body.dice = g.dice_each;
+      body.ones_wild = !!g.ones_wild;
+      body.tick_seconds = g.turn_seconds;
     } else if (g.type === "coderace") {
       body.game = "coderace";
       body.mode = g.mode;
@@ -563,7 +580,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
@@ -620,6 +637,8 @@ export function createGameStore(opts: {
       n = trHistoryRows(g, row, histWho, list);
     } else if (g.type === "auction") {
       n = auHistoryRows(g, row, histWho, list);
+    } else if (g.type === "liarsdice") {
+      n = ldHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1390,6 +1409,111 @@ export function createGameStore(opts: {
     if (note.textContent) wrap.appendChild(note);
   }
 
+  /* Liar's Dice: the standing bid, your cup, the bid builder on your
+     turn, the table, and the last round with every cup opened. */
+  function renderLiarsView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const myTurn = g.status === "running" && you.playing && you.your_turn;
+    const total = g.dice_total || 0;
+    const wild = !!g.ones_wild;
+    const lowFace = wild ? 2 : 1;
+    if (myTurn && (!gv.ldDraft || gv.ldDraft.turn !== g.turn)) {
+      // start from the classic raise (one more of the same face), or, to
+      // open, one of the face you hold most of
+      const b = g.bid;
+      let qty = 1;
+      let face = lowFace;
+      if (b && b.qty + 1 <= total) {
+        qty = b.qty + 1;
+        face = b.face;
+      } else if (b) {
+        qty = b.qty;
+        face = Math.min(6, b.face + 1);
+      } else {
+        let best = -1;
+        for (let f = lowFace; f <= 6; f++) {
+          const k = ((you.dice || []) as number[]).filter((d) => ldCounts(d, f, wild)).length;
+          if (k > best) {
+            best = k;
+            face = f;
+          }
+        }
+        qty = Math.max(1, best);
+      }
+      gv.ldDraft = { turn: g.turn, qty: Math.max(1, Math.min(total, qty)), face };
+    }
+    const dr = gv.ldDraft;
+    const key = [g.status, g.turn, g.round, g.turn_of || "", g.bid ? g.bid.qty + "x" + g.bid.face + g.bid.by : "", (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.dice || 0) + (p.out ? 1 : 0) + (p.timeouts || 0)).join(""), ((you.dice || []) as number[]).join(""), (g.rounds || []).length, youSig(g), gv.tab || "game", dr ? dr.qty + "x" + dr.face : ""].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    if (KIND3D.liarsdice) {
+      wrap.appendChild(viewToggle3d("liarsdice", g));
+      if (pref3d("liarsdice")) {
+        const h = host3d("liarsdice");
+        wrap.appendChild(h.host);
+        paint3d("liarsdice", g, h);
+      } else drop3d();
+    }
+    wrap.appendChild(ldBidNow(g));
+    if (g.status === "running" && you.playing && !you.out && (you.dice || []).length) wrap.appendChild(ldCup(g));
+    if (myTurn && dr) {
+      const hint = arenaHint("liarsdice", "Raise the count, or the face at the same count - or call liar if you think the table can't hold the bid.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        ldBidder(
+          g,
+          dr,
+          (d) => {
+            if (gameView !== gv) return;
+            gv.ldDraft = { turn: g.turn, qty: d.qty, face: d.face };
+            renderLiarsView(g, true);
+          },
+          (dir) => {
+            if (gameView !== gv) return;
+            if (gv.r3dCommit) gv.r3dCommit();
+            void sendMove(g.id, dir, note);
+          },
+          () => {
+            if (gameView !== gv) return;
+            if (gv.r3dCommit) gv.r3dCommit();
+            void sendMove(g.id, "liar", note);
+          }
+        )
+      );
+    }
+    wrap.appendChild(ldTable(g, me));
+    wrap.appendChild(ldRound(g, ldLastRound(g)));
+    if (g.status === "running" && !you.playing) note.textContent = "Spectating - every cup stays hidden until someone calls liar.";
+    else if (g.status === "running" && you.playing && you.out) note.textContent = "You're out of dice - watch the rest play it out.";
+    else if (g.status === "running" && you.playing && !myTurn) note.textContent = "Not your turn. You'll get a nudge when the bid comes round to you.";
+    if (note.textContent) wrap.appendChild(note);
+  }
+
   function renderBattleshipView(g: GL, force?: boolean) {
     if (!gameView) return;
     const you = g.you || { playing: false };
@@ -2107,6 +2231,10 @@ export function createGameStore(opts: {
       renderAuctionView(g, force);
       return;
     }
+    if (g.type === "liarsdice") {
+      renderLiarsView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2287,7 +2415,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2337,7 +2465,7 @@ export function createGameStore(opts: {
           if (!mine.committed) n++;
         } else if (g.type === "coderace") {
           if (!mine.committed && !mine.solved && !mine.out) n++;
-        } else if (g.type === "fourinarow") {
+        } else if (g.type === "fourinarow" || g.type === "liarsdice") {
           if (g.turn_of === me) n++;
         } else if (g.type === "trust") {
           if (!mine.committed && !mine.out) n++;
