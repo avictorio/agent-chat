@@ -1250,6 +1250,48 @@ async function waitUp() {
     check('the last die gone ends the 2-player match', rld.json.game.status === 'finished' && rld.json.game.winner === M2 && (rld.json.game.rounds[1] || {}).count === 0, JSON.stringify(rld.json.game).slice(0, 200));
     rld = await req('GET', R2 + '/games', { token: TP });
     check("the ladder rates Liar's Dice", ((rld.json.ladder || {}).liarsdice || []).length === 2 && rld.json.ladder.liarsdice[0].name === M2, JSON.stringify((rld.json.ladder || {}).liarsdice));
+    // Two Truths and a Lie (2026-11-19): a rotating storyteller, structured
+    // moves (statements + lie), sealed votes, the lie kept secret.
+    const ttExpire = (id) => req('POST', '/api/test-hooks/game-expire', { owner: true, json: { room: roomOf2, id } });
+    let rtt = await req('POST', R2 + '/games', { token: TP, json: { game: 'twotruths', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('two truths needs 3 to 6 -> 400', rtt.status === 400 && /3 to 6/.test(rtt.json.error), rtt.status);
+    rtt = await req('POST', R2 + '/games', { token: TP, json: { game: 'Two Truths and a Lie', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    const tt = rtt.json.game || {};
+    const [T1, T2, T3] = tt.order || [];
+    check('two truths is created in a lobby (the spelled-out name works)', rtt.status === 201 && tt.type === 'twotruths' && tt.status === 'lobby' && tt.rounds_total === 3 && tt.teller === null && tt.round_seconds === 3600 && (tt.order || []).length === 3, rtt.status + ' ' + rtt.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + tt.id + '/accept', { token: TRex, json: {} });
+    rtt = await req('POST', R2 + '/games/' + tt.id + '/accept', { token: TRae, json: {} });
+    check('the first storyteller writes first', rtt.json.game.status === 'running' && rtt.json.game.phase === 'write' && rtt.json.game.teller === T1 && /storyteller/.test(rtt.json.game.how_to_play || ''), JSON.stringify(rtt.json.game).slice(0, 200));
+    rtt = await ldMove(tt.id, T2, '1');
+    check('a vote before the statements are up -> 409', rtt.status === 409, rtt.status);
+    rtt = await req('POST', R2 + '/games/' + tt.id + '/moves', { token: ldTok[T1], json: { statements: ['I have two cats', 'I once met a goat'] , lie: 1 } });
+    check('a storyteller must send three statements -> 400', rtt.status === 400 && /exactly three/.test(rtt.json.error), rtt.status + ' ' + rtt.text.slice(0, 120));
+    rtt = await req('POST', R2 + '/games/' + tt.id + '/moves', { token: ldTok[T1], json: { statements: ['I have two cats', 'I once met a goat', 'I have been to the moon'], lie: 3 } });
+    const ttTeller = rtt.json.game || {};
+    check('the statements go up shuffled; the storyteller alone sees the lie', rtt.status === 200 && ttTeller.phase === 'vote' && (ttTeller.statements || []).length === 3 && ttTeller.you.lie >= 1 && ttTeller.you.lie <= 3 && ttTeller.statements[ttTeller.you.lie - 1] === 'I have been to the moon', rtt.status + ' ' + rtt.text.slice(0, 240));
+    rtt = await req('GET', R2 + '/games/' + tt.id, { token: ldTok[T2] });
+    check('a voter sees the statements but never the lie', rtt.json.game.statements.slice().sort().join('|') === ['I have two cats', 'I once met a goat', 'I have been to the moon'].sort().join('|') && !/"lie"/.test(rtt.text) && JSON.stringify(rtt.json.game.you.legal_moves) === '["1","2","3"]', rtt.text.slice(0, 240));
+    rtt = await ldMove(tt.id, T1, '1');
+    check('the storyteller cannot vote -> 409', rtt.status === 409, rtt.status);
+    const ttLie = ttTeller.you.lie;
+    rtt = await ldMove(tt.id, T2, 'vote ' + ttLie);
+    check('a vote is sealed until all are in', rtt.status === 200 && rtt.json.resolved === false && (rtt.json.game.players.find((p) => p.name === T2) || {}).committed === true, rtt.status + ' ' + rtt.text.slice(0, 160));
+    rtt = await ldMove(tt.id, T3, String((ttLie % 3) + 1));
+    let ttR = ((rtt.json.game || {}).rounds || [])[0] || {};
+    check('the reveal: a right vote scores 2, the storyteller 1 per player fooled', rtt.json.resolved === true && ttR.lie === ttLie && JSON.stringify(ttR.right) === JSON.stringify([T2]) && ttR.fooled === 1 && ttR.points[T2] === 2 && ttR.points[T1] === 1 && rtt.json.game.phase === 'write' && rtt.json.game.teller === T2, JSON.stringify(ttR) + ' ' + JSON.stringify(rtt.json.game).slice(0, 120));
+    rtt = await ldMove(tt.id, T2, JSON.stringify({ statements: ['I speak Welsh', 'I am a night owl', 'I have never seen snow'], lie: 1 }));
+    const ttLie2 = (rtt.json.game.you || {}).lie;
+    check('the same structured move works as JSON in dir', rtt.status === 200 && rtt.json.game.phase === 'vote' && rtt.json.game.statements[ttLie2 - 1] === 'I speak Welsh', rtt.status + ' ' + rtt.text.slice(0, 200));
+    await ldMove(tt.id, T1, String(ttLie2));
+    rtt = await ldMove(tt.id, T3, String(ttLie2));
+    ttR = ((rtt.json.game || {}).rounds || [])[1] || {};
+    check('everyone spotting the lie scores the storyteller nothing, with a roast', ttR.points[T2] === 0 && ttR.right.length === 2 && typeof ttR.note === 'string' && ttR.note.includes(T2), JSON.stringify(ttR));
+    await ttExpire(tt.id);
+    rtt = await req('GET', R2 + '/games/' + tt.id, { token: TP });
+    ttR = (rtt.json.game.rounds || [])[2] || {};
+    check('a storyteller who runs out forfeits; the last round ends the game', ttR.forfeit === true && ttR.teller === T3 && rtt.json.game.status === 'finished' && rtt.json.game.winner === T1 && rtt.json.game.places[0] === T1 && rtt.json.game.players.find((p) => p.name === T1).score === 3, JSON.stringify(rtt.json.game).slice(0, 260));
+    rtt = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Two Truths result', (rtt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Two Truths and a Lie #' + tt.id + ' is over - ' + T1 + ' wins with 3 points.')), JSON.stringify((rtt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 120)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

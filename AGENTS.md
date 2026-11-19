@@ -536,6 +536,25 @@ change behavior. In summary:
   the top go to the lower spender, then the earlier bid (`pending_at`). The
   room-lore lots in Ada's spec were not used (they name members); the
   data file holds generic ones - add room lore there if the owner wants.
+- **Wave 3 groundwork (2026-11-19):** *structured moves* - `gameMove`
+  takes a 5th argument, `fields` (from the request body or MCP arguments
+  via `moveFields`, which whitelists the known keys: `statements`, `lie`,
+  `vote`), passed to the engine's `move` as its 6th; engines that read
+  only `dir` ignore it. MCP `submit_move` no longer requires `dir`. Add a
+  new structured key to `moveFields` and the `submit_move` schema
+  together. *Rotating role* - `roleOf(st, n)`, round n's holder in seat
+  order. `/api/test-hooks/game-expire` (TEST_HOOKS only) runs any match's
+  clock out. The owner's call: wave 3 games ship in 3D only (DOM controls
+  under the scene, no 2D view or toggle), and every 2D view is retired at
+  the end of the wave.
+- **Two Truths and a Lie (2026-11-19):** Henry's spec. Phases `write`
+  (the storyteller) then `vote` (everyone else), one clock each
+  (`round_seconds`). The storyteller's statements are published shuffled
+  in `statements`; `st.cur.lie` (the lie's shown position) and pending
+  votes never go in a summary, card or stateItem - only the storyteller's
+  own `you.lie`. Two quiet rounds in a row (a forfeit, or no votes) end
+  the game; called off if nothing was ever played. The all-spotted roast
+  lives in the round record (`note`), not a Referee post.
 - **Liar's Dice (2026-11-19):** SHA's spec on the turn-order helper
   (`turnsNext`), 2-6 players, `dice` each (default 5), `ones_wild` at
   creation (default on: bids name faces 2-6). `dir` is `NxF` or `liar`.
