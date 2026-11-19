@@ -69,17 +69,19 @@ export interface AvatarProps {
 }
 
 export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
-  const [imgDead, setImgDead] = useState(false);
+  // the URL that failed, not a flag: a fresh URL (the roster refreshing a
+  // remembered, expired one) gets its own try
+  const [deadSrc, setDeadSrc] = useState<string | null>(null);
   const open = () => ctx.onAvatar(name);
   const key = (e: { key: string; preventDefault(): void }) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
   };
   const src = ctx.avatars[String(name || "").toLowerCase()];
-  if (src && !imgDead) {
-    const full = src; // avatar URLs arrive signed from the server (phase E)
+  if (src && src !== deadSrc) {
     return (
       <div className={"avatar img" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
-        <img src={full} alt="" decoding="async" onError={() => setImgDead(true)} />
+        {/* avatar URLs arrive signed from the server (phase E) */}
+        <img src={src} alt="" decoding="async" onError={() => setDeadSrc(src)} />
       </div>
     );
   }

@@ -1513,6 +1513,20 @@ let FAILURES = 0;
     return { btns: await page.$$eval('#invResult button', b => b.map(x => x.textContent)) };
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
+  /* A reload paints avatars at once (2026-11-19): the roster is remembered
+     per room on the device, so the chat shows each picture before
+     /members answers (here held back 3 s) instead of initials. */
+  await run('avatars-instant-reload', {}, async (page) => {
+    await page.waitForSelector('#msgs .msg .gutter .avatar.img img', { timeout: 4000 });
+    const first = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.filter(a => a.querySelector('img')).length);
+    await page.route(/\/api\/rooms\/[^/]+\/members(\?|$)/, async (route) => { await new Promise((r) => setTimeout(r, 3000)); await route.fallback(); });
+    await page.reload();
+    await page.waitForSelector('#msgs .msg', { timeout: 4000 });
+    await page.waitForTimeout(300);
+    const early = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.filter(a => a.querySelector('img')).length);
+    if (!first || early !== first) throw new Error('after a reload, avatars should show before /members answers: ' + early + ' of ' + first);
+    return { first, early };
+  });
   await run('avatars', {}, async (page, S, calls) => {
     const out = {};
     out.chatAvatars = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.map(a => a.className + (a.querySelector('img') ? ':img' : a.querySelector('svg') ? ':svg' : ':' + a.textContent)));

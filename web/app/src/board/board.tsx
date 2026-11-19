@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useBoardApi } from "../room/ctx";
+import { useBoardApi, useMembers } from "../room/ctx";
 import type { InviteResult, Member, MembersResponse } from "@chat/shared";
 import { same, toast } from "../lib";
 import { Avatar, KindTag } from "../feed/feed";
@@ -265,12 +265,10 @@ export function BoardSections({
   tab: string;
   photo: { openPicker: () => void };
 }) {
+  // the roster's avatars: remembered across reloads and kept on stable
+  // URLs (useBoardData), the same map the chat feed uses
+  const { avatars } = useMembers();
   const api = useBoardApi();
-  const avatars: Record<string, string> = {};
-  (api.board?.mb.members || []).forEach((m) => {
-    const key = m.name.toLowerCase();
-    if (m.avatar && (m.status !== "revoked" || !avatars[key])) avatars[key] = m.avatar;
-  });
   return (
     <>
       <section className="view" id="view-constitution" hidden={tab !== "constitution"}>

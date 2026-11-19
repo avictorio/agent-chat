@@ -38,6 +38,47 @@ export const EMPTY_MEMBERS: MembersData = {
   activeCount: 0,
 };
 
+/* The roster is remembered per room on this device (2026-11-19), so a
+   reload paints avatars and member tags at once instead of initials
+   until /members answers (it rides with five other board calls). The
+   server's answer replaces it as soon as it lands. */
+const MEMBERS_CACHE = "ac-members:";
+function cachedMembers(room: string): MembersData | null {
+  try {
+    const v = localStorage.getItem(MEMBERS_CACHE + room);
+    if (!v) return null;
+    const d = JSON.parse(v);
+    if (!d || typeof d.avatars !== "object" || typeof d.kinds !== "object" || !Array.isArray(d.names)) return null;
+    return { ...EMPTY_MEMBERS, ...d };
+  } catch {
+    return null;
+  }
+}
+function saveMembers(room: string, m: MembersData): void {
+  try {
+    localStorage.setItem(MEMBERS_CACHE + room, JSON.stringify(m));
+  } catch {
+    // storage full or blocked: the next load just waits for /members
+  }
+}
+
+/* Avatar URLs are signed on an hour grid, so the same picture comes back
+   under a new URL every hour. Keep the URL already in use while it is the
+   same avatar version and still valid for a while: the browser then
+   serves it from cache instead of downloading the picture again. */
+function keepAvatarUrl(prev: string | undefined, next: string): string {
+  if (!prev || prev === next) return next;
+  try {
+    const a = new URL(prev, location.href);
+    const b = new URL(next, location.href);
+    if (a.pathname !== b.pathname || a.searchParams.get("v") !== b.searchParams.get("v")) return next;
+    const exp = Number(a.searchParams.get("exp") || 0);
+    return !exp || exp > Date.now() / 1000 + 600 ? prev : next;
+  } catch {
+    return next;
+  }
+}
+
 export function useBoardData(opts: {
   client: import("@chat/shared").RoomClient;
   tabRef: RefObject<string>;
@@ -46,7 +87,8 @@ export function useBoardData(opts: {
 }) {
   const { client, tabRef, deny, deniedRef } = opts;
   const [rs, setRs] = useState<RoomState | null>(null);
-  const [members, setMembers] = useState<MembersData>(EMPTY_MEMBERS);
+  const [members, setMembers] = useState<MembersData>(() => cachedMembers(client.room) || EMPTY_MEMBERS);
+  const avatarsRef = useRef<Record<string, string>>(members.avatars);
   const [membersVersion, setMembersVersion] = useState(0);
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [boardView, setBoardView] = useState<BoardData | null>(null);
@@ -90,7 +132,7 @@ export function useBoardData(opts: {
       (d.members || []).forEach((mb) => {
         const key = mb.name.toLowerCase();
         if (mb.kind) kinds[key] = mb.kind;
-        if (mb.avatar && (mb.status !== "revoked" || !avs[key])) avs[key] = mb.avatar;
+        if (mb.avatar && (mb.status !== "revoked" || !avs[key])) avs[key] = keepAvatarUrl(avatarsRef.current[key], mb.avatar);
         if (mb.voice && mb.voice.voice_id) vcs[key] = mb.voice.voice_id;
       });
       const names: string[] = [];
@@ -105,7 +147,8 @@ export function useBoardData(opts: {
       const key = JSON.stringify([kinds, avs, vcs, names, d.invite_only, activeCount]);
       if (key === membersKeyRef.current) return;
       membersKeyRef.current = key;
-      setMembers({
+      avatarsRef.current = avs;
+      const next: MembersData = {
         kinds,
         avatars: avs,
         voices: vcs,
@@ -113,9 +156,11 @@ export function useBoardData(opts: {
         nameKinds,
         inviteOnly: !!d.invite_only,
         activeCount,
-      });
+      };
+      setMembers(next);
+      saveMembers(client.room, next);
     setMembersVersion((v) => v + 1);
-  }, []);
+  }, [client]);
 
   const loadMembers = useCallback(async () => {
     try {
