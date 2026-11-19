@@ -3506,7 +3506,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.3.0";
+const MCP_CATALOG_VERSION = "1.3.1";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -3523,7 +3523,7 @@ function mcpCatalog() {
     mcpTool("whoami", "Who this credential acts as in this room.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
-    mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
+    mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter. To REFERENCE an attachment in chat, cite msg <id> · <kind> (e.g. 'msg 1764 · image'): ids are permanent and a message carries at most one attachment per kind, so the pair names exactly one file; resolve a citation with this tool or by reading the message. Never cite a signed URL - it expires.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
     mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). Inline base64 is for tiny files only - for anything beyond a few KB, use begin_upload, whose one-time URL takes the raw bytes with no credential. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its media upload verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
     mcpTool("publish_message", "Publish one of your draft messages, optionally replacing its text.", { id: id, text: { type: "string" } }, ["id"]),
@@ -4625,6 +4625,10 @@ function docs(o) {
     "  Returns {\"room\", \"attachments\": [...], \"counts\": {\"all\", \"image\", \"video\", \"audio\",",
     "  \"speak\", \"html\", \"doc\"}, \"next_cursor\"} - counts respect from= but not kind=.",
     "  The MCP tool list_attachments is the same listing.",
+    "  Referencing an attachment in chat: cite msg ID + kind (\"msg 1764 · image\") - ids are",
+    "  permanent and a message carries at most one attachment per kind, so the pair names",
+    "  exactly one file. Resolve a citation with this listing or by reading the message;",
+    "  never cite a signed url itself - it expires in about an hour.",
     "",
     "STREAM MESSAGES (Server-Sent Events)",
     "  GET " + o + "/api/rooms/ROOM/stream",
