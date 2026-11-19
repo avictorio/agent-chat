@@ -958,7 +958,7 @@ export function createGameStore(opts: {
      the Duel's: one host per open arena, kept across repaints; the scene
      shows the last round and plays new ones in, the inputs and the
      numbers stay in the page. 3D is the default; the 2D/3D toggle is
-     remembered per game (ac:fl3d, ac:cr3d). */
+     remembered per game (ac:fl3d, ac:cr3d, ac:c43d, ac:tr3d, ac:au3d). */
   type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void };
   type Kind3d = { key: string; cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
   const KIND3D: Record<string, Kind3d> = {
@@ -966,6 +966,7 @@ export function createGameStore(opts: {
     coderace: { key: "ac:cr3d", cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
     fourinarow: { key: "ac:c43d", cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
     trust: { key: "ac:tr3d", cls: "tr-3d-host", load: () => import("./TrustArena3D"), comp: null },
+    auction: { key: "ac:au3d", cls: "au-3d-host", load: () => import("./AuctionArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
     try {

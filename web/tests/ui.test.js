@@ -1350,6 +1350,28 @@ let FAILURES = 0;
       return out;
     });
   }
+  // The auction in 3D (the default): the hall loads first, then the lot,
+  // your bid and the bidders; a bid still sends the number.
+  for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { au: true }, init: () => { try { localStorage.removeItem('ac:au3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .au-card', { timeout: 6000 });
+      await page.click('.game-card.kind-auction');
+      await page.waitForSelector('#viewer:not([hidden]) .au-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.label = await page.$eval('#viewer .au-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|au-lot|au-bid|au-players|au-result/.test(c)));
+      await shot(page, label + '.png');
+      await page.click('#viewer .au-acts button:has-text("Half")');
+      await page.click('#viewer .au-go');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/20/moves')).pop() || '';
+      if (!/Auction arena, 3D view: the lot is A rubber duck of unusual wisdom\. Ada 65 left, 1 won, bid in; Anthony \(you\) 80 left, 1 won, thinking; Henry 100 left, 0 won, thinking\./.test(out.label)) throw new Error('the scene reads the hall: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,au-lot,au-bid,au-players,au-result') throw new Error('the hall, then the lot, your bid, the bidders and the last lot: ' + JSON.stringify(out.order));
+      if (!/"dir":"40"/.test(out.moveCall)) throw new Error('Half bids half the budget left: ' + out.moveCall);
+      return out;
+    });
+  }
   // Four in a Row in 3D (the default): the board scene loads first, the
   // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
   // sends the column, and 2D brings the grid back.

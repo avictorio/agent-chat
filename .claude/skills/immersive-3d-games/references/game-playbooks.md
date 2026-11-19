@@ -28,7 +28,8 @@ sound and buzz stay.
 6. Code Race
 7. Four in a Row
 8. Trust
-9. A new arena
+9. The auction
+10. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -283,7 +284,42 @@ defection. Then scores update and the title lands:
 **Catch-up.** `ac-tr-seen:<path>:<id>`; the latest unseen round replays on
 open; a tap skips; reduced motion lands it at once.
 
-## 9. A new arena
+## 9. The auction: the hall
+
+**World.** A dark hall in indigo and gold (`AU_SKY`, a gold horizon
+glow): a floor ring, a slim pedestal under a spotlight with a gold trim,
+the lot floating above it as a turning gem with its name over it. The
+bidders stand on an arc in front of it, the viewer nearest the camera;
+each has a plinth with a ring in their colour (lit once they have bid),
+a paddle, a column of coins for the budget left (a coin a tenth of the
+starting budget, one instanced draw for every stack), a row of small
+gems for the lots won, and a name plate. The camera (`auHome`) orbits a
+point between the pedestal and the bidders and, for each distance,
+centres the content's vertical extent, so the scene fills the frame
+instead of sitting low under the sky.
+
+**Bids stay sealed.** Nothing shows a pending bid: only who has bid (the
+ring). A resolved lot shows every bid.
+
+**Reveal.** The paddles rise one at a time from the lowest bid to the
+highest (`beat` each; a pass stays down), then the gavel: the gem flies
+in an arc to the winner's row and their coins drop by the price; an
+unsold lot rises and fades. The paddles come down after the title.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you bid | `lock` + `BUZZ.commit`, your ring lights |
+| a rival bids | a soft `ping`, their ring lights |
+| you win the lot | "SOLD to you for n" good, `BUZZ.scored`, `smash` + `win`, a gold `Burst` |
+| you bid and were outbid | "OUTBID" bad, `BUZZ.hitYou`, `smash` |
+| someone else's lot (or you passed) | "SOLD to … for n" neutral, `smash` |
+| nobody bid | "UNSOLD" neutral, `whoosh` |
+| match won / lost | VICTORY / DEFEAT (2nd of 3+ gets "#2"), the winner's pillar and shockwave; afterwards the winner's ring stays lit and their plate reads "★ winner · n lots" |
+
+**Catch-up.** `ac-au-seen:<path>:<id>`; the latest unseen lot replays on
+open; a tap skips; reduced motion lands it at once.
+
+## 10. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.
