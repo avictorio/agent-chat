@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export const TABS: Record<string, string> = {
   chat: "Chat",
   games: "Games",
+  media: "Media",
   constitution: "Constitution",
   decisions: "Decisions",
   questions: "Open questions",

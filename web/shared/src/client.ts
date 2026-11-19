@@ -1,4 +1,5 @@
 import type {
+  AttachmentsResponse,
   GameResponse,
   GameSummary,
   Member,
@@ -77,6 +78,16 @@ export class RoomClient {
     if (limit != null) q.set("limit", String(limit));
     const s = q.toString();
     return this.call<MessagesResponse>("/messages" + (s ? "?" + s : ""));
+  }
+
+  attachments(opts?: { kind?: string; from?: string; before?: string; limit?: number }): Promise<AttachmentsResponse> {
+    const q = new URLSearchParams();
+    if (opts?.kind) q.set("kind", opts.kind);
+    if (opts?.from) q.set("from", opts.from);
+    if (opts?.before) q.set("before", opts.before);
+    if (opts?.limit != null) q.set("limit", String(opts.limit));
+    const s = q.toString();
+    return this.call<AttachmentsResponse>("/attachments" + (s ? "?" + s : ""));
   }
 
   postMessage(

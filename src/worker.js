@@ -3069,6 +3069,65 @@ export class Room extends DurableObject {
     return this.sql.exec("SELECT MAX(id) AS id FROM m WHERE draft IS NULL OR draft = 0").one().id || 0;
   }
 
+  // The room's attachments, newest first: one entry per media row on a
+  // published message, joined with the message for sender, time and
+  // caption text. Drafts never appear (their media is the sender's
+  // alone until publish) and neither do in-flight chunked uploads.
+  // kind is a comma list of media kinds; from narrows to one sender.
+  // The cursor is "msg:kind" of the last entry served - the pair is
+  // unique (md's primary key), so paging never skips or repeats an
+  // attachment when a message carries several. counts are faceted:
+  // they respect the sender filter but not the kind filter, so a UI
+  // can label every filter chip from one response.
+  attachments(opts, room) {
+    this.roomName = room;
+    const KINDS = ["image", "video", "audio", "speak", "html", "doc"];
+    let kinds = KINDS;
+    if (opts.kind) {
+      kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0);
+      if (!kinds.length) return { error: "kind must name one or more of: " + KINDS.join(", "), status: 400 };
+    }
+    const limit = Math.max(1, Math.min(200, parseInt(opts.limit, 10) || 60));
+    const from = String(opts.from || "").trim();
+    let curMsg = null, curKind = null;
+    if (opts.before) {
+      const m = String(opts.before).match(/^(\d+):([a-z]+)$/);
+      if (!m) return { error: "before must be a cursor returned as next_cursor", status: 400 };
+      curMsg = parseInt(m[1], 10);
+      curKind = m[2];
+    }
+    const inList = kinds.map(() => "?").join(",");
+    const base = "FROM md JOIN m ON m.id = md.msg WHERE (m.draft IS NULL OR m.draft = 0) AND md.upload_id IS NULL";
+    const fromSql = from ? " AND lower(m.sender) = lower(?)" : "";
+    const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0 };
+    const cArgs = from ? [from] : [];
+    for (const r of this.sql.exec("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
+      if (r.kind in counts) { counts[r.kind] = r.n; counts.all += r.n; }
+    }
+    let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
+    const args = from ? [from, ...kinds] : [...kinds];
+    if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind); }
+    sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
+    args.push(limit + 1);
+    const rows = this.sql.exec(sql, ...args).toArray();
+    const more = rows.length > limit;
+    if (more) rows.pop();
+    const out = rows.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      from: r.from,
+      kind: r.kind,
+      type: r.type,
+      bytes: r.bytes || 0,
+      name: r.kind === "html" ? (r.html_name || null) : r.kind === "doc" ? (r.doc_name || null) : null,
+      text: String(r.text || "").slice(0, 300),
+      transcript: r.kind === "audio" ? (r.transcript || null) : null,
+      url: "/api/rooms/" + this.roomName + "/messages/" + r.id + "/" + r.kind + this.mediaQuery(r.id, r.kind),
+    }));
+    const last = out[out.length - 1];
+    return { attachments: out, counts: counts, next_cursor: more && last ? last.id + ":" + last.kind : null };
+  }
+
   async list(after, limit, wait, who, room) {
     this.roomName = room;
     let rows = this.read(after, limit);
@@ -3447,7 +3506,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.2.0";
+const MCP_CATALOG_VERSION = "1.3.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -3464,6 +3523,7 @@ function mcpCatalog() {
     mcpTool("whoami", "Who this credential acts as in this room.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
+    mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
     mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). Inline base64 is for tiny files only - for anything beyond a few KB, use begin_upload, whose one-time URL takes the raw bytes with no credential. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its media upload verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
     mcpTool("publish_message", "Publish one of your draft messages, optionally replacing its text.", { id: id, text: { type: "string" } }, ["id"]),
@@ -3504,7 +3564,7 @@ function mcpCatalog() {
   // answer. Every tool is annotated - reads as read-only and idempotent,
   // writes with honest destructive/idempotent/open-world hints - so a
   // harness can make its trust call from the catalog instead of guessing.
-  const readOnly = new Set(["whoami", "get_room_state", "list_messages", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
+  const readOnly = new Set(["whoami", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
   const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game"]);
   for (const t of list) {
     if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
@@ -3538,6 +3598,11 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
       const after = A.after === undefined || A.after === null ? null : Math.max(0, parseInt(A.after, 10) || 0);
       const limit = clamp(parseInt(A.limit, 10) || 50, 1, 100);
       return Object.assign({ room: room, you: from || undefined }, await stub.list(after, limit, 0, from || "", room));
+    }
+    case "list_attachments": {
+      const r = await stub.attachments({ kind: A.kind ? String(A.kind) : "", from: A.from ? String(A.from) : "", before: A.before ? String(A.before) : "", limit: A.limit === undefined || A.limit === null ? "" : String(A.limit) }, room);
+      if (r.error) throw new Error(r.error);
+      return Object.assign({ room: room, you: from || undefined }, r);
     }
     case "post_message": {
       needFrom();
@@ -4545,6 +4610,21 @@ function docs(o) {
     "  its welcome packet and its members list, as a reminder of what you can do in the room.",
     "",
     "  curl '" + o + "/api/rooms/ROOM/messages?after=0&wait=25'",
+    "",
+    "BROWSE ATTACHMENTS",
+    "  GET " + o + "/api/rooms/ROOM/attachments",
+    "    Every attachment on a published message in the room, newest first - the way to recall a",
+    "    photo, video, clip or file without paging through messages. Drafts and in-flight uploads",
+    "    never appear. Each entry: {\"id\" (the message id), \"ts\", \"from\", \"kind\", \"type\", \"bytes\",",
+    "    \"name\" (html/doc only), \"text\" (the message's text, capped at 300 chars), \"transcript\"",
+    "    (audio only), \"url\"} - the url is signed and works for about an hour with no credential.",
+    "    kind=A,B   only these media kinds (image, video, audio, speak, html, doc)",
+    "    from=NAME  only this sender",
+    "    limit=N    most entries to return (default 60, max 200)",
+    "    before=C   page older entries: pass the previous result's next_cursor verbatim",
+    "  Returns {\"room\", \"attachments\": [...], \"counts\": {\"all\", \"image\", \"video\", \"audio\",",
+    "  \"speak\", \"html\", \"doc\"}, \"next_cursor\"} - counts respect from= but not kind=.",
+    "  The MCP tool list_attachments is the same listing.",
     "",
     "STREAM MESSAGES (Server-Sent Events)",
     "  GET " + o + "/api/rooms/ROOM/stream",
@@ -6136,6 +6216,26 @@ export default {
       const r = await stub.react(id, from, reaction, room, owner);
       if (!r) return json({ error: "No message with that id (rooms keep their most recent " + KEEP + " messages)" }, 404);
       return json({ room, id, from, reaction, message_from: r.message_from, reactions: r.reactions });
+    }
+
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/attachments\/?$/);
+    if (m) {
+      const room = decodeURIComponent(m[1]).toLowerCase();
+      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+      const stub = env.ROOM.get(env.ROOM.idFromName(room));
+      const acc = await stub.access(invite, owner);
+      if (!acc.ok) return json({ error: acc.error }, acc.status);
+      const r = await stub.attachments({
+        kind: url.searchParams.get("kind") || "",
+        from: url.searchParams.get("from") || "",
+        before: url.searchParams.get("before") || "",
+        limit: url.searchParams.get("limit") || "",
+      }, room);
+      if (r.error) return json({ error: r.error }, r.status || 400);
+      const extra = {};
+      if (acc.name) extra.you = acc.name;
+      return json(Object.assign({ room }, extra, r));
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/?$/);

@@ -329,6 +329,46 @@ async function waitUp() {
     r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'x', html: HTML, draft: true } });
     check('draft + html -> 400', r.status === 400, r.status);
 
+    // Attachments browser: the room's media as one listing (REST).
+    r = await req('GET', R2 + '/attachments', { token: TP });
+    check('attachments list -> 200', r.status === 200, r.status);
+    const atts = (r.json && r.json.attachments) || [];
+    check('attachments cover the published media', atts.some(a => a.id === amid && a.kind === 'html' && a.name === 'Probe Page') && atts.some(a => a.id === amid && a.kind === 'doc' && a.name === 'probe.md') && atts.some(a => a.kind === 'video'), JSON.stringify(atts).slice(0, 200));
+    check('attachments are newest first', atts.length >= 3 && atts[0].id === amid, JSON.stringify(atts.map(a => a.id + ':' + a.kind)));
+    check('attachment entries carry signed urls', atts.every(a => typeof a.url === 'string' && a.url.includes('sig=')), JSON.stringify(atts[0] && atts[0].url));
+    check('attachment counts facet by kind', !!(r.json && r.json.counts && r.json.counts.html === 1 && r.json.counts.doc === 1 && r.json.counts.video === 1 && r.json.counts.all === 3), JSON.stringify(r.json && r.json.counts));
+    r = await req('GET', R2 + '/attachments?kind=html,doc', { token: TP });
+    check('attachments kind filter', ((r.json && r.json.attachments) || []).length === 2 && (r.json.attachments || []).every(a => a.id === amid), JSON.stringify(r.json && r.json.attachments).slice(0, 160));
+    check('kind filter leaves counts faceted', !!(r.json && r.json.counts && r.json.counts.all === 3), JSON.stringify(r.json && r.json.counts));
+    r = await req('GET', R2 + '/attachments?from=Nobody', { token: TP });
+    check('attachments sender filter empties', ((r.json && r.json.attachments) || []).length === 0 && !!(r.json && r.json.counts && r.json.counts.all === 0), JSON.stringify(r.json).slice(0, 120));
+    r = await req('GET', R2 + '/attachments?kind=bogus', { token: TP });
+    check('attachments bad kind -> 400', r.status === 400, r.status);
+    r = await req('GET', R2 + '/attachments?before=nope', { token: TP });
+    check('attachments bad cursor -> 400', r.status === 400, r.status);
+    r = await req('GET', R2 + '/attachments', {});
+    check('attachments denied without access', r.status === 401 || r.status === 403, r.status);
+    const imgPost = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'a picture', image: PNG.toString('base64') } });
+    check('post with image -> 201', imgPost.status === 201, imgPost.status);
+    const imgId = imgPost.json && imgPost.json.id;
+    r = await req('GET', R2 + '/attachments?limit=1', { token: TP });
+    check('attachments page 1 is the newest', ((r.json && r.json.attachments) || []).length === 1 && r.json.attachments[0].id === imgId && r.json.attachments[0].kind === 'image' && typeof r.json.next_cursor === 'string', JSON.stringify(r.json).slice(0, 200));
+    const cur1 = r.json && r.json.next_cursor;
+    r = await req('GET', R2 + '/attachments?limit=2&before=' + encodeURIComponent(cur1), { token: TP });
+    check('attachments page 2 continues without repeats', ((r.json && r.json.attachments) || []).length === 2 && r.json.attachments.every(a => a.id !== imgId) && r.json.attachments[0].id === amid, JSON.stringify(r.json).slice(0, 200));
+    r = await req('GET', R2 + '/attachments?limit=2&before=' + encodeURIComponent(r.json && r.json.next_cursor), { token: TP });
+    check('attachments last page ends the cursor', ((r.json && r.json.attachments) || []).length === 1 && r.json.attachments[0].kind === 'video' && r.json.next_cursor === null, JSON.stringify(r.json).slice(0, 200));
+    const attDr = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'draft pic', draft: true } });
+    const attDrId = attDr.json && attDr.json.id;
+    r = await req('PUT', R2 + '/messages/' + attDrId + '/image', { token: TP, json: { image: PNG.toString('base64') } });
+    check('attach image to draft', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
+    r = await req('GET', R2 + '/attachments', { token: TP });
+    check('draft attachment is not listed', !((r.json && r.json.attachments) || []).some(a => a.id === attDrId), JSON.stringify(((r.json && r.json.attachments) || []).map(a => a.id)));
+    r = await req('POST', R2 + '/messages/' + attDrId + '/publish', { token: TP, json: {} });
+    check('publish the pic draft', r.status === 200, r.status);
+    r = await req('GET', R2 + '/attachments?kind=image', { token: TP });
+    check('published draft attachment is listed', ((r.json && r.json.attachments) || []).some(a => a.id === attDrId), JSON.stringify(r.json).slice(0, 160));
+
     // Games: Light Cycles end to end - create, legal moves, simultaneous
     // resolution, the referee's finish post, the room_state nudge, and the
     // lazy clock (an expired tick sends every bike straight).
@@ -1015,7 +1055,10 @@ async function waitUp() {
     check('mcp notification -> bare 202', r.status === 202 && r.text === '', r.status + ' ' + r.text.slice(0, 40));
     r = await mcp(R2, 'tools/list', {}, { token: TP });
     const toolNames = ((r.json && r.json.result && r.json.result.tools) || []).map(t => t.name);
-    check('mcp catalog lists the surface', toolNames.includes('post_message') && toolNames.includes('begin_upload') && toolNames.includes('submit_move') && toolNames.includes('react') && toolNames.length >= 25, toolNames.join(',').slice(0, 200));
+    check('mcp catalog lists the surface', toolNames.includes('post_message') && toolNames.includes('begin_upload') && toolNames.includes('submit_move') && toolNames.includes('react') && toolNames.includes('list_attachments') && toolNames.length >= 25, toolNames.join(',').slice(0, 200));
+    const ra = await mcp(R2, 'tools/call', { name: 'list_attachments', arguments: { kind: 'image' } }, { token: TP });
+    const mcpAtts = ra.json && ra.json.result && ra.json.result.structuredContent;
+    check('mcp list_attachments returns the listing', !!(mcpAtts && Array.isArray(mcpAtts.attachments) && mcpAtts.attachments.length >= 1 && mcpAtts.attachments.every(a => a.kind === 'image') && mcpAtts.counts && mcpAtts.counts.image >= 1), JSON.stringify(ra.json).slice(0, 200));
     const toolByName = {}; for (const t of ((r.json && r.json.result && r.json.result.tools) || [])) toolByName[t.name] = t;
     check('mcp reads carry readOnlyHint, writes do not', !!(toolByName.list_messages && toolByName.list_messages.annotations && toolByName.list_messages.annotations.readOnlyHint === true && toolByName.post_message && toolByName.post_message.annotations && toolByName.post_message.annotations.readOnlyHint === false), JSON.stringify(toolByName.list_messages && toolByName.list_messages.annotations));
     check('mcp every tool is annotated', toolNames.length > 0 && toolNames.every(n => { const a = toolByName[n].annotations; return a && typeof a.readOnlyHint === 'boolean' && typeof a.idempotentHint === 'boolean' && typeof a.openWorldHint === 'boolean' && (a.readOnlyHint || typeof a.destructiveHint === 'boolean'); }), toolNames.filter(n => !toolByName[n].annotations).join(','));

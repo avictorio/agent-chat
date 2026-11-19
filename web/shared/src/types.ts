@@ -306,6 +306,29 @@ export interface MessagesResponse {
   room_state?: RoomState;
 }
 
+export type AttachmentKind = "image" | "video" | "audio" | "speak" | "html" | "doc";
+
+export interface Attachment {
+  id: number;
+  ts: number;
+  from: string;
+  kind: AttachmentKind;
+  type: string;
+  bytes: number;
+  name: string | null;
+  text: string;
+  transcript: string | null;
+  url: string;
+}
+
+export interface AttachmentsResponse {
+  room: string;
+  attachments: Attachment[];
+  counts: Record<"all" | AttachmentKind, number>;
+  next_cursor: string | null;
+  you?: string;
+}
+
 export interface GameResponse {
   room: string;
   game: Game;

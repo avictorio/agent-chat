@@ -19,6 +19,12 @@ const ICONS: Record<string, ReactNode> = {
       ]}
     />
   ),
+  media: (
+    <I
+      d={["M4 17l5.5-5.5 3 3L16 11l4 4"]}
+      extra={<><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="1.6" /></>}
+    />
+  ),
   constitution: <I d={["M7 3h8l4 4v14H7z", "M15 3v4h4", "M10 12h6M10 16h6"]} />,
   decisions: (
     <I
@@ -59,7 +65,7 @@ export interface SidebarProps {
   tab: string;
   show: (id: string) => void;
   tabsDisabled: boolean;
-  counts: { chat: string; decisions: string; questions: string; stakes: string; memory: string; members: string; games?: string };
+  counts: { chat: string; decisions: string; questions: string; stakes: string; memory: string; members: string; games?: string; media?: string };
   theme: string;
   applyTheme: (t: "light" | "dark") => void;
   copied: boolean;
@@ -139,6 +145,7 @@ export function Sidebar(p: SidebarProps) {
         <nav className="tabs" id="tabs">
           {tabBtn("chat", "Chat")}
           {tabBtn("games", "Games")}
+          {tabBtn("media", "Media")}
           <div className="nav-label">Room board</div>
           {tabBtn("constitution", "Constitution")}
           {tabBtn("decisions", "Decisions")}

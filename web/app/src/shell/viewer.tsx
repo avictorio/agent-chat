@@ -10,6 +10,13 @@ export type ViewerBuild = (body: HTMLElement) => void;
 
 export interface ViewerApi {
   open(title: string, build: ViewerBuild, dlUrl: string | null): void;
+  // Programmatic close for in-viewer actions that navigate elsewhere
+  // (the media shelf's "View in chat"): unlike the back chevron this
+  // does NOT pop the pushed history entry - popping would restore
+  // the URL the viewer covered, hash and all, and the tab sync would
+  // bounce the user back to the view they were leaving. The entry
+  // stays; a later back lands on it and the popstate handler no-ops.
+  close(): void;
 }
 
 export function useViewerHost(opts?: {
@@ -52,7 +59,16 @@ export function useViewerHost(opts?: {
           // history unavailable: the chevron still closes
         }
       },
+      close() {
+        if (!openRef.current) return;
+        openRef.current = false;
+        pushedRef.current = false;
+        if (opts && opts.onCloseRef && opts.onCloseRef.current) opts.onCloseRef.current();
+        if (bodyRef.current) bodyRef.current.textContent = "";
+        setV(null);
+      },
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 

@@ -29,6 +29,7 @@ import { Composer } from "../composer/composer";
 import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
 import { GamesView } from "../games/GamesView";
+import { MediaView } from "../media/MediaView";
 import { playYourMoveChime, unlockChime } from "../games/chime";
 import type { BoardApi } from "../board/shared";
 import { AvatarDialog, usePhotoUpload } from "../board/avatar";
@@ -175,6 +176,41 @@ export function RoomShell({ room }: { room: string }) {
     store("chat-theme", t);
     document.documentElement.setAttribute("data-theme", t);
     setTheme(t);
+  };
+
+  // The media shelf's way back: land on the message an attachment
+  // belongs to, paging older history in when the boot window (the
+  // latest 200) does not reach it, then flash the row.
+  const jumpToMessage = (id: number) => {
+    show("chat");
+    const scroll = () => {
+      const el = feed.listRef.current?.querySelector('[data-id="' + id + '"]');
+      if (!el) return false;
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("flash");
+      window.setTimeout(() => el.classList.remove("flash"), 1800);
+      return true;
+    };
+    if (feed.messagesRef.current.some((m) => m.id === id)) {
+      requestAnimationFrame(() => window.setTimeout(scroll, 60));
+      return;
+    }
+    void (async () => {
+      try {
+        let after = 0;
+        for (let page = 0; page < 4; page++) {
+          const d = await client.messages(after, 500);
+          const rows = d.messages || [];
+          if (!rows.length) break;
+          feed.mergeHistory(rows);
+          if (rows.some((m) => m.id === id) || rows.length < 500) break;
+          after = rows[rows.length - 1]!.id;
+        }
+      } catch {
+        // history unavailable: the scroll below just no-ops
+      }
+      requestAnimationFrame(() => window.setTimeout(scroll, 60));
+    })();
   };
 
   const copyLink = () => {
@@ -348,6 +384,7 @@ export function RoomShell({ room }: { room: string }) {
       rxTargetId: rx.targetId,
       onAvatar: (n) => setAvatarName(n),
       openViewer: viewerHost.api.open,
+      closeViewer: viewerHost.api.close,
       games,
     }),
     [speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games]
@@ -476,6 +513,9 @@ export function RoomShell({ room }: { room: string }) {
               newGameRef.current?.open();
             }}
           />
+        </section>
+        <section className="view" id="view-media" hidden={denied || gate !== null || tab !== "media"}>
+          <MediaView active={!denied && !gate && tab === "media"} onJump={jumpToMessage} />
         </section>
         <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
       </div>

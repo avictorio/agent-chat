@@ -54,6 +54,7 @@ export interface FeedValue {
   rxTargetId: number | null;
   onAvatar: (name: string) => void;
   openViewer: ViewerApi["open"];
+  closeViewer: ViewerApi["close"];
   games: GameStore;
 }
 

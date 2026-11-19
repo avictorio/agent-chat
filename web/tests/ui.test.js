@@ -193,6 +193,13 @@ function fresh(opts) {
     ] },
     nid: 100,
     av: { henry: { buf: require('fs').readFileSync(__dirname + '/../../tests/fixtures/henry.gif'), type: 'image/gif' } },
+    shelf: opts.shelf ? [
+      { id: 8, ts: now - 60e3, from: 'Ada', kind: 'doc', type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', text: 'Sharing the packet and the notes.', transcript: null, url: '/api/rooms/demo/messages/8/doc?exp=1&sig=x' },
+      { id: 8, ts: now - 60e3, from: 'Ada', kind: 'html', type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', text: 'Sharing the packet and the notes.', transcript: null, url: '/api/rooms/demo/messages/8/html?exp=1&sig=x' },
+      { id: 8, ts: now - 60e3, from: 'Ada', kind: 'image', type: 'image/png', bytes: 4321, name: null, text: 'Sharing the packet and the notes.', transcript: null, url: '/api/rooms/demo/messages/8/image?exp=1&sig=x' },
+      { id: 5, ts: now - 5 * 60e3, from: 'Anthony', kind: 'video', type: 'video/mp4', bytes: 904321, name: null, text: 'Looks good to me.\nLet\'s lock it in.', transcript: null, url: '/api/rooms/demo/messages/5/video?exp=1&sig=x' },
+      { id: 3, ts: now - 50 * 60e3, from: 'Ada', kind: 'audio', type: 'audio/mpeg', bytes: 22100, name: null, text: 'Agreed. Details here.', transcript: 'Agreed - the constitution is up.', url: '/api/rooms/demo/messages/3/audio?exp=1&sig=x' },
+    ] : [],
   };
 }
 function roomState(S) {
@@ -262,6 +269,20 @@ async function setup(page, S, calls) {
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
     if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
     if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
+    if (p.endsWith('/attachments')) {
+      const all = S.shelf || [];
+      const kinds = (u.searchParams.get('kind') || '').split(',').filter(Boolean);
+      const fromF = (u.searchParams.get('from') || '').toLowerCase();
+      const lim = parseInt(u.searchParams.get('limit') || '60', 10);
+      const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0 };
+      for (const a of all) { if (!fromF || a.from.toLowerCase() === fromF) { counts[a.kind]++; counts.all++; } }
+      let list = all.filter(a => (!kinds.length || kinds.includes(a.kind)) && (!fromF || a.from.toLowerCase() === fromF));
+      const before = u.searchParams.get('before');
+      if (before) { const i = list.findIndex(a => (a.id + ':' + a.kind) === before); list = i >= 0 ? list.slice(i + 1) : []; }
+      const pageItems = list.slice(0, lim);
+      const next = list.length > lim && pageItems.length ? pageItems[pageItems.length - 1].id + ':' + pageItems[pageItems.length - 1].kind : null;
+      return J({ room: 'demo', attachments: pageItems, counts, next_cursor: next });
+    }
     if (p.endsWith('/members')) return J(S.mb);
     return route.fulfill({ status: 404, body: 'nf' });
   });
@@ -743,7 +764,7 @@ let FAILURES = 0;
       // divergence cannot pass silently — stakes is due within
       // SEVEN days in the current app, decisions count when an
       // active member has not signed).
-      const wantCounts = ['chat=', 'games=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
+      const wantCounts = ['chat=', 'games=', 'media=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
       if (JSON.stringify(counts) !== JSON.stringify(wantCounts)) throw new Error('sidebar counts diverge from production: got ' + JSON.stringify(counts));
       return { counts, hash: await page.evaluate(() => location.hash) };
     });
@@ -1716,6 +1737,47 @@ let FAILURES = 0;
     out.dragNoBar = !(await page.$('.rx-bar'));
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     return out;
+  });
+
+  // The media shelf: the attachments listing as a filterable grid,
+  // the full-screen viewer, and the jump back to the message.
+  await run('media-shelf', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony' }, async (page) => {
+    await page.click('.tab[data-tab="media"]');
+    await page.waitForSelector('.media-tile', { timeout: 5000 });
+    const out = {};
+    out.tiles = await page.$$eval('.media-tile', ts => ts.length);
+    out.allCount = await page.$eval('.media-bar .seg button[aria-pressed="true"] .media-n', e => e.textContent).catch(() => null);
+    await shot(page, 'media-grid.png');
+    await page.click('.media-bar .seg button:nth-child(2)');
+    await page.waitForFunction(() => document.querySelectorAll('.media-tile').length === 1);
+    out.photosOnly = await page.$$eval('.media-tile', ts => ts.length);
+    await page.click('.media-bar .seg button:nth-child(1)');
+    await page.waitForFunction(() => document.querySelectorAll('.media-tile').length === 5);
+    await page.selectOption('.media-from', 'Anthony');
+    await page.waitForFunction(() => document.querySelectorAll('.media-tile').length === 1);
+    out.senderKinds = await page.$$eval('.media-tile .media-kind', ts => ts.map(t => t.textContent));
+    await page.selectOption('.media-from', '');
+    await page.waitForFunction(() => document.querySelectorAll('.media-tile').length === 5);
+    await page.click('.media-tile:has(img)');
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 5000 });
+    out.viewerOpen = true;
+    await shot(page, 'media-viewer.png');
+    await page.click('.media-cap .btn');
+    await page.waitForFunction(() => document.querySelector('#viewer').hidden, null, { timeout: 5000 });
+    out.backInChat = await page.$eval('#view-chat', e => !e.hidden);
+    await page.waitForFunction(() => { const el = document.querySelector('.msg[data-id="8"]'); return !!el && el.classList.contains('flash'); }, null, { timeout: 5000 });
+    out.flashed = true;
+    return out;
+  });
+  await run('media-shelf-mobile', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page) => {
+    await page.tap('#menu');
+    await page.waitForTimeout(300);
+    await page.tap('.tab[data-tab="media"]');
+    await page.waitForSelector('.media-tile', { timeout: 5000 });
+    await page.waitForTimeout(700); // let the drawer finish closing before the shot
+    const tiles = await page.$$eval('.media-tile', ts => ts.length);
+    await shot(page, 'media-grid-mobile.png');
+    return { tiles };
   });
 
   // The home page runs on its own fake (like the original suite's

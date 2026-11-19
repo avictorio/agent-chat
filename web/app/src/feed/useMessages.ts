@@ -127,6 +127,21 @@ export function useMessages(opts: {
 
   const clearUnread = useCallback(() => setUnread(0), []);
 
+  // Bulk-merge older history (the media view's jump-to-message pages
+  // it in): seeds the seen set and splices the rows in id order,
+  // keeping the memory cap. No unread or scroll side effects - the
+  // caller steers the scroll afterwards.
+  const mergeHistory = useCallback((rows: Message[]) => {
+    if (!rows.length) return;
+    rows.forEach((m) => seenRef.current.add(m.id));
+    setMessages((arr) => {
+      const byId = new Map<number, Message>(arr.map((m) => [m.id, m] as const));
+      for (const m of rows) if (!byId.has(m.id)) byId.set(m.id, m);
+      const next = [...byId.values()].sort((a, b) => a.id - b.id);
+      return next.length > 1200 ? next.slice(-1200) : next;
+    });
+  }, []);
+
   // The boot load: seed the seen set, arm the initial settle, and
   // set the stream cursor.
   const loadInitial = useCallback((sorted: Message[], lastId: number) => {
@@ -151,5 +166,6 @@ export function useMessages(opts: {
     seenRef,
     endSettle,
     loadInitial,
+    mergeHistory,
   };
 }
