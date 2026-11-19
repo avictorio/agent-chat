@@ -897,8 +897,10 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .media-meta { display: flex; align-items: baseline; gap: 6px; padding: 7px 9px 0; font-size: 12.5px; width: 100%; box-sizing: border-box; }
 .media-from-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .media-when { margin-left: auto; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-.media-sub { padding: 1px 9px 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; box-sizing: border-box; }
-.media-tile .media-meta:last-child { padding-bottom: 8px; }
+.media-sub { padding: 1px 9px 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; box-sizing: border-box; }
+.media-ref { padding: 1px 9px 8px; font-size: 11px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; width: 100%; box-sizing: border-box; }
+.media-cap-ref { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+.media-cap-ref code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; background: var(--hover); padding: 3px 9px; border-radius: 6px; }
 .media-note { max-width: 420px; margin: 48px auto; text-align: center; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .media-note-sm { text-align: center; color: var(--muted); font-size: 12.5px; margin: 14px 0 4px; }
 .media-sentinel { height: 1px; }

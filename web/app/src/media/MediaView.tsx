@@ -47,6 +47,11 @@ const KIND_LABEL: Record<Attachment["kind"], string> = {
   doc: "Doc",
 };
 
+// The citation form agents resolve: permanent message id + kind.
+export function refOf(a: Attachment): string {
+  return "msg " + a.id + " · " + a.kind;
+}
+
 export function MediaView({ active, onJump }: { active: boolean; onJump: (id: number) => void }) {
   const { client } = useSession();
   const { names, memberSet } = useMembers();
@@ -202,9 +207,45 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
           t.textContent = body;
           cap.appendChild(t);
         }
+        const refRow = document.createElement("div");
+        refRow.className = "media-cap-ref";
+        const code = document.createElement("code");
+        code.textContent = refOf(a);
+        refRow.appendChild(code);
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn sm";
+        copyBtn.textContent = "Copy reference";
+        copyBtn.addEventListener("click", () => {
+          const done = (label: string) => {
+            copyBtn.textContent = label;
+            window.setTimeout(() => {
+              copyBtn.textContent = "Copy reference";
+            }, 1600);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(refOf(a)).then(
+              () => done("Copied"),
+              () => done("Copy failed")
+            );
+          } else {
+            // No clipboard API (older webview): select the text so a
+            // long-press copy still gets the exact citation.
+            const range = document.createRange();
+            range.selectNodeContents(code);
+            const sel = window.getSelection();
+            if (sel) {
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+            done("Selected");
+          }
+        });
+        refRow.appendChild(copyBtn);
+        cap.appendChild(refRow);
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "btn sm";
+        btn.className = "btn sm media-jump";
         btn.textContent = "View in chat";
         btn.addEventListener("click", () => {
           closeViewer();
@@ -303,6 +344,7 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
                   {(a.kind === "html" || a.kind === "doc" || a.kind === "audio") && (a.name || a.transcript || a.text) ? (
                     <span className="media-sub">{a.kind === "doc" || a.kind === "html" ? a.from + " · " + fmtBytes(a.bytes) : a.transcript || a.text}</span>
                   ) : null}
+                  <span className="media-ref">{refOf(a)}</span>
                 </button>
               ))}
             </div>
