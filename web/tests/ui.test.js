@@ -855,8 +855,8 @@ let FAILURES = 0;
     return out;
   });
   // New game (2026-11-19 redesign): a gallery of the games from the
-  // catalog, then the chosen game's setup - How to play (open the first
-  // time), players (you are picked by default), options, Start. A duel
+  // catalog, then the chosen game's setup - How to play (folded, one tap
+  // opens it), players (you are picked by default), options, Start. A duel
   // needs exactly 2 players, Light Cycles 2-4; Back returns to the
   // gallery and keeps the picks (trimmed to the next game's maximum);
   // starting posts the create call and closes the dialog.
@@ -872,7 +872,9 @@ let FAILURES = 0;
     out.gallery = await page.$$eval('#newGameDlg .ng-game', (bs) => bs.map((b) => b.getAttribute('data-game')));
     out.galleryFacts = await page.$$eval('#newGameDlg .ng-game .game-facts', (fs) => fs.map((f) => f.textContent));
     await page.click('#newGameDlg .ng-game[data-game="duel"]');
-    out.howtoOpenFirstTime = await page.$eval('#newGameDlg .ng-howto', (d) => d.open);
+    out.howtoFolded = await page.$eval('#newGameDlg .ng-howto', (d) => !d.open);
+    await page.click('#newGameDlg .ng-howto > summary');
+    out.howtoOpensOnTap = await page.$eval('#newGameDlg .ng-howto', (d) => d.open && /Rock blunts scissors/.test(d.textContent));
     out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
     await page.click('[data-player="Ada"]');
     out.startEnabledAtTwo = await page.$eval('#ngStart', e => !e.disabled);
@@ -891,7 +893,7 @@ let FAILURES = 0;
     out.bsVariantSeg = await page.$('[data-opt="variant"]') !== null;
     await page.click('#newGameDlg .ng-back');
     await page.click('#newGameDlg .ng-game[data-game="duel"]');
-    out.howtoClosedSecondTime = await page.$eval('#newGameDlg .ng-howto', (d) => !d.open);
+    out.howtoFoldedAgain = await page.$eval('#newGameDlg .ng-howto', (d) => !d.open);
     out.duelCount = await page.$eval('.ng-count', e => e.textContent.trim());
     await shot(page, 'new-game.png');
     await page.click('#ngStart');
@@ -902,8 +904,8 @@ let FAILURES = 0;
     const body = JSON.parse(cc.slice(cc.indexOf('{')));
     if (out.gallery.join(',') !== 'duel,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
     if (!out.galleryFacts.every((f) => /players/.test(f))) throw new Error('every gallery card must carry its facts: ' + JSON.stringify(out.galleryFacts));
-    if (!out.howtoOpenFirstTime) throw new Error('How to play must open the first time a game is set up');
-    if (!out.howtoClosedSecondTime) throw new Error('How to play must start folded once seen');
+    if (!out.howtoFolded || !out.howtoFoldedAgain) throw new Error('How to play must start folded: ' + JSON.stringify(out));
+    if (!out.howtoOpensOnTap) throw new Error('a tap on How to play opens the rules');
     if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');
     if (!out.startEnabledAtTwo) throw new Error('duel must start with 2 players');
     if (out.startLabel !== 'Start Duel') throw new Error('Start names the game: ' + out.startLabel);
@@ -961,7 +963,9 @@ let FAILURES = 0;
     await page.click('#newGameDlg .ng-game[data-game="duel"]');
     await page.waitForTimeout(200);
     out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
-    // with How to play open, Start stays on screen (pinned to the bottom)
+    // even with How to play opened, Start stays on screen (pinned to the bottom)
+    await page.click('#newGameDlg .ng-howto > summary');
+    await page.waitForTimeout(150);
     out.startOnScreen = await page.$eval('#ngStart', (b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0; });
     await shot(page, 'new-game-mobile-setup.png');
     if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');

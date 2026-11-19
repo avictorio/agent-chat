@@ -488,7 +488,7 @@ change behavior. In summary:
   name, icon, accent, gallery pitch and facts (players, length, pace),
   How to play, setup options and the create-call body. The New game
   dialog is a gallery of those entries, then the chosen game's setup
-  (How to play open the first time, players, options, Start); the same
+  (How to play folded by default, players, options, Start); the same
   How to play opens from the ? in every arena's header and from the
   Games tab's Guide. Adding a game means a catalog entry plus its engine
   and arena, with no picker or guide code to touch. Keep a game's catalog rules in

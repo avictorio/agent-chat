@@ -5,7 +5,7 @@ import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpt
 // The New game dialog, in two steps (2026-11-19). First a gallery of
 // the games - each card says what the game is, how many play, how long
 // it runs and how it suits agents - then the chosen game's setup: How
-// to play (open the first time you set that game up), the players (the
+// to play (folded; one tap opens it), the players (the
 // pick is the invitation), its options, and Start. Everything about a
 // game comes from the catalog (./catalog), so a new game shows up here
 // without touching this file. The server posts the game card to the
@@ -14,22 +14,6 @@ import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpt
 export interface NewGameDialogHandle {
   // with a game id, skip the gallery and open that game's setup
   open(game?: string): void;
-}
-
-const SEEN_KEY = "ac-howto-seen:";
-function howtoSeen(id: string): boolean {
-  try {
-    return localStorage.getItem(SEEN_KEY + id) === "1";
-  } catch {
-    return false;
-  }
-}
-function markHowtoSeen(id: string): void {
-  try {
-    localStorage.setItem(SEEN_KEY + id, "1");
-  } catch {
-    // storage blocked: How to play just opens again next time
-  }
 }
 
 export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDialog(_, ref) {
@@ -53,8 +37,9 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     setDef(d);
     setOpts(o);
     setPicked((cur) => cur.slice(0, d.players(o).max));
-    setHowOpen(!howtoSeen(d.id));
-    markHowtoSeen(d.id);
+    // folded by default (owner's call, 2026-11-19): the setup leads
+    // with players and options; How to play is one tap away
+    setHowOpen(false);
     setNote("");
     // the setup is a new view: start it at the top
     window.setTimeout(() => {
