@@ -587,9 +587,23 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
   .gm-wrap { max-width: 1040px; }
   .gm-panel-live { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; align-content: start; }
   .gm-panel-live > :not(.gm-row) { grid-column: 1 / -1; }
-  .gm-panel-history, .gm-panel-standings { max-width: 720px; }
-  .gm-tabs { max-width: 440px; }
+  .gm-panel-history, .gm-panel-standings, .gm-panel-guide { max-width: 720px; }
+  .gm-tabs { max-width: 520px; }
 }
+/* The Guide tab: every game from the catalog, folded to its card; open
+   one for How to play and a Start button that goes straight to setup. */
+.gm-guide-intro { margin: 2px 0 10px; }
+.gm-guide { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); margin-bottom: 8px; }
+.gm-guide > summary { display: flex; align-items: flex-start; gap: 12px; padding: 12px; cursor: pointer; list-style: none; }
+.gm-guide > summary::-webkit-details-marker { display: none; }
+.gm-guide > summary::after { content: "\203A"; margin-left: auto; align-self: center; font-size: 22px; color: var(--muted); transition: transform 0.15s ease; }
+.gm-guide[open] > summary::after { transform: rotate(90deg); }
+.gm-guide > summary:focus-visible { outline: 2px solid rgb(var(--ga)); outline-offset: -2px; border-radius: 12px; }
+.gm-guide-body { padding: 4px 14px 14px 64px; }
+.gm-guide-body .btn { margin-top: 12px; }
+@media (max-width: 520px) { .gm-guide-body { padding-left: 14px; } }
+/* four tabs on a phone: tighter padding so Standings still fits */
+@media (max-width: 420px) { .gm-tab { padding: 6px 4px; font-size: 13px; gap: 4px; } }
 /* The Games tab's tabs (2026-11-19): Live · History · Standings as a
    segmented control that stays in view while the list scrolls; Live
    carries a badge with the matches waiting on you. */
@@ -731,6 +745,8 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .viewer-back { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 34px; height: 34px; border-radius: 999px; font-size: 20px; line-height: 1; cursor: pointer; flex: none; }
 .viewer-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .viewer-head .sp { flex: 1; }
+.viewer-help { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 34px; height: 34px; border-radius: 999px; font: inherit; font-size: 16px; font-weight: 700; line-height: 1; cursor: pointer; flex: none; }
+.viewer-help:hover { background: var(--hover); }
 .viewer-body { flex: 1; overflow: auto; }
 .viewer-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .viewer-doc { max-width: 760px; margin: 0 auto; padding: 18px 18px 40px; }
@@ -864,8 +880,60 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .home-simple a { color: var(--accent); }
 
 /* --- New game dialog (post-cutover feature) --- */
-.ng-dlg { text-align: left; width: 400px; }
+.ng-dlg { text-align: left; width: 440px; max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
 .ng-dlg .vd-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+/* New game, step 1: the gallery. One card per game from the catalog;
+   the game's accent (--ga) tints its icon tile. */
+.ng-sub { margin: -6px 0 12px; font-size: 13px; color: var(--muted); }
+.ng-gallery { display: flex; flex-direction: column; gap: 8px; }
+.ng-game {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 12px 12px 12px; text-align: left;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+@media (hover: hover) { .ng-game:hover { background: var(--hover); border-color: rgba(var(--ga), 0.55); } }
+.ng-game { -webkit-tap-highlight-color: transparent; }
+.ng-game:focus-visible { outline: 2px solid rgb(var(--ga)); outline-offset: 2px; }
+.ng-game-ic {
+  flex: none; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+  color: rgb(var(--ga)); background: rgba(var(--ga), 0.13); border: 1px solid rgba(var(--ga), 0.3);
+}
+.ng-game-ic.sm { width: 30px; height: 30px; border-radius: 8px; }
+.ng-game-ic .i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ng-game-ic.sm .i { width: 17px; height: 17px; }
+.ng-game-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.ng-game-name { font-weight: 700; font-size: 15px; }
+.ng-game-pitch { font-size: 13px; color: var(--ink); opacity: 0.85; line-height: 1.35; }
+.ng-game-go { flex: none; align-self: center; font-size: 22px; color: var(--muted); }
+.game-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 3px; font-size: 12px; color: var(--muted); }
+.game-pace { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.game-pace.pace-agents { color: #15803d; border-color: rgba(21, 128, 61, 0.35); background: rgba(21, 128, 61, 0.08); }
+.game-pace.pace-slow { color: #0369a1; border-color: rgba(3, 105, 161, 0.35); background: rgba(3, 105, 161, 0.08); }
+.game-pace.pace-live { color: #a16207; border-color: rgba(161, 98, 7, 0.35); background: rgba(161, 98, 7, 0.08); }
+:root[data-theme="dark"] .game-pace.pace-agents { color: #86efac; }
+:root[data-theme="dark"] .game-pace.pace-slow { color: #7dd3fc; }
+:root[data-theme="dark"] .game-pace.pace-live { color: #fcd34d; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .game-pace.pace-agents { color: #86efac; }
+  :root:not([data-theme="light"]) .game-pace.pace-slow { color: #7dd3fc; }
+  :root:not([data-theme="light"]) .game-pace.pace-live { color: #fcd34d; }
+}
+/* step 2: the setup */
+.ng-setup-head { justify-content: flex-start !important; gap: 8px; }
+.ng-setup-head .sp { flex: 1; }
+.ng-back { font-size: 20px; line-height: 1; padding: 2px 8px; }
+.ng-howto { border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; background: var(--bg); }
+.ng-howto > summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-size: 14px; list-style-position: inside; }
+.ng-howto[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.ng-howto .howto { padding-bottom: 10px; }
+.ng-help { margin: -4px 0 8px; font-size: 12px; color: var(--muted); }
+.ng-note.bad { color: var(--danger, #b91c1c); }
+/* How to play: the same block in the setup, the ? sheet and the guide */
+.howto { font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+.howto p { margin: 0 0 6px; }
+.howto-h { margin: 10px 0 4px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.howto ul { margin: 0; padding-left: 18px; }
+.howto li { margin: 2px 0; }
 .ng-dlg .seg { margin-bottom: 6px; }
 .ng-label { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; }
 .ng-count { font-weight: 600; letter-spacing: 0; text-transform: none; }
@@ -880,6 +948,8 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .ng-kind { margin-left: auto; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
 .ng-note { min-height: 20px; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
 .ng-dlg .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+/* the setup's Start stays in reach while How to play is open above it */
+.ng-dlg [data-setup] .actions { position: sticky; bottom: -18px; margin: 10px -24px -18px; padding: 10px 24px 18px; background: var(--panel); border-top: 1px solid var(--line); }
 
 @media (prefers-reduced-motion: reduce) { .bs-cell.bs-boom, .bs-cell.bs-splash, .bs-cell.bs-sinking, .duel-pill.your-throw, .duel-pad2.your-move .duel-tile:not(.queued), .reveal-in { animation: none; } }
 

@@ -854,29 +854,44 @@ let FAILURES = 0;
     if (!out.vis.some(Boolean)) throw new Error('push bell never became visible: ' + JSON.stringify(out));
     return out;
   });
-  // New game dialog (post-cutover feature, 2026-11-09): the Games
-  // tab's button opens it; a duel needs exactly 2 players (you are
-  // picked by default), Light Cycles 2-4; starting posts the create
-  // call with the picked players and closes the dialog.
-  await run('new-game', {}, async (page, S, calls) => {
-    const out = {};
+  // New game (2026-11-19 redesign): a gallery of the games from the
+  // catalog, then the chosen game's setup - How to play (open the first
+  // time), players (you are picked by default), options, Start. A duel
+  // needs exactly 2 players, Light Cycles 2-4; Back returns to the
+  // gallery and keeps the picks (trimmed to the next game's maximum);
+  // starting posts the create call and closes the dialog.
+  const ngOpen = async (page) => {
     await page.click('.tab[data-tab="games"]');
     await page.waitForSelector('#view-games .gm-start-btn', { timeout: 4000 });
     await page.click('#view-games .gm-start-btn');
     await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
+  };
+  await run('new-game', {}, async (page, S, calls) => {
+    const out = {};
+    await ngOpen(page);
+    out.gallery = await page.$$eval('#newGameDlg .ng-game', (bs) => bs.map((b) => b.getAttribute('data-game')));
+    out.galleryFacts = await page.$$eval('#newGameDlg .ng-game .game-facts', (fs) => fs.map((f) => f.textContent));
+    await page.click('#newGameDlg .ng-game[data-game="duel"]');
+    out.howtoOpenFirstTime = await page.$eval('#newGameDlg .ng-howto', (d) => d.open);
     out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
     await page.click('[data-player="Ada"]');
     out.startEnabledAtTwo = await page.$eval('#ngStart', e => !e.disabled);
-    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(2)');
-    out.paceSegShown = await page.$('[aria-label="Pace"]') !== null;
-    out.asyncPressed = await page.$eval('[aria-label="Pace"] button:nth-child(1)', e => e.getAttribute('aria-pressed') === 'true');
-    await page.click('[aria-label="Pace"] button:nth-child(2)');
-    out.tickSegShown = await page.$('[aria-label="Tick length"]') !== null;
+    out.startLabel = await page.$eval('#ngStart', e => e.textContent);
+    await page.click('#newGameDlg .ng-back');
+    await page.click('#newGameDlg .ng-game[data-game="lightcycles"]');
+    out.paceSegShown = await page.$('[data-opt="mode"]') !== null;
+    out.asyncPressed = await page.$eval('[data-opt="mode"] button:nth-child(1)', e => e.getAttribute('aria-pressed') === 'true');
+    out.tickHiddenOnAsync = await page.$('[data-opt="tick"]') === null;
+    await page.click('[data-opt="mode"] button:nth-child(2)');
+    out.tickSegShown = await page.$('[data-opt="tick"]') !== null;
     await page.click('[data-player="Henry"]');
     out.lcCount = await page.$eval('.ng-count', e => e.textContent.trim());
-    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(3)');
-    out.bsVariantSeg = await page.$('[aria-label="Battleship variant"]') !== null;
-    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(1)');
+    await page.click('#newGameDlg .ng-back');
+    await page.click('#newGameDlg .ng-game[data-game="battleship"]');
+    out.bsVariantSeg = await page.$('[data-opt="variant"]') !== null;
+    await page.click('#newGameDlg .ng-back');
+    await page.click('#newGameDlg .ng-game[data-game="duel"]');
+    out.howtoClosedSecondTime = await page.$eval('#newGameDlg .ng-howto', (d) => !d.open);
     out.duelCount = await page.$eval('.ng-count', e => e.textContent.trim());
     await shot(page, 'new-game.png');
     await page.click('#ngStart');
@@ -885,34 +900,42 @@ let FAILURES = 0;
     const cc = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
     out.createCall = cc;
     const body = JSON.parse(cc.slice(cc.indexOf('{')));
+    if (out.gallery.join(',') !== 'duel,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
+    if (!out.galleryFacts.every((f) => /players/.test(f))) throw new Error('every gallery card must carry its facts: ' + JSON.stringify(out.galleryFacts));
+    if (!out.howtoOpenFirstTime) throw new Error('How to play must open the first time a game is set up');
+    if (!out.howtoClosedSecondTime) throw new Error('How to play must start folded once seen');
     if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');
     if (!out.startEnabledAtTwo) throw new Error('duel must start with 2 players');
+    if (out.startLabel !== 'Start Duel') throw new Error('Start names the game: ' + out.startLabel);
     if (!out.bsVariantSeg) throw new Error('Battleship must show the variant options');
     if (!out.paceSegShown) throw new Error('Light Cycles must show the pace options');
     if (!out.asyncPressed) throw new Error('Light Cycles must default to async pace');
+    if (!out.tickHiddenOnAsync) throw new Error('the tick length belongs to live pace only');
     if (!out.tickSegShown) throw new Error('Light Cycles live pace must show the tick options');
     if (out.lcCount !== '3 of 2\u20134') throw new Error('LC count wrong: ' + out.lcCount);
-    if (out.duelCount !== '2 of 2') throw new Error('switching back to duel must trim to 2 players, got: ' + out.duelCount);
+    if (out.duelCount !== '2 of 2') throw new Error('going back to duel must trim to 2 players, got: ' + out.duelCount);
     if (!out.dlgClosed) throw new Error('dialog must close after a successful start');
     if (body.game !== 'duel' || body.best_of !== 5 || JSON.stringify(body.players) !== '["Anthony","Ada"]') throw new Error('create body wrong: ' + cc);
     return out;
   });
-  // Battleship seats 2-6 in the dialog: a third pick turns the
-  // match into a free-for-all (count and hint say so), and the
-  // create call carries all three captains.
+  // Battleship seats 2-6: a third pick turns the match into a
+  // free-for-all (count and summary say so), skirmish trims back to
+  // two, and the create call carries the captains and the variant.
   await run('new-game-ffa', {}, async (page, S, calls) => {
     const out = {};
-    await page.click('.tab[data-tab="games"]');
-    await page.waitForSelector('#view-games .gm-start-btn', { timeout: 4000 });
-    await page.click('#view-games .gm-start-btn');
-    await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
-    await page.click('#newGameDlg [aria-label="Game type"] button:nth-child(3)');
+    await ngOpen(page);
+    await page.click('#newGameDlg .ng-game[data-game="battleship"]');
     await page.click('[data-player="Ada"]');
     out.twoCount = await page.$eval('.ng-count', e => e.textContent.trim());
     await page.click('[data-player="Henry"]');
     out.threeCount = await page.$eval('.ng-count', e => e.textContent.trim());
     out.hint = await page.$eval('.ng-note', e => e.textContent);
     out.startEnabled = await page.$eval('#ngStart', e => !e.disabled);
+    await page.click('[data-opt="variant"] button:nth-child(3)');
+    out.skirmishCount = await page.$eval('.ng-count', e => e.textContent.trim());
+    await page.click('[data-opt="variant"] button:nth-child(2)');
+    await page.click('[data-player="Henry"]');
+    out.salvoHint = await page.$eval('.ng-note', e => e.textContent);
     await shot(page, 'new-game-ffa.png');
     await page.click('#ngStart');
     await page.waitForTimeout(600);
@@ -920,9 +943,11 @@ let FAILURES = 0;
     const body = JSON.parse(cc.slice(cc.indexOf('{')));
     if (out.twoCount !== '2 of 2\u20136') throw new Error('two-captain count wrong: ' + out.twoCount);
     if (out.threeCount !== '3 of 2\u20136') throw new Error('ffa count wrong: ' + out.threeCount);
-    if (!/Free-for-all/.test(out.hint)) throw new Error('three captains should read as a free-for-all: ' + out.hint);
+    if (!/free-for-all/i.test(out.hint)) throw new Error('three captains should read as a free-for-all: ' + out.hint);
     if (!out.startEnabled) throw new Error('an ffa must be startable with 3 captains');
-    if (body.game !== 'battleship' || JSON.stringify(body.players) !== '["Anthony","Ada","Henry"]') throw new Error('ffa create body wrong: ' + cc);
+    if (out.skirmishCount !== '2 of 2') throw new Error('skirmish must trim to two captains: ' + out.skirmishCount);
+    if (!/free-for-all salvo/i.test(out.salvoHint)) throw new Error('a 3-captain salvo summary: ' + out.salvoHint);
+    if (body.game !== 'battleship' || body.variant !== 'salvo' || JSON.stringify(body.players) !== '["Anthony","Ada","Henry"]') throw new Error('ffa create body wrong: ' + cc);
     return out;
   });
   await run('new-game-mobile', { w: 390, h: 844, touch: true }, async (page) => {
@@ -933,8 +958,48 @@ let FAILURES = 0;
     await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
     await page.waitForTimeout(200);
     await shot(page, 'new-game-mobile.png');
+    await page.click('#newGameDlg .ng-game[data-game="duel"]');
+    await page.waitForTimeout(200);
     out.startDisabledAtOne = await page.$eval('#ngStart', e => e.disabled);
+    // with How to play open, Start stays on screen (pinned to the bottom)
+    out.startOnScreen = await page.$eval('#ngStart', (b) => { const r = b.getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0; });
+    await shot(page, 'new-game-mobile-setup.png');
     if (!out.startDisabledAtOne) throw new Error('duel must not start with 1 player');
+    if (!out.startOnScreen) throw new Error('Start must stay on screen while How to play is open');
+    return out;
+  });
+  // The Guide tab lists every game; Start in a game's entry opens that
+  // game's setup directly. The ? in an arena's header opens How to play
+  // for that game, and Escape closes the sheet but not the arena.
+  await run('games-guide-and-help', { state: { game: true } }, async (page) => {
+    const out = {};
+    await page.click('.tab[data-tab="games"]');
+    await page.waitForSelector('#gm-tab-guide', { timeout: 4000 });
+    await page.click('#gm-tab-guide');
+    out.guide = await page.$$eval('.gm-guide', (ds) => ds.map((d) => d.getAttribute('data-game')));
+    await page.click('.gm-guide[data-game="battleship"] > summary');
+    out.rulesShown = await page.$eval('.gm-guide[data-game="battleship"] .howto', (h) => /Sink every enemy ship/.test(h.textContent));
+    await page.click('.gm-guide[data-game="battleship"] .btn');
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 3000 });
+    out.setupFromGuide = await page.$eval('#newGameDlg [data-setup]', (e) => e.getAttribute('data-setup'));
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    await page.click('#gm-tab-live');
+    await page.click('.gm-row');
+    await page.waitForSelector('#viewerHelp', { timeout: 6000 });
+    await page.click('#viewerHelp');
+    await page.waitForSelector('#gameHelpDlg[open]', { timeout: 3000 });
+    out.helpTitle = await page.$eval('#ghTitle', (e) => e.textContent);
+    await shot(page, 'arena-help.png');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    out.helpClosed = await page.$eval('#gameHelpDlg', (d) => !d.open);
+    out.arenaStillOpen = await page.$eval('#viewer', (v) => !v.hidden);
+    if (out.guide.join(',') !== 'duel,lightcycles,battleship') throw new Error('guide must list every game: ' + out.guide);
+    if (!out.rulesShown) throw new Error('an open guide entry shows the rules');
+    if (out.setupFromGuide !== 'battleship') throw new Error('Start in the guide opens that game\'s setup: ' + out.setupFromGuide);
+    if (!/How to play Light Cycles/.test(out.helpTitle)) throw new Error('the ? opens this game\'s rules: ' + out.helpTitle);
+    if (!out.helpClosed || !out.arenaStillOpen) throw new Error('Escape closes the sheet and leaves the arena: ' + JSON.stringify(out));
     return out;
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });

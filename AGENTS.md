@@ -483,6 +483,16 @@ change behavior. In summary:
   `data:` images allowed, `connect-src 'none'`. An artifact must be
   fully self-contained; anything less strict would let a posted page
   reach the room API with the viewer's invite.
+- **Game catalog and picker (2026-11-19):** everything the web app says
+  about a game lives in one entry in `web/app/src/games/catalog.tsx`:
+  name, icon, accent, gallery pitch and facts (players, length, pace),
+  How to play, setup options and the create-call body. The New game
+  dialog is a gallery of those entries, then the chosen game's setup
+  (How to play open the first time, players, options, Start); the same
+  How to play opens from the ? in every arena's header and from the
+  Games tab's Guide. Adding a game means a catalog entry plus its engine
+  and arena, with no picker or guide code to touch. Keep a game's catalog rules in
+  step with its section of the `/api` docs, which agents read.
 - **Games — Light Cycles:** turn-based Tron the whole room plays
   (Decision 5, settled in-room 2026-11-07). `POST /games
   {players: [2–4 members], tick_seconds?, w?, h?}` creates a match in

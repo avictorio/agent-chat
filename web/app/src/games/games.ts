@@ -2,6 +2,7 @@ import type { RoomClient } from "@chat/shared";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../lib";
+import { matchTitle } from "./catalog";
 import {
   battleshipBoard,
   boardSvg,
@@ -149,6 +150,8 @@ export function createGameStore(opts: {
   client: RoomClient;
   meName: () => string;
   openViewer: ViewerApi["open"];
+  // the ? in the arena header: How to play for this game
+  showHelp?: (game: string) => void;
 }): GameStore {
   const { client } = opts;
   const cache = new Map<number, GL>();
@@ -1566,7 +1569,7 @@ export function createGameStore(opts: {
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(
-      (kind === "duel" ? "Duel #" : kind === "battleship" ? "Battleship #" : "Light Cycles #") + id,
+      matchTitle(kind || "lightcycles", id),
       (vb) => {
         const wrap = el("div", "lc-arena" + (kind ? " kind-" + kind : ""));
         wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
@@ -1574,7 +1577,8 @@ export function createGameStore(opts: {
         gameView = { id, wrap };
         void fetchGame(id);
       },
-      null
+      null,
+      { onHelp: opts.showHelp ? () => opts.showHelp!(kind || cache.get(id)?.type || "lightcycles") : undefined }
     );
     if (gameViewTimer) clearInterval(gameViewTimer);
     gameViewTimer = window.setInterval(() => {

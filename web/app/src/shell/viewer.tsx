@@ -9,7 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 export type ViewerBuild = (body: HTMLElement) => void;
 
 export interface ViewerApi {
-  open(title: string, build: ViewerBuild, dlUrl: string | null): void;
+  // extra.onHelp puts a ? (How to play) button in the header - the game
+  // arenas pass it so every game's rules are one tap away mid-match
+  open(title: string, build: ViewerBuild, dlUrl: string | null, extra?: { onHelp?: () => void }): void;
   // Programmatic close for in-viewer actions that navigate elsewhere
   // (the media shelf's "View in chat"): unlike the back chevron this
   // does NOT pop the pushed history entry - popping would restore
@@ -22,7 +24,7 @@ export interface ViewerApi {
 export function useViewerHost(opts?: {
   onCloseRef?: React.MutableRefObject<(() => void) | null>;
 }): { api: ViewerApi; node: React.ReactNode } {
-  const [v, setV] = useState<{ title: string; dl: string | null } | null>(null);
+  const [v, setV] = useState<{ title: string; dl: string | null; onHelp?: () => void } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const buildRef = useRef<ViewerBuild | null>(null);
   const openRef = useRef(false);
@@ -47,11 +49,11 @@ export function useViewerHost(opts?: {
 
   const api = useMemo<ViewerApi>(
     () => ({
-      open(title, build, dl) {
+      open(title, build, dl, extra) {
         buildRef.current = build;
         openRef.current = true;
         pushedRef.current = false;
-        setV({ title, dl });
+        setV({ title, dl, onHelp: extra && extra.onHelp });
         try {
           history.pushState({ agentChatViewer: 1 }, "");
           pushedRef.current = true;
@@ -97,7 +99,9 @@ export function useViewerHost(opts?: {
     const opener = document.activeElement as HTMLElement | null;
     backRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) {
+      // a dialog open over the viewer (the How to play sheet) takes its
+      // own Escape: the viewer stays
+      if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector("dialog[open]")) {
         e.preventDefault();
         close(false);
       }
@@ -126,6 +130,11 @@ export function useViewerHost(opts?: {
           {v ? v.title : ""}
         </span>
         <span className="sp"></span>
+        {v && v.onHelp ? (
+          <button type="button" className="viewer-help" id="viewerHelp" aria-label="How to play" title="How to play" onClick={v.onHelp}>
+            ?
+          </button>
+        ) : null}
         <a
           className="linkbtn"
           id="viewerDl"

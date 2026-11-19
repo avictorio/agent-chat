@@ -36,6 +36,7 @@ import { AvatarDialog, usePhotoUpload } from "../board/avatar";
 import { useViewerHost } from "../shell/viewer";
 import { VoiceDialog, type VoiceDialogHandle } from "./voice";
 import { NewGameDialog, type NewGameDialogHandle } from "../games/NewGameDialog";
+import { GameHelpDialog, type GameHelpHandle } from "../games/GameHelpDialog";
 import { createGameStore, type GameStore } from "../games/games";
 import { usePush } from "../shell/push";
 import { initShellCommon } from "../shell/shell";
@@ -234,12 +235,14 @@ export function RoomShell({ room }: { room: string }) {
 
   const viewerCloseRef = useRef<(() => void) | null>(null);
   const viewerHost = useViewerHost({ onCloseRef: viewerCloseRef });
+  const gameHelpRef = useRef<GameHelpHandle | null>(null);
   const gamesRef = useRef<GameStore | null>(null);
   if (!gamesRef.current) {
     gamesRef.current = createGameStore({
       client,
       meName: () => nameStateRef.current,
       openViewer: viewerHost.api.open,
+      showHelp: (game) => gameHelpRef.current?.open(game),
     });
     viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
   }
@@ -512,9 +515,9 @@ export function RoomShell({ room }: { room: string }) {
         <section className="view" id="view-games" hidden={denied || gate !== null || tab !== "games"}>
           <GamesView
             active={!denied && !gate && tab === "games"}
-            onNewGame={() => {
+            onNewGame={(game?: string) => {
               setNavOpen(false);
-              newGameRef.current?.open();
+              newGameRef.current?.open(game);
             }}
           />
         </section>
@@ -527,6 +530,7 @@ export function RoomShell({ room }: { room: string }) {
       <AvatarDialog name={avatarName} mb={board.boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
       <VoiceDialog ref={voiceRef} />
       <NewGameDialog ref={newGameRef} />
+      <GameHelpDialog ref={gameHelpRef} />
       {rx.popovers}
       {photo.el}
       {push.menuNode}

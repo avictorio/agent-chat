@@ -4,6 +4,7 @@ import { useFeed, useSession } from "../room/ctx";
 import { finalScore, formatLeft, type GL } from "./render";
 import { chimeMuted, setChimeMuted } from "./chime";
 import { pressable } from "../lib";
+import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle } from "./catalog";
 
 // Standings with motion, from the finished list (newest first): each
 // player's current streak, and their rank before the kind's most
@@ -63,11 +64,8 @@ function standingsMotion(games: GameSummary[] | null) {
 // lives in the Live tab; the your-move chime toggle sits in the header. A tap on a row opens
 // the arena; the list refreshes whenever the store hears about a game.
 
-const KIND: Record<string, string> = {
-  battleship: "Battleship",
-  duel: "Duel",
-  lightcycles: "Light Cycles",
-};
+// game names come from the catalog (./catalog)
+const KIND: Record<string, string> = Object.fromEntries(GAMES.map((d) => [d.id, d.name]));
 
 function stateLine(g: GL): string {
   const ps = g.players || [];
@@ -115,16 +113,16 @@ function youLabel(g: GL): string {
   return "Your move";
 }
 
-type Tab = "live" | "history" | "standings";
-const TABS: Tab[] = ["live", "history", "standings"];
-const TAB_LABEL: Record<Tab, string> = { live: "Live", history: "History", standings: "Standings" };
+type Tab = "live" | "history" | "standings" | "guide";
+const TABS: Tab[] = ["live", "history", "standings", "guide"];
+const TAB_LABEL: Record<Tab, string> = { live: "Live", history: "History", standings: "Standings", guide: "Guide" };
 const TAB_KEY = "ac-games-tab";
 const PAGE = 20;
 
 function savedTab(): Tab {
   try {
     const v = localStorage.getItem(TAB_KEY);
-    return v === "history" || v === "standings" ? v : "live";
+    return v === "history" || v === "standings" || v === "guide" ? v : "live";
   } catch {
     return "live";
   }
@@ -257,7 +255,7 @@ function ChimeToggle() {
   );
 }
 
-export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: () => void }) {
+export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (game?: string) => void }) {
   const { client } = useSession();
   const store = useFeed().games;
   const version = useSyncExternalStore(store.subscribe, store.getVersion);
@@ -276,7 +274,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   })());
   const [kind, setKind] = useState<string>("all");
   const [shown, setShown] = useState(PAGE);
-  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ live: null, history: null, standings: null });
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ live: null, history: null, standings: null, guide: null });
 
   // /games scans up to 500 matches on the server: the first open loads at
   // once, later store changes (a burst of frames, a poll) coalesce into
@@ -526,9 +524,34 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
         ))}
       </div>
       </div>
-      {games === null && !err ? <p className="gm-note">Loading the matches…</p> : null}
-      {err ? <p className="gm-note">{err}</p> : null}
-      {games !== null ? (
+      {tab === "guide" ? (
+        <div className="gm-panel gm-panel-guide" role="tabpanel" id="gm-panel-guide" aria-labelledby="gm-tab-guide">
+          <p className="gm-note gm-guide-intro">Every game you can play here: what it is, how it plays, and how well it suits agents. Open one for the rules.</p>
+          {GAMES.map((d) => (
+            <details className="gm-guide" key={d.id} data-game={d.id} style={accentStyle(d)}>
+              <summary>
+                <span className="ng-game-ic">
+                  <GameIcon def={d} />
+                </span>
+                <span className="ng-game-body">
+                  <span className="ng-game-name">{d.name}</span>
+                  <span className="ng-game-pitch">{d.pitch}</span>
+                  <GameFacts def={d} />
+                </span>
+              </summary>
+              <div className="gm-guide-body">
+                <HowToPlay def={d} />
+                <button type="button" className="btn primary sm" onClick={() => onNewGame(d.id)}>
+                  Start {d.name}
+                </button>
+              </div>
+            </details>
+          ))}
+        </div>
+      ) : null}
+      {tab !== "guide" && games === null && !err ? <p className="gm-note">Loading the matches…</p> : null}
+      {tab !== "guide" && err ? <p className="gm-note">{err}</p> : null}
+      {tab !== "guide" && games !== null ? (
         <div className={"gm-panel gm-panel-" + tab} role="tabpanel" id={"gm-panel-" + tab} aria-labelledby={"gm-tab-" + tab}>
           {tab === "live" ? (
             live.length ? (
@@ -546,7 +569,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                   </>
                 ) : null}
                 <div className="gm-start">
-                  <button type="button" className="btn primary gm-start-btn" onClick={onNewGame}>
+                  <button type="button" className="btn primary gm-start-btn" onClick={() => onNewGame()}>
                     Start a match
                   </button>
                 </div>
@@ -554,7 +577,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
             ) : (
               <div className="gm-empty">
                 <p>Nothing live right now.</p>
-                <button type="button" className="btn primary gm-start-btn" onClick={onNewGame}>
+                <button type="button" className="btn primary gm-start-btn" onClick={() => onNewGame()}>
                   Start a match
                 </button>
                 {done.length ? (

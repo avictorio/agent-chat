@@ -1,115 +1,112 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
+import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./catalog";
 
-// The New game dialog: pick a game (Duel, Light Cycles, Battleship), pick its
-// players from the room roster — that pick is the invitation — set
-// the one option that matters, and start. The server posts the game
-// card to the feed and wakes the players; on success the arena opens
-// on the new match, like a rematch does.
+// The New game dialog, in two steps (2026-11-19). First a gallery of
+// the games - each card says what the game is, how many play, how long
+// it runs and how it suits agents - then the chosen game's setup: How
+// to play (open the first time you set that game up), the players (the
+// pick is the invitation), its options, and Start. Everything about a
+// game comes from the catalog (./catalog), so a new game shows up here
+// without touching this file. The server posts the game card to the
+// feed and wakes the players; on success the arena opens on the match.
 
 export interface NewGameDialogHandle {
-  open(): void;
+  // with a game id, skip the gallery and open that game's setup
+  open(game?: string): void;
 }
 
-type GameType = "duel" | "lightcycles" | "battleship";
-
-const BEST_OF = [3, 5, 7, 9];
-const TICKS: { secs: number; label: string }[] = [
-  { secs: 30, label: "30 sec" },
-  { secs: 60, label: "1 min" },
-  { secs: 120, label: "2 min" },
-  { secs: 300, label: "5 min" },
-];
-const TURNS: { secs: number; label: string }[] = [
-  { secs: 300, label: "5 min" },
-  { secs: 900, label: "15 min" },
-  { secs: 3600, label: "1 hour" },
-  { secs: 21600, label: "6 hours" },
-  { secs: 86400, label: "24 hours" },
-];
+const SEEN_KEY = "ac-howto-seen:";
+function howtoSeen(id: string): boolean {
+  try {
+    return localStorage.getItem(SEEN_KEY + id) === "1";
+  } catch {
+    return false;
+  }
+}
+function markHowtoSeen(id: string): void {
+  try {
+    localStorage.setItem(SEEN_KEY + id, "1");
+  } catch {
+    // storage blocked: How to play just opens again next time
+  }
+}
 
 export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDialog(_, ref) {
   const session = useSession();
   const members = useMembers();
   const feed = useFeed();
   const dlgRef = useRef<HTMLDialogElement | null>(null);
-  const [type, setType] = useState<GameType>("duel");
+  const [def, setDef] = useState<GameDef | null>(null);
+  const [opts, setOpts] = useState<Opts>({});
   const [picked, setPicked] = useState<string[]>([]);
-  const [bestOf, setBestOf] = useState(5);
-  const [tick, setTick] = useState(120);
-  const [lcMode, setLcMode] = useState<"async" | "live">("async");
-  const [bsVariant, setBsVariant] = useState<"classic" | "salvo" | "skirmish">("classic");
-  const [turn, setTurn] = useState(3600);
+  const [howOpen, setHowOpen] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
   const me = session.meName;
-  // Battleship seats 2 to 6 - 3+ is a free-for-all - except skirmish,
-  // which stays the two-captain duel on the small board.
-  const max = type === "lightcycles" ? 4 : type === "battleship" ? (bsVariant === "skirmish" ? 2 : 6) : 2;
-  const valid =
-    type === "lightcycles"
-      ? picked.length >= 2 && picked.length <= 4
-      : type === "battleship"
-        ? picked.length >= 2 && picked.length <= max
-        : picked.length === 2;
+  const range = def ? def.players(opts) : { min: 2, max: 2 };
+  const valid = !!def && picked.length >= range.min && picked.length <= range.max;
+
+  const choose = (d: GameDef) => {
+    const o = initialOpts(d);
+    setDef(d);
+    setOpts(o);
+    setPicked((cur) => cur.slice(0, d.players(o).max));
+    setHowOpen(!howtoSeen(d.id));
+    markHowtoSeen(d.id);
+    setNote("");
+    // the setup is a new view: start it at the top
+    window.setTimeout(() => {
+      if (dlgRef.current) dlgRef.current.scrollTop = 0;
+      dlgRef.current?.querySelector<HTMLElement>(".ng-back")?.focus();
+    }, 0);
+  };
 
   useImperativeHandle(ref, () => ({
-    open() {
-      setType("duel");
+    open(game?: string) {
       setPicked(me && members.memberSet.has(me.toLowerCase()) ? [me] : []);
-      setBestOf(5);
-      setTick(120);
-      setLcMode("async");
-      setBsVariant("classic");
-      setTurn(3600);
       setNote("");
       setBusy(false);
+      const d = gameDef(game);
+      if (d) choose(d);
+      else setDef(null);
       if (dlgRef.current && !dlgRef.current.open) dlgRef.current.showModal();
     },
   }));
 
   const close = () => dlgRef.current?.close();
 
+  const back = () => {
+    setDef(null);
+    setNote("");
+    window.setTimeout(() => dlgRef.current?.querySelector<HTMLElement>(".ng-game")?.focus(), 0);
+  };
+
   const toggle = (name: string) => {
     setNote("");
     setPicked((cur) => {
       if (cur.includes(name)) return cur.filter((n) => n !== name);
-      if (cur.length >= max) return cur;
+      if (cur.length >= range.max) return cur;
       return [...cur, name];
     });
   };
 
-  const switchType = (t: GameType) => {
-    setType(t);
+  const setOpt = (key: string, value: string | number) => {
+    if (!def) return;
+    const next = { ...opts, [key]: value };
+    setOpts(next);
     setNote("");
-    setPicked((cur) => cur.slice(0, t === "lightcycles" ? 4 : t === "battleship" ? 6 : 2));
-  };
-
-  const pickVariant = (v: "classic" | "salvo" | "skirmish") => {
-    setBsVariant(v);
-    setNote("");
-    if (v === "skirmish") setPicked((cur) => cur.slice(0, 2));
+    // a variant can shrink the table (skirmish is two captains)
+    setPicked((cur) => cur.slice(0, def.players(next).max));
   };
 
   const start = async () => {
-    if (!valid || busy) return;
+    if (!def || !valid || busy) return;
     setBusy(true);
     setNote("");
-    const body: Record<string, unknown> = { players: picked };
-    if (type === "duel") {
-      body.game = "duel";
-      body.best_of = bestOf;
-    } else if (type === "battleship") {
-      body.game = "battleship";
-      body.tick_seconds = turn;
-      if (bsVariant !== "classic") body.variant = bsVariant;
-    } else {
-      body.mode = lcMode;
-      if (lcMode === "live") body.tick_seconds = tick;
-    }
     try {
-      const d = await session.client.createGame(body);
+      const d = await session.client.createGame(def.body(opts, picked));
       if (d.game && d.game.id) {
         feed.games.onFrame(d.game);
         close();
@@ -118,159 +115,127 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
         setNote((d as { error?: string }).error || "The game was refused.");
         setBusy(false);
       }
-    } catch {
-      setNote("The game did not reach the referee.");
+    } catch (e) {
+      setNote(e instanceof Error && e.message ? e.message : "The game did not reach the referee.");
       setBusy(false);
     }
   };
 
-  const ffa = type === "battleship" && bsVariant !== "skirmish" && picked.length > 2;
-  const hint = !valid
-    ? type === "lightcycles"
-      ? "Pick " + (2 - picked.length) + " more — Light Cycles needs 2 to 4 players."
-      : type === "battleship"
-        ? bsVariant === "skirmish"
-          ? "Pick one more captain — skirmish is exactly 2."
-          : "Pick " + (2 - picked.length) + " more — Battleship needs 2 to 6 captains (3+ is a free-for-all)."
-        : picked.length < 2
-          ? "Pick one more player — this game is exactly 2."
-          : "This game is exactly 2 players."
-    : type === "duel"
-      ? "First to " + (Math.floor(bestOf / 2) + 1) + ". Starts when both players accept; each round waits up to 3 minutes for both throws."
-      : type === "battleship"
-        ? ffa
-          ? bsVariant === "salvo"
-            ? "Free-for-all salvo: " + picked.length + " captains, every captain for themselves — each turn fires one shot per ship you have afloat, and the volley must spread across rivals. Last fleet floating wins. Starts when every captain accepts."
-            : "Free-for-all: " + picked.length + " captains, every captain for themselves — turns rotate, each shot names its target, last fleet floating wins. Starts when every captain accepts."
-          : bsVariant === "salvo"
-            ? "Salvo on the 10×10 board: each turn fires one shot per ship you still have afloat. Starts when both captains accept."
-            : bsVariant === "skirmish"
-              ? "Skirmish: a tight 8×8 board, fleets of four (4, 3, 3, 2) — the same hunt, compressed. Starts when both captains accept."
-              : "Hidden fleets on a 10×10 board, one shot per turn. Starts when both captains accept; the slow game — built to breathe between wakes."
-        : lcMode === "async"
-          ? "Starts when every rider accepts their seat; each tick resolves the moment everyone has ridden — a 1 h stall cap covers a vanished rider."
-          : "Starts when every rider accepts their seat; miss a tick and the clock rides straight for you.";
-
   const roster = members.names;
   const ordered = me && roster.includes(me) ? [me, ...roster.filter((n) => n !== me)] : roster;
+  const need = range.min === range.max ? String(range.min) : range.min + "–" + range.max;
+  const hint = !def
+    ? ""
+    : picked.length < range.min
+      ? "Pick " + (range.min - picked.length) + " more: " + def.name + " needs " + need + " players."
+      : def.summary(opts, picked);
 
   return (
     <dialog className="av-dlg ng-dlg" id="newGameDlg" aria-labelledby="ngTitle" ref={dlgRef}>
-      <div className="vd-head">
-        <span className="av-name" id="ngTitle">
-          New game
-        </span>
-        <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
-          ✕
-        </button>
-      </div>
-      <div className="seg full" role="group" aria-label="Game type">
-        <button type="button" aria-pressed={type === "duel"} onClick={() => switchType("duel")}>
-          ⚔️ Duel
-        </button>
-        <button type="button" aria-pressed={type === "lightcycles"} onClick={() => switchType("lightcycles")}>
-          🏍️ Light Cycles
-        </button>
-        <button type="button" aria-pressed={type === "battleship"} onClick={() => switchType("battleship")}>
-          🚢 Battleship
-        </button>
-      </div>
-      <div className="ng-label">
-        Players
-        <span className="ng-count">
-          {picked.length} of {type === "lightcycles" ? "2–4" : type === "battleship" ? (bsVariant === "skirmish" ? "2" : "2–6") : "2"}
-        </span>
-      </div>
-      <div className="ng-players">
-        {ordered.map((name) => {
-          const sel = picked.includes(name);
-          return (
-            <button
-              type="button"
-              key={name}
-              className={"ng-player" + (sel ? " on" : "")}
-              aria-pressed={sel}
-              data-player={name}
-              onClick={() => toggle(name)}
-            >
-              <span className="ng-check">{sel ? "✓" : ""}</span>
-              <span className="ng-name">{name}</span>
-              {name === me ? <span className="ng-you">you</span> : null}
-              <span className="ng-kind">{members.kindOf(name) || ""}</span>
-            </button>
-          );
-        })}
-      </div>
-      {type === "duel" ? (
+      {!def ? (
         <>
-          <div className="ng-label">Best of</div>
-          <div className="seg full" role="group" aria-label="Best of">
-            {BEST_OF.map((n) => (
-              <button key={n} type="button" aria-pressed={bestOf === n} onClick={() => setBestOf(n)}>
-                {n}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : type === "battleship" ? (
-        <>
-          <div className="ng-label">Variant</div>
-          <div className="seg full" role="group" aria-label="Battleship variant">
-            <button type="button" aria-pressed={bsVariant === "classic"} onClick={() => pickVariant("classic")}>
-              Classic 10×10
-            </button>
-            <button type="button" aria-pressed={bsVariant === "salvo"} onClick={() => pickVariant("salvo")}>
-              Salvo
-            </button>
-            <button type="button" aria-pressed={bsVariant === "skirmish"} onClick={() => pickVariant("skirmish")}>
-              Skirmish 8×8
+          <div className="vd-head">
+            <span className="av-name" id="ngTitle">
+              New game
+            </span>
+            <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
+              ✕
             </button>
           </div>
-          <div className="ng-label">Turn clock — how long each captain gets per shot</div>
-          <div className="seg full" role="group" aria-label="Turn clock">
-            {TURNS.map((t) => (
-              <button key={t.secs} type="button" aria-pressed={turn === t.secs} onClick={() => setTurn(t.secs)}>
-                {t.label}
+          <p className="ng-sub">Pick a game. You'll choose the players next.</p>
+          <div className="ng-gallery">
+            {GAMES.map((g) => (
+              <button type="button" key={g.id} className="ng-game" data-game={g.id} style={accentStyle(g)} onClick={() => choose(g)}>
+                <span className="ng-game-ic">
+                  <GameIcon def={g} />
+                </span>
+                <span className="ng-game-body">
+                  <span className="ng-game-name">{g.name}</span>
+                  <span className="ng-game-pitch">{g.pitch}</span>
+                  <GameFacts def={g} />
+                </span>
+                <span className="ng-game-go" aria-hidden="true">
+                  ›
+                </span>
               </button>
             ))}
           </div>
         </>
       ) : (
-        <>
-          <div className="ng-label">Pace — how ticks resolve</div>
-          <div className="seg full" role="group" aria-label="Pace">
-            <button type="button" aria-pressed={lcMode === "async"} onClick={() => setLcMode("async")}>
-              Async · on everyone's move
+        <div style={accentStyle(def)} data-setup={def.id}>
+          <div className="vd-head ng-setup-head">
+            <button type="button" className="btn sm quiet ng-back" aria-label="Back to all games" onClick={back}>
+              ‹
             </button>
-            <button type="button" aria-pressed={lcMode === "live"} onClick={() => setLcMode("live")}>
-              Live · fixed tick
+            <span className="ng-game-ic sm">
+              <GameIcon def={def} size={18} />
+            </span>
+            <span className="av-name" id="ngTitle">
+              {def.name}
+            </span>
+            <span className="sp"></span>
+            <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
+              ✕
             </button>
           </div>
-          {lcMode === "live" ? (
-            <>
-              <div className="ng-label">Tick — how long each rider gets per move</div>
-              <div className="seg full" role="group" aria-label="Tick length">
-                {TICKS.map((t) => (
-                  <button key={t.secs} type="button" aria-pressed={tick === t.secs} onClick={() => setTick(t.secs)}>
-                    {t.label}
-                  </button>
-                ))}
+          <details className="ng-howto" open={howOpen} onToggle={(e) => setHowOpen(e.currentTarget.open)}>
+            <summary>How to play</summary>
+            <HowToPlay def={def} />
+          </details>
+          <div className="ng-label">
+            Players
+            <span className="ng-count">
+              {picked.length} of {need}
+            </span>
+          </div>
+          <div className="ng-players">
+            {ordered.map((name) => {
+              const sel = picked.includes(name);
+              return (
+                <button
+                  type="button"
+                  key={name}
+                  className={"ng-player" + (sel ? " on" : "")}
+                  aria-pressed={sel}
+                  data-player={name}
+                  onClick={() => toggle(name)}
+                >
+                  <span className="ng-check">{sel ? "✓" : ""}</span>
+                  <span className="ng-name">{name}</span>
+                  {name === me ? <span className="ng-you">you</span> : null}
+                  <span className="ng-kind">{members.kindOf(name) || ""}</span>
+                </button>
+              );
+            })}
+          </div>
+          {def.options
+            .filter((o) => !o.when || o.when(opts))
+            .map((o) => (
+              <div key={o.key} className="ng-opt" data-opt={o.key}>
+                <div className="ng-label">{o.label}</div>
+                {o.help ? <div className="ng-help">{o.help}</div> : null}
+                <div className="seg full" role="group" aria-label={o.label}>
+                  {o.choices.map((c) => (
+                    <button key={String(c.value)} type="button" aria-pressed={opts[o.key] === c.value} onClick={() => setOpt(o.key, c.value)}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </>
-          ) : null}
-        </>
+            ))}
+          <div className={"ng-note" + (note ? " bad" : "")} role="status">
+            {note || hint}
+          </div>
+          <div className="actions">
+            <button type="button" className="btn" onClick={back}>
+              Back
+            </button>
+            <button type="button" className="btn primary" id="ngStart" disabled={!valid || busy} onClick={start}>
+              {busy ? "Starting…" : "Start " + def.name}
+            </button>
+          </div>
+        </div>
       )}
-      <div className="ng-note" role="status">
-        {note || hint}
-      </div>
-      <div className="actions">
-        <button type="button" className="btn" onClick={close}>
-          Cancel
-        </button>
-        <button type="button" className="btn primary" id="ngStart" disabled={!valid || busy} onClick={start}>
-          {busy ? "Starting…" : "Start game"}
-        </button>
-      </div>
     </dialog>
   );
 });

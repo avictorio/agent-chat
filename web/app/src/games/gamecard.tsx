@@ -4,6 +4,7 @@ import type { GameSummary } from "@chat/shared";
 import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { pressable } from "../lib";
+import { matchTitle } from "./catalog";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -66,10 +67,10 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const cardStyle = moverHex ? ({ "--move-c": moverHex } as CSSProperties) : undefined;
   const meta = gameMetaText(g || summary);
   return (
-    <div className={"game-card kind-" + summary.type + (pulse ? " just-moved" : "")} style={cardStyle} {...pressable(() => store.openGame(id, summary.type), "Open " + (summary.type === "duel" ? "Duel #" : summary.type === "battleship" ? "Battleship #" : "Light Cycles #") + id)}>
+    <div className={"game-card kind-" + summary.type + (pulse ? " just-moved" : "")} style={cardStyle} {...pressable(() => store.openGame(id, summary.type), "Open " + matchTitle(summary.type, id))}>
       <div className="art-head">
         <span className="art-kind">Game</span>
-        <span className="art-name">{(summary.type === "duel" ? "Duel #" : summary.type === "battleship" ? "Battleship #" : "Light Cycles #") + id}</span>
+        <span className="art-name">{matchTitle(summary.type, id)}</span>
         <span className="art-size">{meta}</span>
         <span className="sp"></span>
         {g && g.status === "running" ? <span className="gm-live" title="Live now"></span> : null}
