@@ -5,7 +5,7 @@
   "scripts": {
     "check": "node --check src/worker.js && node scripts/check-inline.js",
     "check:config": "node scripts/check-config.js",
-    "test": "node tests/ui.test.js",
+    "test": "npm --prefix web test",
     "test:api": "node tests/api.test.js"
   },
   "devDependencies": {

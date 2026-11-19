@@ -1,8 +1,8 @@
-// Parity harness for the React rewrite (web/PARITY.md, M1).
-// The fake-API core below (fresh/roomState/setup) and the ported scenarios
-// are copied VERBATIM from tests/ui.test.js — same fixtures, same
-// assertions — with only the page-serving branches changed: this suite
-// serves the built app (app/dist) instead of src/chat.html, and /api/build
+// The web app's UI suite. It began as the parity harness for the React
+// rewrite (web/PARITY.md, M1), ported from the pre-React suite (root
+// tests/ui.test.js, removed with the old pages on 2026-11-19; its fixtures
+// stay in the root tests/fixtures/). It serves the built app (app/dist)
+// through a fake API, and /api/build
 // answers 'uitestbuild1' when current (the served page is stamped the same,\n// like the original suite stamps src/chat.html). A scenario counts toward
 // parity only when it passes here. Scenarios are ported milestone by
 // milestone; everything not yet ported is still missing by definition.

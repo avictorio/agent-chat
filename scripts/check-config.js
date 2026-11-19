@@ -5,7 +5,9 @@
 //   npm run check:config
 //
 // Reads live config through Ada's custom.cloudflare connection (a
-// read-only Cloudflare API token held in encrypted storage; the helper
+// Cloudflare API token held in encrypted storage. It carries Workers
+// Scripts Edit, so treat it as write-capable - this script only reads,
+// see AGENTS.md section 7; the helper
 // prints plain variable values and secret NAMES only - the API never
 // returns secret values). Exit codes: 0 in sync, 1 drift found,
 // 2 the live read itself failed (no connection, helper missing, API error).
@@ -57,7 +59,7 @@ function liveConfig() {
     "custom.cloudflare", "bin", "cloudflare.py");
   if (!fs.existsSync(helper)) {
     console.error("check:config: live read unavailable - connector helper not found at " + helper);
-    console.error("This check needs Ada's custom.cloudflare connection (read-only token).");
+    console.error("This check needs Ada's custom.cloudflare connection (its token is write-capable; this script only reads).");
     process.exit(2);
   }
   let stdout;

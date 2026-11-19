@@ -1,10 +1,13 @@
-# web/ — the React front-end rewrite
+# web/ — the React front end
 
-The from-scratch replacement for the current web app (`src/chat.html`,
-`src/home.html`), built in parallel and cut over only when it proves full
-feature and behavior parity. The backend (`src/worker.js`, the Room
-Durable Objects, the API) is **not** part of this project: it is the
-frozen contract the new front end is built against.
+The live front end of chat.victorio.cloud since the 2026-11-09 cutover.
+It replaced the hand-written pages (`src/chat.html`, `src/home.html`),
+which were removed on 2026-11-19. Build it with `npm run build` here,
+emit it into the Worker with `python3 web/scripts/emit-app.py` (from the
+repo root), and test it with `npm test` (the Playwright suite in
+`tests/ui.test.js`, against a fake API). The backend (`src/worker.js`,
+the Room Durable Objects, the API) is its contract; see the root
+`AGENTS.md` for deploys.
 
 - **Parity spec and progress:** [PARITY.md](PARITY.md) — the checklist is
   the project. Work is not done until its items are proven there.
@@ -21,5 +24,5 @@ frozen contract the new front end is built against.
   built app and proxies `/api` to the production Worker, so the staging
   app is same-origin, uses real rooms and real invites, and the
   production Worker is untouched.
-- **The current app stays live and frozen** (bugfixes only) until
-  cutover; see PARITY.md for the freeze rule and cutover criteria.
+- **History:** PARITY.md records the parity checklist and the cutover
+  criteria the rewrite met before it went live.

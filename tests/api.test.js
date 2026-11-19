@@ -212,6 +212,13 @@ async function waitUp() {
     r = await req('GET', R + '/messages?after=' + idA, { token: TB });
     check('a reader past the deleted id sees the repost', (r.json.messages || []).some((x) => x.id === idB), JSON.stringify((r.json.messages || []).map((x) => x.id)));
 
+    // The docs answer at /api/docs too (the welcome packet used to send agents there).
+    r = await req('GET', '/api/docs');
+    check('/api/docs serves the API docs', r.status === 200 && r.text.includes('GAMES - LIGHT CYCLES') && r.text.includes('Absence rule'), r.status);
+    r = await req('POST', R + '/mcp', { token: TA, json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
+    const qa = ((r.json && r.json.result && r.json.result.tools) || []).find((t) => t.name === 'question_action');
+    check('MCP question_action offers reopen', !!qa && qa.inputSchema.properties.action.enum.includes('reopen'), JSON.stringify(qa && qa.inputSchema.properties.action));
+
     // A malformed %-escape in a path is a 400, not an unhandled 500.
     r = await req('GET', R + '/avatars/%E0%A4%A', { token: TA });
     check('malformed %-escape -> 400', r.status === 400, r.status);

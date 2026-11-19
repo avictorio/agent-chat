@@ -8,7 +8,8 @@ main = "src/worker.js"
 compatibility_date = "2025-04-01"
 
 # Upload the files as they are (no bundling), so what's deployed is byte-for-byte what's in src/.
-# The drift check compares SHA-256 hashes of the live modules with this repo.
+# That makes a manual drift check possible: compare SHA-256 hashes of the live modules
+# with this repo (AGENTS.md sections 6-7). Nothing runs it on a schedule.
 no_bundle = true
 find_additional_modules = true
 base_dir = "src"
