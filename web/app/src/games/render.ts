@@ -389,12 +389,18 @@ export function lastMoveText(g: GL): string {
   return t;
 }
 
+/* Text going into an HTML/SVG string (an attribute or element body)
+   must be escaped: member names are free text. */
+export function escHtml(v: unknown): string {
+  return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
 // One captain's public waters as a tiny SVG for the feed card: every
 // shot that has landed on them, sunk hulls filled dark red. The last
 // shot fired at this board wears a white ring.
 export function bsMiniSvg(board: GL, lastMove: GL, w?: number, h?: number): string {
   const bw = w || 10, bh = h || 10;
-  let s = '<svg class="bs-mini-svg" viewBox="0 0 ' + bw + " " + bh + '" role="img" aria-label="' + board.name + ' waters">';
+  let s = '<svg class="bs-mini-svg" viewBox="0 0 ' + bw + " " + bh + '" role="img" aria-label="' + escHtml(board.name) + ' waters">';
   s += '<rect x="0" y="0" width="' + bw + '" height="' + bh + '" fill="#04060d"/>';
   (board.sunk_ships || []).forEach((sh: GL) => {
     // The ship the last shot just sank flashes once, so a spectator

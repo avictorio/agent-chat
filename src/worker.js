@@ -22,6 +22,22 @@ const MAX_TEXT = 8000;
 const LOBBY_DEFAULT_SECONDS = 3600;
 const SPEAK_INFLIGHT = new Map();
 const MAX_NAME = 40;
+// Member names (2026-11-19 sweep): free text, but never markup or game
+// syntax. A name reaches HTML-built strings, game moves ("Ada:C5", volleys
+// split on commas) and push titles, so new names may not carry those
+// characters. Older names keep working; the web app escapes them anyway.
+function memberNameProblem(name) {
+  if (/[\u0000-\u001f\u007f<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
+  if (/[,:]/.test(name)) return "Names can't contain a comma or a colon (they separate targets in game moves)";
+  return null;
+}
+// Two names are the same member when they fold the same way. SQLite's
+// lower() folds ASCII only, so "José" and "JOSÉ" could both get invites
+// while every JS check treats them as one person; fold in JS instead, with
+// NFKC so look-alike forms (full-width letters, composed vs decomposed) match.
+function nameFold(name) {
+  return String(name || "").normalize("NFKC").toLowerCase();
+}
 const KEEP = 1000;
 const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
@@ -43,6 +59,13 @@ const MAX_SIGNERS = 100;
 
 const MEMBER_INVITES_PER_DAY = 5;
 const MAX_ACTIVE_INVITES = 50;
+// Push registrations kept per member (browsers and devices each): every one
+// costs a signed request on every message.
+const PUSH_MAX_PER_MEMBER = 10;
+// Web push endpoints must belong to a real push service (Chrome/Edge/
+// Samsung/Opera via FCM, Firefox autopush, Edge/Windows WNS, Safari/Apple),
+// so a member cannot point the room's fan-out at arbitrary hosts.
+const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|android\.googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com)$/;
 const AVATAR_MAX = 2000000;
 // Media storage failures are all-or-nothing (2026-11-11, media plan phase A):
 // an R2 failure fails the whole request with this message and leaves nothing
@@ -121,6 +144,8 @@ export class Room extends DurableObject {
     // Only the ticket's SHA-256 is stored; the raw ticket exists solely in the
     // begin_upload response and the PUT URL it authorizes.
     this.sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
+    // owner: minted with the owner key, for a draft posted under any name
+    try { this.sql.exec("ALTER TABLE ut ADD COLUMN owner INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch (e) {}
@@ -214,6 +239,11 @@ export class Room extends DurableObject {
       for (const k of keys) { try { await this.env.MEDIA.delete(k); } catch (e) {} }
     } catch (e) {}
     await this.ctx.storage.deleteAll();
+    // In-memory caches of what was just deleted: a room recreated under the
+    // same name in this instance's lifetime must not sign with the old key
+    // or skip its draft sweep.
+    this._sigBytes = null;
+    this._sweptAt = 0;
     return { deleted: true };
   }
 
@@ -291,7 +321,11 @@ export class Room extends DurableObject {
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
-    for (const c of this.clients) { if (streamWants(c, "reaction")) c.send(frame); }
+    // A draft is private to its sender (and the owner): its reactions are
+    // not announced to the rest of the room.
+    const sees = (c) => !msg.draft || c.owner || String(c.name || "").toLowerCase() === String(msg.sender).toLowerCase();
+    for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
+    if (msg.draft) return { reactions: reactions, message_from: msg.sender };
     this.emitState(room);
     const ws = this.waiters;
     this.waiters = new Set();
@@ -355,16 +389,25 @@ export class Room extends DurableObject {
     return { provider: r.provider || "cartesia", voice_id: r.voice_id || null, sample: !!r.sample_key, updated: r.ts || null };
   }
 
-  voiceSampleKey(room, name) { return (room || this.roomName || "room") + "/voice-sample/" + String(name).toLowerCase().replace(/[^a-z0-9_-]+/g, "-"); }
+  // The slug alone collided ("José" and "Jos?" both slug to "jos-"), so
+  // one member could overwrite another's sample: a hash of the folded name
+  // keeps keys distinct. Older rows keep the key they were stored under.
+  async voiceSampleKey(room, name) {
+    const fold = nameFold(name);
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fold)));
+    const hex = Array.from(h.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
+    return (room || this.roomName || "room") + "/voice-sample/" + fold.replace(/[^a-z0-9_-]+/g, "-").slice(0, 40) + "-" + hex;
+  }
 
   async putVoiceSample(name, data, type, room) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
-    const key = this.voiceSampleKey(room, name);
+    const key = await this.voiceSampleKey(room, name);
     // Storage failure is its own answer (phase A): the route turns STORE_FAIL
     // into a 503, distinct from the no-such-member null.
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { return "STORE_FAIL"; }
     const prev = this.voiceRow(name);
+    if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) {} }
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
     this.notifyMembers(name);
@@ -556,7 +599,7 @@ export class Room extends DurableObject {
   // ticket in the URL is the whole credential, which is what lets an agent
   // whose invite token lives in its gateway (never in its sandbox) upload.
   // (The TTL itself lives with the test hooks above: ticketTtlMs.)
-  async mintUploadTicket(msgId, kind, member, room) {
+  async mintUploadTicket(msgId, kind, member, room, byOwner) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
     const r = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
@@ -569,8 +612,8 @@ export class Room extends DurableObject {
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const maxBytes = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
     const expires = now + this.ticketTtlMs();
-    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes);
+    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null);
     return { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
   }
 
@@ -578,7 +621,7 @@ export class Room extends DurableObject {
     // An unknown room answers exactly like an unknown ticket: no hint.
     if (!this.ready) return { status: 404, error: "Unknown upload ticket" };
     const h = await sha256hex(String(rawTicket || ""));
-    const t = this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries FROM ut WHERE h = ?", h).toArray()[0];
+    const t = this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries, owner FROM ut WHERE h = ?", h).toArray()[0];
     // No hint whether a garbled ticket ever existed.
     if (!t) return { status: 404, error: "Unknown upload ticket" };
     const now = Date.now();
@@ -586,8 +629,10 @@ export class Room extends DurableObject {
     if (now > t.expires) return { status: 410, error: "This upload link has expired" };
     if (t.tries >= TICKET_MAX_TRIES) return { status: 410, error: "This upload link has had too many attempts" };
     this.sql.exec("UPDATE ut SET tries = tries + 1 WHERE h = ?", h);
-    const inv = this.sql.exec("SELECT revoked FROM inv WHERE lower(name) = lower(?)", t.member).toArray()[0];
-    if (!inv || inv.revoked) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    // Any active invite under the name counts: a member whose invite was
+    // rotated has a revoked row and a live one. Owner-minted tickets carry
+    // no member check (the owner posts under any name).
+    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
     const m = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The draft this upload was opened for is gone" };
     if (!m.draft) return { status: 409, error: "The draft this upload was opened for is already published" };
@@ -597,13 +642,19 @@ export class Room extends DurableObject {
     if (data.byteLength > t.max_bytes) return { status: 413, error: kind === "image" ? "Images can be up to 5 MB" : kind === "audio" ? "Audio clips can be up to 5 MB" : "Videos can be up to 25 MB on a single-shot upload; larger files use the chunked flow" };
     const type = kind === "image" ? sniffImage(data) : kind === "audio" ? sniffAudio(data) : sniffVideo(data);
     if (!type) return { status: 415, error: kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV" };
-    // Same R2-only write as every other path (phase A): a storage failure is
-    // a 503 and does NOT consume the ticket, so the PUT can simply retry.
-    try { await this.putMedia(t.msg, kind, data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
+    // Claim the ticket before the R2 write: the await lets a second PUT with
+    // the same ticket in, and it must see the ticket as spent. Same R2-only
+    // write as every other path (phase A): a storage failure is a 503 and
+    // releases the claim, so the PUT can simply retry.
+    this.sql.exec("UPDATE ut SET used = ? WHERE h = ?", now, h);
+    try { await this.putMedia(t.msg, kind, data, type, room); } catch (e) {
+      this.sql.exec("UPDATE ut SET used = NULL WHERE h = ?", h);
+      if (isStoreError(e)) return { status: 503, error: STORE_MSG };
+      throw e;
+    }
     if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, t.msg);
     if (kind === "audio") this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, t.msg);
     if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, t.msg);
-    this.sql.exec("UPDATE ut SET used = ? WHERE h = ?", now, h);
     let published = false;
     const mp = await this.maybeAutoPublish(t.msg, room);
     if (mp) published = true;
@@ -661,11 +712,13 @@ export class Room extends DurableObject {
     const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
-    const row = this.sql.exec("SELECT r2key, upload_id, parts, part_size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    const row = this.sql.exec("SELECT r2key, upload_id, parts, part_size, size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
     if (row.part_size && data && data.byteLength > row.part_size) return { status: 413, error: "That part is larger than this upload's part size" };
     n = Math.floor(Number(n));
     if (!Number.isFinite(n) || n < 1 || n > 10000) return { status: 400, error: "Part number out of range" };
+    // Parts past the declared size would only be stored to fail at finish.
+    if (row.part_size && row.size && n > Math.ceil(row.size / row.part_size)) return { status: 400, error: "Part number is past the end of this upload (" + Math.ceil(row.size / row.part_size) + " parts)" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
     const part = await up.uploadPart(n, data);
@@ -729,9 +782,12 @@ export class Room extends DurableObject {
     return { status: 200, key: key, uploadId: up.uploadId };
   }
 
-  async streamComplete(id, size, sniffed, room) {
-    const row = this.sql.exec("SELECT size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (!row) return { status: 404, error: "No upload in progress for that message" };
+  // Both take the multipart upload id streamBegin answered: a newer upload
+  // for the same message replaces the row, and a late finish or abort of
+  // the old one must not index or delete the new one.
+  async streamComplete(id, size, sniffed, room, uploadId) {
+    const row = this.sql.exec("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 409, error: "This upload was replaced by a newer one for the same message" };
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
@@ -739,12 +795,15 @@ export class Room extends DurableObject {
     return { status: 200, type: sniffed, bytes: size, published: published };
   }
 
-  async streamAbort(id) {
+  async streamAbort(id, uploadId) {
     // Discard means the R2 multipart dies too, as in abortVideoUpload: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
     const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+    if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
     if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
+    // a stream that completed in R2 but failed the size/type check left an object
+    if (row && row.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(row.r2key); } catch (e) {} }
     this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
     return { status: 200 };
@@ -771,8 +830,14 @@ export class Room extends DurableObject {
     return { status: 200, found: false };
   }
 
-  videoUploadStatus(id) {
-    const row = this.sql.exec("SELECT type, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+  // who/owner given (the REST route): only the draft's sender or the owner
+  // may see another message's upload progress.
+  videoUploadStatus(id, who, owner) {
+    if (who !== undefined && !owner) {
+      const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+      if (!r || String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 200, uploading: false, received: [] };
+    }
+    const row =this.sql.exec("SELECT type, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row) return { status: 200, uploading: false, received: [] };
     const got = new Set(this.sql.exec("SELECT n FROM mdp WHERE msg = ?", id).toArray().map((r) => r.n));
     try { for (const p of JSON.parse(row.parts || "[]")) got.add(p.partNumber); } catch (e) {}
@@ -804,8 +869,12 @@ export class Room extends DurableObject {
 
   // ---- Web Push: subscriptions and fan-out ----
   pushSubscribe(member, sub, mode) {
+    const who = String(member || "").toLowerCase();
     this.sql.exec("INSERT OR REPLACE INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES (?, ?, ?, ?, ?, ?)",
-      String(member || "").toLowerCase(), sub.endpoint, sub.p256dh, sub.auth, Date.now(), mode === "mentions" ? "mentions" : "all");
+      who, sub.endpoint, sub.p256dh, sub.auth, Date.now(), mode === "mentions" ? "mentions" : "all");
+    // Each registration costs a signed request per message: keep a
+    // member's newest PUSH_MAX_PER_MEMBER and drop the rest.
+    this.sql.exec("DELETE FROM push WHERE member = ? AND endpoint NOT IN (SELECT endpoint FROM push WHERE member = ? ORDER BY ts DESC LIMIT ?)", who, who, PUSH_MAX_PER_MEMBER);
     return { status: 200 };
   }
   pushUnsubscribe(member, endpoint, owner) {
@@ -822,8 +891,10 @@ export class Room extends DurableObject {
   // member + mode semantics identical to web push. APNs rows can register
   // now; their sender lands with the iOS leg.
   deviceRegister(member, platform, token, mode) {
+    const who = String(member || "").toLowerCase();
     this.sql.exec("INSERT OR REPLACE INTO pushdev (member, platform, token, ts, mode) VALUES (?, ?, ?, ?, ?)",
-      String(member || "").toLowerCase(), platform === "ios" ? "ios" : "android", String(token || ""), Date.now(), mode === "mentions" ? "mentions" : "all");
+      who, platform === "ios" ? "ios" : "android", String(token || ""), Date.now(), mode === "mentions" ? "mentions" : "all");
+    this.sql.exec("DELETE FROM pushdev WHERE member = ? AND token NOT IN (SELECT token FROM pushdev WHERE member = ? ORDER BY ts DESC LIMIT ?)", who, who, PUSH_MAX_PER_MEMBER);
     return { status: 200 };
   }
   deviceUnregister(member, token, owner) {
@@ -849,7 +920,8 @@ export class Room extends DurableObject {
       if (doSend && r.platform === "android") {
         try { item.send = await sendFcmDebug(this.env, r.token, { title: "Ada - Agent Chat", body: "Test push - if this buzzed, the chain works.", url: "/r/" + room, tag: "room-" + room }); }
         catch (e) { item.send = { stage: "exception", detail: String(e && e.message || e).slice(0, 160) }; }
-        if (item.send === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
+        // sendFcmDebug answers an object; its verdict says a token is dead
+        if (item.send && item.send.verdict === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
       }
       out.push(item);
     }
@@ -860,9 +932,14 @@ export class Room extends DurableObject {
     const text = String(msg.text || "").trim();
     const excerpt = text ? (text.length > 120 ? text.slice(0, 117) + "..." : text) : "(attachment)";
     const payload = JSON.stringify({ title: msg.from + " - Agent Chat", body: excerpt, url: "/r/" + room, tag: "room-" + room });
+    // Only the owner ("") and members with an active invite hear about a
+    // message: revoke() drops a leaving member's registrations, and this
+    // keeps any that slipped through (older rows) from leaking text.
+    const active = new Set(this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
+    const allowed = (m) => m === "" || active.has(m);
     // Web push (browser subscriptions).
     const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
-    const targets = rows.filter((r) => r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
+    const targets = rows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     for (const r of targets) {
       try {
         const status = await sendWebPush(this.env, r, payload);
@@ -876,7 +953,7 @@ export class Room extends DurableObject {
     const drows = this.sql.exec("SELECT member, platform, token, mode FROM pushdev").toArray();
     if (drows.length) {
       const note = JSON.parse(payload);
-      const dtargets = drows.filter((r) => r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
+      const dtargets = drows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
       for (const r of dtargets) {
         if (r.platform !== "android") continue;
         try {
@@ -919,12 +996,22 @@ export class Room extends DurableObject {
   // review): if a member could hold it, their posts and game frames
   // would be indistinguishable from the official's.
   isReservedName(name) {
-    return String(name || "").trim().toLowerCase() === "referee";
+    return nameFold(String(name || "").trim()) === "referee";
   }
 
-  invite(name, kind, by) {
+  // limits (a member creating an invite): the day and active caps are
+  // checked here, inside the one serialized call, so parallel requests
+  // cannot all pass a check made in a separate call.
+  invite(name, kind, by, limits) {
+    name = String(name || "").normalize("NFC");
     if (this.isReservedName(name)) return null;
-    if (this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", name).toArray().length) return null;
+    const fold = nameFold(name);
+    if (this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) return null;
+    if (limits) {
+      const load = this.inviteLoad(by);
+      if (load.recent >= limits.perDay) return { limit: "day" };
+      if (load.active >= limits.maxActive) return { limit: "active" };
+    }
     const bytes = crypto.getRandomValues(new Uint8Array(18));
     const token = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, "-").replace(/\//g, "_");
     const created = Date.now();
@@ -933,16 +1020,36 @@ export class Room extends DurableObject {
   }
 
   revoke(token) {
-    if (!this.sql.exec("SELECT token FROM inv WHERE token = ? AND revoked IS NULL", token).toArray().length) return false;
+    const row = this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray()[0];
+    if (!row) return false;
     this.sql.exec("UPDATE inv SET revoked = ? WHERE token = ?", Date.now(), token);
     for (const c of this.clients) if (c.token === token) c.close();
+    // A member who is out stops getting pushes (message text included):
+    // their browser and phone registrations go with their last invite.
+    const fold = nameFold(row.name);
+    if (!this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
     this.emitState();
     return true;
   }
 
-  unlock() {
+  dropPush(name) {
+    const member = String(name || "").toLowerCase();
+    this.sql.exec("DELETE FROM push WHERE member = ?", member);
+    this.sql.exec("DELETE FROM pushdev WHERE member = ?", member);
+  }
+
+  // Revoke everyone: every invite, every push registration, every open
+  // member stream (owner streams stay), and the avatar objects in R2 -
+  // the inv rows are their only pointers, so a later destroy() could not
+  // find them.
+  async unlock() {
+    const avatarKeys = this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM cfg WHERE k = 'open'");
+    this.sql.exec("DELETE FROM push");
+    this.sql.exec("DELETE FROM pushdev");
+    for (const c of Array.from(this.clients)) if (!c.owner) c.close();
+    if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) {} }
     return true;
   }
 
@@ -3612,7 +3719,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "decision_action": {
       needFrom(); const id = parseInt(A.id, 10);
       if (A.action === "delete") { if (!(await stub.deleteDecision(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = String(A.title || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
+      if (A.action === "edit") { const title = String(A.title || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
       const r = await stub.updateDecision(id, String(A.action || ""), from); if (r.error) throw new Error(r.error); return { room: room, decision: r.decision };
     }
     case "get_questions": return Object.assign({ room: room }, await stub.questions());
@@ -3630,12 +3737,12 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "stake_action": {
       needFrom(); const id = parseInt(A.id, 10);
       if (A.action === "delete") { if (!(await stub.deleteStake(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = String(A.title || "").trim(); const date = String(A.date || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
+      if (A.action === "edit") { const title = String(A.title || "").trim(); const date = String(A.date || "").trim(); const note = String(A.note || "").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
       const r = await stub.updateStake(id, String(A.action || ""), from); if (r.error) throw new Error(r.error); return { room: room, stake: r.stake };
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(parseInt(A.limit, 10) || 10, 1, KEEP_DIGESTS)));
     case "file_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw new Error("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow."); return { room: room, digest: d }; }
-    case "edit_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "edit_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
     case "delete_digest": { needFrom(); if (!(await stub.deleteDigest(parseInt(A.id, 10)))) throw new Error("Nothing with that id"); return { room: room, deleted: parseInt(A.id, 10) }; }
     case "fetch_url": {
       needFrom();
@@ -3662,8 +3769,9 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
       needFrom();
       const kind = String(A.kind || "");
       if (["image", "audio", "video"].indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio or video");
+      if (String(A.text || "").length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
       const msg = await stub.post(from, String(A.text || ""), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
-      const t = await stub.mintUploadTicket(msg.id, kind, from, room);
+      const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
       if (t.status !== 200) throw new Error(t.error);
       const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, kind, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
@@ -4141,6 +4249,31 @@ async function cartesiaClone(env, data, type, memberName) {
   const j = await r.json().catch(() => null);
   if (!r.ok || !j || !j.id) throw new Error("Cartesia cloning failed (" + r.status + ")" + (j && (j.error || j.message) ? ": " + String(j.error || j.message).slice(0, 160) : ""));
   return j.id;
+}
+
+// A replaced or cleared clone is deleted at Cartesia too, so re-cloning
+// does not pile voices up on the account. Best effort: a failure here
+// never fails the member's request.
+async function cartesiaDelete(env, voiceId) {
+  if (!env.CARTESIA_API_KEY || !voiceId) return;
+  try {
+    await fetch("https://api.cartesia.ai/voices/" + encodeURIComponent(voiceId), {
+      method: "DELETE",
+      headers: { "X-API-Key": env.CARTESIA_API_KEY, "Cartesia-Version": "2025-04-16" },
+    });
+  } catch (e) {}
+}
+
+// Each clone is a paid call: members get VOICE_CLONES_PER_DAY a day (the
+// owner is not capped). KV counters, so a parallel burst can overshoot by
+// a little - an abuse brake like the room-creation caps.
+const VOICE_CLONES_PER_DAY = 5;
+async function cloneAllowed(env, room, who) {
+  const k = "clone:" + room + ":" + nameFold(who) + ":" + new Date().toISOString().slice(0, 10);
+  const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
+  if (n >= VOICE_CLONES_PER_DAY) return false;
+  await env.REQUESTS.put(k, String(n + 1), { expirationTtl: 172800 });
+  return true;
 }
 
 // Strip the Markdown that would sound like noise read aloud, and cap the length
@@ -4957,6 +5090,19 @@ function docs(o) {
 
 export default {
   async fetch(request, env) {
+    try {
+      return await routeRequest(request, env);
+    } catch (e) {
+      // A malformed %-escape in a path segment (decodeURIComponent throws
+      // URIError) is the client's mistake: answer 400, not a 500.
+      if (e instanceof URIError) return json({ error: "The URL has a malformed %-escape" }, 400);
+      throw e;
+    }
+  },
+};
+
+async function routeRequest(request, env) {
+  {
     const url = new URL(request.url);
     const path = url.pathname;
     const owner = !!env.OWNER_KEY && request.headers.get("X-Owner-Key") === env.OWNER_KEY;
@@ -5036,6 +5182,9 @@ export default {
       if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);
       if (!cname) return json({ error: "\"name\" is required" }, 400);
+      if (nameFold(cname) === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
+      const cnameErr = memberNameProblem(cname);
+      if (cnameErr) return json({ error: cnameErr }, 400);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
       const cday = new Date().toISOString().slice(0, 10);
       const cip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -5378,18 +5527,24 @@ export default {
         if (!who) return json({ error: "Voices are for members of invite-only rooms: send your X-Invite-Token." }, 403);
       }
       if (request.method === "GET" && !action) return json({ room, name: who, voice: await stub.voiceOf(who) });
+      const oldVoice = await stub.voiceOf(who);
+      const dropOld = async (keep) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id); };
+      const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
       if (request.method === "DELETE" && !action) {
         if (!(await stub.clearVoice(who))) return json({ error: "No voice to remove" }, 404);
+        await dropOld(null);
         return json({ room, name: who, voice: null });
       }
       if (request.method === "POST" && action === "reclone") {
         if (!env.CARTESIA_API_KEY) return json({ error: "Server cloning is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
         const smp = await stub.getVoiceSample(who);
         if (!smp) return json({ error: "No stored sample to clone from" }, 404);
+        if (!owner && !(await cloneAllowed(env, room, who))) return json({ error: capMsg }, 429);
         let vid;
         try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && e.message) || e) }, 502); }
         const v = await stub.setVoiceId(who, "cartesia", vid);
-        if (!v) return json({ error: "No member with that name" }, 404);
+        if (!v) { await cartesiaDelete(env, vid); return json({ error: "No member with that name" }, 404); }
+        await dropOld(vid);
         return json({ room, name: who, voice: v, cloned: true });
       }
       if ((request.method === "PUT" || request.method === "POST") && action === "sample") {
@@ -5411,9 +5566,11 @@ export default {
         if (key === "STORE_FAIL") return json({ error: STORE_MSG }, 503);
         if (!key) return json({ error: "No member with that name" }, 404);
         if (!env.CARTESIA_API_KEY) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, note: "Sample stored. Server cloning is not configured yet, so no voice id was saved." }, 202);
+        if (!owner && !(await cloneAllowed(env, room, who))) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true, error: capMsg }, 429);
         let vid;
         try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && e.message) || e), sample_stored: true }, 502); }
         const v = await stub.setVoiceId(who, "cartesia", vid);
+        await dropOld(vid);
         return json({ room, name: who, voice: v, cloned: true });
       }
       return json({ error: "Method not allowed" }, 405);
@@ -5465,14 +5622,13 @@ export default {
         if (!name) return json({ error: "\"name\" is required" }, 400);
         const kind = String((body && body.kind) || "agent").toLowerCase();
         if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
-        if (name.toLowerCase() === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
-        if (memberCreate) {
-          const load = await stub.inviteLoad(inviter);
-          if (load.recent >= MEMBER_INVITES_PER_DAY) return json({ error: "You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day" }, 429);
-          if (load.active >= MAX_ACTIVE_INVITES) return json({ error: "This room already has " + MAX_ACTIVE_INVITES + " active invites" }, 429);
-        }
-        const inv = await stub.invite(name, kind, owner ? null : inviter);
-        if (!inv) return json({ error: name + " already has an active invite. Revoke it first to make a new one." }, 409);
+        if (nameFold(name) === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
+        const nameErr = memberNameProblem(name);
+        if (nameErr) return json({ error: nameErr }, 400);
+        const inv = await stub.invite(name, kind, owner ? null : inviter, memberCreate ? { perDay: MEMBER_INVITES_PER_DAY, maxActive: MAX_ACTIVE_INVITES } : null);
+        if (inv && inv.limit === "day") return json({ error: "You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day" }, 429);
+        if (inv && inv.limit === "active") return json({ error: "This room already has " + MAX_ACTIVE_INVITES + " active invites" }, 429);
+        if (!inv) return json({ error: name + " already has an active invite (names match regardless of case). Revoke it first to make a new one." }, 409);
         const created = Object.assign({ room, link: link(inv.token) }, inv);
         if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token);
         return json(created, 201);
@@ -5725,6 +5881,9 @@ export default {
         const p256dh = String(keysIn.p256dh || "");
         const auth = String(keysIn.auth || "");
         if (!/^https:\/\//.test(endpoint)) return json({ error: "subscription.endpoint must be an https URL" }, 400);
+        let pushHost = "";
+        try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch (e) {}
+        if (!PUSH_HOST_RE.test(pushHost)) return json({ error: "subscription.endpoint must be a browser push service URL" }, 400);
         // b64urlDecode throws on malformed input (bad characters, impossible
         // lengths): validate like every other base64 path in this file and
         // answer 400, not an unhandled 500.
@@ -5999,8 +6158,9 @@ export default {
       const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
       const fail = async (status, error) => {
         try { await up.abort(); } catch (e) {}
-        try { await env.MEDIA.delete(key); } catch (e) {}
-        await stub.streamAbort(id);
+        // streamAbort deletes the object too, but only while this upload
+        // still owns the message's row: the key is shared with any newer one
+        await stub.streamAbort(id, uploadId);
         return json({ error: error }, status);
       };
       const parts = [];
@@ -6041,7 +6201,7 @@ export default {
         try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}
       }
       if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
-      const doneRes = await stub.streamComplete(id, counted, sniffed, room);
+      const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);
       if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
       return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
     }
@@ -6069,7 +6229,7 @@ export default {
       }
       if (action === "status") {
         if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-        const r = await stub.videoUploadStatus(id);
+        const r = await stub.videoUploadStatus(id, acc.name || "", owner);
         return json({ room: room, id: id, uploading: r.uploading, size: r.size || null, type: r.type || null, received: r.received });
       }
       if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -6122,7 +6282,7 @@ export default {
       const kind = String((body && body.kind) || "");
       if (["image", "audio", "video"].indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio or video" }, 400);
       const member = acc.name || String((body && body.from) || "");
-      const t = await stub.mintUploadTicket(id, kind, member, room);
+      const t = await stub.mintUploadTicket(id, kind, member, room, !!owner);
       if (t.status !== 200) return json({ error: t.error }, t.status);
       return json({ room: room, message_id: id, draft: true, upload: ticketUpload(url.origin, room, kind, t) });
     }
@@ -6313,5 +6473,5 @@ export default {
     }
 
     return new Response("Not found", { status: 404 });
-  },
-};
+  }
+}

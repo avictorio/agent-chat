@@ -156,8 +156,55 @@ async function waitUp() {
     check('react after publish works', r.status === 200, r.status);
 
     // Push subscribe validates its keys instead of throwing on bad base64url.
-    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://example.com/x', keys: { p256dh: '!!!', auth: 'AAAAAAAAAAAAAAAAAAAAAA' } } } });
-    check('malformed push keys -> 400, not 500', r.status === 400, r.status);
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/bad-keys', keys: { p256dh: '!!!', auth: 'AAAAAAAAAAAAAAAAAAAAAA' } } } });
+    check('malformed push keys -> 400, not 500', r.status === 400 && /p256dh/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    // Push endpoints must belong to a browser push service, so a member
+    // cannot aim the room's fan-out at an arbitrary host.
+    const P65 = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
+    const AUTH16 = Buffer.alloc(16, 9).toString('base64url');
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://example.com/x', keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('push endpoint off the push services -> 400', r.status === 400 && /push service/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com.evil.example/x', keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('look-alike push host -> 400', r.status === 400, r.status);
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF, keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('push service endpoint accepted', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
+    await req('POST', R + '/push/unsubscribe', { token: TA, json: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF } });
+
+    // Member names (2026-11-19 sweep): no markup or game syntax, and one
+    // member per name however it is cased or composed.
+    r = await req('POST', R + '/invites', { owner: true, json: { name: '<img src=x onerror=alert(1)>', kind: 'agent' } });
+    check('name with markup -> 400', r.status === 400, r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'Ada:C5', kind: 'agent' } });
+    check('name with a colon -> 400', r.status === 400, r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'Ann, Bo', kind: 'agent' } });
+    check('name with a comma -> 400', r.status === 400, r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'APIA', kind: 'agent' } });
+    check('differently cased duplicate -> 409', r.status === 409, r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'ＡｐｉＡ', kind: 'agent' } });
+    check('full-width look-alike duplicate -> 409', r.status === 409, r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'Ｒｅｆｅｒｅｅ', kind: 'agent' } });
+    check('full-width Referee is reserved -> 400', r.status === 400 && /reserved/.test(r.json.error), r.status);
+    const accU = await req('POST', R + '/invites', { owner: true, json: { name: 'José', kind: 'agent' } });
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'JOSÉ', kind: 'agent' } });
+    check('non-ASCII case fold duplicate -> 409', accU.status === 201 && r.status === 409, accU.status + ' ' + r.status);
+    r = await req('POST', R + '/invites', { owner: true, json: { name: 'José', kind: 'agent' } });
+    check('decomposed accent duplicate -> 409', r.status === 409, r.status);
+    if (accU.json && accU.json.token) await req('DELETE', R + '/invites/' + encodeURIComponent(accU.json.token), { owner: true });
+
+    // Revoking a member drops their push registrations: no more message
+    // text reaches a device of someone who is out.
+    const invPG = await req('POST', R + '/invites', { owner: true, json: { name: 'PushGone', kind: 'agent' } });
+    r = await req('POST', R + '/push/device/register', { token: invPG.json.token, json: { token: 'dev-pushgone-' + SUF, platform: 'android' } });
+    check('device registers', r.status === 200, r.status);
+    r = await req('POST', R + '/push/device/test', { owner: true, json: {} });
+    check('owner sees the registered device', (r.json.devices || []).some((d) => d.member === 'pushgone'), JSON.stringify(r.json).slice(0, 120));
+    await req('DELETE', R + '/invites/' + encodeURIComponent(invPG.json.token), { owner: true });
+    r = await req('POST', R + '/push/device/test', { owner: true, json: {} });
+    check('revoke drops the member\'s devices', !(r.json.devices || []).some((d) => d.member === 'pushgone'), JSON.stringify(r.json).slice(0, 120));
+
+    // A malformed %-escape in a path is a 400, not an unhandled 500.
+    r = await req('GET', R + '/avatars/%E0%A4%A', { token: TA });
+    check('malformed %-escape -> 400', r.status === 400, r.status);
 
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
