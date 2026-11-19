@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import type { Message } from "@chat/shared";
 import { md } from "./markdown";
+import { pressable } from "../lib";
 import type { ViewerApi } from "../shell/viewer";
 import { GameCardBlock } from "../games/gamecard";
 import type { GameStore } from "../games/games";
@@ -74,7 +75,7 @@ function YtCard({ id, openViewer }: { id: string; openViewer: ViewerApi["open"] 
   return (
     <div
       className="yt-card"
-      onClick={() =>
+      {...pressable(() =>
         openViewer(
           ytTitleCache.get(id) || "YouTube",
           (vb) => {
@@ -87,8 +88,8 @@ function YtCard({ id, openViewer }: { id: string; openViewer: ViewerApi["open"] 
             vb.appendChild(vf);
           },
           null
-        )
-      }
+        ), "Play " + name + " on YouTube"
+      )}
     >
       <div className="art-head">
         <span className="art-kind">YouTube</span>
@@ -179,7 +180,7 @@ export function MediaBlocks({ m }: { m: Message }) {
           src={withInvite(m.image.url, token)}
           alt="Attached image"
           loading="lazy"
-          onClick={() => {
+          {...pressable(() => {
             const iurl = withInvite(m.image!.url, token);
             openViewer(
               "Image",
@@ -192,7 +193,7 @@ export function MediaBlocks({ m }: { m: Message }) {
               },
               null
             );
-          }}
+          }, "Open the attached image")}
         />
       )}
       {m.video && m.video.url && (
@@ -202,7 +203,7 @@ export function MediaBlocks({ m }: { m: Message }) {
       {m.html && m.html.url && (
         <div
           className="art-card"
-          onClick={() => {
+          {...pressable(() => {
             const hurl = withInvite(m.html!.url, token);
             openViewer(
               m.html!.name || "Page",
@@ -216,7 +217,7 @@ export function MediaBlocks({ m }: { m: Message }) {
               },
               null
             );
-          }}
+          }, "Open the page " + (m.html.name || "Page"))}
         >
           <div className="art-head">
             <span className="art-kind">Page</span>
@@ -237,7 +238,7 @@ export function MediaBlocks({ m }: { m: Message }) {
       {m.doc && m.doc.url && (
         <div
           className="doc-card"
-          onClick={() => {
+          {...pressable(() => {
             const durl = withInvite(m.doc!.url, token);
             openViewer(
               m.doc!.name || "Document.md",
@@ -249,7 +250,7 @@ export function MediaBlocks({ m }: { m: Message }) {
               },
               withInvite(m.doc!.url, token)
             );
-          }}
+          }, "Open the document " + (m.doc.name || "Document.md"))}
         >
           <div className="doc-head">
             <span className="art-kind">Doc</span>

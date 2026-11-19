@@ -3,6 +3,7 @@ import type { GameSummary } from "@chat/shared";
 import { useFeed, useSession } from "../room/ctx";
 import { finalScore, formatLeft, type GL } from "./render";
 import { chimeMuted, setChimeMuted } from "./chime";
+import { pressable } from "../lib";
 
 // Standings with motion, from the finished list (newest first): each
 // player's current streak, and their rank before the kind's most
@@ -277,23 +278,34 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const [shown, setShown] = useState(PAGE);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ live: null, history: null, standings: null });
 
+  // /games scans up to 500 matches on the server: the first open loads at
+  // once, later store changes (a burst of frames, a poll) coalesce into
+  // one reload a beat later.
+  const listedRef = useRef(false);
   useEffect(() => {
     if (!active) return;
     let dead = false;
-    client.listGames().then(
-      (r) => {
-        if (!dead) {
-          setGames(r.games || []);
-          setRecord(r.record || {});
-          setErr("");
-        }
-      },
+    const t = window.setTimeout(
       () => {
-        if (!dead) setErr("Could not load the matches. Try again in a moment.");
-      }
+        client.listGames().then(
+          (r) => {
+            if (!dead) {
+              listedRef.current = true;
+              setGames(r.games || []);
+              setRecord(r.record || {});
+              setErr("");
+            }
+          },
+          () => {
+            if (!dead) setErr("Could not load the matches. Try again in a moment.");
+          }
+        );
+      },
+      listedRef.current ? 1200 : 0
     );
     return () => {
       dead = true;
+      window.clearTimeout(t);
     };
   }, [active, client, version]);
 
@@ -346,7 +358,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     const isLive = g.status === "lobby" || g.status === "running";
     const players = g.players || [];
     return (
-      <div className={"gm-row kind-" + g.type} key={g.id} onClick={() => store.openGame(g.id, g.type)}>
+      <div className={"gm-row kind-" + g.type} key={g.id} {...pressable(() => store.openGame(g.id, g.type), "Open " + (KIND[g.type] || g.type) + " #" + g.id)}>
         <span className="gm-top">
           {isLive ? <span className="gm-live" /> : null}
           <span className="gm-kind">{(KIND[g.type] || g.type) + " #" + g.id}</span>

@@ -65,9 +65,14 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // A callback ref: the sentinel unmounts on an empty result and comes
+  // back later, and the observer must follow the element it watches.
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
   const stateRef = useRef({ group, sender, cursor, loading });
   stateRef.current = { group, sender, cursor, loading };
+  // Each listing request takes a number; only the newest one may land,
+  // so a filter tap mid-load replaces the load instead of being dropped.
+  const seqRef = useRef(0);
   const lastFetchRef = useRef(0);
   const memberSetRef = useRef(memberSet);
   memberSetRef.current = memberSet;
@@ -75,7 +80,10 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
   const fetchPage = useCallback(
     async (before: string | null, replace: boolean) => {
       const st = stateRef.current;
-      if (st.loading) return;
+      // a next page waits for whatever is loading; a fresh listing wins
+      if (!replace && st.loading) return;
+      const seq = ++seqRef.current;
+      stateRef.current = { ...st, loading: true };
       setLoading(true);
       setError(null);
       try {
@@ -86,15 +94,16 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
           before: before || undefined,
           limit: 60,
         });
+        if (seq !== seqRef.current) return;
         lastFetchRef.current = Date.now();
         setCounts(d.counts as unknown as Record<string, number>);
         setCursor(d.next_cursor);
         setItems((prev) => (replace ? d.attachments : [...prev, ...d.attachments]));
         setLoaded(true);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Couldn't load attachments.");
+        if (seq === seqRef.current) setError(e instanceof Error ? e.message : "Couldn't load attachments.");
       } finally {
-        setLoading(false);
+        if (seq === seqRef.current) setLoading(false);
       }
     },
     [client]
@@ -116,14 +125,14 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
       firstFilterRun.current = false;
       return;
     }
-    if (loaded) void fetchPage(null, true);
+    if (loaded || active) void fetchPage(null, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, sender]);
 
   // Infinite scroll: the sentinel sits after the grid.
   useEffect(() => {
     const root = scrollRef.current;
-    const el = sentinelRef.current;
+    const el = sentinel;
     if (!root || !el || !window.IntersectionObserver) return;
     const io = new IntersectionObserver(
       (es) => {
@@ -136,7 +145,7 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [fetchPage, loaded]);
+  }, [fetchPage, sentinel]);
 
   const openItem = (a: Attachment) => {
     const when = new Date(a.ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -348,7 +357,7 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
                 </button>
               ))}
             </div>
-            <div ref={sentinelRef} className="media-sentinel" aria-hidden="true"></div>
+            <div ref={setSentinel} className="media-sentinel" aria-hidden="true"></div>
             {loading ? <p className="media-note-sm">Loading…</p> : null}
             {loaded && !cursor && items.length > 0 ? <p className="media-note-sm">That's everything the room has kept.</p> : null}
           </>

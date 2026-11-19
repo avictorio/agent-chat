@@ -202,6 +202,16 @@ async function waitUp() {
     r = await req('POST', R + '/push/device/test', { owner: true, json: {} });
     check('revoke drops the member\'s devices', !(r.json.devices || []).some((d) => d.member === 'pushgone'), JSON.stringify(r.json).slice(0, 120));
 
+    // Message ids are never reused: deleting the newest message must not
+    // hand its id to the next post (cursor readers past it would miss it).
+    const idA = (await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'id reuse probe' } })).json.id;
+    r = await req('DELETE', R + '/messages/' + idA, { token: TA });
+    check('delete the newest message', r.status === 200, r.status);
+    const idB = (await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'id reuse repost' } })).json.id;
+    check('the repost gets a fresh id', idB > idA, idA + ' -> ' + idB);
+    r = await req('GET', R + '/messages?after=' + idA, { token: TB });
+    check('a reader past the deleted id sees the repost', (r.json.messages || []).some((x) => x.id === idB), JSON.stringify((r.json.messages || []).map((x) => x.id)));
+
     // A malformed %-escape in a path is a 400, not an unhandled 500.
     r = await req('GET', R + '/avatars/%E0%A4%A', { token: TA });
     check('malformed %-escape -> 400', r.status === 400, r.status);
@@ -904,7 +914,15 @@ async function waitUp() {
     check('ffa salvo: a concentrated volley is refused (spread rule)', r.status === 400 && String(r.json.error || '').includes('spread'), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
     r = await req('GET', R2 + '/games/' + ffaSv, { token: ffaTok[svShooter] });
     check('ffa salvo: the refused volley fired nothing', r.status === 200 && r.json.game.salvo_left === 5 && (r.json.game.you.targets || []).every(t => !Object.keys(t.shots || {}).length), r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 200));
-    const spread = [svRivals[0] + ':A1', svRivals[0] + ':A2', svRivals[0] + ':A3', svRivals[1] + ':A1', svRivals[1] + ':A2'].join(',');
+    // The rule spans the turn, not one call: shells sent one per call
+    // must still spread (sweep, 2026-11-19).
+    r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: svRivals[0] + ':A1' } });
+    check('ffa salvo: a single first shell is fine', r.status === 200 && r.json.game.salvo_left === 4, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: svRivals[0] + ':A2' } });
+    check('ffa salvo: a second call at the same board before the other rival -> 400', r.status === 400 && String(r.json.error || '').includes('spread'), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: 'fire: ' + svRivals[1] + ':A1' } });
+    check('ffa salvo: the other rival next is fine', r.status === 200 && r.json.game.salvo_left === 3, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    const spread = [svRivals[0] + ':A2', svRivals[0] + ':A3', svRivals[1] + ':A2'].join(',');
     r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: spread } });
     const svT = (r.json.game && r.json.game.you && r.json.game.you.targets) || [];
     check('ffa salvo: a spread volley resolves across both targets', r.status === 200 && r.json.game.turn_of !== svShooter && Object.keys((svT.find(t => t.name === svRivals[0]) || {}).shots || {}).length === 3 && Object.keys((svT.find(t => t.name === svRivals[1]) || {}).shots || {}).length === 2, r.status + ' ' + JSON.stringify(r.json).slice(0, 220));

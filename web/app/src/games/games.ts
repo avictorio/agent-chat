@@ -1,7 +1,7 @@
 import type { RoomClient } from "@chat/shared";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { el } from "../lib";
+import { el, toast } from "../lib";
 import {
   battleshipBoard,
   boardSvg,
@@ -367,9 +367,12 @@ export function createGameStore(opts: {
         openGame(d.game.id, d.game.type);
       } else if (note) {
         note.textContent = "The rematch was refused.";
-      }
-    } catch {
+      } else toast("The rematch was refused.", true);
+    } catch (e) {
+      // cards and the Games tab have no note line: say it in a toast
+      const msg = e instanceof Error && e.message ? e.message : "The rematch did not reach the referee.";
       if (note) note.textContent = "The rematch did not reach the referee.";
+      else toast(msg, true);
     } finally {
       rematchInFlight.delete(g.id);
     }
@@ -388,9 +391,13 @@ export function createGameStore(opts: {
         renderGameView(d.game, true);
       } else if (note) {
         note.textContent = "The referee refused that.";
-      }
+      } else toast("The referee refused that.", true);
     } catch (e) {
-      if (note) note.textContent = e instanceof Error ? e.message : "That did not reach the referee.";
+      const msg = e instanceof Error && e.message ? e.message : "That did not reach the referee.";
+      if (note) note.textContent = msg;
+      else toast(msg, true);
+      // the lobby may have expired or been decided meanwhile: show what is true now
+      void fetchGame(id);
     }
   }
 
@@ -1526,16 +1533,30 @@ export function createGameStore(opts: {
     if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
   }
 
-  async function fetchGame(id: number): Promise<void> {
-    try {
-      const d = await client.game(id);
-      if (!d.game) return;
-      cache.set(id, d.game);
-      notify();
-      if (gameView && gameView.id === id) renderGameView(d.game);
-    } catch {
-      // a failed refresh keeps the last known state
-    }
+  // One request per match at a time: a frame burst (Light Cycles ticks)
+  // or the poll landing mid-fetch rides the request already out.
+  const fetching = new Map<number, Promise<void>>();
+  function fetchGame(id: number): Promise<void> {
+    const cur = fetching.get(id);
+    if (cur) return cur;
+    const p = (async () => {
+      try {
+        const d = await client.game(id);
+        if (!d.game) return;
+        const prev = cache.get(id);
+        cache.set(id, d.game);
+        // listeners (cards, the Games tab's /games reload, the title
+        // badge) only hear about real changes, not every poll
+        if (!prev || prev.__frameOnly || JSON.stringify(prev) !== JSON.stringify(d.game)) notify();
+        if (gameView && gameView.id === id) renderGameView(d.game);
+      } catch {
+        // a failed refresh keeps the last known state
+      } finally {
+        fetching.delete(id);
+      }
+    })();
+    fetching.set(id, p);
+    return p;
   }
 
   function openGame(id: number, type?: string) {
@@ -1566,11 +1587,13 @@ export function createGameStore(opts: {
     document.querySelectorAll("[data-duel-deadline]").forEach((b) => setClockBar(b as HTMLElement));
     document.querySelectorAll("[data-turn-deadline]").forEach((b) => setTurnClock(b as HTMLElement));
   }, 1000);
-  // Cards stay fresh on a slow poll, like the current app.
+  // Cards stay fresh on a slow poll, like the current app. A finished
+  // or called-off match never changes again, so only live ones (and
+  // entries known only from a frame) are polled.
   window.setInterval(() => {
     if (document.hidden) return;
-    cache.forEach((_g, id) => {
-      void fetchGame(id);
+    cache.forEach((g, id) => {
+      if (g.__frameOnly || g.status === "lobby" || g.status === "running") void fetchGame(id);
     });
   }, 20000);
 
@@ -1592,9 +1615,20 @@ export function createGameStore(opts: {
         // replacing wiped the per-viewer fields (you, rounds, log)
         // the cards and arenas render from, so a live update could
         // show the wrong "your move" state until the next poll.
+        // The merge keeps the cached per-viewer fields (you, rounds,
+        // log), which the frame cannot update: for a match you play in,
+        // and for one known only from this frame (its card message may
+        // land after it), fetch the full state right away so "your
+        // move" and Accept/Decline are never stale.
         const prev = cache.get(game.id);
-        cache.set(game.id, prev ? Object.assign({}, prev, game) : game);
+        cache.set(game.id, prev ? Object.assign({}, prev, game) : Object.assign({ __frameOnly: true }, game));
         notify();
+        const me = (opts.meName() || "").toLowerCase();
+        const playing = !!me && (game.players || []).some((p: GL) => String(p.name || "").toLowerCase() === me);
+        if (!prev || prev.__frameOnly || playing) {
+          void fetchGame(game.id);
+          return;
+        }
       }
       if (gameView && gameView.id === game.id) void fetchGame(game.id);
     },
@@ -1630,6 +1664,7 @@ export function createGameStore(opts: {
     viewerClosed() {
       dropLc3d();
       dropBs3d();
+      dropDuel3d();
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
         gameViewTimer = 0;

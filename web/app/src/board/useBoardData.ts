@@ -93,6 +93,8 @@ export function useBoardData(opts: {
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [boardView, setBoardView] = useState<BoardData | null>(null);
   const rsKeyRef = useRef("");
+  const boardKeyRef = useRef("");
+  const loadedAtRef = useRef(0);
   const membersKeyRef = useRef("");
   const boardDataRef = useRef<BoardData | null>(null);
   const editingCountRef = useRef(0);
@@ -108,10 +110,25 @@ export function useBoardData(opts: {
     const first = rsKeyRef.current === "";
     rsKeyRef.current = k;
     setRs(s);
-    if (!first && tabRef.current !== "chat") {
+    // Reload the board when its part of the state moved (not on game
+    // ticks or reactions, which change room_state constantly). On the
+    // chat tab too, more lazily: the sidebar counts read the board, and
+    // a board tab opened later must not show (or save over) old data.
+    const bk = JSON.stringify([s.constitution_version, s.open_questions, s.decisions_awaiting_signatures, s.stakes_due, s.memory]);
+    const boardMoved = bk !== boardKeyRef.current;
+    boardKeyRef.current = bk;
+    if (!first && boardMoved) {
       window.clearTimeout(boardTimerRef.current);
-      boardTimerRef.current = window.setTimeout(() => void loadAllRef.current(), 700);
+      boardTimerRef.current = window.setTimeout(() => void loadAllRef.current(), tabRef.current === "chat" ? 3000 : 700);
     }
+  }, []);
+
+  // Opening a board tab reloads anything older than 15 s (what the
+  // pre-React page did): edits that room_state does not reflect - a
+  // stake's note, a resolved question's history - show up too. The boot
+  // load covers the first visit.
+  const refreshIfStale = useCallback(() => {
+    if (loadedAtRef.current && Date.now() - loadedAtRef.current > 15000) void loadAllRef.current();
   }, []);
 
   const editingDelta = useCallback((d: number) => {
@@ -182,6 +199,7 @@ export function useBoardData(opts: {
         client.api<MembersResponse>("/members"),
       ]);
       const data: BoardData = { con, dc: dc.decisions, q, sk, dg: dg.digests, mb };
+      loadedAtRef.current = Date.now();
       boardDataRef.current = data;
       setBoardData(data);
       applyMembersData(mb);
@@ -210,5 +228,6 @@ export function useBoardData(opts: {
     loadAll,
     loadAllRef,
     loadMembers,
+    refreshIfStale,
   };
 }

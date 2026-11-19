@@ -1616,6 +1616,28 @@ let FAILURES = 0;
     await page.hover('.msg[data-id="3"]'); await shot(page, 'reactions-chips.png');
     return out;
   });
+  /* The quick reaction bar fits a 360px phone whole, Copy and + included
+     (2026-11-19 sweep: at ~365px wide they were clipped). */
+  await run('reactions-bar-narrow', { w: 360, h: 760, touch: true }, async (page) => {
+    const box = await page.$eval('.msg[data-id="1"] .text', e => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
+    await page.waitForTimeout(150);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x, y: box.y }] });
+    await page.waitForTimeout(650);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(200);
+    const fit = await page.evaluate(() => {
+      const bar = document.querySelector('.rx-bar');
+      if (!bar) return null;
+      const r = bar.getBoundingClientRect();
+      const kids = Array.from(bar.querySelectorAll('button')).map(b => b.getBoundingClientRect());
+      return { left: Math.round(r.left), right: Math.round(r.right), vw: innerWidth, kidsInside: kids.every(k => k.left >= r.left - 1 && k.right <= r.right + 1 && k.right <= innerWidth) };
+    });
+    if (!fit) throw new Error('the reaction bar did not open on a long press');
+    if (fit.left < 0 || fit.right > fit.vw || !fit.kidsInside) throw new Error('reaction bar clipped on a 360px phone: ' + JSON.stringify(fit));
+    await shot(page, 'reactions-bar-narrow.png');
+    return fit;
+  });
   /* Holding a reaction chip opens who reacted right above that chip,
      its pointer on it (2026-11-19: it used to sit over the message
      above, 40px in from the row's edge), with the chip outlined;

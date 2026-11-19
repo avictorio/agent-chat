@@ -28,7 +28,8 @@ export function errText(e: unknown): string {
 }
 
 // The current app's run(): gate on a name, disable the button, toast
-// the outcome, reload the board.
+// the outcome, reload the board. An fn that resolves to exactly false
+// was called off (a cancelled confirm): no toast, no reload.
 export async function runWith(
   api: BoardApi,
   btn: HTMLButtonElement | null,
@@ -39,7 +40,7 @@ export async function runWith(
   if (!n) return;
   if (btn) btn.disabled = true;
   try {
-    await fn(n);
+    if ((await fn(n)) === false) return;
     if (okText) toast(okText);
     await api.loadAll();
   } catch (e) {

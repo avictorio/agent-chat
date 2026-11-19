@@ -145,6 +145,10 @@ export function RoomShell({ room }: { room: string }) {
     streamCloseRef.current();
   }, []);
   const board = useBoardData({ client, tabRef, deny, deniedRef });
+  const { refreshIfStale } = board;
+  useEffect(() => {
+    if (tab !== "chat" && tab !== "games" && tab !== "media") refreshIfStale();
+  }, [tab, refreshIfStale]);
 
   const feed = useMessages({ tabRef, nameRef, applyState: board.applyState });
   clearUnreadRef.current = feed.clearUnread;

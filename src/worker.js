@@ -1330,7 +1330,7 @@ export class Room extends DurableObject {
         fetched: fetched,
         rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
         games: this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
-          try { const st = JSON.parse(r.state || "{}"); if (st.type === "duel") return { id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; if (st.type === "battleship") return { id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: st.accepted ? !!st.accepted[p.name] : true })) }; return { id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; } catch (e) { return null; }
+          try { const st = JSON.parse(r.state || "{}"); if (st.type === "duel") return { id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; if (st.type === "battleship") return { id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: st.accepted ? !!st.accepted[p.name] : true })) }; return { id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; } catch (e) { return null; }
         }).filter(Boolean),
       };
     } catch (e) {
@@ -1374,7 +1374,7 @@ export class Room extends DurableObject {
     await this.sweepDrafts();
     this.roomName = room;
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id", ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
+    const id = this.sql.exec("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
     // Inline media is all or nothing (phase A): every put lands in R2 before
     // the message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
@@ -1722,6 +1722,23 @@ export class Room extends DurableObject {
   }
 
   bsFleetSizes(st) { return (st && st.fleet_sizes) || [5, 4, 3, 3, 2]; }
+
+  // An FFA shot "Name:Cell" -> { target, cellPart }, or null. Every colon
+  // is a candidate split, so a captain whose name holds a colon (older
+  // names could) is still reachable; a split whose remainder parses as a
+  // cell wins.
+  bsTargetOf(st, entry) {
+    let best = null;
+    for (let ci = entry.indexOf(":"); ci >= 0; ci = entry.indexOf(":", ci + 1)) {
+      const tName = entry.slice(0, ci).trim().toLowerCase();
+      const p = st.players.find((q) => q.name.toLowerCase() === tName);
+      if (!p) continue;
+      const cand = { target: p, cellPart: entry.slice(ci + 1).trim() };
+      if (this.bsParseCell(cand.cellPart)) return cand;
+      if (!best) best = cand;
+    }
+    return best;
+  }
 
   // A placement example that is valid on this board: one ship per odd
   // row from column A, in fleet order. (The hardcoded classic example
@@ -2156,10 +2173,13 @@ export class Room extends DurableObject {
     }
     if (st.turn_of !== me.name) return { status: 409, error: "It is " + st.turn_of + "'s turn to fire" };
     if (me.eliminated) return { status: 409, error: "You are eliminated - your fleet is a wreck chart now" };
+    const ffa = this.bsFfa(st);
     let cell = s;
-    if (cell.indexOf("fire:") === 0) cell = cell.slice(5).trim();
-    if (cell.indexOf("fire ") === 0) cell = cell.slice(5).trim();
-    if (cell.indexOf("shoot:") === 0) cell = cell.slice(6).trim();
+    // One optional verb, stripped once - and not when the text already
+    // starts with a captain's target (a captain named "Fire Ant" is
+    // targeted as "Fire Ant:C5"; stripping "fire " made that "ant:C5").
+    const verb = /^(fire:|shoot:|fire\s+)\s*/.exec(cell);
+    if (verb && !(ffa && this.bsTargetOf(st, cell.split(",")[0].trim()))) cell = cell.slice(verb[0].length).trim();
     // A salvo turn may arrive as ONE call carrying the whole volley
     // ("C5,D6,E7"). Shots after the first never changed the awaited
     // turn, so a wake-driven player was never re-woken for them, and
@@ -2168,7 +2188,6 @@ export class Room extends DurableObject {
     // In a free-for-all every entry names its target - "Rex:C5" -
     // because the same cell on two boards is two different shots;
     // a salvo volley may split across targets.
-    const ffa = this.bsFfa(st);
     const cells = cell.split(",").map((c) => c.trim()).filter(Boolean);
     const openHint = [ffa ? "fire: any living rival's open cell as Name:Cell, e.g. fire: " + ((this.bsLiving(st).find((p) => p.name !== me.name) || {}).name || "Rex") + ":C5" : "fire: any cell A1-" + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " you have not fired at yet, e.g. fire: C5"];
     const badCell = { status: 400, error: ffa ? "fire as Name:Cell at a living rival, e.g. Rex:C5" : "fire at a cell, A1 to " + this.bsLabel(this.bsKey(st.w - 1, st.h - 1)) + " - e.g. C5", legal_moves: openHint };
@@ -2183,10 +2202,10 @@ export class Room extends DurableObject {
       if (ffa) {
         const ci = c.indexOf(":");
         if (ci < 0) return { status: 400, error: "in a free-for-all every shot names its target - '" + c + "' should look like Rex:C5", legal_moves: openHint };
-        const tName = c.slice(0, ci).trim();
-        cellPart = c.slice(ci + 1).trim();
-        target = st.players.find((p) => p.name.toLowerCase() === tName.toLowerCase()) || null;
-        if (!target) return { status: 400, error: "'" + tName + "' is not a captain in this match", legal_moves: openHint };
+        const tt = this.bsTargetOf(st, c);
+        if (!tt) return { status: 400, error: "'" + c.slice(0, ci).trim() + "' is not a captain in this match", legal_moves: openHint };
+        target = tt.target;
+        cellPart = tt.cellPart;
         if (target.name === me.name) return { status: 400, error: "You cannot fire at your own waters", legal_moves: openHint };
         if (target.eliminated) return { status: 400, error: target.name + " is eliminated - their board is a wreck chart, not a target", legal_moves: openHint };
       }
@@ -2206,13 +2225,26 @@ export class Room extends DurableObject {
     // a whole salvo on one board. Extra shells beyond one per
     // required target may go anywhere legal. One living rival (or
     // the two-player game) carries no spread constraint.
+    // The rule holds across the whole turn, not per call: a volley sent
+    // one shell per call used to pass every check and land on one board
+    // (sweep, 2026-11-19). st.salvo_turn keeps the turn's targets and
+    // shells so far; rivals is the count afloat when the turn began
+    // (a rival sunk mid-turn was a target, so still counts as one).
+    let salvoTurn = null;
     if (ffa && st.variant === "salvo") {
-      const livingRivals = this.bsLiving(st).filter((p) => p.name !== me.name).length;
-      const distinct = {};
-      for (const e of entries) distinct[e.opp.name] = true;
-      const need = Math.min(entries.length, livingRivals);
-      if (Object.keys(distinct).length < need) return { status: 400, error: "a free-for-all salvo must spread: " + entries.length + " shells with " + livingRivals + " rivals afloat must name at least " + need + " different targets - one shell per rival first, extra shells anywhere", legal_moves: openHint };
+      const prevTurn = st.salvo_turn && st.salvo_turn.turn === st.turn ? st.salvo_turn : null;
+      const rivals = prevTurn ? prevTurn.rivals : this.bsLiving(st).filter((p) => p.name !== me.name).length;
+      const distinct = new Set(prevTurn ? prevTurn.targets : []);
+      for (const e of entries) distinct.add(e.opp.name);
+      const firedAfter = (prevTurn ? prevTurn.fired : 0) + entries.length;
+      const need = Math.min(firedAfter, rivals);
+      if (distinct.size < need) {
+        const hit = prevTurn && prevTurn.targets.length ? " (this turn so far: " + prevTurn.targets.join(", ") + ")" : "";
+        return { status: 400, error: "a free-for-all salvo must spread: " + firedAfter + " shells this turn with " + rivals + " rivals afloat must name at least " + need + " different targets - one shell per rival first, extra shells anywhere" + hit, legal_moves: openHint };
+      }
+      salvoTurn = { turn: st.turn, rivals: rivals, targets: Array.from(distinct), fired: firedAfter };
     }
+    if (salvoTurn) st.salvo_turn = salvoTurn;
     let fired = 0;
     let won = false;
     for (const e of entries) {
@@ -2385,14 +2417,14 @@ export class Room extends DurableObject {
       st.move_log.push({ tick: st.tick, name: a.name, dir: a.dir, submitted: a.submitted, at: a.at, resolved_at: resolvedAt });
     }
     st.log.push({ tick: st.tick, text: "Tick " + st.tick + ": " + attribution.map((a) => a.name + " " + a.dir + (a.submitted ? " (submitted)" : " (clock default)")).join("; ") + "." });
+    // Has anyone gone out before this tick? (Older matches carry no flag:
+    // a rider already down, or a credited keeper, says the same.)
+    const firstOutDecided = !!st.first_out_decided || !!st.record_keeper || st.players.some((p) => !p.alive);
+    const outs = deaths.slice();
     for (const p of deaths) {
       p.alive = false;
       st.log.push({ tick: st.tick, text: p.name + " is out at tick " + st.tick + " - the trail holds at (" + p.x + ", " + p.y + ")." });
     }
-    // The record keeper is the first rider out - unless several die
-    // on the same tick, in which case no single rider is credited
-    // (the old loop quietly took whoever came first in player order).
-    if (!st.record_keeper && deaths.length === 1) st.record_keeper = deaths[0].name;
     // Absence rule (2026-11-12): a rider the clock carries for three
     // ticks in a row is taken out. Without it an async match with one
     // absent rider burns the full stall cap on every tick - some 19
@@ -2404,9 +2436,18 @@ export class Room extends DurableObject {
       for (const p of st.players) {
         if (p.alive && (st.absent_streak[p.name] || 0) >= 3) {
           p.alive = false;
+          outs.push(p);
           st.log.push({ tick: st.tick, text: p.name + " is taken out - three ticks in a row without a submitted move." });
         }
       }
+    }
+    // The record keeper is the first rider out, crash or absence alike.
+    // The first tick with any out decides it for good: one rider out
+    // keeps the record, several out together leave it with nobody (a
+    // later crash used to be credited after a pile-up - sweep, 2026-11-19).
+    if (!firstOutDecided && outs.length) {
+      st.first_out_decided = true;
+      if (outs.length === 1) st.record_keeper = outs[0].name;
     }
     const alive = st.players.filter((p) => p.alive);
     if (alive.length <= 1) {
@@ -2447,6 +2488,10 @@ export class Room extends DurableObject {
       }
       const cur = await this.ctx.storage.getAlarm();
       if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
+      // The alarm may fire in a fresh instance, where roomName (memory
+      // only) is unset: keep the name with the clock so the Referee's
+      // posts and their pushes still link to the room.
+      if (this.roomName) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('room_name', ?)", this.roomName);
       if (cur !== next) await this.ctx.storage.setAlarm(next);
     } catch (e) {}
   }
@@ -2456,7 +2501,10 @@ export class Room extends DurableObject {
   // re-arm for the next deadline. This is what lets a match run to its
   // finish overnight with nobody reading it.
   async alarm() {
-    const room = this.roomName || (this.ctx.id && this.ctx.id.name) || "";
+    let saved = "";
+    try { const r = this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) {}
+    const room = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
+    if (room && !this.roomName) this.roomName = room;
     // One match's bad state must not stop every clock in the room:
     // advance each match under its own try/catch, and re-arm in a
     // finally - the old loop let a single throw skip the re-arm, so
@@ -2528,9 +2576,22 @@ export class Room extends DurableObject {
 
   // A room message from the referee itself (match results). Not a member: it
   // never claims a member's name, and members cannot post as it.
+  // Message ids never come back: SQLite hands out max(id)+1, so deleting
+  // the newest message freed its id for the next post - cursor readers
+  // past it never saw the repost, and a signed media URL for the deleted
+  // message served the new one's media (sweep, 2026-11-19). A high-water
+  // mark in cfg keeps every id fresh.
+  nextMsgId() {
+    const max = this.sql.exec("SELECT MAX(id) AS id FROM m").one().id || 0;
+    const r = this.sql.exec("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray()[0];
+    const id = Math.max(max, r ? parseInt(r.v, 10) || 0 : 0) + 1;
+    this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(id));
+    return id;
+  }
+
   postSystem(text, room) {
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, pub_ts) VALUES (?, ?, ?, ?) RETURNING id", ts, "Referee", text, ts).one().id;
+    const id = this.sql.exec("INSERT INTO m (id, ts, sender, text, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, "Referee", text, ts).one().id;
     const msg = this.withKinds([{ id: id, ts: ts, from: "Referee", text: text }])[0];
     this.announce(msg, room);
     return msg;
@@ -2540,7 +2601,7 @@ export class Room extends DurableObject {
   // renders in the stream and opens the arena full-screen.
   async postGameCard(sender, text, gameId, room) {
     const ts = Date.now();
-    const id = this.sql.exec("INSERT INTO m (ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", ts, sender, text, gameId, ts).one().id;
+    const id = this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one().id;
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room);
@@ -2837,7 +2898,8 @@ export class Room extends DurableObject {
   // takes a W, the other finishers an L; undecided finishes and
   // called-off matches count for nothing).
   listGames() {
-    const all = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray().map((r) => {
+    const scanned = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray();
+    const all = scanned.map((r) => {
       const g = this.gameRow(r.id);
       if (!g || !g.st) return null;
       const s = this.gameSummary(g);
@@ -2866,6 +2928,23 @@ export class Room extends DurableObject {
         else row.l++;
       });
     });
+    // Matches older than the 500-row window still count toward the
+    // record (it promises every finished match): a light SQL pass reads
+    // just type, winner and player names, never the boards.
+    if (scanned.length === 500) {
+      const floor = scanned[scanned.length - 1].id;
+      try {
+        const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
+        for (const r of rows) {
+          if (!r.w || !r.name) continue;
+          const type = r.t === "duel" || r.t === "battleship" ? r.t : "lightcycles";
+          const table = byType[type] || (byType[type] = {});
+          const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
+          if (r.name === r.w) row.w++;
+          else row.l++;
+        }
+      } catch (e) {}
+    }
     const record = {};
     Object.keys(byType).forEach((t) => {
       record[t] = Object.values(byType[t]).sort((a, b) => b.w - a.w || a.l - b.l || (a.name < b.name ? -1 : 1));
@@ -3316,7 +3395,7 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
-    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : (gm.players && gm.players.length > 2 ? "<fire: " + ((gm.players.filter((p) => p.name.toLowerCase() !== String(name).toLowerCase())[0] || {}).name || "Rex") + ":C5>" : "<fire: C5>")) : "<up|down|left|right>" }) });
+    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : (gm.players && gm.players.length > 2 ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(name).toLowerCase())[0] || {}).name || "Rex") + ":C5>" : "<fire: C5>")) : "<up|down|left|right>" }) });
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });

@@ -87,13 +87,36 @@ export function useViewerHost(opts?: {
     return () => window.removeEventListener("popstate", onPop);
   }, [close]);
 
+  // A dialog takes the focus while it is open (the back button, so
+  // Enter or Escape closes it) and hands it back to what opened it.
+  // Escape closes, unless something inside already used the key.
+  const backRef = useRef<HTMLButtonElement | null>(null);
+  const isOpen = !!v;
+  useEffect(() => {
+    if (!isOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    backRef.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        close(false);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (opener && opener.isConnected && opener !== document.body) opener.focus({ preventScroll: true });
+    };
+  }, [isOpen, close]);
+
   const node = (
-    <div id="viewer" hidden={!v} role="dialog" aria-modal="true">
+    <div id="viewer" hidden={!v} role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
       <div className="viewer-head">
         <button
           type="button"
           className="viewer-back"
           id="viewerBack"
+          ref={backRef}
           aria-label="Back to the room"
           onClick={() => close(false)}
         >

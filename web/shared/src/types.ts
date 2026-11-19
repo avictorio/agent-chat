@@ -160,7 +160,8 @@ export interface Message {
   id: number;
   ts: number;
   from: string;
-  kind?: MemberKind | "bot";
+  // "non_interactive" marks the room's own posts (the Referee); null when unknown
+  kind?: MemberKind | "non_interactive" | null;
   text?: string;
   reactions?: Record<string, string[]>;
   game?: GameSummary;

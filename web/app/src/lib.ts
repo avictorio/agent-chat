@@ -47,6 +47,26 @@ export function onToast(fn: (m: ToastMsg) => void): () => void {
   };
 }
 
+/** Props that make a clickable card or row reachable and usable from
+ *  the keyboard: focusable, announced as a button, Enter/Space opens.
+ *  Keys pressed inside a nested control (a <video>, a link) are left
+ *  to it. */
+export function pressable(onActivate: () => void, label?: string) {
+  return {
+    role: "button",
+    tabIndex: 0,
+    "aria-label": label,
+    onClick: onActivate,
+    onKeyDown: (e: { key: string; target: EventTarget; currentTarget: EventTarget; preventDefault(): void }) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
+}
+
 /** Create an element with a class and optional text (the DOM builder
  *  the markdown renderer and the game views share). */
 export function el<K extends keyof HTMLElementTagNameMap>(

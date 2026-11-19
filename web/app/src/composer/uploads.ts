@@ -284,6 +284,9 @@ async function fetchLiveOrPublish(client: RoomClient, id: number, text: string):
   return client.publishMessage(id, text);
 }
 
+// Native uploads give up only after this long with no progress event.
+const UPLOAD_STALL_MIN = 10;
+
 export async function sendBigVideoNative(
   client: RoomClient,
   from: string,
@@ -294,14 +297,23 @@ export async function sendBigVideoNative(
   const pd = await client.createDraft(from, text, true);
   const id = pd.id;
   const P = nativePlugins();
+  let fail: (e: Error) => void = () => {};
   const done = new Promise<PostedMessage>((resolve, reject) => {
     let settled = false;
     let sub: any = null;
     let poll: number | null = null;
+    // An inactivity timeout, re-armed by every progress event: a big file
+    // on a slow uplink legitimately takes longer than any fixed limit.
+    let idle = 0;
+    const arm = () => {
+      window.clearTimeout(idle);
+      idle = window.setTimeout(() => settle(reject, new Error("the upload stalled (no progress for " + UPLOAD_STALL_MIN + " minutes)")), UPLOAD_STALL_MIN * 60000);
+    };
     const settle = (fn: (v: any) => void, val: any) => {
       if (settled) return;
       settled = true;
       if (poll) clearInterval(poll);
+      window.clearTimeout(idle);
       Promise.resolve(sub)
         .then((h: any) => {
           if (h && h.remove) h.remove();
@@ -312,6 +324,7 @@ export async function sendBigVideoNative(
     sub = P.Uploader.addListener("events", (ev: any) => {
       if (settled || !ev) return;
       if (ev.name === "uploading" && ev.payload && typeof ev.payload.percent === "number" && ev.payload.percent >= 0) {
+        arm();
         onLabel("🎬 Uploading " + (f.name || "video") + " - " + Math.round(ev.payload.percent) + "%");
         return;
       }
@@ -330,16 +343,23 @@ export async function sendBigVideoNative(
         })
         .catch(() => {});
     }, 5000);
-    window.setTimeout(() => settle(reject, new Error("the upload timed out")), 600000);
+    arm();
+    fail = (e) => settle(reject, e);
   });
-  await P.Uploader.startUpload({
+  // A start that throws settles `done` (stopping the poll, the listener
+  // and the timer) and the caller gets that error from it.
+  try {
+    await P.Uploader.startUpload({
     filePath: f.path,
     serverUrl: location.origin + client.basePath() + "/messages/" + id + "/video/stream",
     method: "PUT",
     headers: { "X-Invite-Token": client.inviteToken() || "", "Content-Type": f.mimeType || "video/mp4" },
     notificationTitle: "Agent Chat",
     notificationBody: "Uploading " + (f.name || "video"),
-  });
+    });
+  } catch (e) {
+    fail(e instanceof Error ? e : new Error(String(e)));
+  }
   return done;
 }
 
@@ -372,14 +392,23 @@ export async function sendBigVideoChunkedNative(
     id = pd.id;
   }
   const mid = id;
+  let fail: (e: Error) => void = () => {};
   const done = new Promise<PostedMessage>((resolve, reject) => {
     let settled = false;
     let sub: any = null;
     let poll: number | null = null;
+    // An inactivity timeout, re-armed by every progress event: a big file
+    // on a slow uplink legitimately takes longer than any fixed limit.
+    let idle = 0;
+    const arm = () => {
+      window.clearTimeout(idle);
+      idle = window.setTimeout(() => settle(reject, new Error("the upload stalled (no progress for " + UPLOAD_STALL_MIN + " minutes)")), UPLOAD_STALL_MIN * 60000);
+    };
     const settle = (fn: (v: any) => void, val: any) => {
       if (settled) return;
       settled = true;
       if (poll) clearInterval(poll);
+      window.clearTimeout(idle);
       Promise.resolve(sub)
         .then((h: any) => {
           if (h && h.remove) h.remove();
@@ -390,6 +419,7 @@ export async function sendBigVideoChunkedNative(
     sub = P.ChunkedUploader.addListener("chunkedEvents", (ev: any) => {
       if (settled || !ev || String(ev.key) !== String(mid)) return;
       if (ev.name === "progress" && typeof ev.percent === "number" && ev.percent >= 0) {
+        arm();
         onLabel("🎬 Uploading " + (f.name || "video") + " - " + Math.round(ev.percent) + "% (background-safe: you can switch apps)");
         return;
       }
@@ -408,9 +438,11 @@ export async function sendBigVideoChunkedNative(
         })
         .catch(() => {});
     }, 5000);
-    window.setTimeout(() => settle(reject, new Error("the upload timed out")), 900000);
+    arm();
+    fail = (e) => settle(reject, e);
   });
-  await P.ChunkedUploader.start({
+  try {
+    await P.ChunkedUploader.start({
     key: String(mid),
     apiBase: location.origin + client.basePath() + "/messages",
     id: mid,
@@ -420,6 +452,9 @@ export async function sendBigVideoChunkedNative(
     size: f.size,
     fingerprint: fp || "",
     name: f.name || "video",
-  });
+    });
+  } catch (e) {
+    fail(e instanceof Error ? e : new Error(String(e)));
+  }
   return done;
 }

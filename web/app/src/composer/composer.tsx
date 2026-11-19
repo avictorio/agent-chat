@@ -182,8 +182,19 @@ export function Composer(p: ComposerProps) {
   };
 
   // ---- submit ----
+  // Ctrl+Enter submits through requestSubmit, which ignores the disabled
+  // Send button: this ref is the real in-flight guard.
+  const sendingRef = useRef(false);
+  // After a send, clear only what was sent: text typed while a long
+  // upload ran stays in the composer.
+  const clearSent = (textEl: HTMLTextAreaElement | null, typed: string) => {
+    if (!textEl) return;
+    const v = textEl.value;
+    textEl.value = v === typed ? "" : typed && v.startsWith(typed) ? v.slice(typed.length).replace(/^\s+/, "") : v;
+  };
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sendingRef.current) return;
     stopDictation(true);
     const textEl = textRef.current;
     const from = nameLocked ? committed : draft.trim() || committed;
@@ -194,6 +205,7 @@ export function Composer(p: ComposerProps) {
       return;
     }
     let text = textEl ? textEl.value : "";
+    const typed = text;
     if (!text.trim() && !clip && !image && !video && !art) return;
     if (!text.trim())
       text = clip
@@ -207,6 +219,7 @@ export function Composer(p: ComposerProps) {
               : "📄 " + art!.name;
     if (from !== committed) p.onCommitName(from);
     setChanging(false);
+    sendingRef.current = true;
     setSending(true);
     setErr(null);
     try {
@@ -225,7 +238,7 @@ export function Composer(p: ComposerProps) {
             : bigNative
               ? await sendBigVideoNative(client, from, text, bigNative, (label) => setVidProgress(label))
               : await sendBigVideo(client, room, from, text, bigFile!, (label) => setVidProgress(label));
-          if (textEl) textEl.value = "";
+          clearSent(textEl, typed);
           grow();
           setVideo(null);
           setVidProgress(null);
@@ -262,7 +275,7 @@ export function Composer(p: ComposerProps) {
         payload.doc_name = art.name;
       }
       const d = await client.postPayload(payload);
-      if (textEl) textEl.value = "";
+      clearSent(textEl, typed);
       grow();
       setClip(null);
       setImage(null);
@@ -273,6 +286,7 @@ export function Composer(p: ComposerProps) {
     } catch (err) {
       setErr("Couldn't send: " + (err instanceof Error ? err.message : String(err)));
     } finally {
+      sendingRef.current = false;
       if (!p.denied) {
         setSending(false);
         textRef.current?.focus();

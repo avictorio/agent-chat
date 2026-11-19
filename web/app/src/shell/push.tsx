@@ -158,28 +158,39 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
       const reg = await navigator.serviceWorker.ready;
       const sub = reg ? await reg.pushManager.getSubscription() : null;
       let m = modeRef.current;
+      let on = false;
       if (sub) {
-        // The bell may only say "on" when pushes will actually
-        // arrive: check the room still holds this subscription, and
-        // quietly re-register if it lost it.
+        // One browser subscription serves every room on this device, so
+        // its existence says nothing about THIS room. The bell says "on"
+        // when the room holds the subscription; a room that lost it is
+        // quietly re-registered only if this room was turned on here
+        // (its saved mode) - never just because another room was.
+        let saved: string | null = null;
+        try {
+          saved = localStorage.getItem(modeKey);
+        } catch {
+          // storage unavailable
+        }
+        const wanted = saved === "all" || saved === "mentions" ? (saved as PushMode) : null;
         try {
           const sd = await client.pushStatus(sub.endpoint);
-          if (sd.registered) m = (sd.mode as PushMode) || "all";
-          else {
-            let saved: PushMode = "all";
-            try {
-              saved = localStorage.getItem(modeKey) === "mentions" ? "mentions" : "all";
-            } catch {
-              // storage unavailable
-            }
-            m = saved;
-            await client.pushSubscribe(sub.toJSON(), saved);
+          if (sd.registered) {
+            m = (sd.mode as PushMode) || "all";
+            on = true;
+          } else if (wanted) {
+            m = wanted;
+            await client.pushSubscribe(sub.toJSON(), wanted);
+            on = true;
           }
         } catch {
-          // status check is best-effort
+          // status check is best-effort: trust the saved choice
+          if (wanted) {
+            m = wanted;
+            on = true;
+          }
         }
       }
-      paint(sub ? "on" : "off", m);
+      paint(on ? "on" : "off", m);
     } catch {
       paint("off", modeRef.current);
     }
@@ -270,15 +281,19 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
       await shellPushOff();
       return;
     }
+    try {
+      localStorage.removeItem(modeKey);
+    } catch {
+      // storage unavailable
+    }
+    // Off is per room: drop this room's registration and keep the
+    // browser subscription, which other rooms on this device still use.
     const reg = await navigator.serviceWorker.getRegistration("/");
     const sub = reg ? await reg.pushManager.getSubscription() : null;
-    if (sub) {
-      await client.pushUnsubscribe(sub.endpoint).catch(() => {});
-      await sub.unsubscribe().catch(() => {});
-    }
-    toast("Notifications off for this device.");
+    if (sub) await client.pushUnsubscribe(sub.endpoint).catch(() => {});
+    toast("Notifications off for this room on this device.");
     void paintPushState();
-  }, [client, paintPushState, shellPushOff, toast]);
+  }, [client, modeKey, paintPushState, shellPushOff, toast]);
 
   // Boot: register the service worker and paint the initial state,
   // exactly where the current app does it.
