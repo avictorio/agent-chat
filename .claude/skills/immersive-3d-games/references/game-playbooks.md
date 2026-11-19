@@ -25,7 +25,8 @@ sound and buzz stay.
 3. Light Cycles
 4. RPS Duel
 5. Frontlines
-6. A new arena
+6. Code Race
+7. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -186,7 +187,46 @@ on open, only the latest unseen round replays (the History tab has the
 rest). A first look at a match shows it as it stands. A tap skips to the
 verdict; under reduced motion a missed round lands at once with its title.
 
-## 6. A new arena
+## 6. Code Race: the vault
+
+**World.** A violet grid floor running to a striped synthwave sun, and in
+the middle distance the vault: a cryptex of rings (one per peg or letter)
+on a plinth, above the racers. In front stands one lock pillar per racer
+(the viewer's in the middle, nearest; a spectator sees the match's order),
+a spine of camera-facing coins with a name plate on the floor.
+
+**Board.** A pillar's coins are that racer's latest feedback, top down:
+Colors - a solid white coin per right-place peg, a white ring per
+right-colour peg, dim for the rest (shape carries the meaning, not only
+brightness); Words - green, amber or dim coins. A rival's pillar shows
+only feedback, never their guess, matching the page. The foot ring lights
+when a racer has guessed this round, burns once they have cracked it.
+The vault's rings stay violet until the race is over, then turn to the
+secret (colours, or letters for Words).
+
+**Reveal** (`CodeRaceArena3D.tsx`, on the juice clock): every racer who
+guessed spins their coins (0-0.45 s, a `charge`), then coin by coin from
+the top they land on their new state with a click (`snip`, the last a
+`lock`); a racer who cracked it gets a `LightPillar` and a `Burst` in
+their colour; then the verdict. The last round opens the vault (rings
+spin up and settle in the secret's colours), then the final title and
+the winner's pillar and shockwave. Name plates and rings follow what the
+scene shows, never the latest state, so nothing is told early.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you guess | `lock` + `BUZZ.commit` at the tap, your foot ring lights |
+| a rival guesses (seen live) | a soft `ping`, their foot ring lights |
+| a round, nobody cracks it | your feedback as the title ("Closer · 2 right place · 1 right colour" good when it beats your best, with `ping` and a commit buzz; else neutral `beat`); a missed guess `buzzer`, bad |
+| you crack it | trauma 0.55, stop 180, `BUZZ.sankTheirs`, `shatter` + `win`, "CRACKED" good |
+| a rival cracks it (you haven't) | trauma 0.4, stop 120, `BUZZ.hitYou`, `shatter`, "CRACKED" bad, "keep racing" |
+| race won / lost | VICTORY (`wonMatch`, `win`) / DEFEAT (`lostMatch`, `lose`), trauma 0.8, stop 250, slow 0.8; cracked but not first: "#2" neutral with `scored`; nobody cracked it: "THE CODE HOLDS" |
+
+**Catch-up.** `ac-cr-seen:<path>:<id>` keeps the rounds seen; the latest
+unseen round replays on open; a tap skips; reduced motion lands it at
+once with its title and opens the vault without the spin.
+
+## 7. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

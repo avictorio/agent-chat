@@ -180,9 +180,11 @@ export function createGameStore(opts: {
     // number of rounds already shown (a new one plays its reveal)
     flDraft?: { round: number; vals: number[] } | null;
     flShown?: number;
-    fl3d?: Host3d | null;
-    fl3dSeq?: number;
-    flCommit?: (() => void) | null;
+    // a rounds game's 3D view (Frontlines, Code Race): its host, the paint
+    // sequence, and the scene's seal-my-move-now hook
+    r3d?: Host3d | null;
+    r3dSeq?: number;
+    r3dCommit?: (() => void) | null;
     // Code Race: the guess being made (kept across repaints, reset each round)
     crDraft?: { round: number; v: string } | null;
     bsFire?: ((label: string) => void) | null;
@@ -821,26 +823,26 @@ export function createGameStore(opts: {
     if (tb) wrap.appendChild(tb);
     wrap.appendChild(arenaTabs(g));
     if (gv.tab === "history") {
-      dropFl3d();
+      drop3d();
       wrap.appendChild(historyList(g));
       return;
     }
     const note = el("div", "lc-note", "");
     if (g.status === "lobby") {
-      dropFl3d();
+      drop3d();
       wrap.appendChild(lobbyPanel(g, note));
       wrap.appendChild(note);
       return;
     }
     // the score, then the field: the last resolved round, played in when new
     // (in 3D the scene plays it; the numbers follow under the planner)
-    const in3d = fl3dPref();
-    wrap.appendChild(flViewToggle(g));
+    const in3d = pref3d("frontlines");
+    wrap.appendChild(viewToggle3d("frontlines", g));
     if (in3d) {
-      if (!gv.fl3d) gv.fl3d = makeHost3d("lc-board-big lc-3d-host fl-3d-host");
-      wrap.appendChild(gv.fl3d.host);
-      paintFl3d(g, gv.fl3d);
-    } else dropFl3d();
+      const h = host3d("frontlines");
+      wrap.appendChild(h.host);
+      paint3d("frontlines", g, h);
+    } else drop3d();
     const score = el("div", "fl-score");
     (g.players || []).forEach((p: GL, i: number) => {
       if (i) score.appendChild(el("span", "fl-vs", "vs"));
@@ -881,7 +883,7 @@ export function createGameStore(opts: {
           },
           (v) => {
             // the scene seals and sounds the lock-in at once, before the request
-            if (gv.flCommit) gv.flCommit();
+            if (gv.r3dCommit) gv.r3dCommit();
             void sendMove(g.id, v.join(","), note);
           }
         )
@@ -897,52 +899,64 @@ export function createGameStore(opts: {
     if (in3d) putField();
   }
 
-  /* Frontlines' 3D field (lazy, like the Duel's): the scene shows the
-     last round and plays new ones in; the planner and the numbers stay
-     in the page. */
-  const FL3D_KEY = "ac:fl3d";
-  let fl3dComp: Promise<
-    ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }>
-  > | null = null;
-  function fl3dPref(): boolean {
+  /* The rounds games' 3D views (Frontlines, Code Race), lazy-loaded like
+     the Duel's: one host per open arena, kept across repaints; the scene
+     shows the last round and plays new ones in, the inputs and the
+     numbers stay in the page. 3D is the default; the 2D/3D toggle is
+     remembered per game (ac:fl3d, ac:cr3d). */
+  type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void };
+  type Kind3d = { key: string; cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
+  const KIND3D: Record<string, Kind3d> = {
+    frontlines: { key: "ac:fl3d", cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
+    coderace: { key: "ac:cr3d", cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
+  };
+  function pref3d(kind: string): boolean {
     try {
-      return localStorage.getItem(FL3D_KEY) !== "0";
+      return localStorage.getItem(KIND3D[kind]!.key) !== "0";
     } catch {
       return false;
     }
   }
-  function setFl3dPref(on: boolean) {
+  function setPref3d(kind: string, on: boolean) {
     try {
-      localStorage.setItem(FL3D_KEY, on ? "1" : "0");
+      localStorage.setItem(KIND3D[kind]!.key, on ? "1" : "0");
     } catch {
       // storage unavailable: the toggle still works for this view
     }
   }
-  function loadFl3d() {
-    if (!fl3dComp)
-      fl3dComp = import("./FrontlinesArena3D")
+  function load3d(kind: string) {
+    const k = KIND3D[kind]!;
+    if (!k.comp)
+      k.comp = k
+        .load()
         .then((m) => m.default)
         .catch((e) => {
-          fl3dComp = null;
+          k.comp = null;
           throw e;
         });
-    return fl3dComp;
+    return k.comp;
   }
-  function dropFl3d() {
+  function drop3d() {
     const gv = gameView;
-    if (gv && gv.fl3d) {
-      const m = gv.fl3d;
-      gv.fl3d = null;
-      gv.flCommit = null;
+    if (gv && gv.r3d) {
+      const m = gv.r3d;
+      gv.r3d = null;
+      gv.r3dCommit = null;
       m.root.unmount();
     }
   }
-  function paintFl3d(g: GL, h: Host3d) {
+  // the open arena's host (made on first use), already in the page order
+  function host3d(kind: string): Host3d {
+    const gv = gameView!;
+    if (!gv.r3d) gv.r3d = makeHost3d("lc-board-big lc-3d-host " + KIND3D[kind]!.cls);
+    return gv.r3d;
+  }
+  function paint3d(kind: string, g: GL, h: Host3d) {
     const gv = gameView;
     if (!gv || h.failed) return;
-    const seq = (gv.fl3dSeq = (gv.fl3dSeq || 0) + 1);
-    const current = () => !!gameView && gameView === gv && gv.fl3dSeq === seq && gv.fl3d === h;
-    loadFl3d().then(
+    const seq = (gv.r3dSeq = (gv.r3dSeq || 0) + 1);
+    const current = () => !!gameView && gameView === gv && gv.r3dSeq === seq && gv.r3d === h;
+    load3d(kind).then(
       (Comp) => {
         if (!current() || h.failed) return;
         h.root.render(
@@ -952,7 +966,7 @@ export function createGameStore(opts: {
             aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
             onReady: () => ready3d(h),
             registerCommit: (fn: (() => void) | null) => {
-              if (gameView === gv) gv.flCommit = fn;
+              if (gameView === gv) gv.r3dCommit = fn;
             },
           })
         );
@@ -962,17 +976,17 @@ export function createGameStore(opts: {
       }
     );
   }
-  function flViewToggle(g: GL): HTMLElement {
+  function viewToggle3d(kind: string, g: GL): HTMLElement {
     const row = el("div", "lc-view-toggle");
-    const on = fl3dPref();
+    const on = pref3d(kind);
     const mk = (label: string, is3d: boolean) => {
       const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
       b.type = "button";
       b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
       b.addEventListener("click", () => {
-        if (fl3dPref() === is3d) return;
-        setFl3dPref(is3d);
-        if (!is3d) dropFl3d();
+        if (pref3d(kind) === is3d) return;
+        setPref3d(kind, is3d);
+        if (!is3d) drop3d();
         renderGameView(g, true);
       });
       return b;
@@ -1018,15 +1032,24 @@ export function createGameStore(opts: {
     if (tb) wrap.appendChild(tb);
     wrap.appendChild(arenaTabs(g));
     if (gv.tab === "history") {
+      drop3d();
       wrap.appendChild(historyList(g));
       return;
     }
     const note = el("div", "lc-note", "");
     if (g.status === "lobby") {
+      drop3d();
       wrap.appendChild(lobbyPanel(g, note));
       wrap.appendChild(note);
       return;
     }
+    // in 3D the vault comes first, the input right under it
+    wrap.appendChild(viewToggle3d("coderace", g));
+    if (pref3d("coderace")) {
+      const h = host3d("coderace");
+      wrap.appendChild(h.host);
+      paint3d("coderace", g, h);
+    } else drop3d();
     const sec = crSecretEl(g);
     if (sec) wrap.appendChild(sec);
     const racing = g.status === "running" && you.playing && !you.solved && !you.out;
@@ -1050,6 +1073,8 @@ export function createGameStore(opts: {
           (v) => {
             if (gameView !== gv) return;
             gv.crDraft = { round: g.round, v };
+            // the scene seals and sounds the guess at once, before the request
+            if (gv.r3dCommit) gv.r3dCommit();
             void sendMove(g.id, g.mode === "words" ? v : v.split("").join(" "), note);
           },
           (v) => {
@@ -1915,7 +1940,7 @@ export function createGameStore(opts: {
     dropLc3d();
     dropBs3d();
     dropDuel3d();
-    dropFl3d();
+    drop3d();
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(
@@ -2023,7 +2048,7 @@ export function createGameStore(opts: {
       dropLc3d();
       dropBs3d();
       dropDuel3d();
-      dropFl3d();
+      drop3d();
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
         gameViewTimer = 0;

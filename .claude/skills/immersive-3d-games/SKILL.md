@@ -219,7 +219,10 @@ read as silhouettes - keep the ships lit from the player's side and
 their paint non-metallic), `DuelArena3D.tsx` (RPS: a floating stage in a nebula,
 the four-beat reveal and the KO), `FrontlinesArena3D.tsx` (Frontlines: five
 hills at dusk, an army of glowing units per side, a hill-by-hill reveal;
-the planner and the exact numbers stay in the DOM). `games.ts` lazy-loads
+the planner and the exact numbers stay in the DOM), `CodeRaceArena3D.tsx`
+(Code Race: a cryptex vault under a synthwave sun and one lock pillar per
+racer whose tumblers show that racer's latest feedback - a rival's never
+shows their guess). `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and
 atmos primitives before adding parallel machinery: extend the shared files
@@ -401,9 +404,9 @@ Full tables and starting `Juice.hit` values per event and seat:
 3. **Screenshot at desktop and phone widths:** desktop 1280×860 (the suite
    default) and phone 390×844 with `hasTouch`/`isMobile`; add a
    `reducedMotion: 'reduce'` context for the still path. 3D is the default
-   arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d` or `ac:fl3d` of `"0"`
-   forces 2D, so clear those keys. The entry sequence plays once per game per page
-   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl>:<id>"] = "1"` to
+   arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d`, `ac:fl3d` or
+   `ac:cr3d` of `"0"` forces 2D, so clear those keys. The entry sequence plays once per game per page
+   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).
