@@ -1088,6 +1088,48 @@ async function waitUp() {
     check('MCP get_game carries how_to_play', !!mcpHowGame && /rock-paper-scissors/.test(mcpHowGame.how_to_play || ''), JSON.stringify(r.json).slice(0, 200));
     for (const id of extra) await req('POST', R2 + '/games/' + id + '/cancel', { token: TP, json: {} });
 
+    // Four in a Row (2026-11-19): turns on the turn-order helper, a 7x6
+    // board, four in a line wins; who moves first is drawn at creation.
+    const tokOf = { Poc: TP, Rex: TRex };
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'fourinarow', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    check('four in a row needs exactly 2 -> 400', r.status === 400 && /exactly 2/.test(r.json.error), r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'Connect Four', from: 'Poc', players: ['Poc', 'Rex'] } });
+    const c4 = r.json.game || {};
+    check('four in a row created in a lobby (the Connect Four alias works)', r.status === 201 && c4.type === 'fourinarow' && c4.status === 'lobby' && c4.board.length === 6 && c4.board.every((row) => row === '.......') && ['Poc', 'Rex'].includes(c4.first) && c4.turn_seconds === 3600 && c4.turn_of === null, r.status + ' ' + r.text.slice(0, 200));
+    const F = c4.first, S = F === 'Poc' ? 'Rex' : 'Poc';
+    r = await req('POST', R2 + '/games/' + c4.id + '/accept', { token: TRex, json: {} });
+    check('four in a row starts with the first mover to play', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === F, JSON.stringify(r.json.game).slice(0, 160));
+    check('how_to_play: four in a row names who moves first', /moves first and plays X/.test(r.json.game.how_to_play || '') && /1 to 7 from the left/.test(r.json.game.how_to_play || ''), String(r.json.game.how_to_play).slice(0, 160));
+    r = await req('GET', R2 + '/messages?limit=5', { token: tokOf[F] });
+    check('room_state asks the first mover for a column', ((r.json.room_state || {}).awaiting_you || []).some((a) => a.type === 'game' && a.id === c4.id && /column/.test(a.call.body.dir)), JSON.stringify(((r.json.room_state || {}).awaiting_you || []).map((a) => a.id + ':' + ((a.call || {}).body || {}).dir)));
+    r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[S], json: { dir: '4' } });
+    check('moving out of turn -> 409', r.status === 409 && new RegExp("It's " + F + "'s turn").test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[F], json: { dir: '8' } });
+    check('column 8 -> 400 with the open columns', r.status === 400 && (r.json.legal_moves || []).join() === '1,2,3,4,5,6,7', r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[F], json: { dir: '4' } });
+    check('a disc falls to the bottom and the turn passes', r.status === 200 && r.json.game.board[5] === '...X...' && r.json.game.turn_of === S && r.json.game.turn === 2 && JSON.stringify(r.json.game.last_move && [r.json.game.last_move.col, r.json.game.last_move.row]) === '[4,1]', JSON.stringify(r.json.game).slice(0, 220));
+    // F builds column 1 to four; S stacks column 2 to three, then goes wide
+    for (const [who, col] of [[S, 2], [F, 1], [S, 2], [F, 1], [S, 2], [F, 1], [S, 7]]) await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[who], json: { dir: String(col) } });
+    r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[F], json: { dir: 'column 1' } });
+    check('four up a column wins', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === F && JSON.stringify(r.json.game.line) === '[[1,1],[1,2],[1,3],[1,4]]' && r.json.game.moves.length === 9, JSON.stringify(r.json.game).slice(0, 240));
+    r = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Four in a Row result', (r.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Four in a Row match #' + c4.id + ' is over - ' + F + ' connects four up a column on move 9')), JSON.stringify((r.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-3)));
+    // a full column refuses the disc
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'fourinarow', from: 'Poc', players: ['Poc', 'Rex'] } });
+    const c4b = r.json.game || {};
+    await req('POST', R2 + '/games/' + c4b.id + '/accept', { token: TRex, json: {} });
+    const F2 = c4b.first, S2 = F2 === 'Poc' ? 'Rex' : 'Poc';
+    for (let k = 0; k < 6; k++) await req('POST', R2 + '/games/' + c4b.id + '/moves', { token: tokOf[k % 2 ? S2 : F2], json: { dir: '3' } });
+    r = await req('POST', R2 + '/games/' + c4b.id + '/moves', { token: tokOf[F2], json: { dir: '3' } });
+    check('a full column -> 400 without it in legal_moves', r.status === 400 && /Column 3 is full/.test(r.json.error) && (r.json.legal_moves || []).join() === '1,2,4,5,6,7', r.status + ' ' + r.text.slice(0, 140));
+    await req('POST', R2 + '/games/' + c4b.id + '/cancel', { token: TP, json: {} });
+    // the ladder: an Elo rating per game over 2-player matches
+    r = await req('GET', R2 + '/games', { token: TP });
+    const lad = (r.json.ladder || {}).fourinarow || [];
+    const lw = lad.find((x) => x.name === F) || {}, ll = lad.find((x) => x.name === S) || {};
+    check('the ladder rates the Four in a Row win: 1016 vs 984', lw.rating === 1016 && lw.w === 1 && lw.last === 16 && ll.rating === 984 && ll.l === 1 && ll.last === -16 && lad[0].name === F, JSON.stringify(lad));
+    check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
+
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });

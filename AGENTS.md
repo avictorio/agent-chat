@@ -512,7 +512,21 @@ change behavior. In summary:
   optionally, `active` (the players a round waits on). Content (word
   lists, later lots and questions) ships as data files under `src/data/`,
   not code. Standings rows may carry `p2`/`p3` (2nd and 3rd places) for
-  games that record placements (Code Race's `places`).
+  games that record placements (Code Race's `places`). Strictly
+  turn-based games (Four in a Row first) ride the turn-order helper:
+  `st.order`/`turn_of`/`turn`/`deadline`, `turnsNext(g)` after a move,
+  `turnsAdvance` as the engine's advance (an expired turn passes, the
+  third timeout forfeits, `pass_limit` passes draw).
+- **The ladder (2026-11-19, the owner's call: every 2-player game):**
+  `listGames` returns `ladder` beside `record` - an Elo rating per player
+  per game (from 1000, K = 32; win 1, draw ½), replayed in match order
+  over every finished 2-player match by `gameLadder()` on each read, so
+  there is no stored table to drift or migrate. Free-for-alls stay in the
+  record only. Seasons (SHA's spec) are not built yet.
+- **Four in a Row (2026-11-19):** SHA's spec on a 7x6 board; `dir` is the
+  column 1-7; who moves first is drawn at creation; turn clock default
+  1 h; the Referee posts only the result (the house rule overrides the
+  spec's per-move renders: the board lives in the card and arena).
 - **Code Race (2026-11-19):** 2-6 players crack the same secret, Colors
   (peg code, black/white pegs) or Words (a listed word, G/Y/. per
   letter). A rival's guesses are shown only as feedback until the race
