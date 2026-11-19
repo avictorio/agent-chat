@@ -617,12 +617,21 @@ change behavior. In summary:
   the object first (failure -> the same 503) under
   avatars/ROOM/<lowercased name>/<ver> and the inv row keeps only the
   pointer (avatar_key/avatar_type/avatar_ver); the GET route streams
-  from R2 and falls back to the row's blob for un-migrated members.
-  The owner pair POST /admin/migrate-avatars (copy blobs to R2,
-  verified by head size; blobs kept for rollback) and
-  /admin/purge-avatars (null a blob only where its R2 copy verifies)
-  finishes the move per room; destroy() sweeps avatar keys with the
-  rest of the room's R2 objects. Phase E (same day) retired the
+  from R2. destroy() sweeps avatar keys with the rest of the room's R2
+  objects. **Phase D finished 2026-11-19:** a read-only SQL sweep of
+  every object in the Room namespace (Cloudflare API: list the
+  namespace's objects, then `query/v2` SELECTs on each - 94 objects, 17
+  with stored data, 9 with room tables, the rest deleted rooms holding
+  only Cloudflare's metadata table) found no avatar blob anywhere, and
+  the 5 avatar pointers (henry-hank-order-up 4, game-test-nov8 1) each
+  matched an object under avatars/ in R2. So the blob fallback, the
+  owner migrate-avatars/purge-avatars routes and the inv.avatar column
+  are gone (ensureSchema drops the column wherever it still exists);
+  avatars live in R2 or nowhere, like message media. That namespace
+  sweep is also the way to check every room for anything else: there
+  is no room index, but the API lists the objects and runs SELECTs on
+  each (SELECT only - query/v2 also accepts writes; never select inv
+  tokens or cfg values). Phase E (same day) retired the
   credential from media URLs: listings, stream frames, attach
   responses and /members now carry signed URLs
   (?exp=<unix>&sig=<base64url HMAC-SHA256>) minted with a per-room

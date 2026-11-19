@@ -97,7 +97,10 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN seen INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN kind TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN invited_by TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar BLOB"); } catch (e) {}
+    // Avatars live in R2 only (phase D, finished 2026-11-19: every room was
+    // checked and held no blob), so the blob-era column goes wherever it
+    // still exists.
+    try { this.sql.exec("ALTER TABLE inv DROP COLUMN avatar"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_ver INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_key TEXT"); } catch (e) {}
@@ -298,10 +301,9 @@ export class Room extends DurableObject {
 
   // Avatars: one small image per member. The bytes live in R2 (media plan
   // phase D) under avatars/ROOM/<lowercased name>/<ver>; the inv row carries
-  // only the pointer (avatar_key, avatar_type, avatar_ver). Rows migrated
-  // from the blob era may still hold the blob until the owner purge runs;
-  // getAvatar serves those from the row. Streams get a "members" event on
-  // change.
+  // only the pointer (avatar_key, avatar_type, avatar_ver). There is no
+  // in-DB copy any more (the blob era ended 2026-11-19). Streams get a
+  // "members" event on change.
   avatarKey(room, name, ver) {
     return "avatars/" + room + "/" + String(name).toLowerCase() + "/" + ver;
   }
@@ -315,7 +317,7 @@ export class Room extends DurableObject {
     try {
       await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
     } catch (e) { return "STORE_FAIL"; }
-    this.sql.exec("UPDATE inv SET avatar = NULL, avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
+    this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) {} }
     this.notifyMembers(name);
     return ver;
@@ -324,7 +326,7 @@ export class Room extends DurableObject {
   async clearAvatar(name) {
     const rows = this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL", name).toArray();
     if (!rows.length) return false;
-    this.sql.exec("UPDATE inv SET avatar = NULL, avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE lower(name) = lower(?)", name);
+    this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE lower(name) = lower(?)", name);
     if (this.env && this.env.MEDIA) {
       for (const r of rows) if (r.avatar_key) { try { await this.env.MEDIA.delete(r.avatar_key); } catch (e) {} }
     }
@@ -332,52 +334,11 @@ export class Room extends DurableObject {
     return true;
   }
 
+  // The member's avatar pointer, or null; the route streams the bytes
+  // from R2.
   getAvatar(name) {
-    const r = this.sql.exec("SELECT avatar, avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
-    return r ? { data: r.avatar_key ? null : r.avatar, key: r.avatar_key || null, type: r.avatar_type, ver: r.avatar_ver } : null;
-  }
-
-  // Owner-run avatar backfill (phase D): copy every remaining inv.avatar
-  // blob to its R2 key and set avatar_key, verifying each copy with a head
-  // size check. Blobs stay in place for rollback; purgeAvatars nulls them
-  // once the R2 copies have soaked. Idempotent.
-  async migrateAvatars(room) {
-    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    let migrated = 0, already = 0, failed = 0;
-    const rows = this.sql.exec("SELECT token, name, avatar, avatar_type, avatar_ver, avatar_key FROM inv WHERE avatar IS NOT NULL AND avatar_ver IS NOT NULL").toArray();
-    for (const r of rows) {
-      const key = r.avatar_key || this.avatarKey(room, r.name, r.avatar_ver);
-      try {
-        let head = null;
-        try { head = await this.env.MEDIA.head(key); } catch (e) {}
-        if (!head || head.size !== r.avatar.byteLength) {
-          await this.env.MEDIA.put(key, r.avatar, { httpMetadata: { contentType: r.avatar_type } });
-          head = await this.env.MEDIA.head(key);
-        }
-        if (!head || head.size !== r.avatar.byteLength) { failed++; continue; }
-        if (r.avatar_key === key) already++;
-        else { this.sql.exec("UPDATE inv SET avatar_key = ? WHERE token = ?", key, r.token); migrated++; }
-      } catch (e) { failed++; }
-    }
-    return { status: 200, migrated: migrated, already: already, failed: failed };
-  }
-
-  // Owner-run cleanup after the soak: null the blob wherever an R2 copy
-  // verifies (head size matches the blob). Rows whose copy does not verify
-  // keep their blob and are counted as failed.
-  async purgeAvatars() {
-    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    let purged = 0, failed = 0;
-    const rows = this.sql.exec("SELECT token, avatar, avatar_key FROM inv WHERE avatar IS NOT NULL AND avatar_key IS NOT NULL").toArray();
-    for (const r of rows) {
-      try {
-        const head = await this.env.MEDIA.head(r.avatar_key);
-        if (!head || head.size !== r.avatar.byteLength) { failed++; continue; }
-        this.sql.exec("UPDATE inv SET avatar = NULL WHERE token = ?", r.token);
-        purged++;
-      } catch (e) { failed++; }
-    }
-    return { status: 200, purged: purged, failed: failed };
+    const r = this.sql.exec("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
+    return r ? { key: r.avatar_key, type: r.avatar_type, ver: r.avatar_ver } : null;
   }
 
   // Voices: one cloned voice per member. The sample lives in R2; the mv row carries the
@@ -4265,8 +4226,9 @@ const MEDIA_CACHE = "private, max-age=3600, immutable";
 
 // Stream one media object to the client. The fast path reads R2 directly here in
 // the Worker (the Room only supplies the index row), so even a 5 GB video never
-// materializes inside the Durable Object. Anything not in R2 falls back to the
-// Room's buffered read of the legacy in-DB store (small objects only).
+// materializes inside the Durable Object. If that direct read fails, the Room's
+// own buffered R2 read (getMedia) is the second try; there is no in-DB copy
+// (phase B).
 async function serveMedia(request, env, stub, id, kind, room, viewer) {
   const noun = kind === "audio" ? "audio" : kind;
   const meta = await stub.mediaMeta(id, kind, viewer);
@@ -5351,9 +5313,9 @@ export default {
           "Content-Type": a.type, "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
           "ETag": "\"" + a.ver + "\"", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
         }, CORS);
-        if (a.key && env.MEDIA) {
-          // Phase D: the bytes live in R2; stream them from the Worker.
-          try {
+        // The bytes live in R2 only (phase D); stream them from the Worker.
+        try {
+          if (env.MEDIA) {
             if (request.method === "HEAD") {
               const head = await env.MEDIA.head(a.key);
               if (head) { aheaders["Content-Length"] = String(head.size); return new Response(null, { headers: aheaders }); }
@@ -5361,10 +5323,9 @@ export default {
               const obj = await env.MEDIA.get(a.key);
               if (obj) { aheaders["Content-Length"] = String(obj.size); return new Response(obj.body, { headers: aheaders }); }
             }
-          } catch (e) {}
-          if (!a.data) return json({ error: "No avatar" }, 404);
-        }
-        return new Response(request.method === "HEAD" ? null : a.data, { headers: aheaders });
+          }
+        } catch (e) {}
+        return json({ error: "No avatar" }, 404);
       }
       let who;
       if (m[2] !== undefined) {
@@ -6195,20 +6156,6 @@ export default {
       const body = await readBody(request);
       const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner);
       return json({ room: room, found: !!r.found, id: r.id || null, received: r.received || [] });
-    }
-
-    // Owner-only avatar migration (phase D): copy inv.avatar blobs to R2,
-    // then null the blobs once the copies have soaked.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/admin\/(migrate-avatars|purge-avatars)\/?$/);
-    if (m) {
-      if (!owner) return json({ error: "Owner key required" }, 403);
-      const room = decodeURIComponent(m[1]).toLowerCase();
-      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
-      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const r = m[2] === "migrate-avatars" ? await stub.migrateAvatars(room) : await stub.purgeAvatars();
-      if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json(Object.assign({ room: room }, r));
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);

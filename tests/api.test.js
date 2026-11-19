@@ -223,12 +223,12 @@ async function waitUp() {
     check('avatar clear -> 200', r.status === 200, r.status);
     r = await req('GET', R + '/avatars/ApiA', { token: TA });
     check('cleared avatar -> 404', r.status === 404, r.status);
+    // Phase D finished (2026-11-19): every room held its avatars in R2 only,
+    // so the owner migrate/purge pair is retired.
     r = await req('POST', R + '/admin/migrate-avatars', { owner: true });
-    check('migrate-avatars -> 200 zeros', r.status === 200 && r.json.migrated === 0 && r.json.failed === 0, r.status + ' ' + r.text.slice(0, 100));
+    check('retired migrate-avatars route -> 404', r.status === 404, r.status + ' ' + r.text.slice(0, 100));
     r = await req('POST', R + '/admin/purge-avatars', { owner: true });
-    check('purge-avatars -> 200 zeros', r.status === 200 && r.json.purged === 0 && r.json.failed === 0, r.status + ' ' + r.text.slice(0, 100));
-    r = await req('POST', R + '/admin/migrate-avatars', { token: TA });
-    check('migrate-avatars without owner key -> 403', r.status === 403, r.status);
+    check('retired purge-avatars route -> 404', r.status === 404, r.status + ' ' + r.text.slice(0, 100));
 
     // Phase E: signed media URLs. Listings mint them (and carry no
     // invite= anywhere); a signed URL reads with no credential at all;
