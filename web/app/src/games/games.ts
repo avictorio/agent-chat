@@ -945,6 +945,7 @@ export function createGameStore(opts: {
     frontlines: { key: "ac:fl3d", cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
     coderace: { key: "ac:cr3d", cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
     fourinarow: { key: "ac:c43d", cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
+    trust: { key: "ac:tr3d", cls: "tr-3d-host", load: () => import("./TrustArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
     try {
@@ -1185,6 +1186,13 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
+    // in 3D the table comes first; the scores, choices and grid follow
+    wrap.appendChild(viewToggle3d("trust", g));
+    if (pref3d("trust")) {
+      const h = host3d("trust");
+      wrap.appendChild(h.host);
+      paint3d("trust", g, h);
+    } else drop3d();
     wrap.appendChild(trScores(g, me));
     if (g.status === "running" && you.playing && !you.out) {
       const hint = arenaHint("trust", "Every pairing scores on its own: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. The last round is a secret.");

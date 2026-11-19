@@ -27,7 +27,8 @@ sound and buzz stay.
 5. Frontlines
 6. Code Race
 7. Four in a Row
-8. A new arena
+8. Trust
+9. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -253,7 +254,36 @@ the pointer and drop on a tap (the page's 1-7 buttons do the same).
 latest unseen move drops in (any earlier ones are placed at once); a tap
 skips; reduced motion places it with its title and sound.
 
-## 8. A new arena
+## 8. Trust: the round table
+
+**World.** A dark round table on an open plain under a teal and violet
+aurora (`TR_SKY`); each player's seat glows in their colour around it,
+the viewer nearest the camera; name plates and scores sit outward from
+the table so they never cover the threads.
+
+**Board.** The last round as a web: every pairing is a chord across the
+table in two halves, each the choice one player made toward the other -
+teal (trust), red (betrayal), dim red when both defected - all in one
+instanced draw. A seat's ring lights when that player has chosen.
+
+**Reveal.** Seats pulse (0.5 s), then pair by pair (spaced to fit ~2.2 s
+whatever the table size) both halves grow from the seats and meet: `ping`
+for trust kept, `snip` and a red `Burst` for a betrayal, `beat` for mutual
+defection. Then scores update and the title lands:
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you lock in | `lock` + `BUZZ.commit`, your seat lights |
+| a rival locks in | a soft `ping`, their seat lights |
+| someone betrayed your trust | "BETRAYED by …" bad, trauma 0.4, stop 120, `BUZZ.hitYou`, `tear` |
+| all your trust returned | "TRUST HELD" good, `BUZZ.scored`, `win` |
+| any other round | "ROUND n · +pts" neutral, `clash` |
+| match won / lost | VICTORY / DEFEAT (2nd of 3+ gets "#2"), the winner's pillar and shockwave |
+
+**Catch-up.** `ac-tr-seen:<path>:<id>`; the latest unseen round replays on
+open; a tap skips; reduced motion lands it at once.
+
+## 9. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

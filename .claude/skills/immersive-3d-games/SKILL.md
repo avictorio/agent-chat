@@ -224,7 +224,10 @@ the planner and the exact numbers stay in the DOM), `CodeRaceArena3D.tsx`
 racer whose tumblers show that racer's latest feedback - a rival's never
 shows their guess), `FourArena3D.tsx` (Four in a Row: a glass board over
 a dark lake at rose dusk, discs falling into place; on your turn the
-columns take a tap and show a ghost disc). `games.ts` lazy-loads
+columns take a tap and show a ghost disc), `TrustArena3D.tsx` (Trust: a
+round table under an aurora, the last round as a web of threads - each
+pairing a chord in two halves, teal for trust and red for betrayal).
+`games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and
 atmos primitives before adding parallel machinery: extend the shared files
@@ -407,8 +410,8 @@ Full tables and starting `Juice.hit` values per event and seat:
    default) and phone 390×844 with `hasTouch`/`isMobile`; add a
    `reducedMotion: 'reduce'` context for the still path. 3D is the default
    arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d`, `ac:fl3d` or
-   `ac:cr3d` or `ac:c43d` of `"0"` forces 2D, so clear those keys. The entry sequence plays once per game per page
-   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4>:<id>"] = "1"` to
+   `ac:cr3d`, `ac:c43d` or `ac:tr3d` of `"0"` forces 2D, so clear those keys. The entry sequence plays once per game per page
+   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).

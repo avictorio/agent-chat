@@ -1281,6 +1281,28 @@ let FAILURES = 0;
       return out;
     });
   }
+  // Trust in 3D (the default): the table loads first, then the scores,
+  // the choices and the grid; a lock-in still sends per-rival choices.
+  for (const [label, o] of [['trust-3d', {}], ['trust-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { tr: true }, init: () => { try { localStorage.removeItem('ac:tr3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
+      await page.click('.game-card.kind-trust');
+      await page.waitForSelector('#viewer:not([hidden]) .tr-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.label = await page.$eval('#viewer .tr-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tr-scores|tr-plan|tr-grid-wrap/.test(c)));
+      await shot(page, label + '.png');
+      await page.click('#viewer .tr-acts button:has-text("Trust everyone")');
+      await page.click('#viewer .tr-go');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/18/moves')).pop() || '';
+      if (!/Trust arena, 3D view: Ada 14, chosen; Henry 9, thinking; Anthony \(you\) 12, thinking\. On the table: round 2\./.test(out.label)) throw new Error('the scene reads the table: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,tr-scores,tr-plan,tr-grid-wrap') throw new Error('the table, then scores, choices and the grid: ' + JSON.stringify(out.order));
+      if (!/"dir":"Ada:C, Henry:C"/.test(out.moveCall)) throw new Error('Trust everyone sends C to each rival: ' + out.moveCall);
+      return out;
+    });
+  }
   // Four in a Row in 3D (the default): the board scene loads first, the
   // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
   // sends the column, and 2D brings the grid back.
