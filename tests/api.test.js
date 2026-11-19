@@ -1128,6 +1128,41 @@ async function waitUp() {
     const lad = (r.json.ladder || {}).fourinarow || [];
     const lw = lad.find((x) => x.name === F) || {}, ll = lad.find((x) => x.name === S) || {};
     check('the ladder rates the Four in a Row win: 1016 vs 984', lw.rating === 1016 && lw.w === 1 && lw.last === 16 && ll.rating === 984 && ll.l === 1 && ll.last === -16 && lad[0].name === F, JSON.stringify(lad));
+    // Trust (2026-11-19): pairwise C/D, payoffs 3/5/0/1, a hidden last round.
+    const tokT = { Poc: TP, Rex: TRex, Rae: TRae };
+    let rt = await req('POST', R2 + '/games', { token: TP, json: { game: 'trust', from: 'Poc', players: ['Poc'] } });
+    check('trust needs 2 to 8 -> 400', rt.status === 400 && /2 to 8/.test(rt.json.error), rt.status);
+    rt = await req('POST', R2 + '/games', { token: TP, json: { game: 'trust', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rounds: 4, tick_seconds: 3600 } });
+    const tr0 = rt.json.game || {};
+    check('trust created in a lobby, the last round hidden', rt.status === 201 && tr0.type === 'trust' && tr0.status === 'lobby' && tr0.rounds_about === 4 && tr0.last_round === null && tr0.payoffs && tr0.payoffs.DC === 5 && tr0.payoffs.CD === 0, rt.status + ' ' + rt.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + tr0.id + '/accept', { token: TRex, json: {} });
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/accept', { token: TRae, json: {} });
+    check('trust starts when everyone accepts', rt.status === 200 && rt.json.game.status === 'running' && /about 4 rounds/.test(rt.json.game.how_to_play || ''), rt.status + ' ' + String(rt.json.game && rt.json.game.how_to_play).slice(0, 120));
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TP, json: { dir: 'C, Rex:D' } });
+    check('a default plus an exception commits without resolving', rt.status === 200 && rt.json.resolved === false && JSON.stringify(rt.json.game.you.queued) === '{"Rex":"D","Rae":"C"}', rt.status + ' ' + rt.text.slice(0, 200));
+    rt = await req('GET', R2 + '/games/' + tr0.id, { token: TRex });
+    check('choices stay secret until the round resolves', (rt.json.game.players.find((p) => p.name === 'Poc') || {}).committed === true && rt.json.game.you.queued === null && rt.json.game.rounds.length === 0 && !JSON.stringify(rt.json.game).includes('"Rex":"D"'), JSON.stringify(rt.json.game).slice(0, 200));
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TRae, json: { dir: 'maybe' } });
+    check('a choice that is not C or D -> 400', rt.status === 400 && /not C or D/.test(rt.json.error), rt.status + ' ' + rt.text.slice(0, 120));
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TRae, json: { dir: 'Bob:C' } });
+    check('a name that is not a rival -> 400', rt.status === 400 && /not a rival/.test(rt.json.error), rt.status + ' ' + rt.text.slice(0, 120));
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TRae, json: { dir: 'Poc:C' } });
+    check('a rival left out with no default -> 400 naming them', rt.status === 400 && /no choice for Rex/.test(rt.json.error), rt.status + ' ' + rt.text.slice(0, 120));
+    await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TRex, json: { dir: 'defect' } });
+    rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: TRae, json: { dir: 'cooperate' } });
+    const trR1 = ((rt.json.game || {}).rounds || [])[0] || {};
+    // Poc-Rex: D/D 1 each; Poc-Rae: C/C 3 each; Rex-Rae: D/C 5 to Rex, 0 to Rae
+    check('every pairing scores on its own: Poc 4, Rex 6, Rae 3', rt.status === 200 && rt.json.resolved === true && JSON.stringify(trR1.points) === '{"Poc":4,"Rex":6,"Rae":3}' && trR1.moves.Poc.Rex === 'D' && trR1.moves.Rex.Rae === 'D' && trR1.moves.Rae.Poc === 'C', JSON.stringify(trR1));
+    let trG = rt.json.game;
+    for (let k = 0; k < 8 && trG.status === 'running'; k++) {
+      for (const n of ['Poc', 'Rex', 'Rae']) {
+        rt = await req('POST', R2 + '/games/' + tr0.id + '/moves', { token: tokT[n], json: { dir: 'C' } });
+        if (rt.json && rt.json.game) trG = rt.json.game;
+      }
+    }
+    check('trust ends at its secret last round; Rex wins by 2', trG.status === 'finished' && trG.winner === 'Rex' && trG.last_round === trG.rounds.length && trG.last_round >= 3 && trG.last_round <= 6 && trG.players.find((p) => p.name === 'Rex').score - trG.players.find((p) => p.name === 'Poc').score === 2, JSON.stringify({ status: trG.status, winner: trG.winner, last: trG.last_round, n: (trG.rounds || []).length, players: trG.players }));
+    rt = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Trust result', (rt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trust match #' + tr0.id + ' is over after') && x.text.includes('Rex wins with')), JSON.stringify((rt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

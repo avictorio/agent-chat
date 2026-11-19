@@ -523,6 +523,13 @@ change behavior. In summary:
   over every finished 2-player match by `gameLadder()` on each read, so
   there is no stored table to drift or migrate. Free-for-alls stay in the
   record only. Seasons (SHA's spec) are not built yet.
+- **Trust (2026-11-19):** the iterated prisoner's dilemma, everyone
+  against everyone (2-8 players, payoffs 3/5/0/1 per pairing), on the
+  rounds helper. The real last round is drawn within two of `rounds` at
+  creation and stays out of every view until the match ends (`last_round`
+  appears then) - keep it that way, or the endgame turns into planned
+  betrayal. A missed round is D toward everyone; three in a row take a
+  player out.
 - **Four in a Row (2026-11-19):** SHA's spec on a 7x6 board; `dir` is the
   column 1-7; who moves first is drawn at creation; turn clock default
   1 h; the Referee posts only the result (the house rule overrides the
