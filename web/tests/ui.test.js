@@ -1422,6 +1422,28 @@ let FAILURES = 0;
       return out;
     });
   }
+  // Liar's Dice in 3D (the default): the table loads first, then the
+  // standing bid, your cup, the bid builder, the table and the last round;
+  // Liar! still sends the call.
+  for (const [label, o] of [['liarsdice-3d', {}], ['liarsdice-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ld: true }, init: () => { try { localStorage.removeItem('ac:ld3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
+      await page.click('.game-card.kind-liarsdice');
+      await page.waitForSelector('#viewer:not([hidden]) .ld-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.label = await page.$eval('#viewer .ld-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ld-now|ld-cup|ld-bidder|ld-table|ld-reveal/.test(c)));
+      await shot(page, label + '.png');
+      await page.click('#viewer .ld-liar');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/22/moves')).pop() || '';
+      if (!/Liar's Dice table, 3D view: the standing bid is 3 fours by Ada\. Ada 5 dice; Anthony \(you\) 5 dice, to bid; Henry 4 dice\./.test(out.label)) throw new Error('the scene reads the table: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,ld-now,ld-cup,ld-bidder,ld-table,ld-reveal') throw new Error('the table, then the bid, your cup, the builder, the seats and the last round: ' + JSON.stringify(out.order));
+      if (!/"dir":"liar"/.test(out.moveCall)) throw new Error('Liar! sends the call: ' + out.moveCall);
+      return out;
+    });
+  }
   // The auction in 3D (the default): the hall loads first, then the lot,
   // your bid and the bidders; a bid still sends the number.
   for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {

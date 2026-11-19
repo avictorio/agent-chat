@@ -29,7 +29,8 @@ sound and buzz stay.
 7. Four in a Row
 8. Trust
 9. The auction
-10. A new arena
+10. Liar's Dice
+11. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -319,7 +320,48 @@ unsold lot rises and fades. The paddles come down after the title.
 **Catch-up.** `ac-au-seen:<path>:<id>`; the latest unseen lot replays on
 open; a tap skips; reduced motion lands it at once.
 
-## 10. A new arena
+## 10. Liar's Dice: the den
+
+**World.** A round crimson felt table with a wooden rim under one warm
+lamp (`LD_SKY`, near black with an amber glow), the room around it dark.
+Each seat (turn order, the viewer nearest the camera) has a leather cup
+tinted with the player's colour, a ring that pulses on their turn, and a
+plate (yours toward the camera, rivals' above their cups). The standing
+bid floats over the middle: a big die tipped to face the camera, the
+count beside it, the bidder under it; a new bid flips it.
+
+**Secrecy.** A rival's cup never lifts outside a reveal: the server
+never sends their dice. Your own cup lies tipped beside your dice, which
+sit face up in a row tipped toward the camera - for your eyes only.
+Spectators see every cup down.
+
+**Dice.** One instanced draw for every die on the table: a box whose UVs
+map into a 3x2 canvas atlas of pips (opposite faces sum to 7), the value
+set by rotation (`faceUp`), an optional tilt toward the camera, and a
+per-instance tint (hit, dim, wild).
+
+**Reveal.** Every cup slides aside along the table's edge and tips away
+(so none stands between the camera and the dice), each seat's dice line
+up face up, then the dice that count toward the called face light one at
+a time while "n of N" climbs over the bid; at the verdict the count turns
+green (the bid stands) or red (a lie), the loser's last die shatters in
+their colour, the cups come down and shake for the next roll. A turn
+that ran out skips the lift: the die just shatters.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you bid or call | `lock` + `BUZZ.commit` |
+| a rival bids | a soft `ping`, the bid die flips |
+| your call was right / your bid stood | "LIAR!" / "IT STANDS" good, `BUZZ.scored`, `smash` + `win` |
+| you lose a die (wrong call, or caught) | "WRONG CALL" / "CAUGHT" bad, `BUZZ.hitYou`, `smash` + `shatter`; your last die: "OUT", `BUZZ.lostOne` |
+| your turn ran out | "TIME" bad, `buzzer` + `shatter` |
+| anyone else's round | "LIAR!" / "IT STANDS" / "TIME" neutral |
+| match won / lost | VICTORY / DEFEAT (2nd of 3+ gets "#2"), the winner's pillar and shockwave; the table then reads "★ name wins" |
+
+**Catch-up.** `ac-ld-seen:<path>:<id>`; the latest unseen round replays
+on open; a tap skips; reduced motion lands it at once.
+
+## 11. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

@@ -230,7 +230,11 @@ pairing a chord in two halves, teal for trust and red for betrayal),
 `AuctionArena3D.tsx` (the auction: a dark hall in indigo and gold, the
 lot as a turning gem on a pedestal, the bidders on an arc with coin
 stacks for the budget left; a resolved lot raises the paddles lowest bid
-first, then the gavel sends the gem to the winner).
+first, then the gavel sends the gem to the winner), `LiarsArena3D.tsx`
+(Liar's Dice: a crimson felt table under one lamp, a leather cup per
+seat - a rival's never lifts until a call - your own dice face up for
+you alone, the standing bid as a big die over the middle; a call slides
+every cup aside and lights the dice that count, one by one).
 `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and
@@ -414,8 +418,8 @@ Full tables and starting `Juice.hit` values per event and seat:
    default) and phone 390×844 with `hasTouch`/`isMobile`; add a
    `reducedMotion: 'reduce'` context for the still path. 3D is the default
    arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d`, `ac:fl3d` or
-   `ac:cr3d`, `ac:c43d`, `ac:tr3d` or `ac:au3d` of `"0"` forces 2D, so clear those keys. The entry sequence plays once per game per page
-   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au>:<id>"] = "1"` to
+   `ac:cr3d`, `ac:c43d`, `ac:tr3d`, `ac:au3d` or `ac:ld3d` of `"0"` forces 2D, so clear those keys. The entry sequence plays once per game per page
+   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).
