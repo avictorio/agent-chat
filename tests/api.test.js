@@ -945,6 +945,59 @@ async function waitUp() {
     check('"Light Cycles" spelled out still creates Light Cycles', r.status === 201 && r.json.game.type === 'lightcycles', r.status + ' ' + r.text.slice(0, 120));
     if (r.json && r.json.game) await req('POST', R2 + '/games/' + r.json.game.id + '/cancel', { token: TP, json: {} });
 
+    // Frontlines (2026-11-19): 100 troops over 5 hills, secret splits,
+    // hill by hill to the bigger army, the round to more hills held.
+    // Earlier sections leave live matches behind, and awaiting_you is
+    // capped: clear them so this section's nudge check sees its own match.
+    r = await req('GET', R2 + '/games', { owner: true });
+    for (const gl of (r.json.games || []).filter((x) => x.status === 'lobby' || x.status === 'running')) await req('POST', R2 + '/games/' + gl.id + '/cancel', { owner: true, json: {} });
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'frontlines', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
+    check('frontlines needs exactly 2 -> 400', r.status === 400, r.status);
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'frontlines', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
+    check('frontlines created in a lobby', r.status === 201 && r.json.game.type === 'frontlines' && r.json.game.status === 'lobby' && r.json.game.target === 2 && r.json.game.hills === 5 && r.json.game.troops === 100 && r.json.game.values === null, r.status + ' ' + r.text.slice(0, 160));
+    const flId = r.json.game.id;
+    r = await req('POST', R2 + '/games/' + flId + '/accept', { token: TRex, json: {} });
+    check('frontlines starts when both accept', r.status === 200 && r.json.game.status === 'running' && r.json.game.round === 1, r.status);
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TP, json: { dir: '50,50,10,0,0' } });
+    check('a split over 100 -> 400 naming the sum', r.status === 400 && /add up to exactly 100/.test(r.json.error) && /110/.test(r.json.error) && Array.isArray(r.json.legal_moves), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TP, json: { dir: '25,25,50' } });
+    check('three numbers -> 400', r.status === 400 && /5 numbers/.test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TP, json: { dir: '40,30,30,0,0' } });
+    check('a split commits without resolving', r.status === 200 && r.json.resolved === false && JSON.stringify(r.json.game.you.queued) === '[40,30,30,0,0]', r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/games/' + flId, { token: TRex });
+    check('the split stays secret from the rival', (r.json.game.players.find((p) => p.name === 'Poc') || {}).committed === true && r.json.game.you.queued === null && !JSON.stringify(r.json.game).includes('40,30,30') && !JSON.stringify(r.json.game.rounds).includes('40'), JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TRex });
+    check('room_state asks the rival for a split', ((r.json.room_state || {}).awaiting_you || []).some((a) => a.type === 'game' && a.id === flId && a.turn === 1 && /100/.test(a.call.body.dir)), 'flId ' + flId + ': ' + JSON.stringify(((r.json.room_state || {}).awaiting_you || []).map((a) => a.type + ':' + a.id + ':' + a.turn + ':' + ((a.call || {}).body || {}).dir)) + ' more ' + JSON.stringify(Object.keys(r.json.room_state || {})));
+    // Poc 40/30/30/0/0 vs Rex 20/20/20/20/20: Poc takes A, B, C (3 hills) - Poc's round
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TRex, json: { dir: 'even' } });
+    const fr1 = (r.json.game.rounds || [])[0] || {};
+    check('the round resolves hill by hill', r.status === 200 && r.json.resolved === true && fr1.winner === 'Poc' && JSON.stringify(fr1.hills) === '["Poc","Poc","Poc","Rex","Rex"]' && fr1.held.Poc === 3 && fr1.held.Rex === 2 && r.json.game.score.Poc === 1, JSON.stringify(fr1));
+    check('both splits are public once resolved', JSON.stringify(fr1.alloc.Rex) === '[20,20,20,20,20]' && JSON.stringify(fr1.alloc.Poc) === '[40,30,30,0,0]');
+    // a level round: identical splits take nothing
+    await req('POST', R2 + '/games/' + flId + '/moves', { token: TP, json: { dir: 'even' } });
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TRex, json: { dir: '20 20 20 20 20' } });
+    check('a level round scores nobody', r.status === 200 && (r.json.game.rounds[1] || {}).winner === null && r.json.game.round === 3 && r.json.game.score.Poc === 1, JSON.stringify(r.json.game.rounds[1] || {}));
+    await req('POST', R2 + '/games/' + flId + '/moves', { token: TP, json: { dir: '0,0,34,33,33' } });
+    r = await req('POST', R2 + '/games/' + flId + '/moves', { token: TRex, json: { dir: '30,30,30,10,0' } });
+    check('frontlines finishes at the target', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Poc', JSON.stringify(r.json.game).slice(0, 200));
+    r = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Frontlines result', (r.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Frontlines match #' + flId + ' is over') && x.text.includes('Poc takes the field 2-0')), JSON.stringify((r.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 90))));
+    r = await req('GET', R2 + '/games', { token: TP });
+    check('standings count Frontlines', !!(r.json.record || {}).frontlines && r.json.record.frontlines.some((row) => row.name === 'Poc' && row.w >= 1), JSON.stringify((r.json.record || {}).frontlines || null));
+    // valued hills: public values each round, the round to more points
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'frontlines', variant: 'valued', from: 'Poc', players: ['Poc', 'Rex'], best_of: 1, tick_seconds: 3600 } });
+    const flv = r.json.game;
+    check('valued hills: five public values, 1,1,2,2,3 shuffled', r.status === 201 && flv.variant === 'valued' && Array.isArray(flv.values) && flv.values.slice().sort().join(',') === '1,1,2,2,3', JSON.stringify(flv.values));
+    await req('POST', R2 + '/games/' + flv.id + '/accept', { token: TRex, json: {} });
+    // Poc stacks the 3-point hill, Rex takes the other four: Rex holds more hills, but is it more points?
+    const three = flv.values.indexOf(3);
+    const pocSplit = [0, 0, 0, 0, 0]; pocSplit[three] = 100;
+    const rexSplit = [25, 25, 25, 25, 25]; rexSplit[three] = 0;
+    await req('POST', R2 + '/games/' + flv.id + '/moves', { token: TP, json: { dir: pocSplit.join(',') } });
+    r = await req('POST', R2 + '/games/' + flv.id + '/moves', { token: TRex, json: { dir: rexSplit.join(',') } });
+    const vr = (r.json.game.rounds || [])[0] || {};
+    check('valued hills: the round goes to more points, not more hills', vr.held.Rex === 4 && vr.points.Poc === 3 && vr.points.Rex === 6 && vr.winner === 'Rex' && r.json.game.status === 'finished', JSON.stringify(vr));
+
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });

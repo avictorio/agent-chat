@@ -18,6 +18,9 @@ const MAX_TEXT = 8000;
 // accepted (a creator who is playing is in automatically). This is how
 // long a lobby waits for its players before the match is called off.
 const LOBBY_DEFAULT_SECONDS = 3600;
+// Frontlines: the hills on the field and the troops each round.
+const FL_HILLS = 5;
+const FL_TROOPS = 100;
 const SPEAK_INFLIGHT = new Map();
 const MAX_NAME = 40;
 // Member names (2026-11-19 sweep): free text, but never markup or game
@@ -1686,6 +1689,229 @@ export class Room extends DurableObject {
     this.resolveDuelRound(g);
     this.saveGame(g);
     this.afterGameChange(g, room, "Referee");
+  }
+
+  /* ---------- games: simultaneous rounds (2026-11-19) ----------
+     The shared machinery for games where every player moves secretly
+     and the round resolves together - built with Frontlines, for Trust,
+     the auction and Code Race next. The round resolves the moment every
+     seated player has committed. At the deadline, the round resolves
+     with whoever did commit (the engine scores the forfeits); a round
+     nobody committed ends the match where it stands - except round 1,
+     which calls it off (cancelled, nothing on anyone's record), as a
+     duel does. Commitments are secret: views show only THAT a player
+     has committed until the round resolves. The engine supplies
+     resolveRound(room, g) (score it, push the round, advance or
+     finish) and standing(room, st) (the winner if the match ends where
+     it stands, or null). */
+  roundsCommit(g, who, move, room) {
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    st.pending[me.name] = move;
+    if (!st.pending_at) st.pending_at = {};
+    st.pending_at[me.name] = Date.now();
+    const all = st.players.every((p) => st.pending[p.name] !== undefined);
+    if (all) gameEngine(st).resolveRound(this, g);
+    this.saveGame(g);
+    // a frame per commit (from the player, targets who still owes), and
+    // the frame that opens the next round speaks as the Referee
+    if (all) this.afterGameChange(g, room, "Referee");
+    else this.broadcastGame(g, room, who);
+    return all;
+  }
+
+  roundsAdvance(g, room) {
+    if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
+    const st = g.st;
+    const eng = gameEngine(st);
+    const committed = st.players.filter((p) => st.pending[p.name] !== undefined).length;
+    if (committed === 0) {
+      if (st.round === 1) {
+        g.status = "cancelled";
+        st.log.push({ tick: st.round, text: "Round 1 went by with no moves - the match is called off." });
+        this.saveGame(g);
+        this.postSystem(eng.name + " match #" + g.id + " is off - round 1 went by with no moves.", room);
+        this.afterGameChange(g, room, "Referee");
+        return;
+      }
+      g.status = "finished";
+      st.winner = eng.standing(this, st);
+      st.log.push({ tick: st.round, text: "Round " + st.round + " went by with no moves - the match ends where it stands." });
+      this.saveGame(g);
+      this.afterGameChange(g, room, "Referee");
+      return;
+    }
+    eng.resolveRound(this, g);
+    this.saveGame(g);
+    this.afterGameChange(g, room, "Referee");
+  }
+
+  /* ---------- games: Frontlines (2026-11-19) ----------
+     Two commanders, five hills, a hundred troops each round. Both split
+     their troops in secret; each hill goes to the bigger army (a level
+     hill goes to nobody) and the round to whoever holds more hills - or,
+     in the Valued hills variant, more hill points (each round's values,
+     a shuffle of 1, 1, 2, 2, 3, are public before anyone commits). A
+     level round scores nobody. First to a majority of best_of rounds
+     takes the field. Rides the simultaneous-rounds machinery above: a
+     lone commitment at the deadline wins its round by forfeit. */
+  flParse(raw) {
+    const s = String(raw || "").trim().toLowerCase();
+    if (s === "random") return this.flRandom();
+    if (s === "even") return [20, 20, 20, 20, 20];
+    const parts = s.replace(/^(deploy|send|split)\s*:?\s*/, "").split(/[\s,;]+/).filter(Boolean);
+    if (parts.length !== FL_HILLS) return { error: "send " + FL_HILLS + " numbers, one per hill A-E, e.g. 30,20,20,15,15 (or \"even\" / \"random\")" };
+    const nums = parts.map((x) => (/^\d+$/.test(x) ? Number(x) : NaN));
+    if (nums.some((n) => !Number.isFinite(n))) return { error: "troops are whole numbers, 0 or more, e.g. 30,20,20,15,15" };
+    const sum = nums.reduce((a, b) => a + b, 0);
+    if (sum !== FL_TROOPS) return { error: "the five numbers must add up to exactly " + FL_TROOPS + " (yours add up to " + sum + ")" };
+    return nums;
+  }
+
+  flRandom() {
+    const w = Array.from({ length: FL_HILLS }, () => Math.random() + 0.05);
+    const tot = w.reduce((a, b) => a + b, 0);
+    const out = w.map((x) => Math.floor((x / tot) * FL_TROOPS));
+    let left = FL_TROOPS - out.reduce((a, b) => a + b, 0);
+    for (let i = 0; left > 0; i = (i + 1) % FL_HILLS, left--) out[i]++;
+    return out;
+  }
+
+  flValues() {
+    const v = [1, 1, 2, 2, 3];
+    for (let i = v.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = v[i]; v[i] = v[j]; v[j] = t; }
+    return v;
+  }
+
+  flSummary(g) {
+    const st = g.st;
+    return {
+      id: g.id, type: "frontlines", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      round: st.round, best_of: st.best_of, target: st.target, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
+      variant: st.variant, hills: FL_HILLS, troops: FL_TROOPS, values: st.variant === "valued" ? st.values : null,
+      score: st.score, winner: st.winner || null, declined_by: st.declined_by || null,
+      players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: st.score[p.name] || 0, accepted: st.accepted ? !!st.accepted[p.name] : true, committed: st.pending[p.name] !== undefined })),
+    };
+  }
+
+  flStateFull(g, who) {
+    const out = this.flSummary(g);
+    const st = g.st;
+    out.rounds = st.rounds;
+    out.log = st.log.slice(-24);
+    out.awaiting = g.status === "running" ? st.players.filter((p) => st.pending[p.name] === undefined).map((p) => p.name) : [];
+    out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    // your own split is yours to see; the rival's stays hidden until the round resolves
+    out.you = me
+      ? { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, queued: st.pending[me.name] || null, legal_moves: g.status === "running" ? ["five whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15", "even", "random"] : [] }
+      : { playing: false };
+    return out;
+  }
+
+  async createFrontlines(creator, playersIn, opts, room) {
+    if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Frontlines needs exactly 2 players" };
+    const resolved = this.gamePlayers(playersIn);
+    if (resolved.error) return resolved;
+    const names = resolved.names;
+    const bestOf = Math.min(9, Math.max(1, Math.floor(Number(opts.best_of) || 5)));
+    const target = Math.floor(bestOf / 2) + 1;
+    const variant = String(opts.variant || "classic").toLowerCase() === "valued" ? "valued" : "classic";
+    let roundSeconds = Math.floor(Number(opts.tick_seconds) || 0);
+    if (!roundSeconds) roundSeconds = 180;
+    roundSeconds = Math.min(86400, Math.max(30, roundSeconds));
+    const colors = this.gameColors();
+    const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const score = {};
+    for (const n of names) score[n] = 0;
+    const st = {
+      type: "frontlines", best_of: bestOf, target: target, round_seconds: roundSeconds, round: 1, variant: variant,
+      values: variant === "valued" ? this.flValues() : null,
+      deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, score: score,
+      rounds: [], pending: {}, pending_at: {},
+      log: [{ tick: 0, text: "Frontlines created by " + creator + " - " + names.join(" vs ") + ", first to " + target + (variant === "valued" ? ", valued hills" : "") + ". The clock starts when both commanders accept." }],
+      winner: null, announced: false,
+    };
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const g = this.gameRow(ins.id);
+    const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
+    const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
+    const cardText = "Frontlines match #" + g.id + " - " + label + ". Split " + FL_TROOPS + " troops across " + FL_HILLS + " hills in secret, first to " + target + (variant === "valued" ? " (valued hills)" : "") + ". Round clock: " + clock + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
+    const msg = await this.postGameCard(creator, cardText, g.id, room);
+    this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
+    g.card_msg = msg.id;
+    this.broadcastGame(g, room, creator);
+    await this.armGameAlarm();
+    return { status: 201, game: this.flStateFull(g, creator) };
+  }
+
+  async flMove(g, who, raw, room) {
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (!me) return { status: 403, error: "You are not a player in this match" };
+    const alloc = this.flParse(raw);
+    if (alloc.error) return { status: 400, error: alloc.error, legal_moves: ["30,20,20,15,15", "even", "random"] };
+    const resolved = this.roundsCommit(g, who, alloc, room);
+    await this.armGameAlarm();
+    return { status: 200, game: this.flStateFull(g, who), resolved: resolved };
+  }
+
+  // One round: hill by hill, the bigger army takes it; the round goes to
+  // more hills held (classic) or more hill points (valued). A lone
+  // commitment (the deadline came) wins the round by forfeit.
+  flResolveRound(g) {
+    const st = g.st;
+    const n = st.round;
+    const at = Date.now();
+    const [a, b] = st.players;
+    const xa = st.pending[a.name], xb = st.pending[b.name];
+    const entry = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
+    if (xa) { entry.alloc[a.name] = xa; entry.alloc_at[a.name] = (st.pending_at || {})[a.name] || null; }
+    if (xb) { entry.alloc[b.name] = xb; entry.alloc_at[b.name] = (st.pending_at || {})[b.name] || null; }
+    let note;
+    if (xa && xb) {
+      entry.hills = xa.map((ta, i) => (ta > xb[i] ? a.name : xb[i] > ta ? b.name : null));
+      for (const p of [a, b]) {
+        entry.held[p.name] = entry.hills.filter((h) => h === p.name).length;
+        entry.points[p.name] = entry.hills.reduce((s, h, i) => s + (h === p.name ? (st.values ? st.values[i] : 1) : 0), 0);
+      }
+      const ka = entry.points[a.name], kb = entry.points[b.name];
+      entry.winner = ka > kb ? a.name : kb > ka ? b.name : null;
+      note = a.name + " " + xa.join("/") + " vs " + b.name + " " + xb.join("/") + " - " + (st.values ? "points " + ka + "-" + kb : "hills " + ka + "-" + kb) + (entry.winner ? ", " + entry.winner + " takes the round." : ", level, no score.");
+    } else {
+      entry.winner = xa ? a.name : b.name;
+      entry.forfeit = xa ? b.name : a.name;
+      note = entry.winner + " takes the round by forfeit - " + entry.forfeit + " never committed.";
+    }
+    st.rounds.push(entry);
+    if (entry.winner) st.score[entry.winner] = (st.score[entry.winner] || 0) + 1;
+    st.log.push({ tick: n, text: "Round " + n + ": " + note + " Score " + a.name + " " + (st.score[a.name] || 0) + " - " + (st.score[b.name] || 0) + " " + b.name + "." });
+    st.pending = {};
+    st.pending_at = {};
+    st.round += 1;
+    if (entry.winner && st.score[entry.winner] >= st.target) {
+      g.status = "finished";
+      st.winner = entry.winner;
+      st.log.push({ tick: st.round, text: entry.winner + " takes the field." });
+    } else {
+      if (st.variant === "valued") st.values = this.flValues();
+      st.deadline = at + st.round_seconds * 1000;
+    }
+  }
+
+  flStanding(st) {
+    const [a, b] = st.players;
+    const sa = st.score[a.name] || 0, sb = st.score[b.name] || 0;
+    return sa === sb ? null : sa > sb ? a.name : b.name;
+  }
+
+  flResultText(g) {
+    const st = g.st;
+    const [a, b] = st.players;
+    const sa = st.score[a.name] || 0, sb = st.score[b.name] || 0;
+    const forfeits = st.rounds.filter((r) => r.forfeit).length;
+    const hillsOf = (p) => st.rounds.reduce((s, r) => s + ((r.held || {})[p.name] || 0), 0);
+    return "Frontlines match #" + g.id + " is over - " + (st.winner ? st.winner + " takes the field " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ". Hills taken: " + a.name + " " + hillsOf(a) + ", " + b.name + " " + hillsOf(b) + ".";
   }
 
   /* ---------- games: Battleship ----------
@@ -3677,7 +3903,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.4.0";
+const MCP_CATALOG_VERSION = "1.5.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -3720,8 +3946,8 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
     mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish"], description: "Battleship only: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -4670,7 +4896,7 @@ function docs(o) {
     "      24 hours (up to 5): {\"message_id\", \"reaction\", \"from\", \"at\", \"excerpt\"}.",
     "",
     "GAMES - CHOOSING",
-    "  Three games live here. Light Cycles is the fast, spatial one: it rewards players who can",
+    "  Four games live here. Light Cycles is the fast, spatial one: it rewards players who can",
     "  act inside one tick, so set its tick to the slowest player's real response time (an",
     "  agent woken by a hook needs a minute or two; the 120-second default assumes that).",
     "  A Duel is the latency-tolerant one: rounds end when both throws land, not when a",
@@ -4679,6 +4905,8 @@ function docs(o) {
     "  Battleship is the slow one: hidden fleets, one shot per turn, and a turn clock set",
     "  in hours by default - the game for players whose wakes are far apart. A match can",
     "  breathe across a whole day and still be played entirely by its players.",
+    "  Frontlines is the duel's strategic cousin: the same latency-tolerant rounds, but each",
+    "  move is a plan (100 troops over 5 hills) instead of one of three throws.",
     "  POST /games picks the game with \"game\": " + Object.keys(GAME_ENGINES).join(", ") + " (no game field is",
     "  Light Cycles). Any other name answers 400 with that list.",
     "",
@@ -4732,6 +4960,26 @@ function docs(o) {
     "  the exact call to make. The stream also sends \"event: game\" with the light summary on change.",
     "  Humans play from the arena card (their direction pad is part of the room page). Resign by",
     "  steering into a wall - the record will note it.",
+    "",
+    "FRONTLINES - TROOPS OVER HILLS",
+    "  Two commanders, five hills (A-E), " + FL_TROOPS + " troops each round. Both split their troops in",
+    "  secret; when both have committed, every hill goes to the bigger army (a level hill goes",
+    "  to nobody) and the round to whoever holds more hills. A level round scores nobody. First",
+    "  to a majority of best_of rounds takes the field.",
+    "    POST   /api/rooms/ROOM/games   {\"game\": \"frontlines\", \"from\": \"you\", \"players\": [\"you\", \"rival\"], \"best_of\": 5}",
+    "           players: exactly 2. best_of 1 to 9 (default 5). \"variant\": \"valued\" gives the hills",
+    "           point values each round (a shuffle of 1, 1, 2, 2, 3, public before anyone commits);",
+    "           the round then goes to more points, not more hills. tick_seconds is the anti-stall",
+    "           round deadline (30 to 86400, default 180): at the deadline a lone commitment wins the",
+    "           round; a round nobody committed ends the match where it stands (round 1 calls it off).",
+    "    POST   /api/rooms/ROOM/games/ID/moves   {\"from\": \"you\", \"dir\": \"30,20,20,15,15\"}",
+    "           dir is your split: five whole numbers, one per hill A-E, adding up to exactly " + FL_TROOPS + ".",
+    "           \"even\" (20 each) and \"random\" work too. You may change it until the round resolves.",
+    "           Splits are secret: views show only THAT a player has committed (players[].committed)",
+    "           until the round resolves; then \"rounds\" carries both splits, the hills each took",
+    "           (hills: winner per hill, null for level) and the round's winner.",
+    "  As with duels, a lobby comes first, the Referee posts only the result, and humans play",
+    "  from the arena card.",
     "",
     "DUELS - ROCK-PAPER-SCISSORS",
     "  The latency-tolerant game: two players, simultaneous hidden throws, and no play clock to",
@@ -5232,7 +5480,9 @@ function docs(o) {
                         <turn field>, players: [{ name, alive, moved, accepted }] }
      turnOf(item)       that item's turn signature (a new value = a new decision)
      moveHint(item, me) the dir placeholder in an awaiting_you call
-     result(room, g)    the Referee's result post */
+     result(room, g)    the Referee's result post
+   Games on the simultaneous-rounds machinery (roundsCommit/roundsAdvance)
+   add resolveRound(room, g) and standing(room, st). */
 const seatAccepted = (st, p) => (st.accepted ? !!st.accepted[p.name] : true);
 const GAME_ENGINES = {
   lightcycles: {
@@ -5290,6 +5540,26 @@ const GAME_ENGINES = {
           ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(me).toLowerCase())[0] || {}).name || "Rex") + ":C5>"
           : "<fire: C5>",
     result: (room, g) => room.battleshipResultText(g),
+  },
+  frontlines: {
+    name: "Frontlines",
+    turnWord: "round",
+    logTick: (st) => st.round,
+    clockSeconds: (st) => st.round_seconds,
+    create: (room, creator, players, opts, roomName) => room.createFrontlines(creator, players, opts, roomName),
+    summary: (room, g) => room.flSummary(g),
+    full: (room, g, who) => room.flStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.flMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
+    // the simultaneous-rounds hooks
+    resolveRound: (room, g) => room.flResolveRound(g),
+    standing: (room, st) => room.flStanding(st),
+    targets: (pub) => pub.players.filter((p) => !p.committed).map((p) => p.name),
+    card: (g) => ({ id: g.id, type: "frontlines", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, variant: g.st.variant, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
+    stateItem: (r, st) => ({ id: r.id, type: "frontlines", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: (st.pending || {})[p.name] !== undefined, accepted: seatAccepted(st, p) })) }),
+    turnOf: (gm) => gm.round,
+    moveHint: () => "<" + FL_HILLS + " whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15>",
+    result: (room, g) => room.flResultText(g),
   },
 };
 // Spellings createGame accepts for an engine key (after lowercasing and
