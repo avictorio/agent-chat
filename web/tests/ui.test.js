@@ -31,7 +31,7 @@ function fresh(opts) {
       ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
       ...(opts.fl ? [{ id: 13, ts: now - 40e3, from: 'Ada', kind: 'agent', text: 'Frontlines match #12 - Ada (cyan) vs Anthony (orange). Split 100 troops across 5 hills in secret, first to 3.', game: { id: 12, type: 'frontlines', status: 'running', round: 3, target: 3, round_seconds: 180, variant: 'classic', winner: null, score: { Ada: 1, Anthony: 0 }, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 1 }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0 }] } }] : []),
       ...(opts.cr ? [{ id: 15, ts: now - 35e3, from: 'Ada', kind: 'agent', text: 'Code Race match #14 - Ada (cyan), Henry (orange) and Anthony (pink). Everyone cracks the same secret.', game: { id: 14, type: 'coderace', status: 'running', round: 3, max_rounds: opts.crWords ? 6 : 10, mode: opts.crWords ? 'words' : 'colors', length: opts.crWords ? 5 : 4, colors: opts.crWords ? null : 6, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee' }, { name: 'Henry', color: 'orange', hex: '#fb923c' }, { name: 'Anthony', color: 'pink', hex: '#f472b6' }] } }] : []),
-      ...(opts.c4 ? [{ id: 17, ts: now - 32e3, from: 'Ada', kind: 'agent', text: 'Four in a Row match #16 - Anthony (orange) vs Ada (cyan). Drop discs on a 7x6 board; four in a line wins.', game: { id: 16, type: 'fourinarow', status: opts.c4Done ? 'finished' : 'running', turn: 7, turn_of: opts.c4Done ? null : 'Anthony', winner: opts.c4Done ? 'Ada' : null, draw: false, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', piece: 'X' }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', piece: 'O' }] } }] : []),
+      ...(opts.c4 ? [{ id: 17, ts: now - 32e3, from: 'Ada', kind: 'agent', text: 'Four in a Row match #16 - Anthony (orange) vs Ada (cyan). Drop discs on a 7x6 board; four in a line wins.', game: { id: 16, type: 'fourinarow', status: opts.c4Done ? 'finished' : 'running', turn: opts.c4Done ? 12 : 7, turn_of: opts.c4Done ? null : 'Anthony', winner: opts.c4Done ? 'Ada' : null, draw: false, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', piece: 'X' }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', piece: 'O' }] } }] : []),
       ...(opts.duelLobby ? [{ id: 11, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'Duel match #3 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Lobby open - the match starts when both players accept; tap the card to take your seat.', game: { id: 3, type: 'duel', status: 'lobby', round: 1, target: 3, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false }] } }] : []),
       ...(opts.bs ? [{ id: 12, ts: now - 25e3, from: 'Henry', kind: 'agent', text: 'Battleship match #5 - Ada (cyan) vs Henry (orange). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 5, type: 'battleship', status: 'running', phase: 'play', turn: 80, turn_of: 'Henry', winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 }, { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 }] } }] : []),
       ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
@@ -100,7 +100,8 @@ function fresh(opts) {
       you: { playing: true, accepted: true, queued: null, legal_moves: ['five whole numbers adding up to 100', 'even', 'random'] } } : null,
     c4: opts.c4 ? (() => {
       // Anthony (X) to move at turn 7; Ada (O) just dropped in column 4.
-      // Done: Ada's diagonal from (3,1) to (6,4) won on move 10.
+      // Done (a separate game, 12 moves): Ada's diagonal from (3,1) to
+      // (6,4) wins on move 12.
       const g = { id: 16, type: 'fourinarow', status: 'running', created_by: 'Ada', card_msg: 17, turn: 7, turn_of: 'Anthony', turn_seconds: 3600, deadline: now + 3000e3, lobby_deadline: null, cols: 7, rows: 6, first: 'Anthony',
         board: ['.......', '.......', '.......', '.......', 'X..O...', 'O.XOX..'],
         last_move: { n: 6, by: 'Ada', col: 4, row: 2, at: now - 60e3 }, line: null, winner: null, draw: false, forfeit: null, declined_by: null,
@@ -109,10 +110,11 @@ function fresh(opts) {
         log: [], awaiting: ['Anthony'], awaiting_accept: [],
         you: { playing: true, accepted: true, piece: 'X', your_turn: true, timeouts: 0, legal_moves: ['1', '2', '3', '4', '5', '6', '7'] } };
       if (opts.c4Done) {
-        Object.assign(g, { status: 'finished', turn: 10, turn_of: null, winner: 'Ada', deadline: null, awaiting: [],
+        const seq = [['Anthony', 5, 1], ['Ada', 3, 1], ['Anthony', 6, 1], ['Ada', 4, 1], ['Anthony', 5, 2], ['Ada', 4, 2], ['Anthony', 6, 2], ['Ada', 1, 1], ['Anthony', 1, 2], ['Ada', 5, 3], ['Anthony', 6, 3], ['Ada', 6, 4]];
+        g.moves = seq.map(([by, col, row], i) => ({ n: i + 1, by, col, row }));
+        Object.assign(g, { status: 'finished', turn: 12, turn_of: null, winner: 'Ada', deadline: null, awaiting: [],
           board: ['.......', '.......', '.....O.', '....OX.', 'X..OXX.', 'O.OOXX.'], line: [[3, 1], [4, 2], [5, 3], [6, 4]],
-          last_move: { n: 10, by: 'Ada', col: 6, row: 4 } });
-        for (const m of [{ n: 7, by: 'Anthony', col: 5, row: 2 }, { n: 8, by: 'Ada', col: 5, row: 3 }, { n: 9, by: 'Anthony', col: 6, row: 1 }, { n: 10, by: 'Ada', col: 6, row: 4 }]) g.moves.push(m);
+          last_move: g.moves[11] });
         g.you = { playing: true, accepted: true, piece: 'X', your_turn: false, timeouts: 0, legal_moves: [] };
       }
       return g;
@@ -1225,9 +1227,37 @@ let FAILURES = 0;
       out.drops = await page.$$('#viewer .c4-drop').then((b) => b.length);
       await shot(page, label + '.png');
       if (out.win !== 4) throw new Error('the winning four glow: ' + out.win);
-      if (!/Four in a row · 10 moves/.test(out.meta)) throw new Error('the record line: ' + out.meta);
-      if (!/Ada/.test(out.winner) || !/move 10/.test(out.winner)) throw new Error('the winner banner: ' + out.winner);
+      if (!/Four in a row · 12 moves/.test(out.meta)) throw new Error('the record line: ' + out.meta);
+      if (!/Ada/.test(out.winner) || !/move 12/.test(out.winner)) throw new Error('the winner banner: ' + out.winner);
       if (out.drops !== 0) throw new Error('no drop buttons once it is over');
+      return out;
+    });
+  }
+  // Four in a Row in 3D (the default): the board scene loads first, the
+  // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
+  // sends the column, and 2D brings the grid back.
+  for (const [label, o] of [['fourinarow-3d', {}], ['fourinarow-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, init: () => { try { localStorage.removeItem('ac:c43d'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer:not([hidden]) .c4-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.label = await page.$eval('#viewer .c4-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|c4-seats|c4-under/.test(c)));
+      out.grid = !!(await page.$('#viewer .c4-grid'));
+      await shot(page, label + '.png');
+      await page.click('#viewer .c4-drop:nth-child(2)');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/16/moves')).pop() || '';
+      await page.click('#viewer .lc-view-btn:has-text("2D")');
+      await page.waitForTimeout(300);
+      out.after2d = { scene: !!(await page.$('#viewer .c4-3d-host')), grid: !!(await page.$('#viewer .c4-grid')) };
+      if (!/Four in a Row arena, 3D view: Anthony \(you\) plays solid discs; Ada plays ringed discs\. Anthony to move, turn 7\. 6 discs on the board\./.test(out.label)) throw new Error('the scene names the seats and the turn: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,c4-seats,c4-under') throw new Error('the scene, then the seats, then the drop buttons: ' + JSON.stringify(out.order));
+      if (out.grid) throw new Error('no 2D grid under the 3D board');
+      if (!/"dir":"2"/.test(out.moveCall)) throw new Error('a drop button still sends the column: ' + out.moveCall);
+      if (out.after2d.scene || !out.after2d.grid) throw new Error('2D swaps the scene for the grid: ' + JSON.stringify(out.after2d));
       return out;
     });
   }

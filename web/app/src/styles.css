@@ -534,6 +534,9 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .lc-3d-host.fl-3d-host { height: min(44vh, 360px); }
 /* Code Race: the vault and the pillars - a little taller than the field. */
 .lc-3d-host.cr-3d-host { height: min(46vh, 400px); }
+/* Four in a Row: a tall board - a taller host. */
+.lc-3d-host.c4-3d-host { height: min(56vh, 520px); }
+.c4-under .c4-wrap { margin-top: 8px; }
 /* 3D host layers (games.ts makeHost3d, arena3d.tsx ArenaFrame). */
 .arena3d-mount { position: absolute; inset: 0; }
 .arena3d-frame { position: relative; width: 100%; height: 100%; }
@@ -606,6 +609,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
   /* Frontlines in 3D: the planner must follow close under the field. */
   .lc-3d-host.fl-3d-host { height: min(32vh, 240px); }
   .lc-3d-host.cr-3d-host { height: min(36vh, 280px); }
+  .lc-3d-host.c4-3d-host { height: min(48vh, 380px); }
   .lc-board-big.duel-board-under { display: none; }
 }
 /* One finger scrolls the page over a 3D board (and taps it); two

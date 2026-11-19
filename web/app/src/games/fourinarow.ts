@@ -24,7 +24,7 @@ function seatName(g: GL, piece: string): string {
 
 /* The board. opts.onDrop makes the column heads buttons (your turn);
    opts.compact draws the card's small board. */
-export function c4Board(g: GL, opts?: { compact?: boolean; onDrop?: (col: number) => void; open?: string[] }): HTMLElement {
+export function c4Board(g: GL, opts?: { compact?: boolean; onDrop?: (col: number) => void; open?: string[]; headsOnly?: boolean }): HTMLElement {
   const compact = !!(opts && opts.compact);
   const wrap = el("div", "c4-wrap" + (compact ? " compact" : ""));
   const board: string[] = (g && g.board) || Array(C4_ROWS).fill(".".repeat(C4_COLS));
@@ -44,6 +44,8 @@ export function c4Board(g: GL, opts?: { compact?: boolean; onDrop?: (col: number
     }
     wrap.appendChild(heads);
   }
+  // in 3D the scene is the board: the page keeps only the drop buttons
+  if (opts && opts.headsOnly) return wrap;
   const grid = el("div", "c4-grid");
   grid.setAttribute("role", "grid");
   grid.setAttribute("aria-label", "Four in a Row board, 7 columns by 6 rows");

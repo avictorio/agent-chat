@@ -920,11 +920,12 @@ export function createGameStore(opts: {
      shows the last round and plays new ones in, the inputs and the
      numbers stay in the page. 3D is the default; the 2D/3D toggle is
      remembered per game (ac:fl3d, ac:cr3d). */
-  type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void };
+  type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void };
   type Kind3d = { key: string; cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
   const KIND3D: Record<string, Kind3d> = {
     frontlines: { key: "ac:fl3d", cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
     coderace: { key: "ac:cr3d", cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
+    fourinarow: { key: "ac:c43d", cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
     try {
@@ -967,7 +968,7 @@ export function createGameStore(opts: {
     if (!gv.r3d) gv.r3d = makeHost3d("lc-board-big lc-3d-host " + KIND3D[kind]!.cls);
     return gv.r3d;
   }
-  function paint3d(kind: string, g: GL, h: Host3d) {
+  function paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Arena3dProps>) {
     const gv = gameView;
     if (!gv || h.failed) return;
     const seq = (gv.r3dSeq = (gv.r3dSeq || 0) + 1);
@@ -984,6 +985,7 @@ export function createGameStore(opts: {
             registerCommit: (fn: (() => void) | null) => {
               if (gameView === gv) gv.r3dCommit = fn;
             },
+            ...(extra || {}),
           })
         );
       },
@@ -1152,25 +1154,28 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    wrap.appendChild(c4Seats(g, me));
     const myTurn = g.status === "running" && you.playing && you.your_turn;
+    const drop = (col: number) => {
+      if (gameView !== gv) return;
+      if (gv.r3dCommit) gv.r3dCommit();
+      void sendMove(g.id, String(col), note);
+    };
+    // in 3D the scene is the board (its columns take a tap too); the
+    // seats and the 1-7 drop buttons stay in the page under it
+    const in3d = pref3d("fourinarow");
+    wrap.appendChild(viewToggle3d("fourinarow", g));
+    if (in3d) {
+      const h = host3d("fourinarow");
+      wrap.appendChild(h.host);
+      paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
+    } else drop3d();
+    wrap.appendChild(c4Seats(g, me));
     if (myTurn) {
-      const hint = arenaHint("fourinarow", "Tap a column to drop your disc. Block your rival's three in a row before it becomes four.");
+      const hint = arenaHint("fourinarow", in3d ? "Tap a column on the board (or a number) to drop your disc." : "Tap a column to drop your disc. Block your rival's three in a row before it becomes four.");
       if (hint) wrap.appendChild(hint);
     }
-    const big = el("div", "lc-board-big");
-    big.appendChild(
-      c4Board(g, {
-        open: myTurn ? you.legal_moves || [] : [],
-        onDrop: myTurn
-          ? (col) => {
-              if (gameView !== gv) return;
-              if (gv.r3dCommit) gv.r3dCommit();
-              void sendMove(g.id, String(col), note);
-            }
-          : undefined,
-      })
-    );
+    const big = el("div", in3d ? "c4-under" : "lc-board-big");
+    if (!in3d || myTurn) big.appendChild(c4Board(g, { open: myTurn ? you.legal_moves || [] : [], onDrop: myTurn ? drop : undefined, headsOnly: in3d }));
     wrap.appendChild(big);
     if (g.status === "running" && !you.playing) note.textContent = "Spectating - the board updates as each disc drops.";
     else if (g.status === "running" && you.playing && !myTurn) note.textContent = "Your rival is thinking. You'll get a nudge when it's your turn.";

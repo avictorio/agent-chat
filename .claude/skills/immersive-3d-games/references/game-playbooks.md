@@ -26,7 +26,8 @@ sound and buzz stay.
 4. RPS Duel
 5. Frontlines
 6. Code Race
-7. A new arena
+7. Four in a Row
+8. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -226,7 +227,33 @@ scene shows, never the latest state, so nothing is told early.
 unseen round replays on open; a tap skips; reduced motion lands it at
 once with its title and opens the vault without the spin.
 
-## 7. A new arena
+## 7. Four in a Row: the glass board
+
+**World.** A tall board of glass rings in a dark frame, standing over a
+dark mirror lake, a rose dusk behind (`C4_SKY`). The camera looks
+straight through the board's centre (the look-at point is where that
+line meets the floor, far behind), slightly from above.
+
+**Board.** Discs are camera-facing coins in the player's colour: X solid,
+O with a dark ring (the second channel). Every settled disc is one of two
+instanced draws; the latest move falls on the juice clock from above the
+board (0.55 s, accelerating) and settles with a small bounce. On your
+turn, invisible column hit boxes show a ghost disc over the column under
+the pointer and drop on a tap (the page's 1-7 buttons do the same).
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you drop | `lock` + `BUZZ.commit` at the tap |
+| the rival's disc lands on your board | trauma 0.12, stop 40, `lock`, `BUZZ.commit` (it's your turn) |
+| a disc lands (spectator) | trauma 0.08, `lock` |
+| you win / lose | VICTORY / DEFEAT, trauma 0.8, stop 250, slow 0.8, `wonMatch` / `lostMatch`; the four glow, a beam runs through them, a burst at each, then a `LightPillar` and a `Shockwave` |
+| a draw | "DRAW" neutral, `whoosh` |
+
+**Catch-up.** `ac-c4-seen:<path>:<id>` holds the moves seen; on open the
+latest unseen move drops in (any earlier ones are placed at once); a tap
+skips; reduced motion places it with its title and sound.
+
+## 8. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.
