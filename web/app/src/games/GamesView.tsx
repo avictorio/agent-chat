@@ -58,8 +58,8 @@ function standingsMotion(games: GameSummary[] | null) {
 // The Games tab (2026-11-19): three tabs - Live (opens by default, and
 // whenever a match waits on you; matches waiting on YOU first), History
 // (every match that ended, as compact rows filed by the day it ended,
-// filterable by game) and Standings (the room record). The New game
-// button and the chime toggle sit above the tabs. A tap on a row opens
+// filterable by game) and Standings (the room record). Start a match
+// lives in the Live tab; the your-move chime toggle sits in the header. A tap on a row opens
 // the arena; the list refreshes whenever the store hears about a game.
 
 const KIND: Record<string, string> = {
@@ -161,6 +161,101 @@ function lengthLine(g: GL): string {
   return (g.tick || 0) + " ticks";
 }
 
+/* The your-move chime toggle (2026-11-19). It was a bell, which read
+   as the app's notifications; a speaker says sound. What it does is
+   one hover or long-press away: a tooltip on hover (desktop), keyboard
+   focus, or a hold on touch (the hold does not toggle), and a tap
+   confirms the new state for a moment ("Chime off"). */
+const SPEAKER = "M11 5 6 9H3v6h3l5 4V5z";
+const WAVES = ["M15.5 8.5a5 5 0 0 1 0 7", "M18.5 5.5a9 9 0 0 1 0 13"];
+const MUTED = ["M16 9.5l5 5", "M21 9.5l-5 5"];
+
+function ChimeToggle() {
+  const [muted, setMuted] = useState(() => chimeMuted());
+  const [tip, setTip] = useState<"" | "hint" | "on" | "off">("");
+  const hoverT = useRef(0);
+  const holdT = useRef(0);
+  const hideT = useRef(0);
+  const held = useRef(false);
+  useEffect(
+    () => () => {
+      window.clearTimeout(hoverT.current);
+      window.clearTimeout(holdT.current);
+      window.clearTimeout(hideT.current);
+    },
+    []
+  );
+  const show = (k: "hint" | "on" | "off", ms?: number) => {
+    window.clearTimeout(hideT.current);
+    setTip(k);
+    if (ms) hideT.current = window.setTimeout(() => setTip(""), ms);
+  };
+  const hide = () => {
+    window.clearTimeout(hoverT.current);
+    window.clearTimeout(holdT.current);
+    setTip("");
+  };
+  const text =
+    tip === "on"
+      ? "Chime on"
+      : tip === "off"
+        ? "Chime off"
+        : muted
+          ? "Your-move chime is off. Tap to hear a short sound when a match is waiting on you."
+          : "Your-move chime: a short sound plays when a match is waiting on you. Tap to mute it.";
+  return (
+    <span className="gm-chime">
+      <button
+        type="button"
+        className={"btn quiet gm-chime-btn" + (muted ? " off" : "")}
+        aria-pressed={!muted}
+        aria-label="Your-move chime"
+        aria-describedby="gm-chime-tip"
+        onMouseEnter={() => {
+          hoverT.current = window.setTimeout(() => show("hint"), 350);
+        }}
+        onMouseLeave={hide}
+        onFocus={(e) => {
+          if (e.currentTarget.matches(":focus-visible")) show("hint");
+        }}
+        onBlur={hide}
+        onPointerDown={(e) => {
+          if (e.pointerType === "mouse") return;
+          held.current = false;
+          holdT.current = window.setTimeout(() => {
+            held.current = true;
+            show("hint", 4000);
+          }, 450);
+        }}
+        onPointerUp={() => window.clearTimeout(holdT.current)}
+        onPointerCancel={() => window.clearTimeout(holdT.current)}
+        onContextMenu={(e) => e.preventDefault()}
+        onClick={() => {
+          // a hold shows what the button does; only a tap toggles
+          if (held.current) {
+            held.current = false;
+            return;
+          }
+          const m = !muted;
+          setMuted(m);
+          setChimeMuted(m);
+          show(m ? "off" : "on", 1600);
+        }}
+      >
+        <svg className="i" viewBox="0 0 24 24" aria-hidden="true">
+          <path d={SPEAKER} />
+          {(muted ? MUTED : WAVES).map((d) => (
+            <path key={d} d={d} />
+          ))}
+        </svg>
+      </button>
+      <span id="gm-chime-tip" role="tooltip" className={"gm-tip" + (tip ? " on" : "")}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
 export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: () => void }) {
   const { client } = useSession();
   const store = useFeed().games;
@@ -168,7 +263,6 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const [games, setGames] = useState<GameSummary[] | null>(null);
   const [record, setRecord] = useState<RecordTable>({});
   const [err, setErr] = useState("");
-  const [muted, setMuted] = useState(() => chimeMuted());
   const [tab, setTab] = useState<Tab>(() => savedTab());
   // an explicit pick holds for the browser session (a trip to an arena
   // and back keeps it); a new visit opens Live if something waits on you
@@ -386,22 +480,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     <div className="gm-wrap">
       <div className="gm-head">
         <h2 className="gm-title">Games</h2>
-        <button
-          type="button"
-          className="btn quiet gm-bell"
-          aria-pressed={muted}
-          title={muted ? "Your-move chime is off — tap to turn it on" : "Your-move chime is on — tap to mute it"}
-          onClick={() => {
-            const m = !muted;
-            setMuted(m);
-            setChimeMuted(m);
-          }}
-        >
-          {muted ? "🔕" : "🔔"}
-        </button>
-        <button type="button" className="btn primary" onClick={onNewGame}>
-          New game
-        </button>
+        <ChimeToggle />
       </div>
       <div className="gm-tabbar">
       <div className="gm-tabs" role="tablist" aria-label="Games">
@@ -454,11 +533,16 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                     {otherLive.map(row)}
                   </>
                 ) : null}
+                <div className="gm-start">
+                  <button type="button" className="btn primary gm-start-btn" onClick={onNewGame}>
+                    Start a match
+                  </button>
+                </div>
               </>
             ) : (
               <div className="gm-empty">
                 <p>Nothing live right now.</p>
-                <button type="button" className="btn primary" onClick={onNewGame}>
+                <button type="button" className="btn primary gm-start-btn" onClick={onNewGame}>
                   Start a match
                 </button>
                 {done.length ? (

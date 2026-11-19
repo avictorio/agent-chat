@@ -517,7 +517,16 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .gm-rec-move { font-size: 11.5px; font-weight: 700; white-space: nowrap; }
 .gm-rec-move.up { color: #4ade80; }
 .gm-rec-move.down { color: #f87171; }
-.gm-bell { font-size: 15px; padding: 4px 8px; margin-left: auto; }
+/* the your-move chime toggle and its tooltip (games/GamesView.tsx) */
+.gm-chime { position: relative; margin-left: auto; }
+.gm-chime-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border-radius: 999px; color: var(--ink); -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; }
+.gm-chime-btn.off { color: var(--muted); }
+.gm-chime-btn svg.i { width: 21px; height: 21px; }
+.gm-tip { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; width: max-content; max-width: 240px; padding: 8px 11px; border-radius: 9px; border: 1px solid rgba(148, 197, 219, .22); background: #0b1220; color: #e6f4fb; font-size: 12.5px; font-weight: 500; line-height: 1.35; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .12s, transform .12s, visibility .12s; pointer-events: none; }
+.gm-tip.on { opacity: 1; visibility: visible; transform: none; }
+.gm-tip::before { content: ""; position: absolute; top: -5px; right: 15px; width: 10px; height: 10px; background: inherit; transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) { .gm-tip { transition: none; } }
+.gm-start { display: flex; justify-content: center; padding: 14px 0 4px; }
 .duel-tend { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--gbg); display: grid; gap: 4px; }
 .duel-tend-row { font-size: 12.5px; color: #cbd5e1; display: flex; gap: 8px; flex-wrap: wrap; }
 .duel-tend-name { font-weight: 700; }
