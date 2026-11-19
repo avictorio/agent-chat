@@ -998,6 +998,72 @@ async function waitUp() {
     const vr = (r.json.game.rounds || [])[0] || {};
     check('valued hills: the round goes to more points, not more hills', vr.held.Rex === 4 && vr.points.Poc === 3 && vr.points.Rex === 6 && vr.winner === 'Rex' && r.json.game.status === 'finished', JSON.stringify(vr));
 
+    // Code Race (2026-11-19): everyone cracks the same secret; one secret
+    // guess a round; a rival's guess shows only as feedback until the
+    // race ends; places by the round you cracked it. The suite sets the
+    // secret through a TEST_HOOKS-only hook so a race can be solved.
+    const roomOf2 = R2.slice('/api/rooms/'.length);
+    const crSecret = (id, secret) => req('POST', '/api/test-hooks/coderace-secret', { owner: true, json: { room: roomOf2, id, secret } });
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'coderace', from: 'Poc', players: ['Poc'] } });
+    check('code race needs 2 to 6 -> 400', r.status === 400 && /2 to 6/.test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'coderace', mode: 'chess', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('code race mode must be colors or words -> 400', r.status === 400 && /colors or words/.test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'Code Race', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], max_rounds: 6, tick_seconds: 3600 } });
+    const cr0 = r.json.game || {};
+    check('code race created in a lobby, colors by default', r.status === 201 && cr0.type === 'coderace' && cr0.status === 'lobby' && cr0.mode === 'colors' && cr0.length === 4 && cr0.colors === 6 && (cr0.palette || []).length === 6 && cr0.max_rounds === 6 && cr0.secret === null, r.status + ' ' + r.text.slice(0, 200));
+    const crId = cr0.id;
+    await req('POST', R2 + '/games/' + crId + '/accept', { token: TRex, json: {} });
+    r = await req('POST', R2 + '/games/' + crId + '/accept', { token: TRae, json: {} });
+    check('code race starts when everyone accepts', r.status === 200 && r.json.game.status === 'running' && r.json.game.round === 1, r.status);
+    r = await crSecret(crId, 'RGBY');
+    check('the suite hook sets the secret', r.status === 200 && r.json.ok === true, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TRae });
+    check('room_state asks each racer for a guess', ((r.json.room_state || {}).awaiting_you || []).some((a) => a.type === 'game' && a.id === crId && /colours/.test(a.call.body.dir)), JSON.stringify(((r.json.room_state || {}).awaiting_you || []).map((a) => a.type + ':' + a.id + ':' + ((a.call || {}).body || {}).dir)));
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TP, json: { dir: 'R G B M' } });
+    check('a colour not in the race -> 400 naming the palette', r.status === 400 && /not a colour/.test(r.json.error) && /P \(purple\)/.test(r.json.error), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TP, json: { dir: 'R G B' } });
+    check('three pegs in a 4-peg race -> 400', r.status === 400 && /4 colours/.test(r.json.error), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TP, json: { dir: 'red green blue orange' } });
+    check('a guess commits without resolving', r.status === 200 && r.json.resolved === false && r.json.game.you.queued === 'RGBO', r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/games/' + crId, { token: TRex });
+    check('the guess stays secret from rivals', (r.json.game.players.find((p) => p.name === 'Poc') || {}).committed === true && !JSON.stringify(r.json.game).includes('RGBO') && r.json.game.secret === null, JSON.stringify(r.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + crId + '/moves', { token: TRae, json: { dir: 'RRRR' } });
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TRex, json: { dir: 'rgby' } });
+    const crR1 = (r.json.game.rounds || [])[0] || { guesses: {} };
+    check('round 1 resolves once all three guessed', r.status === 200 && r.json.resolved === true && r.json.game.round === 2 && r.json.game.status === 'running', r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    check('black and white pegs: RGBY cracks it, RGBO scores 3 black, RRRR 1 black', JSON.stringify(crR1.guesses.Rex.fb) === '[4,0]' && JSON.stringify(crR1.guesses.Poc.fb) === '[3,0]' && JSON.stringify(crR1.guesses.Rae.fb) === '[1,0]' && JSON.stringify(crR1.solved) === '["Rex"]', JSON.stringify(crR1));
+    check('your own guess is yours to see; a rival\'s shows only feedback', crR1.guesses.Rex.guess === 'RGBY' && crR1.guesses.Poc.guess === undefined && crR1.guesses.Rae.guess === undefined && !JSON.stringify(r.json.game).includes('RGBO'), JSON.stringify(crR1));
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TRex, json: { dir: 'RGBY' } });
+    check('a racer who cracked it is done -> 400', r.status === 400 && /cracked it in round 1/.test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    // Round 2 waits on the two still racing. Poc cracks it; Rae is then
+    // the only racer left with a winner decided, so her place is settled
+    // and the race ends
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TRae, json: { dir: 'Y Y Y Y' } });
+    check('round 2 waits on the racers still racing', r.status === 200 && r.json.resolved === false && JSON.stringify(r.json.game.awaiting) === '["Poc"]', r.status + ' ' + JSON.stringify(r.json.game && r.json.game.awaiting));
+    r = await req('POST', R2 + '/games/' + crId + '/moves', { token: TP, json: { dir: 'R G B Y' } });
+    check('the race ends when the last racer\'s place is settled', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Rex' && JSON.stringify(r.json.game.places) === '["Rex","Poc","Rae"]', JSON.stringify(r.json.game).slice(0, 240));
+    check('the end reveals the secret and every guess', JSON.stringify(r.json.game.secret) === '["R","G","B","Y"]' && r.json.game.rounds[0].guesses.Rae.guess === 'RRRR' && r.json.game.rounds[0].guesses.Rex.guess === 'RGBY', JSON.stringify(r.json.game.rounds[0]));
+    r = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Code Race result', (r.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Code Race match #' + crId + ' is over - Rex cracked the code first, in round 1') && x.text.includes('2. Poc (round 2)') && x.text.includes('The code was R G B Y')), JSON.stringify((r.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 120))));
+    r = await req('GET', R2 + '/games', { token: TP });
+    const crRec = (r.json.record || {}).coderace || [];
+    check('standings count Code Race places', crRec.some((row) => row.name === 'Rex' && row.w >= 1) && crRec.some((row) => row.name === 'Poc' && row.p2 >= 1 && row.l >= 1) && crRec.some((row) => row.name === 'Rae' && row.p3 >= 1), JSON.stringify(crRec));
+    // Words: listed words only, per-letter feedback with the classic
+    // repeated-letter rule (secret apple, guess paper -> Y Y G Y .)
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'coderace', mode: 'words', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 3600 } });
+    const crw = r.json.game || {};
+    check('words mode: a 5-letter word, 6 rounds by default', r.status === 201 && crw.mode === 'words' && crw.length === 5 && crw.max_rounds === 6 && crw.colors === null && crw.palette === null, r.status + ' ' + r.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + crw.id + '/accept', { token: TRex, json: {} });
+    await crSecret(crw.id, 'apple');
+    r = await req('POST', R2 + '/games/' + crw.id + '/moves', { token: TP, json: { dir: 'xqzzt' } });
+    check('a word not in the list -> 400', r.status === 400 && /not in the word list/.test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + crw.id + '/moves', { token: TP, json: { dir: 'carts' } });
+    r = await req('POST', R2 + '/games/' + crw.id + '/moves', { token: TP, json: { dir: 'PAPER' } });
+    check('a guess can be changed until the round resolves', r.status === 200 && r.json.game.you.queued === 'paper', r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games/' + crw.id + '/moves', { token: TRex, json: { dir: 'apple' } });
+    const wr1 = ((r.json.game || {}).rounds || [])[0] || { guesses: {} };
+    check('words feedback: paper vs apple is YYGY.', wr1.guesses.Rex && wr1.guesses.Rex.fb === 'GGGGG' && r.json.game.status === 'finished' && r.json.game.winner === 'Rex' && (r.json.game.rounds[0].guesses.Poc || {}).fb === 'YYGY.' && r.json.game.secret === 'apple', JSON.stringify(r.json.game).slice(0, 260));
+
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });

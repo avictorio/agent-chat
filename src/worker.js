@@ -12,6 +12,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAIAAADdvvtQAABa10lEQVR42u29aY
 const ICON_180 = "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";
 import APP_INDEX from "./app/index.html";
 import APP_ASSETS from "./app/assets-map.js";
+import CR_WORDS_TXT from "./data/coderace-words.txt";
 
 const MAX_TEXT = 8000;
 // Games open in a lobby: play starts only when every invited player has
@@ -21,6 +22,33 @@ const LOBBY_DEFAULT_SECONDS = 3600;
 // Frontlines: the hills on the field and the troops each round.
 const FL_HILLS = 5;
 const FL_TROOPS = 100;
+// Code Race: the colours a code is drawn from (the first `colors` of
+// them), and a sample word per length for hints.
+const CR_PALETTE = [
+  { k: "R", name: "red", hex: "#ef4444" }, { k: "G", name: "green", hex: "#22c55e" }, { k: "B", name: "blue", hex: "#3b82f6" },
+  { k: "Y", name: "yellow", hex: "#facc15" }, { k: "O", name: "orange", hex: "#f97316" }, { k: "P", name: "purple", hex: "#a855f7" },
+  { k: "C", name: "cyan", hex: "#22d3ee" }, { k: "W", name: "white", hex: "#f1f5f9" },
+];
+const CR_EXAMPLE = { 4: "lamp", 5: "crane", 6: "planet" };
+// The word lists (content as data, src/data/coderace-words.txt), parsed
+// on first use: answersN are the secrets, guessesN every word a guess
+// may be.
+let crWordsCache = null;
+function crWords() {
+  if (crWordsCache) return crWordsCache;
+  const out = {};
+  for (const line of String(CR_WORDS_TXT).split("\n")) {
+    const m = line.match(/^(answers|guesses)(\d+) (.*)$/);
+    if (!m) continue;
+    const L = Number(m[2]);
+    if (!out[L]) out[L] = { answers: [], guesses: new Set() };
+    if (m[1] === "answers") out[L].answers = m[3].trim().split(/\s+/);
+    else out[L].guesses = new Set(m[3].trim().split(/\s+/));
+  }
+  for (const L in out) for (const w of out[L].answers) out[L].guesses.add(w);
+  crWordsCache = out;
+  return out;
+}
 const SPEAK_INFLIGHT = new Map();
 const MAX_NAME = 40;
 // Member names (2026-11-19 sweep): free text, but never markup or game
@@ -472,6 +500,17 @@ export class Room extends DurableObject {
     if (!this.env || !this.env.TEST_HOOKS) return false;
     const r = this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray()[0];
     return !!(r && r.v === "1");
+  }
+
+  // A Code Race's secret, set by the API suite so a race can be solved
+  // on purpose (TEST_HOOKS only, like the hooks around it).
+  setTestCrSecret(id, secret) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    const g = this.gameRow(id);
+    if (!g || !g.st || g.st.type !== "coderace") return { error: "No Code Race with that id" };
+    g.st.secret = g.st.mode === "words" ? String(secret || "").toLowerCase() : String(secret || "").toUpperCase().replace(/[^A-Z]/g, "");
+    this.saveGame(g);
+    return { ok: true };
   }
 
   setTestR2Fail(on) {
@@ -1703,14 +1742,21 @@ export class Room extends DurableObject {
      has committed until the round resolves. The engine supplies
      resolveRound(room, g) (score it, push the round, advance or
      finish) and standing(room, st) (the winner if the match ends where
-     it stands, or null). */
+     it stands, or null), and may add active(room, st): the players a
+     round waits on (default: all of them - Code Race leaves out racers
+     who have finished or dropped). */
+  roundsActive(st) {
+    const eng = gameEngine(st);
+    return eng.active ? eng.active(this, st) : st.players;
+  }
+
   roundsCommit(g, who, move, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     st.pending[me.name] = move;
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();
-    const all = st.players.every((p) => st.pending[p.name] !== undefined);
+    const all = this.roundsActive(st).every((p) => st.pending[p.name] !== undefined);
     if (all) gameEngine(st).resolveRound(this, g);
     this.saveGame(g);
     // a frame per commit (from the player, targets who still owes), and
@@ -1724,7 +1770,7 @@ export class Room extends DurableObject {
     if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
     const st = g.st;
     const eng = gameEngine(st);
-    const committed = st.players.filter((p) => st.pending[p.name] !== undefined).length;
+    const committed = this.roundsActive(st).filter((p) => st.pending[p.name] !== undefined).length;
     if (committed === 0) {
       if (st.round === 1) {
         g.status = "cancelled";
@@ -1912,6 +1958,278 @@ export class Room extends DurableObject {
     const forfeits = st.rounds.filter((r) => r.forfeit).length;
     const hillsOf = (p) => st.rounds.reduce((s, r) => s + ((r.held || {})[p.name] || 0), 0);
     return "Frontlines match #" + g.id + " is over - " + (st.winner ? st.winner + " takes the field " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ". Hills taken: " + a.name + " " + hillsOf(a) + ", " + b.name + " " + hillsOf(b) + ".";
+  }
+
+  /* ---------- games: Code Race (2026-11-19) ----------
+     Everyone cracks the same secret at once. Colors mode: a code of
+     `length` pegs from `colors` colours (repeats allowed); a guess
+     scores black pegs (right colour, right place) and white pegs (right
+     colour, wrong place). Words mode: a secret word; each letter of a
+     guess scores G (right place), Y (in the word, elsewhere) or . (not
+     in it), with the classic rule for repeated letters; guesses must be
+     words from the list (src/data/coderace-words.txt). One guess per
+     round per racer, secret until the round resolves - and a RIVAL's
+     guess stays hidden for the whole match: views show only its
+     feedback, so nobody races on someone else's clues (the owner's
+     call, 2026-11-19). The end reveals every guess and the secret.
+     Rounds ride the simultaneous-rounds machinery and wait only on
+     racers still racing. Three missed rounds in a row drop a racer.
+     The race ends when nobody is left racing, when only one racer is
+     left and someone has already cracked it (their place is settled),
+     or at the round cap. Places: solvers first, by the round they
+     cracked it, then most marks across their guesses (pegs, or greens),
+     then the earliest solving guess; then the rest by their closest
+     guess, dropped racers last. Nobody cracking it means no winner. */
+  crActive(st) {
+    return st.players.filter((p) => { const pr = st.prog[p.name]; return !pr.solved && !pr.out; });
+  }
+
+  crParse(st, raw) {
+    const s = String(raw || "").trim().toLowerCase().replace(/^(guess|try)\s*:?\s*/, "");
+    if (st.mode === "words") {
+      const w = s.replace(/[^a-z]/g, "");
+      if (w.length !== st.length) return { error: "a guess is one " + st.length + "-letter word (\"" + (s || "nothing") + "\" has " + w.length + " letters)" };
+      const words = crWords()[st.length];
+      if (!words || !words.guesses.has(w)) return { error: "\"" + w + "\" is not in the word list - try another " + st.length + "-letter word" };
+      return w;
+    }
+    const pal = CR_PALETTE.slice(0, st.colors);
+    if (s === "random") return Array.from({ length: st.length }, () => pal[Math.floor(Math.random() * pal.length)].k).join("");
+    const byName = {};
+    pal.forEach((c) => { byName[c.name] = c.k; byName[c.k.toLowerCase()] = c.k; });
+    let toks = s.split(/[^a-z]+/).filter(Boolean);
+    // "rgby" in one piece reads as initials
+    if (toks.length === 1 && toks[0].length === st.length && !byName[toks[0]]) toks = toks[0].split("");
+    const keys = toks.map((t) => byName[t]);
+    const bad = toks.filter((t, i) => !keys[i]);
+    if (bad.length) return { error: "\"" + bad[0] + "\" is not a colour in this race - use " + pal.map((c) => c.k + " (" + c.name + ")").join(", ") };
+    if (keys.length !== st.length) return { error: "a guess is " + st.length + " colours in order, e.g. " + pal.slice(0, st.length).map((c) => c.k).join(" ") + " (you sent " + keys.length + ")" };
+    return keys.join("");
+  }
+
+  // Colors: [black, white]. Words: "GY..G".
+  crFeedback(st, guess) {
+    const sec = st.secret;
+    if (st.mode === "words") {
+      const out = Array(sec.length).fill(".");
+      const left = {};
+      for (let i = 0; i < sec.length; i++) {
+        if (guess[i] === sec[i]) out[i] = "G";
+        else left[sec[i]] = (left[sec[i]] || 0) + 1;
+      }
+      for (let i = 0; i < sec.length; i++) {
+        if (out[i] !== "G" && left[guess[i]] > 0) { out[i] = "Y"; left[guess[i]]--; }
+      }
+      return out.join("");
+    }
+    let black = 0;
+    const cs = {}, cg = {};
+    for (let i = 0; i < sec.length; i++) {
+      if (guess[i] === sec[i]) black++;
+      cs[sec[i]] = (cs[sec[i]] || 0) + 1;
+      cg[guess[i]] = (cg[guess[i]] || 0) + 1;
+    }
+    let both = 0;
+    for (const k in cg) both += Math.min(cg[k], cs[k] || 0);
+    return [black, both - black];
+  }
+
+  crCracked(st, fb) {
+    return st.mode === "words" ? fb === "G".repeat(st.length) : fb[0] === st.length;
+  }
+  // a guess's closeness (for the unsolved order) and its marks (for the
+  // solvers' tie-break): pegs, or greens then yellows
+  crScore(st, fb) {
+    if (st.mode === "words") { const gr = fb.split("G").length - 1; const ye = fb.split("Y").length - 1; return { close: gr * 10 + ye, marks: gr }; }
+    return { close: fb[0] * 10 + fb[1], marks: fb[0] + fb[1] };
+  }
+
+  crShow(st, guess) {
+    return st.mode === "words" ? String(guess).toUpperCase() : String(guess).split("").join(" ");
+  }
+
+  crPlaces(st) {
+    const rows = st.players.map((p) => ({ name: p.name, pr: st.prog[p.name] }));
+    rows.sort((a, b) => {
+      const sa = a.pr.solved, sb = b.pr.solved;
+      if (sa && sb) return sa - sb || (b.pr.marks || 0) - (a.pr.marks || 0) || (a.pr.solved_at || 0) - (b.pr.solved_at || 0);
+      if (sa) return -1;
+      if (sb) return 1;
+      if (!!a.pr.out !== !!b.pr.out) return a.pr.out ? 1 : -1;
+      return (b.pr.best || 0) - (a.pr.best || 0) || (b.pr.marks || 0) - (a.pr.marks || 0) || (a.name < b.name ? -1 : 1);
+    });
+    return rows.map((r) => r.name);
+  }
+
+  // The places are settled when the race ends; the winner is the first
+  // place only if they cracked it.
+  crStanding(st) {
+    st.places = this.crPlaces(st);
+    const top = st.places[0];
+    return top && st.prog[top].solved ? top : null;
+  }
+
+  crSummary(g) {
+    const st = g.st;
+    const over = g.status !== "running" && g.status !== "lobby";
+    const out = {
+      id: g.id, type: "coderace", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      round: st.round, max_rounds: st.max_rounds, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
+      mode: st.mode, length: st.length, colors: st.mode === "colors" ? st.colors : null,
+      palette: st.mode === "colors" ? CR_PALETTE.slice(0, st.colors).map((c) => ({ k: c.k, name: c.name, hex: c.hex })) : null,
+      winner: st.winner || null, declined_by: st.declined_by || null, places: st.places || null,
+      secret: over && st.secret ? (st.mode === "words" ? st.secret : st.secret.split("")) : null,
+      players: st.players.map((p) => {
+        const pr = st.prog[p.name] || {};
+        return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, committed: st.pending[p.name] !== undefined, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0, best: pr.best || 0 };
+      }),
+    };
+    return out;
+  }
+
+  // Rounds as this viewer may see them: your own guesses in full, a
+  // rival's only as feedback while the race runs; everything once over.
+  crStateFull(g, who) {
+    const out = this.crSummary(g);
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    const open = g.status !== "running" && g.status !== "lobby";
+    out.rounds = st.rounds.map((r) => {
+      const gs = {};
+      for (const name in r.guesses) {
+        const x = r.guesses[name];
+        gs[name] = open || (me && me.name === name) ? { guess: x.g, fb: x.fb, at: x.at } : { fb: x.fb };
+      }
+      return { n: r.n, at: r.at, guesses: gs, solved: r.solved, missed: r.missed, dropped: r.dropped };
+    });
+    out.log = st.log.slice(-24);
+    const active = g.status === "running" ? this.crActive(st) : [];
+    out.awaiting = active.filter((p) => st.pending[p.name] === undefined).map((p) => p.name);
+    out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
+    if (me) {
+      const pr = st.prog[me.name];
+      const racing = g.status === "running" && !pr.solved && !pr.out;
+      out.you = {
+        playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, queued: st.pending[me.name] || null, solved: pr.solved || null, out: !!pr.out,
+        legal_moves: racing ? (st.mode === "words" ? ["one " + st.length + "-letter word from the word list, e.g. " + CR_EXAMPLE[st.length]] : [st.length + " colours in order from " + CR_PALETTE.slice(0, st.colors).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" "), "random"]) : [],
+      };
+    } else out.you = { playing: false };
+    return out;
+  }
+
+  async createCodeRace(creator, playersIn, opts, room) {
+    if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Code Race needs 2 to 6 players" };
+    const modeIn = String(opts.mode || "colors").toLowerCase();
+    if (modeIn !== "colors" && modeIn !== "words") return { status: 400, error: "mode must be colors or words" };
+    const resolved = this.gamePlayers(playersIn);
+    if (resolved.error) return resolved;
+    const names = resolved.names;
+    const words = modeIn === "words";
+    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const length = words ? clamp(opts.length, 4, 6, 5) : clamp(opts.length, 3, 6, 4);
+    const ncolors = words ? null : clamp(opts.colors, 4, CR_PALETTE.length, 6);
+    const maxRounds = words ? clamp(opts.max_rounds, 4, 12, 6) : clamp(opts.max_rounds, 4, 16, 10);
+    const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
+    let secret;
+    if (words) {
+      const list = crWords()[length].answers;
+      secret = list[Math.floor(Math.random() * list.length)];
+    } else secret = Array.from({ length: length }, () => CR_PALETTE[Math.floor(Math.random() * ncolors)].k).join("");
+    const colors = this.gameColors();
+    const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const prog = {};
+    for (const n of names) prog[n] = { solved: null, solved_at: null, out: false, missed: 0, guesses: 0, marks: 0, best: 0 };
+    const what = words ? "the same secret " + length + "-letter word" : "the same secret code: " + length + " pegs from " + ncolors + " colours";
+    const st = {
+      type: "coderace", mode: words ? "words" : "colors", length: length, colors: ncolors, max_rounds: maxRounds, round_seconds: roundSeconds, round: 1, secret: secret,
+      deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
+      rounds: [], pending: {}, pending_at: {}, places: null,
+      log: [{ tick: 0, text: "Code Race created by " + creator + " - " + names.join(", ") + " race to crack " + what + ", up to " + maxRounds + " rounds. The clock starts when everyone accepts." }],
+      winner: null, announced: false,
+    };
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const g = this.gameRow(ins.id);
+    const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
+    const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
+    const cardText = "Code Race match #" + g.id + " - " + label + ". Everyone cracks " + what + ", one guess a round, up to " + maxRounds + " rounds. Round clock: " + clock + ". Lobby open - the race starts when everyone accepts; tap the card to take your seat.";
+    const msg = await this.postGameCard(creator, cardText, g.id, room);
+    this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
+    g.card_msg = msg.id;
+    this.broadcastGame(g, room, creator);
+    await this.armGameAlarm();
+    return { status: 201, game: this.crStateFull(g, creator) };
+  }
+
+  async crMove(g, who, raw, room) {
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (!me) return { status: 403, error: "You are not a player in this match" };
+    const pr = st.prog[me.name];
+    if (pr.solved) return { status: 400, error: "You cracked it in round " + pr.solved + " - the race goes on without you now" };
+    if (pr.out) return { status: 400, error: "You are out of this race (three missed rounds in a row)" };
+    const guess = this.crParse(st, raw);
+    if (guess.error) return { status: 400, error: guess.error, legal_moves: st.mode === "words" ? [CR_EXAMPLE[st.length]] : [CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" "), "random"] };
+    const resolved = this.roundsCommit(g, who, guess, room);
+    await this.armGameAlarm();
+    return { status: 200, game: this.crStateFull(g, who), resolved: resolved };
+  }
+
+  crResolveRound(g) {
+    const st = g.st;
+    const n = st.round;
+    const at = Date.now();
+    const entry = { n: n, at: at, guesses: {}, solved: [], missed: [], dropped: [] };
+    for (const p of this.crActive(st)) {
+      const pr = st.prog[p.name];
+      const guess = st.pending[p.name];
+      if (guess === undefined) {
+        pr.missed = (pr.missed || 0) + 1;
+        entry.missed.push(p.name);
+        if (pr.missed >= 3) { pr.out = true; entry.dropped.push(p.name); }
+        continue;
+      }
+      pr.missed = 0;
+      const fb = this.crFeedback(st, guess);
+      const ga = (st.pending_at || {})[p.name] || at;
+      entry.guesses[p.name] = { g: guess, fb: fb, at: ga };
+      const sc = this.crScore(st, fb);
+      pr.guesses = (pr.guesses || 0) + 1;
+      pr.marks = (pr.marks || 0) + sc.marks;
+      pr.best = Math.max(pr.best || 0, sc.close);
+      if (this.crCracked(st, fb)) { pr.solved = n; pr.solved_at = ga; entry.solved.push(p.name); }
+    }
+    st.rounds.push(entry);
+    const bits = [];
+    if (entry.solved.length) bits.push(entry.solved.join(" and ") + (entry.solved.length > 1 ? " crack" : " cracks") + " it");
+    const others = Object.keys(entry.guesses).filter((x) => entry.solved.indexOf(x) < 0);
+    if (others.length) bits.push(others.length + (others.length > 1 ? " guesses miss" : " guess misses"));
+    if (entry.missed.length) bits.push(entry.missed.join(", ") + " sent no guess" + (entry.dropped.length ? " (" + entry.dropped.join(", ") + " out after three missed rounds)" : ""));
+    st.log.push({ tick: n, text: "Round " + n + ": " + (bits.join("; ") || "no guesses") + "." });
+    st.pending = {};
+    st.pending_at = {};
+    const left = this.crActive(st);
+    const anySolved = st.players.some((p) => st.prog[p.name].solved);
+    if (!left.length || (left.length === 1 && anySolved) || n >= st.max_rounds) {
+      g.status = "finished";
+      st.winner = this.crStanding(st);
+      st.log.push({ tick: n, text: st.winner ? st.winner + " wins the race." : "Nobody cracked it - the " + (st.mode === "words" ? "word" : "code") + " holds." });
+    } else {
+      st.round += 1;
+      st.deadline = at + st.round_seconds * 1000;
+    }
+  }
+
+  crResultText(g) {
+    const st = g.st;
+    if (!st.places) st.places = this.crPlaces(st);
+    const what = st.mode === "words" ? "word" : "code";
+    const placeLine = st.places.map((name, i) => {
+      const pr = st.prog[name];
+      const how = pr.solved ? "round " + pr.solved : pr.out ? "dropped out" : "not cracked";
+      return (i + 1) + ". " + name + " (" + how + ")";
+    }).join(", ");
+    const head = st.winner ? st.winner + " cracked the " + what + " first, in round " + st.prog[st.winner].solved + "." : "nobody cracked the " + what + " in " + st.rounds.length + (st.rounds.length === 1 ? " round." : " rounds.");
+    return "Code Race match #" + g.id + " is over - " + head + " Places: " + placeLine + ". The " + what + " was " + this.crShow(st, st.secret) + ".";
   }
 
   /* ---------- games: Battleship ----------
@@ -3170,6 +3488,13 @@ export class Room extends DurableObject {
     const live = all.filter((g) => g.status === "lobby" || g.status === "running").slice(0, 100);
     const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
     const byType = {};
+    // A race with placements (Code Race) also counts 2nd and 3rd places
+    // (p2, p3); its W and L stay winner / everyone else.
+    const placed = (row, places, name) => {
+      const k = Array.isArray(places) ? places.indexOf(name) : -1;
+      if (k === 1) row.p2 = (row.p2 || 0) + 1;
+      else if (k === 2) row.p3 = (row.p3 || 0) + 1;
+    };
     done.forEach((g) => {
       if (g.status !== "finished" || !g.winner) return;
       const table = byType[g.type] || (byType[g.type] = {});
@@ -3177,6 +3502,7 @@ export class Room extends DurableObject {
         const row = table[p.name] || (table[p.name] = { name: p.name, hex: p.hex, w: 0, l: 0 });
         if (p.name === g.winner) row.w++;
         else row.l++;
+        placed(row, g.places, p.name);
       });
     });
     // Matches older than the 500-row window still count toward the
@@ -3185,7 +3511,7 @@ export class Room extends DurableObject {
     if (scanned.length === 500) {
       const floor = scanned[scanned.length - 1].id;
       try {
-        const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
+        const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
         for (const r of rows) {
           if (!r.w || !r.name) continue;
           const type = GAME_ENGINES[r.t] ? r.t : "lightcycles";
@@ -3193,6 +3519,7 @@ export class Room extends DurableObject {
           const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
           if (r.name === r.w) row.w++;
           else row.l++;
+          if (r.places) { try { placed(row, JSON.parse(r.places), r.name); } catch (e) {} }
         }
       } catch (e) {}
     }
@@ -3903,7 +4230,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.5.0";
+const MCP_CATALOG_VERSION = "1.6.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -3944,10 +4271,10 @@ function mcpCatalog() {
     mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
-    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels and battleship (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
-    mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines"] }, mode: { type: "string", enum: ["async", "live"], description: "Light Cycles only: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
+    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels, battleship, Frontlines and Code Race (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
+    mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves.", { id: id }, ["id"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace"] }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -4082,7 +4409,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "submit_move": { needFrom(); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
@@ -4896,7 +5223,7 @@ function docs(o) {
     "      24 hours (up to 5): {\"message_id\", \"reaction\", \"from\", \"at\", \"excerpt\"}.",
     "",
     "GAMES - CHOOSING",
-    "  Four games live here. Light Cycles is the fast, spatial one: it rewards players who can",
+    "  Five games live here. Light Cycles is the fast, spatial one: it rewards players who can",
     "  act inside one tick, so set its tick to the slowest player's real response time (an",
     "  agent woken by a hook needs a minute or two; the 120-second default assumes that).",
     "  A Duel is the latency-tolerant one: rounds end when both throws land, not when a",
@@ -4907,6 +5234,8 @@ function docs(o) {
     "  breathe across a whole day and still be played entirely by its players.",
     "  Frontlines is the duel's strategic cousin: the same latency-tolerant rounds, but each",
     "  move is a plan (100 troops over 5 hills) instead of one of three throws.",
+    "  Code Race is the room-sized one: 2 to 6 players crack the same secret code or word, one",
+    "  guess a round, rounds resolving when every racer still racing has guessed.",
     "  POST /games picks the game with \"game\": " + Object.keys(GAME_ENGINES).join(", ") + " (no game field is",
     "  Light Cycles). Any other name answers 400 with that list.",
     "",
@@ -4980,6 +5309,34 @@ function docs(o) {
     "           (hills: winner per hill, null for level) and the round's winner.",
     "  As with duels, a lobby comes first, the Referee posts only the result, and humans play",
     "  from the arena card.",
+    "",
+    "CODE RACE - ONE SECRET, EVERYONE RACING",
+    "  2 to 6 players race to crack the same secret. Each round every racer sends one guess in",
+    "  secret; the round resolves when every racer still racing has guessed, or at the deadline",
+    "  (a missed round is just a round without a guess; three in a row drop you from the race).",
+    "  Colors mode: a code of length pegs from colors colours (repeats allowed); a guess scores",
+    "  black pegs (right colour, right place) and white pegs (right colour, wrong place) - fb is",
+    "  [black, white]. Words mode: a secret word; a guess must be a listed word, and scores each",
+    "  letter G (right place), Y (in the word elsewhere) or . (not in it) - fb is e.g. \"GY..G\",",
+    "  with the classic rule for repeated letters.",
+    "    POST   /api/rooms/ROOM/games   {\"game\": \"coderace\", \"from\": \"you\", \"players\": [\"you\", \"a\", \"b\"], \"mode\": \"colors\"}",
+    "           mode colors (default) or words. length: pegs 3-6 (default 4) or letters 4-6 (default 5).",
+    "           colors: 4-8 (default 6; the palette is R G B Y O P C W in that order). max_rounds:",
+    "           colors 4-16 (default 10), words 4-12 (default 6). tick_seconds is the anti-stall round",
+    "           deadline (30 to 86400, default 3600).",
+    "    POST   /api/rooms/ROOM/games/ID/moves   {\"from\": \"you\", \"dir\": \"R G B Y\"}  or  {\"dir\": \"crane\"}",
+    "           Colors: the colours in order by initial (R G B Y, rgby, or red green blue yellow), or",
+    "           \"random\". Words: one word of the right length from the list (an unknown word answers",
+    "           400 - send another). You may change your guess until the round resolves.",
+    "  Secrecy: rounds[].guesses carries YOUR guesses with their feedback; a rival's entry carries",
+    "  only fb (their guesses stay hidden until the race ends, so nobody races on someone else's",
+    "  clues). players[] shows each racer's committed, solved (the round they cracked it), out,",
+    "  guesses and best. Once the race is over, every guess and the secret are in the state.",
+    "  The race ends when nobody is left racing, when one racer is left after someone has cracked",
+    "  it, or at max_rounds. places ranks everyone: solvers by the round they cracked it (ties: more",
+    "  marks across their guesses - pegs, or greens - then the earlier solving guess), then the rest",
+    "  by their closest guess, dropped racers last. Nobody cracking it means no winner. The room",
+    "  record counts 2nd and 3rd places (p2, p3) for Code Race beside W and L.",
     "",
     "DUELS - ROCK-PAPER-SCISSORS",
     "  The latency-tolerant game: two players, simultaneous hidden throws, and no play clock to",
@@ -5561,6 +5918,27 @@ const GAME_ENGINES = {
     moveHint: () => "<" + FL_HILLS + " whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15>",
     result: (room, g) => room.flResultText(g),
   },
+  coderace: {
+    name: "Code Race",
+    turnWord: "round",
+    logTick: (st) => st.round,
+    clockSeconds: (st) => st.round_seconds,
+    create: (room, creator, players, opts, roomName) => room.createCodeRace(creator, players, opts, roomName),
+    summary: (room, g) => room.crSummary(g),
+    full: (room, g, who) => room.crStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.crMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
+    // the simultaneous-rounds hooks: a round waits only on racers still racing
+    resolveRound: (room, g) => room.crResolveRound(g),
+    standing: (room, st) => room.crStanding(st),
+    active: (room, st) => room.crActive(st),
+    targets: (pub) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
+    card: (g) => ({ id: g.id, type: "coderace", status: g.status, round: g.st.round, max_rounds: g.st.max_rounds, mode: g.st.mode, length: g.st.length, colors: g.st.colors, winner: g.st.winner || null, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0 }; }) }),
+    stateItem: (r, st) => ({ id: r.id, type: "coderace", status: r.status, round: st.round, mode: st.mode, length: st.length, colors: st.colors, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.solved || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
+    turnOf: (gm) => gm.round,
+    moveHint: (gm) => (gm.mode === "words" ? "<a " + (gm.length || 5) + "-letter word, e.g. " + CR_EXAMPLE[gm.length || 5] + ">" : "<" + (gm.length || 4) + " colours from " + CR_PALETTE.slice(0, gm.colors || 6).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, gm.length || 4).map((c) => c.k).join(" ") + ">"),
+    result: (room, g) => room.crResultText(g),
+  },
 };
 // Spellings createGame accepts for an engine key (after lowercasing and
 // dropping spaces, dashes and underscores).
@@ -5621,6 +5999,16 @@ async function routeRequest(request, env) {
       if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
       const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
       return json(await tstub.setTestTicketTtl(tb && tb.ttl_ms));
+    }
+    if (path === "/api/test-hooks/coderace-secret") {
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const tb = await readBody(request);
+      const troom = String((tb && tb.room) || "").toLowerCase();
+      if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+      const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+      return json(await tstub.setTestCrSecret(parseInt(tb && tb.id, 10), tb && tb.secret));
     }
     // Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
     // begin_upload ticket. Deliberately NO access check: the ticket is the

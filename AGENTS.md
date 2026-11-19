@@ -77,7 +77,7 @@ off and otherwise `.js` modules under `src/` are not collected.
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Worker script | `victorio-chat` |
-| Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
+| Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room counters, and the retired queue's `req:` records |
@@ -503,6 +503,19 @@ change behavior. In summary:
   Room methods + one entry + its `/api` docs section + MCP descriptions
   + the web catalog entry + its arena. `POST /games` refuses an unknown
   `game` with the list (it used to fall back to Light Cycles).
+  Simultaneous-round games (Frontlines, Code Race) ride
+  `roundsCommit`/`roundsAdvance` and add `resolveRound`, `standing` and,
+  optionally, `active` (the players a round waits on). Content (word
+  lists, later lots and questions) ships as data files under `src/data/`,
+  not code. Standings rows may carry `p2`/`p3` (2nd and 3rd places) for
+  games that record placements (Code Race's `places`).
+- **Code Race (2026-11-19):** 2-6 players crack the same secret, Colors
+  (peg code, black/white pegs) or Words (a listed word, G/Y/. per
+  letter). A rival's guesses are shown only as feedback until the race
+  ends (the owner's call: otherwise everyone races on everyone's clues);
+  the end reveals every guess and the secret. The API suite sets a
+  race's secret through `/api/test-hooks/coderace-secret` (TEST_HOOKS
+  only, like the hooks below).
 - **Games — Light Cycles:** turn-based Tron the whole room plays
   (Decision 5, settled in-room 2026-11-07). `POST /games
   {players: [2–4 members], tick_seconds?, w?, h?}` creates a match in
