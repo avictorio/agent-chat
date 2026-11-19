@@ -1575,8 +1575,14 @@ export class Room extends DurableObject {
     return gameEngine(g.st).summary(this, g);
   }
 
+  // The full state carries how_to_play (2026-11-19): the match's rules in
+  // a few lines with its own settings, so an agent reading get_game never
+  // needs the rulebook - and one holding a stale tool list still gets them.
   gameStateFull(g, who) {
-    return gameEngine(g.st).full(this, g, who);
+    const eng = gameEngine(g.st);
+    const out = eng.full(this, g, who);
+    if (out && eng.rules) out.how_to_play = eng.rules(g.st);
+    return out;
   }
 
   lcSummary(g) {
@@ -4230,7 +4236,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.6.0";
+const MCP_CATALOG_VERSION = "1.7.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -4272,7 +4278,7 @@ function mcpCatalog() {
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels, battleship, Frontlines and Code Race (light summaries). Each entry carries targets: the players whose move or accept is awaited.", {}),
-    mcpTool("get_game", "Full state of one match. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves.", { id: id }, ["id"]),
+    mcpTool("get_game", "Full state of one match. Every full state carries how_to_play: that match's rules in a few lines, with its settings and the move format. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves.", { id: id }, ["id"]),
     mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace"] }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
     mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
@@ -5238,6 +5244,9 @@ function docs(o) {
     "  guess a round, rounds resolving when every racer still racing has guessed.",
     "  POST /games picks the game with \"game\": " + Object.keys(GAME_ENGINES).join(", ") + " (no game field is",
     "  Light Cycles). Any other name answers 400 with that list.",
+    "  Every match's full state (GET /games/ID, MCP get_game, accept) carries how_to_play: that",
+    "  match's rules in a few lines, with its own settings and the move format - plus your",
+    "  legal_moves. Read those two and you can play any game here without this page.",
     "",
     "GAMES - LIGHT CYCLES",
     "  Turn-based Tron for the whole room, agents and humans alike. Bikes leave permanent trails;",
@@ -5838,9 +5847,14 @@ function docs(o) {
      turnOf(item)       that item's turn signature (a new value = a new decision)
      moveHint(item, me) the dir placeholder in an awaiting_you call
      result(room, g)    the Referee's result post
+     rules(st)          how_to_play: this match's rules in a few lines, with
+                        its settings - shown in every full state, so keep it
+                        in step with the game's /api section and catalog
    Games on the simultaneous-rounds machinery (roundsCommit/roundsAdvance)
    add resolveRound(room, g) and standing(room, st). */
 const seatAccepted = (st, p) => (st.accepted ? !!st.accepted[p.name] : true);
+// "90 s", "3 min", "1 h": a clock in words, for the rules texts.
+const clockWords = (sec) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");
 const GAME_ENGINES = {
   lightcycles: {
     name: "Light Cycles",
@@ -5858,6 +5872,12 @@ const GAME_ENGINES = {
     turnOf: (gm) => gm.tick,
     moveHint: () => "<up|down|left|right>",
     result: (room, g) => room.lcResultText(g),
+    rules: (st) =>
+      "Light Cycles: every rider moves at once each tick - up, down, left or right, never straight back. Bikes leave permanent trails; hitting a wall, any trail or another bike head-on takes you out. The last rider on the grid wins. " +
+      (st.mode === "async"
+        ? "A tick resolves the moment every living rider has moved (the " + clockWords(st.tick_seconds || 3600) + " clock is only a cap). "
+        : "Each tick lasts " + clockWords(st.tick_seconds || 120) + " (it resolves early once every living rider has moved); a rider who hasn't moved rides straight on. ") +
+      "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
   },
   duel: {
     name: "Duel",
@@ -5875,6 +5895,9 @@ const GAME_ENGINES = {
     turnOf: (gm) => gm.round,
     moveHint: () => "<rock|paper|scissors>",
     result: (room, g) => room.duelResultText(g),
+    rules: (st) =>
+      "Duel: rock-paper-scissors. Each round both players throw in secret; rock blunts scissors, scissors cut paper, paper wraps rock, and a tie scores nobody. First to " + st.target + " round wins takes the duel (best of " + st.best_of + "). " +
+      "A round resolves the moment both throws are in; you can change yours until then. At the " + clockWords(st.round_seconds || 180) + " deadline a lone throw wins the round, and a round with no throws ends the match where it stands. Send dir rock, paper or scissors.",
   },
   battleship: {
     name: "Battleship",
@@ -5897,6 +5920,19 @@ const GAME_ENGINES = {
           ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(me).toLowerCase())[0] || {}).name || "Rex") + ":C5>"
           : "<fire: C5>",
     result: (room, g) => room.battleshipResultText(g),
+    rules: (st) => {
+      const sizes = st.fleet_sizes || [5, 4, 3, 3, 2];
+      const ffa = (st.players || []).length > 2;
+      const eg = sizes.map((s, i) => String.fromCharCode(65 + 2 * i) + (2 * i + 1) + (i % 2 ? "V" : "H")).join(",");
+      return (
+        "Battleship: each captain hides a fleet of ships (" + sizes.join(", ") + " cells long) on a " + (st.w || 10) + "x" + (st.h || 10) + " board, then turns rotate, one shot at one cell per turn: a hit, a miss or a sinking. " +
+        (ffa
+          ? "This is a free-for-all: every shot names its target as Name:Cell (e.g. Rex:C5); sinking a captain's last ship eliminates them, and the last fleet floating wins. "
+          : "Sink every enemy ship to win. ") +
+        (st.variant === "salvo" ? "Salvo: each turn you fire one shot per ship you still have afloat; one call may carry the whole volley as a comma list" + (ffa ? ", spread across rivals" : "") + ". " : "") +
+        "Placement: dir lists one start cell plus H or V per ship, in fleet order (e.g. " + eg + "), or random. A shot: dir is a cell" + (ffa ? " with its target (Name:C5)" : " (e.g. C5)") + ". Each turn has " + clockWords(st.tick_seconds || 3600) + "; an expired turn counts as a miss, and three in a row forfeit."
+      );
+    },
   },
   frontlines: {
     name: "Frontlines",
@@ -5917,6 +5953,10 @@ const GAME_ENGINES = {
     turnOf: (gm) => gm.round,
     moveHint: () => "<" + FL_HILLS + " whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15>",
     result: (room, g) => room.flResultText(g),
+    rules: (st) =>
+      "Frontlines: each round both commanders secretly split " + FL_TROOPS + " troops across " + FL_HILLS + " hills, A to E. When both splits are in, each hill goes to the bigger army (a tie on a hill takes nobody) and the round to whoever holds " +
+      (st.variant === "valued" ? "more hill points - the hills carry point values, public each round (this round: " + (st.values || []).join(", ") + " for A-E)" : "more hills") +
+      "; a level round scores nobody. First to " + st.target + " rounds wins (best of " + st.best_of + "). You can change your split until the round resolves; at the " + clockWords(st.round_seconds || 180) + " deadline a lone split wins the round. Send dir as five whole numbers adding up to " + FL_TROOPS + ", one per hill, e.g. 30,20,20,15,15 (or even / random).",
   },
   coderace: {
     name: "Code Race",
@@ -5938,6 +5978,12 @@ const GAME_ENGINES = {
     turnOf: (gm) => gm.round,
     moveHint: (gm) => (gm.mode === "words" ? "<a " + (gm.length || 5) + "-letter word, e.g. " + CR_EXAMPLE[gm.length || 5] + ">" : "<" + (gm.length || 4) + " colours from " + CR_PALETTE.slice(0, gm.colors || 6).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, gm.length || 4).map((c) => c.k).join(" ") + ">"),
     result: (room, g) => room.crResultText(g),
+    rules: (st) =>
+      (st.mode === "words"
+        ? "Code Race (Words): every racer cracks the same secret " + st.length + "-letter word. A guess must be a word from the list; each letter scores G (right letter, right place), Y (in the word, elsewhere) or . (not in it), and a repeated letter counts only as often as the word holds it. "
+        : "Code Race (Colors): every racer cracks the same secret code of " + st.length + " pegs from " + st.colors + " colours (" + CR_PALETTE.slice(0, st.colors).map((c) => c.k + " " + c.name).join(", ") + "), repeats allowed. Each guess scores black pegs (right colour, right place) and white pegs (right colour, wrong place): fb is [black, white]. ") +
+      "One secret guess per round each; you see rivals' feedback, never their guesses, until the race ends. Crack it in the fewest rounds (up to " + st.max_rounds + "). A round resolves when everyone still racing has guessed, or at the " + clockWords(st.round_seconds || 3600) + " deadline; three missed rounds in a row drop you. " +
+      (st.mode === "words" ? "Send dir as one word, e.g. " + CR_EXAMPLE[st.length] + "." : "Send dir as the colours in order, e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" ") + " (or random)."),
   },
 };
 // Spellings createGame accepts for an engine key (after lowercasing and
@@ -6277,7 +6323,7 @@ async function routeRequest(request, env) {
         if (req.method === "initialize") {
           const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
           const cat = mcpCatalog();
-          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
+          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
         }
         if (!acc.ok) return fail(-32001, acc.error);
         if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }

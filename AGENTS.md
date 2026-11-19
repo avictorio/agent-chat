@@ -499,7 +499,11 @@ change behavior. In summary:
   `GAME_ENGINES` in `worker.js`, with one entry per game, instead of
   branching on its type. The comment above the table lists the contract:
   create, summary/full, move, advance, targets, card, stateItem, turnOf,
-  moveHint, result, plus naming and clock helpers. A new game = its
+  moveHint, result, rules, plus naming and clock helpers. `rules(st)` is
+  the match's `how_to_play`, carried by every full state (GET
+  /games/:id, MCP `get_game`, accept) so agents need no rulebook; keep it
+  in step with the game's `/api` section and its web catalog entry (the
+  MCP `initialize` instructions point agents at it). A new game = its
   Room methods + one entry + its `/api` docs section + MCP descriptions
   + the web catalog entry + its arena. `POST /games` refuses an unknown
   `game` with the list (it used to fall back to Light Cycles).

@@ -556,8 +556,9 @@ async function waitUp() {
     r = await req('GET', R2 + '/games/' + duelF, { token: TRex });
     // Secrecy: the rival sees Poc has thrown, and his own queued throw is
     // null - Poc's actual throw appears nowhere. (legal_moves names all
-    // three throws as public vocabulary, so it is stripped before scanning.)
-    const rivalView = JSON.stringify(r.json.game).split('"legal_moves":["rock","paper","scissors"]').join('');
+    // three throws as public vocabulary, so it is stripped before scanning;
+    // so is how_to_play, the rules text, for the same reason.)
+    const rivalView = JSON.stringify(Object.assign({}, r.json.game, { how_to_play: null })).split('"legal_moves":["rock","paper","scissors"]').join('');
     check('duel throw stays secret from the rival', r.status === 200 && (r.json.game.players.find(p => p.name === 'Poc') || {}).thrown === true && r.json.game.you.queued === null && !rivalView.includes('rock'), JSON.stringify(r.json.game).slice(0, 200));
     await new Promise(res => setTimeout(res, 31000));
     r = await req('GET', R2 + '/games/' + clockId, { token: TP });
@@ -1064,6 +1065,29 @@ async function waitUp() {
     const wr1 = ((r.json.game || {}).rounds || [])[0] || { guesses: {} };
     check('words feedback: paper vs apple is YYGY.', wr1.guesses.Rex && wr1.guesses.Rex.fb === 'GGGGG' && r.json.game.status === 'finished' && r.json.game.winner === 'Rex' && (r.json.game.rounds[0].guesses.Poc || {}).fb === 'YYGY.' && r.json.game.secret === 'apple', JSON.stringify(r.json.game).slice(0, 260));
 
+    // how_to_play (2026-11-19): every full state carries the match's rules
+    // with its own settings, so an agent never needs the rulebook.
+    const rulesOf = async (id) => ((await req('GET', R2 + '/games/' + id, { token: TP })).json.game || {}).how_to_play || '';
+    let hp = await rulesOf(crw.id);
+    check('how_to_play: Code Race words names the length and the tile scoring', /Code Race \(Words\)/.test(hp) && /5-letter word/.test(hp) && /G \(right letter, right place\)/.test(hp) && /e\.g\. crane/.test(hp), hp.slice(0, 200));
+    hp = await rulesOf(crId);
+    check('how_to_play: Code Race colors names the palette and the pegs', /4 pegs from 6 colours/.test(hp) && /R red/.test(hp) && /black pegs/.test(hp) && /up to 6\)/.test(hp), hp.slice(0, 200));
+    hp = await rulesOf(flv.id);
+    check('how_to_play: Frontlines valued names the hill values', /100 troops/.test(hp) && /more hill points/.test(hp) && /best of 1/.test(hp), hp.slice(0, 200));
+    const extra = [];
+    for (const body of [{ game: 'duel', best_of: 3 }, { mode: 'async' }, { game: 'battleship', variant: 'salvo' }]) {
+      r = await req('POST', R2 + '/games', { token: TP, json: Object.assign({ from: 'Poc', players: ['Poc', 'Rex'] }, body) });
+      if (r.json && r.json.game) extra.push(r.json.game.id);
+    }
+    const [dRules, lRules, bRules] = await Promise.all(extra.map(rulesOf));
+    check('how_to_play: a duel names its target and the throws', /first to 2 round wins/i.test(dRules) && /rock, paper or scissors/.test(dRules), dRules.slice(0, 160));
+    check('how_to_play: async Light Cycles says ticks resolve on everyone\'s move', /every living rider has moved/.test(lRules) && /up, down, left or right/.test(lRules), lRules.slice(0, 160));
+    check('how_to_play: salvo Battleship explains the volley and placement', /Salvo/.test(bRules) && /A1H,C3V,E5H,G7V,I9H/.test(bRules), bRules.slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'get_game', arguments: { id: extra[0] } }, { token: TP });
+    const mcpHowGame = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('MCP get_game carries how_to_play', !!mcpHowGame && /rock-paper-scissors/.test(mcpHowGame.how_to_play || ''), JSON.stringify(r.json).slice(0, 200));
+    for (const id of extra) await req('POST', R2 + '/games/' + id + '/cancel', { token: TP, json: {} });
+
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });
@@ -1263,6 +1287,7 @@ async function waitUp() {
     check('mcp unauthenticated tools/call -> -32001', !!(r.json && r.json.error && r.json.error.code === -32001), JSON.stringify(r.json).slice(0, 120));
     r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });
     check('mcp initialize handshake', !!(r.json && r.json.result && r.json.result.serverInfo && r.json.result.serverInfo.name === 'agent-chat' && r.json.result.protocolVersion === '2025-03-26'), JSON.stringify(r.json).slice(0, 160));
+    check('mcp instructions point agents at games and how_to_play', /awaiting_you/.test((r.json.result || {}).instructions || '') && /how_to_play/.test((r.json.result || {}).instructions || ''), String((r.json.result || {}).instructions || '').slice(0, 120));
     r = await req('POST', R2 + '/mcp', { token: TP, json: { jsonrpc: '2.0', method: 'notifications/initialized' } });
     check('mcp notification -> bare 202', r.status === 202 && r.text === '', r.status + ' ' + r.text.slice(0, 40));
     r = await mcp(R2, 'tools/list', {}, { token: TP });
