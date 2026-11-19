@@ -994,7 +994,7 @@ let FAILURES = 0;
   // in stays off until the split adds up to 100; Even fills it; the
   // commit sends the split and the planner reads as locked.
   for (const [label, o] of [['frontlines-arena', {}], ['frontlines-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { fl: true }, init: () => { try { localStorage.setItem('ac:fl3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
       out.cardHills = await page.$$eval('.game-card .fl-hill', (h) => h.length);
@@ -1026,6 +1026,40 @@ let FAILURES = 0;
       if (!/All 100 placed/.test(out.left) || !/5 left to place/.test(out.leftAfterNudge)) throw new Error('the troop counter: ' + JSON.stringify(out));
       if (!/"dir":"20,20,20,20,20"/.test(out.moveCall)) throw new Error('the commit sends the split: ' + out.moveCall);
       if (!/Locked in/.test(out.lockedLabel)) throw new Error('the planner reads locked after the commit: ' + out.lockedLabel);
+      return out;
+    });
+  }
+  // Frontlines in 3D (the default): the scene loads above the score and
+  // the planner, the round's numbers follow the planner, a lock-in still
+  // sends the split, and 2D drops the scene for the DOM field.
+  for (const [label, o] of [['frontlines-3d', {}], ['frontlines-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { fl: true }, init: () => { try { localStorage.removeItem('ac:fl3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
+      await page.click('.game-card');
+      await page.waitForSelector('#viewer:not([hidden]) .fl-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.label = await page.$eval('#viewer .fl-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      out.pressed = await page.$eval('#viewer .lc-view-btn[aria-pressed="true"]', (b) => b.textContent);
+      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /fl-3d-host|lc-board-big|fl-score|fl-plan|fl-cap/.test(c) || c === 'lc-board-big'));
+      out.fieldCap = await page.$eval('#viewer .fl-cap', (e) => e.textContent);
+      await shot(page, label + '.png');
+      await page.click('#viewer .fl-acts button:nth-child(1)');
+      await page.click('#viewer .fl-go');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/12/moves')).pop() || '';
+      await page.click('#viewer .lc-view-btn:has-text("2D")');
+      await page.waitForTimeout(300);
+      out.after2d = { canvas: !!(await page.$('#viewer .fl-3d-host')), cap: await page.$eval('#viewer .fl-cap', (e) => e.textContent) };
+      if (!/Frontlines arena, 3D view: Anthony \(you\) 0, planning versus Ada 1, committed\. On the field: round 2\./.test(out.label)) throw new Error('the scene names both sides from the viewer\'s seat: ' + out.label);
+      if (out.pressed !== '3D') throw new Error('3D is the default: ' + out.pressed);
+      const iScene = out.order.indexOf('lc-board-big');
+      const iPlan = out.order.indexOf('fl-plan');
+      const iCap = out.order.indexOf('fl-cap');
+      if (!(iScene >= 0 && iScene < iPlan && iPlan < iCap)) throw new Error('scene, then the planner, then the numbers: ' + JSON.stringify(out.order));
+      if (!/Round 2 in numbers/.test(out.fieldCap)) throw new Error('the numbers follow the planner in 3D: ' + out.fieldCap);
+      if (!/"dir":"20,20,20,20,20"/.test(out.moveCall)) throw new Error('the 3D view still commits the split: ' + out.moveCall);
+      if (out.after2d.canvas || !/Round 2 on the field/.test(out.after2d.cap)) throw new Error('2D drops the scene for the DOM field: ' + JSON.stringify(out.after2d));
       return out;
     });
   }

@@ -24,7 +24,8 @@ sound and buzz stay.
 2. Battleship
 3. Light Cycles
 4. RPS Duel
-5. A new arena
+5. Frontlines
+6. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -147,7 +148,45 @@ and a round-chip strip. A 3D arena keeps every one of those meanings (in the
 scene or the DOM HUD) and must not let the HUD update before the 3D reveal
 lands. Elements that sit on the page background carry their own dark panel.
 
-## 5. A new arena
+## 5. Frontlines: troops over hills at dusk
+
+**World.** Five low hills (A–E) in an arc on a dark plain under a warm
+dusk horizon, far ridges and low downs in the haze, each commander's camp
+(tents, a few campfires) behind their front line. Lit warm from the
+viewer's side so the hills read as shapes. The viewer holds the near side;
+a spectator sees the match's order.
+
+**Board.** One unit per 5 troops, in rows of five on each side's slope:
+standing units in one glowing instanced draw per side, the losers of a
+hill toppled and dim in a second draw (the record a latecomer reads). A
+banner on each crest and a ring at each foot in the holder's colour; the
+hill letters (and, Valued hills, the points) as canvas sprites. A front
+line behind each army breathes while that commander plans and lights
+when they commit. A pending split is never drawn.
+
+**Reveal** (`FrontlinesArena3D.tsx`, all on the juice clock): deploy
+(0–0.6 s, both armies rise), then hill by hill from 0.95 s every 0.55 s:
+both formations push up the slope, the loser's units topple in a `Burst`
+of their colour, the banner rises and the ring takes the holder's colour
+(a level hill: both fall back, a whoosh, no banner). Verdict at ~3.85 s.
+The ring stays grey until its own clash so the outcome is not given away.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you lock in | `lock` + `BUZZ.commit` at the tap, your front line lights |
+| rival locks in (seen live) | a soft `ping`, their line lights |
+| each hill resolves | `zap` (`whoosh` if level), trauma 0.08–0.12, stop 30 |
+| round won | trauma 0.25, stop 80, `BUZZ.scored`, "ROUND n" good |
+| round lost | trauma 0.4, stop 120, `BUZZ.hitYou`, "ROUND n" bad |
+| level round | trauma 0.12, "LEVEL" neutral |
+| match won / lost | trauma 0.8, stop 250, slow 0.8, `wonMatch`/`lostMatch`, `win`/`lose`, "VICTORY"/"DEFEAT", then a `LightPillar` behind the winner's line and a `Shockwave` |
+
+**Catch-up.** The rounds seen are kept per game (`ac-fl-seen:<path>:<id>`);
+on open, only the latest unseen round replays (the History tab has the
+rest). A first look at a match shows it as it stands. A tap skips to the
+verdict; under reduced motion a missed round lands at once with its title.
+
+## 6. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

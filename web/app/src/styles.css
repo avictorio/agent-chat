@@ -429,6 +429,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .lc-view-btn.on { color: #a5f3fc; border-color: rgba(var(--ga), .6); box-shadow: inset 0 0 0 1px rgba(var(--ga), .25); }
 .lc-3d-host { position: relative; height: min(50vh, 540px); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; overflow: hidden; background: #04060d; }
 .lc-3d-host canvas { display: block; }
+/* Frontlines: a wide, shallow field - a lower host than the boards. */
+.lc-3d-host.fl-3d-host { height: min(44vh, 360px); }
 /* 3D host layers (games.ts makeHost3d, arena3d.tsx ArenaFrame). */
 .arena3d-mount { position: absolute; inset: 0; }
 .arena3d-frame { position: relative; width: 100%; height: 100%; }
@@ -498,6 +500,8 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
      record (chips), so the scoreboard under it gives its room to the
      throw pad, which must stay on screen. */
   .lc-3d-host.duel-3d-host { height: min(40vh, 300px); }
+  /* Frontlines in 3D: the planner must follow close under the field. */
+  .lc-3d-host.fl-3d-host { height: min(32vh, 240px); }
   .lc-board-big.duel-board-under { display: none; }
 }
 /* One finger scrolls the page over a 3D board (and taps it); two
