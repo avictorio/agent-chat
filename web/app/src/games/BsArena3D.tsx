@@ -729,6 +729,7 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
     () => new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(tile.hex), emissiveIntensity: 1.5, toneMapped: false }),
     [tile.hex]
   );
+  useEffect(() => () => frameMat.dispose(), [frameMat]);
   useFrame(({ clock }) => {
     frameMat.emissiveIntensity = tile.canFire ? (still ? 3.2 : 2.6 + 0.9 * Math.sin(clock.elapsedTime * 3)) : 1.5;
   });
@@ -922,6 +923,7 @@ function shotImpact(lm: GL, me: string, target: string, shipName: string, final:
 function Scene({
   g,
   tiles,
+  allTiles,
   foeName,
   onFire,
   onAim,
@@ -943,6 +945,8 @@ function Scene({
   ready: boolean;
   g: GL;
   tiles: TileT[];
+  // every ocean, shown or not (a phone shows one at a time)
+  allTiles: TileT[];
   foeName: string | null;
   onFire?: (label: string) => void;
   onAim?: (label: string) => void;
@@ -996,7 +1000,9 @@ function Scene({
      wrecks already there at mount are settled. Keyed by ocean name,
      not position: on a phone the shown ocean swaps, and a wreck must
      not replay its sinking when its ocean comes back into view. */
-  const wreckKeys = tiles.flatMap((t) => t.ships.filter((s) => s.sunk).map((s) => t.name + ":" + s.key));
+  // from every ocean, not just the shown one: an ocean swapped into view
+  // must not take its old wrecks for new sinkings
+  const wreckKeys = allTiles.flatMap((t) => t.ships.filter((s) => s.sunk).map((s) => t.name + ":" + s.key));
   const seenWrecks = useRef<Set<string>>(new Set(wreckKeys));
   const [freshWrecks, setFreshWrecks] = useState<Record<string, number>>({});
 
@@ -1007,7 +1013,10 @@ function Scene({
   const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const seenLm = useRef<string | null>(null);
   const seenStatus = useRef<string | null>(null);
-  const [anim, setAnim] = useState<Anim | null>(null);
+  // Every shot in flight gets its own ShotFx (keyed by shot): a salvo's
+  // next shell can land a second after the last, and sharing one
+  // instance carried the old shot's timeline over and lost an impact.
+  const [anims, setAnims] = useState<Anim[]>([]);
   const [sinks, setSinks] = useState<Sink[]>([]);
   const juice = useJuice();
   const ocean = useMemo(() => new OceanStore(), []);
@@ -1053,7 +1062,8 @@ function Scene({
       if (tt && !still) {
         const loc = cellLocal(lm.cell, w, h);
         sfx("whistle");
-        setAnim({ id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink });
+        const next: Anim = { id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink };
+        setAnims((l) => [...l.filter((a) => a.id !== next.id).slice(-5), next]);
       } else juice.hit(imp);
     }
     if (ended) {
@@ -1324,22 +1334,25 @@ function Scene({
               return <PendingMark x={aimTile.cx + loc.x} z={loc.z} />;
             })()
           : null}
-        {anim && !still ? (
-          <ShotFx
-            anim={anim}
-            onImpact={() => {
-              juice.hit(anim.impact);
-              ocean.ripple(anim.x, anim.z, anim.result === "hit" ? 0.7 : 1);
-              const sk = anim.sink;
-              if (sk) {
-                setSinks((l) => [...l, sk]);
-                // a ship going down heaves the water around it
-                ocean.ripple(sk.at[0], sk.at[2], 1.5);
-              }
-            }}
-            onDone={() => setAnim(null)}
-          />
-        ) : null}
+        {!still
+          ? anims.map((anim) => (
+              <ShotFx
+                key={anim.id}
+                anim={anim}
+                onImpact={() => {
+                  juice.hit(anim.impact);
+                  ocean.ripple(anim.x, anim.z, anim.result === "hit" ? 0.7 : 1);
+                  const sk = anim.sink;
+                  if (sk) {
+                    setSinks((l) => (l.some((x) => x.id === sk.id) ? l : [...l, sk]));
+                    // a ship going down heaves the water around it
+                    ocean.ripple(sk.at[0], sk.at[2], 1.5);
+                  }
+                }}
+                onDone={() => setAnims((l) => l.filter((x) => x.id !== anim.id))}
+              />
+            ))
+          : null}
         {sinks.map((sk) => (
           <SinkFx key={sk.id} sink={sk} lite={q.lite} onDone={() => setSinks((l) => l.filter((x) => x.id !== sk.id))} />
         ))}
@@ -1429,9 +1442,15 @@ export default function BsArena3D({
   const lmK = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const [prevLm, setPrevLm] = useState(lmK);
   const [landing, setLanding] = useState<number | null>(null);
+  const [manualIdx, setManualIdx] = useState<number | null>(null);
   if (prevLm !== lmK) {
     setPrevLm(lmK);
-    if (lmK) setLanding(lastShotIdx);
+    if (lmK) {
+      setLanding(lastShotIdx);
+      // a new shot ends a manual peek: the view goes where the shell lands
+      // (a spectator's choice used to stick for the rest of the view)
+      setManualIdx(null);
+    }
   }
   useEffect(() => {
     if (landing === null) return;
@@ -1440,11 +1459,11 @@ export default function BsArena3D({
     return () => clearTimeout(t);
   }, [landing, lmK]);
   const autoIdx = landing !== null ? landing : player ? (canFire ? 1 : 0) : lastShotIdx;
-  const [manualIdx, setManualIdx] = useState<number | null>(null);
   useEffect(() => {
     setManualIdx(null);
   }, [canFire]);
-  const shownIdx = Math.min(tiles.length - 1, manualIdx ?? autoIdx);
+  // the landing hold wins over a manual pick: the shot must be seen
+  const shownIdx = Math.min(tiles.length - 1, landing !== null ? landing : manualIdx ?? autoIdx);
   const shown = useMemo(() => {
     if (!single) return tiles;
     const t = tiles[shownIdx];
@@ -1607,6 +1626,7 @@ export default function BsArena3D({
           <Scene
             g={g}
             tiles={shown}
+            allTiles={tiles}
             foeName={foe ? foe.name : null}
             onFire={foe ? fire : undefined}
             onAim={foe ? aimAt : undefined}

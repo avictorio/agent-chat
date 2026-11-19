@@ -335,45 +335,57 @@ export function FireSystem({ fires, lite, still }: { fires: FireSpec[]; lite: bo
     },
     [mats]
   );
-  const lit = list.map((f, i) => (f.light ? i : -1)).filter((i) => i >= 0);
+  // A fixed set of point lights, mounted for the scene's lifetime and
+  // parked dark until a lit fire needs one: adding or removing a light
+  // recompiles every lit material (a stall right on the sinking beat).
+  // Phones keep one, desktops three.
+  const slots = lite ? 1 : 3;
+  const lit = list.map((f, i) => (f.light ? i : -1)).filter((i) => i >= 0).slice(0, slots);
   const lights = useRef<(PointLight | null)[]>([]);
   useFrame(() => {
     const t = still ? 3.7 : j.t;
     mats.flame.uniforms.uTime!.value = t;
     mats.smoke.uniforms.uTime!.value = t;
     mats.spark.uniforms.uTime!.value = t;
-    lit.forEach((fi, li) => {
+    for (let li = 0; li < slots; li++) {
       const L = lights.current[li];
-      if (!L) return;
-      const s = (fi + 1) * 1.7;
+      if (!L) continue;
+      const fi = lit[li];
+      const f = fi === undefined ? undefined : list[fi];
+      if (!f) {
+        L.intensity = 0;
+        continue;
+      }
+      L.position.set(f.x, f.y + 0.55, f.z);
+      const s = (fi! + 1) * 1.7;
       // a cooled wreck glows instead of lighting the whole ocean
-      const heat = list[fi]?.heat ?? 1;
+      const heat = f.heat ?? 1;
       const base = (still ? 5.2 : 5.2 + Math.sin(t * 13.7 + s) * 1.6 + Math.sin(t * 31.3 + s * 2) * 1.0) * (0.25 + 0.75 * heat);
       L.intensity = base;
-    });
+    }
   });
-  if (!list.length) return null;
   return (
     <group>
-      <mesh geometry={geos.smoke} material={mats.smoke} frustumCulled={false} renderOrder={3} />
-      <mesh geometry={geos.flame} material={mats.flame} frustumCulled={false} renderOrder={4} />
-      <mesh geometry={geos.spark} material={mats.spark} frustumCulled={false} renderOrder={5} />
-      {lit.map((fi, li) => {
-        const f = list[fi]!;
-        return (
-          <pointLight
-            key={f.key}
-            ref={(r) => {
-              lights.current[li] = r;
-            }}
-            position={[f.x, f.y + 0.55, f.z]}
-            color="#ff8a3c"
-            intensity={5}
-            distance={4.5}
-            decay={2}
-          />
-        );
-      })}
+      {list.length ? (
+        <>
+          <mesh geometry={geos.smoke} material={mats.smoke} frustumCulled={false} renderOrder={3} />
+          <mesh geometry={geos.flame} material={mats.flame} frustumCulled={false} renderOrder={4} />
+          <mesh geometry={geos.spark} material={mats.spark} frustumCulled={false} renderOrder={5} />
+        </>
+      ) : null}
+      {Array.from({ length: slots }, (_, li) => (
+        <pointLight
+          key={li}
+          ref={(r) => {
+            lights.current[li] = r;
+          }}
+          position={[0, -50, 0]}
+          color="#ff8a3c"
+          intensity={0}
+          distance={4.5}
+          decay={2}
+        />
+      ))}
     </group>
   );
 }

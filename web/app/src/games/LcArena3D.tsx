@@ -96,7 +96,10 @@ class Race {
   T = 0;
   target = 0;
   fast = false;
-  startAt = 0;
+  // Infinity until the scene is ready: frames run while shaders compile
+  // behind the loading layer, and a catch-up must not play (and fire its
+  // crashes, or mark the ticks seen) where nobody can see it.
+  startAt = Infinity;
   played = false;
   fired = new Set<string>();
   list: Rider[] = [];

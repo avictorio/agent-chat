@@ -649,6 +649,8 @@ export function ShipBody({ geo, mats, still, radarSpin, foam: showFoam = true }:
     g.rotateX(-Math.PI / 2);
     return g;
   }, [geo]);
+  // a prop geometry is never disposed by R3F (a phone's ocean swap remounts ships)
+  useEffect(() => () => foamGeo.dispose(), [foamGeo]);
   return (
     <group>
       {geo.hull ? <mesh geometry={geo.hull} material={mats.hull} /> : null}

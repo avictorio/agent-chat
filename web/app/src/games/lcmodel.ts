@@ -79,6 +79,14 @@ export function riders(g: any, me: string): Rider[] {
     }
     return null;
   };
+  // The server's move_log is kept whole (the narrative log above is a
+  // window of the last 80 lines): every rider resolved on a tick has an
+  // entry for it, so its last entry is the tick it went out on.
+  const lastMoved: Record<string, number> = {};
+  ((g && g.move_log) || []).forEach((m: any) => {
+    const t = Number(m && m.tick) || 0;
+    if (m && m.name && t > (lastMoved[m.name] || 0)) lastMoved[m.name] = t;
+  });
   const list: Rider[] = players.map((p, i) => {
     let cells = cellsOf[i] || [];
     if (!cells.length && typeof p.x === "number") cells = [[p.x, p.y]];
@@ -94,7 +102,16 @@ export function riders(g: any, me: string): Rider[] {
       // a live rider's newest cell is the present tick
       r.k0 = Math.max(0, tick - (n - 1));
     } else if (n) {
-      const takenAt = logTick(r.name, " is taken out");
+      let takenAt = logTick(r.name, " is taken out");
+      let crashAt: number | null = null;
+      const L = lastMoved[r.name];
+      if (takenAt === null && L) {
+        // trails start at tick 0, so cell k is tick k: a rider taken out
+        // rode its last tick (its last cell is tick L); a crash never
+        // reached its tick-L cell
+        if (L === n - 1) takenAt = L;
+        else crashAt = L;
+      }
       if (takenAt !== null) {
         // it rode its last tick, then the clock took it out
         const t = Math.min(tick, takenAt);
@@ -107,7 +124,7 @@ export function riders(g: any, me: string): Rider[] {
         const kind: OutKind = off ? "wall" : "trail";
         // the crash tick: the server's log line, or (a real match) the
         // tick after its last cell
-        const t = Math.min(tick, Math.max(1, logTick(r.name, " is out at tick ") ?? n));
+        const t = Math.min(tick, Math.max(1, crashAt ?? logTick(r.name, " is out at tick ") ?? n));
         r.out = { tick: t, kind, target, reach: REACH[kind], with: [] };
         r.k0 = Math.max(0, t - n);
       }

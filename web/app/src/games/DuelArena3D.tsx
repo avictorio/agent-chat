@@ -176,6 +176,8 @@ const newFx = (): Fx => ({ cut: 0, split: 0, wrap: 0, dim: 0, fade: 0 });
 
 function Edges({ geometry, color, onMat }: { geometry: BufferGeometry; color: Color; onMat?: (m: LineBasicMaterial | null) => void }) {
   const edges = useMemo(() => new EdgesGeometry(geometry, 25), [geometry]);
+  // passed as a prop, so R3F never disposes it: every reveal remounts this
+  useEffect(() => () => edges.dispose(), [edges]);
   return (
     <lineSegments geometry={edges}>
       <lineBasicMaterial ref={onMat} color={color} transparent toneMapped={false} />
@@ -256,6 +258,13 @@ function Paper({ hex, fx }: { hex: string; fx: Fx }) {
     };
     return [mk(-1), mk(1)] as const;
   }, []);
+  useEffect(
+    () => () => {
+      halves.forEach((g) => g.dispose());
+      outline.forEach((g) => g.dispose());
+    },
+    [halves, outline]
+  );
   const core = useMemo(() => new Color(hex), [hex]);
   const edge = useMemo(() => bright(hex, 2.4), [hex]);
   const L = useRef<Group>(null);
@@ -1421,7 +1430,10 @@ export default function DuelArena3D({
           {sides.length === 2 ? <Record rounds={shownRounds} sides={sides} phone={phone} /> : null}
           {current && sides.length === 2 ? (
             <Reveal
-              key={current.idx + (current.skip ? ":s" : "")}
+              // keyed on the round alone: a skip on the round already
+              // showing is the [item.skip] effect's job (a remount here
+              // replayed a KO that had already landed)
+              key={current.idx}
               item={current}
               sides={sides}
               rv={rv}

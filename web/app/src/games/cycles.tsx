@@ -4,7 +4,7 @@
    light, a rider lying flat along it, trails that are walls of light
    with a white-hot top edge pouring out of the rear wheel, a black
    mirror floor with a pale grid. LcArena3D poses and stages them. */
-import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -24,6 +24,7 @@ import {
   SphereGeometry,
   TorusGeometry,
   Vector3,
+  type WebGLRenderer,
   DataTexture,
   DoubleSide,
   ExtrudeGeometry,
@@ -85,21 +86,37 @@ function glow(hex: string, k = 1): Color {
 /* A tiny studio for reflections (three's RoomEnvironment, built from
    boxes - no download), prefiltered once and shared: without it the
    glossy black shell has nothing to reflect and reads as a hole. Only
-   the cycles use it; the world stays black. */
-let envTex: Texture | null = null;
+   the cycles use it; the world stays black. The texture is a render
+   target, so it belongs to the renderer that made it: a new Canvas (2D/3D
+   toggle, reopening a match) or a restored context needs its own - three
+   never re-uploads a render target, and a shared one reflected nothing. */
+const envTexByGl = new WeakMap<WebGLRenderer, Texture>();
 function useStudio(): Texture | null {
   const gl = useThree((st) => st.gl);
+  const [gen, setGen] = useState(0);
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const onRestore = () => {
+      envTexByGl.delete(gl);
+      setGen((n) => n + 1);
+    };
+    canvas.addEventListener("webglcontextrestored", onRestore);
+    return () => canvas.removeEventListener("webglcontextrestored", onRestore);
+  }, [gl]);
   return useMemo(() => {
-    if (envTex) return envTex;
+    const have = envTexByGl.get(gl);
+    if (have) return have;
     try {
       const pm = new PMREMGenerator(gl);
-      envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+      const tex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
       pm.dispose();
+      envTexByGl.set(gl, tex);
+      return tex;
     } catch {
-      envTex = null;
+      return null;
     }
-    return envTex;
-  }, [gl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gl, gen]);
 }
 
 /* The cycle's parts, merged once into one geometry per material (a
