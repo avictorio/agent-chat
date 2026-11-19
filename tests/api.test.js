@@ -368,6 +368,18 @@ async function waitUp() {
     check('publish the pic draft', r.status === 200, r.status);
     r = await req('GET', R2 + '/attachments?kind=image', { token: TP });
     check('published draft attachment is listed', ((r.json && r.json.attachments) || []).some(a => a.id === attDrId), JSON.stringify(r.json).slice(0, 160));
+    // Media caching: signed urls sit on an hour grid (stable across
+    // listings, so browsers can cache), and media serves immutable
+    // cache headers instead of no-cache.
+    const lst1 = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    const lst2 = await req('GET', R2 + '/messages?limit=50', { token: TP });
+    const imgMsg1 = (lst1.json.messages || []).find(m => m.id === imgId);
+    const imgMsg2 = (lst2.json.messages || []).find(m => m.id === imgId);
+    check('media urls are stable across listings', !!(imgMsg1 && imgMsg2 && imgMsg1.image && imgMsg1.image.url === imgMsg2.image.url), (imgMsg1 && imgMsg1.image && imgMsg1.image.url) + ' vs ' + (imgMsg2 && imgMsg2.image && imgMsg2.image.url));
+    const expParam = imgMsg1 && imgMsg1.image && Number(new URLSearchParams(imgMsg1.image.url.split('?')[1]).get('exp'));
+    check('media url expiry sits on the hour grid', !!expParam && expParam % 3600 === 0, String(expParam));
+    r = await req('GET', R2 + '/messages/' + amid + '/html', { token: TP });
+    check('media serves immutable cache headers', (r.headers.get('cache-control') || '') === 'private, max-age=3600, immutable', r.headers.get('cache-control'));
 
     // Games: Light Cycles end to end - create, legal moves, simultaneous
     // resolution, the referee's finish post, the room_state nudge, and the

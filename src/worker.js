@@ -516,7 +516,12 @@ export class Room extends DurableObject {
   }
 
   mediaQuery(id, kind) {
-    const exp = Math.floor(Date.now() / 1000) + 3600;
+    // The expiry sits on an hour grid, one to two hours out, so every
+    // mint inside the same hour produces the identical URL. That is
+    // what lets browsers actually cache media (see serveMedia): a
+    // per-second expiry makes every listing a brand-new URL, and no
+    // cache entry is ever hit twice.
+    const exp = (Math.floor(Date.now() / 3600000) + 2) * 3600;
     return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp);
   }
 
@@ -3748,7 +3753,9 @@ function sniffAudio(buf) {
 // ---- Signed media URLs (media plan phase E) ----
 // Media reads accept a short-lived signature instead of a credential:
 // sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)), exp a unix
-// timestamp about an hour out. The room key is 32 random bytes kept in
+// timestamp on an hour grid, one to two hours out (the grid keeps the
+// URL - and so the browser's cache entry - stable within the hour).
+// The room key is 32 random bytes kept in
 // the room's own cfg (media_sig_key), so there is no site-wide secret to
 // rotate. WebCrypto's subtle API is async-only, but message
 // serialization is sync, so the HMAC is computed with the plain-JS
@@ -3838,7 +3845,10 @@ async function roomMediaKeyBytes(env, room) {
 async function mediaSigParams(env, room, id, kind) {
   const key = await roomMediaKeyBytes(env, room);
   if (!key) return "";
-  const exp = Math.floor(Date.now() / 1000) + 3600;
+  // Same hour grid as the Room's mediaQuery, so a URL minted here is
+  // byte-identical to the one listings carry (and hits the same
+  // browser cache entry).
+  const exp = (Math.floor(Date.now() / 3600000) + 2) * 3600;
   return "exp=" + exp + "&sig=" + mediaSig(key, room, id, kind, exp);
 }
 
@@ -4246,6 +4256,13 @@ function mediaCsp(kind) {
   return "default-src 'none'; sandbox";
 }
 
+// Media bytes under a message are effectively immutable once published,
+// and the signed URL is stable for an hour at a time (mediaQuery), so
+// browsers may keep a copy for an hour instead of re-downloading on
+// every render. private: the signed URL is a capability - no shared
+// cache may store it.
+const MEDIA_CACHE = "private, max-age=3600, immutable";
+
 // Stream one media object to the client. The fast path reads R2 directly here in
 // the Worker (the Room only supplies the index row), so even a 5 GB video never
 // materializes inside the Durable Object. Anything not in R2 falls back to the
@@ -4266,7 +4283,7 @@ async function serveMedia(request, env, stub, id, kind, room, viewer) {
         const obj = await env.MEDIA.get(meta.r2key, rr ? { range: rr.r2 } : {});
         if (obj) {
           const headers = Object.assign({
-            "Content-Type": meta.type, "Cache-Control": "private, no-cache",
+            "Content-Type": meta.type, "Cache-Control": MEDIA_CACHE,
             "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
             "Accept-Ranges": "bytes",
           }, CORS);
@@ -4290,7 +4307,7 @@ async function serveMedia(request, env, stub, id, kind, room, viewer) {
 // and video players can seek. The object carries the bytes for the requested range.
 function mediaResponse(request, a, kind) {
   const headers = Object.assign({
-    "Content-Type": a.type, "Cache-Control": "private, no-cache",
+    "Content-Type": a.type, "Cache-Control": MEDIA_CACHE,
     "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
     "Accept-Ranges": "bytes",
   }, CORS);
@@ -4617,7 +4634,7 @@ function docs(o) {
     "    photo, video, clip or file without paging through messages. Drafts and in-flight uploads",
     "    never appear. Each entry: {\"id\" (the message id), \"ts\", \"from\", \"kind\", \"type\", \"bytes\",",
     "    \"name\" (html/doc only), \"text\" (the message's text, capped at 300 chars), \"transcript\"",
-    "    (audio only), \"url\"} - the url is signed and works for about an hour with no credential.",
+    "    (audio only), \"url\"} - the url is signed and works for an hour or two with no credential.",
     "    kind=A,B   only these media kinds (image, video, audio, speak, html, doc)",
     "    from=NAME  only this sender",
     "    limit=N    most entries to return (default 60, max 200)",
@@ -4628,7 +4645,7 @@ function docs(o) {
     "  Referencing an attachment in chat: cite msg ID + kind (\"msg 1764 · image\") - ids are",
     "  permanent and a message carries at most one attachment per kind, so the pair names",
     "  exactly one file. Resolve a citation with this listing or by reading the message;",
-    "  never cite a signed url itself - it expires in about an hour.",
+    "  never cite a signed url itself - it expires in an hour or two.",
     "",
     "STREAM MESSAGES (Server-Sent Events)",
     "  GET " + o + "/api/rooms/ROOM/stream",
