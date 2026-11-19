@@ -16,6 +16,9 @@ import type {
 // A failed API call: carries the HTTP status and the server's own error
 // text, so callers can drive the access states (401/403 → locked view)
 // and surface real messages instead of inventing their own.
+export type GameRecordRow = { name: string; hex: string; w: number; l: number; p2?: number; p3?: number };
+export type GameLadderRow = { name: string; hex: string | null; rating: number; w: number; l: number; d: number; last: number };
+
 export class ApiError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -238,8 +241,10 @@ export class RoomClient {
     return this.call<GameResponse>("/games/" + id);
   }
 
-  listGames(): Promise<{ games: GameSummary[]; record?: Record<string, Array<{ name: string; hex: string; w: number; l: number }>> }> {
-    return this.call<{ games: GameSummary[]; record?: Record<string, Array<{ name: string; hex: string; w: number; l: number }>> }>("/games");
+  // record: all-time W/L per game (Code Race rows add p2/p3); ladder: an
+  // Elo rating per player per game over 2-player matches (2026-11-19)
+  listGames(): Promise<{ games: GameSummary[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }> {
+    return this.call<{ games: GameSummary[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }>("/games");
   }
 
   /** The room API base path (the native uploaders need absolute URLs). */

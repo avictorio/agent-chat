@@ -78,6 +78,7 @@ function stateLine(g: GL): string {
     return head + " · " + ps.map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
   }
   if (g.type === "duel" || g.type === "frontlines") return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
+  if (g.type === "fourinarow") return "Turn " + (g.turn || 1) + (g.turn_of ? " · " + g.turn_of + " to move" : "");
   if (g.type === "coderace") {
     const cracked = ps.filter((p: GL) => p.solved).map((p: GL) => p.name);
     return "Round " + (g.round || 1) + " of " + (g.max_rounds || "?") + " · " + (cracked.length ? cracked.join(", ") + " cracked it" : "nobody has cracked it");
@@ -87,6 +88,27 @@ function stateLine(g: GL): string {
 }
 
 type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; l: number; p2?: number; p3?: number }>>;
+type LadderTable = Record<string, Array<{ name: string; hex: string | null; rating: number; w: number; l: number; d: number; last: number }>>;
+type StandRow = { name: string; hex: string; w: number; l: number; d: number; p2?: number; p3?: number; rating: number | null; last: number };
+
+/* One game's standings (2026-11-19): with a ladder, rated players first by
+   Elo rating (their all-time W-L beside it, from the record), then anyone
+   only seen in free-for-alls, unrated; without one, the record as is. */
+function standRows(rec: RecordTable[string] | undefined, lad: LadderTable[string] | undefined): StandRow[] {
+  const recBy: Record<string, RecordTable[string][number]> = {};
+  (rec || []).forEach((r) => (recBy[r.name] = r));
+  const out: StandRow[] = [];
+  const seen = new Set<string>();
+  (lad || []).forEach((x) => {
+    const r = recBy[x.name];
+    seen.add(x.name);
+    out.push({ name: x.name, hex: (r && r.hex) || x.hex || "#94a3b8", w: r ? r.w : x.w, l: r ? r.l : x.l, d: x.d, p2: r && r.p2, p3: r && r.p3, rating: x.rating, last: x.last });
+  });
+  (rec || []).forEach((r) => {
+    if (!seen.has(r.name)) out.push({ name: r.name, hex: r.hex, w: r.w, l: r.l, d: 0, p2: r.p2, p3: r.p3, rating: null, last: 0 });
+  });
+  return out;
+}
 
 /* The Games tab as a to-do list (2026-11-13): matches waiting on YOU
    come first, soonest deadline first, each with what it wants ("Your
@@ -104,6 +126,7 @@ function waitingOn(g: GL): string[] {
   if (g.type === "duel") return ps.filter((p) => !p.thrown).map((p) => p.name);
   if (g.type === "frontlines") return ps.filter((p) => !p.committed).map((p) => p.name);
   if (g.type === "coderace") return ps.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name);
+  if (g.type === "fourinarow") return g.turn_of ? [g.turn_of] : [];
   if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
   return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
 }
@@ -111,12 +134,13 @@ const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_dea
 const durOf = (g: GL): number =>
   g.status === "lobby"
     ? 3600e3
-    : 1000 * (g.type === "duel" || g.type === "frontlines" ? g.round_seconds || 180 : g.type === "coderace" ? g.round_seconds || 3600 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+    : 1000 * (g.type === "duel" || g.type === "frontlines" ? g.round_seconds || 180 : g.type === "coderace" ? g.round_seconds || 3600 : g.type === "battleship" || g.type === "fourinarow" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
 function youLabel(g: GL): string {
   if (g.status === "lobby") return "Your invite";
   if (g.type === "duel") return "Your throw";
   if (g.type === "frontlines") return "Your split";
   if (g.type === "coderace") return "Your guess";
+  if (g.type === "fourinarow") return "Your move";
   if (g.type === "battleship") return g.phase === "setup" ? "Place your fleet" : "Your shot";
   return "Your move";
 }
@@ -166,6 +190,7 @@ function lengthLine(g: GL): string {
   if (g.type === "battleship") return (g.turn || 0) + " turns";
   if (g.type === "duel") return (g.round || 0) + " rounds";
   if (g.type === "frontlines" || g.type === "coderace") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
+  if (g.type === "fourinarow") return ((g.last_move && g.last_move.n) || 0) + " moves";
   return (g.tick || 0) + " ticks";
 }
 
@@ -270,6 +295,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const version = useSyncExternalStore(store.subscribe, store.getVersion);
   const [games, setGames] = useState<GameSummary[] | null>(null);
   const [record, setRecord] = useState<RecordTable>({});
+  const [ladder, setLadder] = useState<LadderTable>({});
   const [err, setErr] = useState("");
   const [tab, setTab] = useState<Tab>(() => savedTab());
   // an explicit pick holds for the browser session (a trip to an arena
@@ -300,6 +326,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
               listedRef.current = true;
               setGames(r.games || []);
               setRecord(r.record || {});
+              setLadder(r.ladder || {});
               setErr("");
             }
           },
@@ -460,24 +487,37 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     else groups.push({ name, items: [g] });
   });
 
-  const standings = Object.keys(record).length ? (
+  const standings = Object.keys(record).length || Object.keys(ladder).length ? (
     <div className="gm-rec">
-      {GAMES.map((d) => d.id).map((t) =>
-        record[t] && record[t].length ? (
+      {GAMES.map((d) => d.id).map((t) => {
+        const rows = standRows(record[t], ladder[t]);
+        if (!rows.length) return null;
+        const rated = !!(ladder[t] && ladder[t].length);
+        return (
           <div className="gm-rec-kind" key={t}>
-            <div className="gm-rec-title">{KIND[t]}</div>
-            {record[t].map((r, ri) => {
+            <div className="gm-rec-title">
+              {KIND[t]}
+              {rated ? <span className="gm-rec-sub">Elo ladder · 2-player matches</span> : null}
+            </div>
+            {rows.map((r, ri) => {
               const st = (streaks[t] || {})[r.name];
               const prev = (prevRanks[t] || {})[r.name];
-              const delta = prev ? prev - (ri + 1) : 0;
+              const delta = !rated && prev ? prev - (ri + 1) : 0;
               return (
-                <div className="gm-rec-row" key={r.name}>
+                <div className={"gm-rec-row" + (rated && r.rating == null ? " unrated" : "")} key={r.name}>
                   <span className="gm-dot" style={{ background: r.hex }} />
                   <span className="gm-rec-name">{r.name}</span>
+                  {rated ? (
+                    <span className="gm-rec-elo" title={r.rating == null ? "Free-for-alls only - no ladder rating yet" : "Elo rating"}>
+                      {r.rating == null ? "–" : r.rating}
+                      {r.rating != null && r.last ? <span className={"gm-rec-last " + (r.last > 0 ? "up" : "down")}>{(r.last > 0 ? "+" : "−") + Math.abs(r.last)}</span> : null}
+                    </span>
+                  ) : null}
                   <span className="gm-rec-wl">
                     {r.w}–{r.l}
+                    {r.d ? "–" + r.d : ""}
                   </span>
-                  <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
+                  <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l + r.d)) + "%"}</span>
                   {r.p2 || r.p3 ? (
                     <span className="gm-rec-places" title="2nd and 3rd places">
                       {(r.p2 ? "2nd ×" + r.p2 : "") + (r.p2 && r.p3 ? " · " : "") + (r.p3 ? "3rd ×" + r.p3 : "")}
@@ -495,8 +535,8 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
               );
             })}
           </div>
-        ) : null
-      )}
+        );
+      })}
     </div>
   ) : null;
 

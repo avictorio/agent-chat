@@ -5,6 +5,7 @@ import { el, toast } from "../lib";
 import { matchTitle } from "./catalog";
 import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
 import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
+import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
 import {
   battleshipBoard,
   boardSvg,
@@ -283,6 +284,15 @@ export function createGameStore(opts: {
           sub = "If the clock runs out, a lone split takes the round.";
         }
       } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
+    } else if (g.type === "fourinarow") {
+      dur = (g.turn_seconds || 3600) * 1000;
+      if (you.playing && you.your_turn) {
+        mine = true;
+        text = "Your move · turn " + g.turn;
+        const to = you.timeouts || 0;
+        sub = to >= 2 ? "You've timed out twice - one more forfeits the match." : to === 1 ? "You timed out once - three timeouts forfeit the match." : "Tap a column to drop your disc.";
+      } else if (you.playing) text = "Waiting on " + (g.turn_of || "your rival") + " · turn " + g.turn;
+      else text = (g.turn_of ? g.turn_of + " to move · " : "") + "turn " + g.turn;
     } else if (g.type === "coderace") {
       dur = (g.round_seconds || 3600) * 1000;
       const waiting = players.filter((p: GL) => !p.committed && !p.solved && !p.out && p.name !== me).map((p: GL) => p.name);
@@ -392,6 +402,9 @@ export function createGameStore(opts: {
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
       if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    } else if (g.type === "fourinarow") {
+      body.game = "fourinarow";
+      body.tick_seconds = g.turn_seconds;
     } else if (g.type === "coderace") {
       body.game = "coderace";
       body.mode = g.mode;
@@ -517,6 +530,7 @@ export function createGameStore(opts: {
   function histCount(g: GL): number {
     if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
+    if (g.type === "fourinarow") return (g.moves || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
     return ticks.size;
   }
@@ -565,6 +579,8 @@ export function createGameStore(opts: {
       n = flHistoryRows(g, row, histWho, list);
     } else if (g.type === "coderace") {
       n = crHistoryRows(g, row, histWho, list);
+    } else if (g.type === "fourinarow") {
+      n = c4HistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1101,6 +1117,64 @@ export function createGameStore(opts: {
         f.setSelectionRange(n, n);
       }
     }
+  }
+
+  /* Four in a Row (2026-11-19): who plays which disc, then the board -
+     on your turn the column heads are the drop buttons. A drop goes out
+     at once; the turn passes when the server answers. */
+  function renderFourView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const key = [g.status, g.turn, g.turn_of || "", (g.board || []).join("/"), (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.timeouts || 0)).join(""), youSig(g), gv.tab || "game"].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    wrap.appendChild(c4Seats(g, me));
+    const myTurn = g.status === "running" && you.playing && you.your_turn;
+    if (myTurn) {
+      const hint = arenaHint("fourinarow", "Tap a column to drop your disc. Block your rival's three in a row before it becomes four.");
+      if (hint) wrap.appendChild(hint);
+    }
+    const big = el("div", "lc-board-big");
+    big.appendChild(
+      c4Board(g, {
+        open: myTurn ? you.legal_moves || [] : [],
+        onDrop: myTurn
+          ? (col) => {
+              if (gameView !== gv) return;
+              if (gv.r3dCommit) gv.r3dCommit();
+              void sendMove(g.id, String(col), note);
+            }
+          : undefined,
+      })
+    );
+    wrap.appendChild(big);
+    if (g.status === "running" && !you.playing) note.textContent = "Spectating - the board updates as each disc drops.";
+    else if (g.status === "running" && you.playing && !myTurn) note.textContent = "Your rival is thinking. You'll get a nudge when it's your turn.";
+    if (note.textContent) wrap.appendChild(note);
   }
 
   function renderBattleshipView(g: GL, force?: boolean) {
@@ -1808,6 +1882,10 @@ export function createGameStore(opts: {
       renderCodeRaceView(g, force);
       return;
     }
+    if (g.type === "fourinarow") {
+      renderFourView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -1988,7 +2066,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2038,6 +2116,8 @@ export function createGameStore(opts: {
           if (!mine.committed) n++;
         } else if (g.type === "coderace") {
           if (!mine.committed && !mine.solved && !mine.out) n++;
+        } else if (g.type === "fourinarow") {
+          if (g.turn_of === me) n++;
         } else if (g.type === "battleship") {
           if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
         } else if (mine.alive && !mine.moved) n++;

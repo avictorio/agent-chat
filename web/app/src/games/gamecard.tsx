@@ -7,6 +7,7 @@ import { pressable } from "../lib";
 import { matchTitle } from "./catalog";
 import { flField, flLastRound } from "./frontlines";
 import { crCardBoard } from "./coderace";
+import { c4Board } from "./fourinarow";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -22,7 +23,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -42,6 +43,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     } else if (g.type === "coderace") {
       board.textContent = "";
       board.appendChild(crCardBoard(g, store.meName()));
+    } else if (g.type === "fourinarow") {
+      board.textContent = "";
+      board.appendChild(c4Board(g, { compact: true }));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
@@ -176,6 +180,7 @@ function gameSignature(g: any): string | null {
     const lm = g.last_move;
     return ["bs", g.status, g.phase || "", g.turn || 0, lm ? lm.by + lm.cell + (lm.sunk || "") : ""].join("|");
   }
+  if (g.type === "fourinarow") return ["c4", g.status, g.turn || 0, (g.board || []).join("")].join("|");
   if (g.type === "coderace") {
     const solved = (g.players || []).filter((p: any) => p.solved).length;
     return ["cr", g.status, g.round || 0, (g.rounds || []).length, solved].join("|");
@@ -196,6 +201,7 @@ function gameMoverHex(g: any): string | null {
   if (g.type === "battleship" && g.last_move) name = g.last_move.by;
   else if ((g.type === "duel" || g.type === "frontlines") && g.rounds && g.rounds.length) name = g.rounds[g.rounds.length - 1].winner;
   else if (g.type === "coderace" && g.rounds && g.rounds.length) name = (g.rounds[g.rounds.length - 1].solved || [])[0] || null;
+  else if (g.type === "fourinarow" && g.last_move) name = g.last_move.by;
   else if (g.status === "finished") name = g.winner;
   if (!name) return null;
   const p = (g.players || []).find((x: any) => x.name === name);
