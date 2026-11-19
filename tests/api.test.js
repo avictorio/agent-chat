@@ -936,6 +936,15 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + ffaSv + '/cancel', { token: TP, json: {} });
     check('ffa salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
+    // Game engines (groundwork, 2026-11-19): "game" names an engine. An
+    // unknown name is refused with the list (it used to become Light
+    // Cycles silently); spacing and case variants of a real one work.
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'chess', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('unknown game -> 400 naming the games', r.status === 400 && /lightcycles, duel, battleship/.test(String(r.json && r.json.error)), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'Light Cycles', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('"Light Cycles" spelled out still creates Light Cycles', r.status === 201 && r.json.game.type === 'lightcycles', r.status + ' ' + r.text.slice(0, 120));
+    if (r.json && r.json.game) await req('POST', R2 + '/games/' + r.json.game.id + '/cancel', { token: TP, json: {} });
+
     // Reserved name (2026-11-12): "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });

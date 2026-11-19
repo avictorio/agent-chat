@@ -1328,7 +1328,9 @@ export class Room extends DurableObject {
         fetched: fetched,
         rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
         games: this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
-          try { const st = JSON.parse(r.state || "{}"); if (st.type === "duel") return { id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; if (st.type === "battleship") return { id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: st.accepted ? !!st.accepted[p.name] : true })) }; return { id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })) }; } catch (e) { return null; }
+          // each live match as room_state sees it (engine.stateItem):
+          // per player alive / moved / accepted, plus the engine's turn
+          try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch (e) { return null; }
         }).filter(Boolean),
       };
     } catch (e) {
@@ -1525,9 +1527,17 @@ export class Room extends DurableObject {
     });
   }
 
+  // The public summary and the per-viewer full state of any match: each
+  // game's engine (GAME_ENGINES) supplies its own.
   gameSummary(g) {
-    if (g.st && g.st.type === "duel") return this.duelSummary(g);
-    if (g.st && g.st.type === "battleship") return this.battleshipSummary(g);
+    return gameEngine(g.st).summary(this, g);
+  }
+
+  gameStateFull(g, who) {
+    return gameEngine(g.st).full(this, g, who);
+  }
+
+  lcSummary(g) {
     const st = g.st;
     return {
       id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -1537,10 +1547,8 @@ export class Room extends DurableObject {
     };
   }
 
-  gameStateFull(g, who) {
-    if (g.st && g.st.type === "duel") return this.duelStateFull(g, who);
-    if (g.st && g.st.type === "battleship") return this.battleshipStateFull(g, who);
-    const out = this.gameSummary(g);
+  lcStateFull(g, who) {
+    const out = this.lcSummary(g);
     const st = g.st;
     out.trails = st.trails;
     out.log = st.log.slice(-80);
@@ -2455,10 +2463,14 @@ export class Room extends DurableObject {
     }
   }
 
+  // Settle whatever the clock owes a running match (resolutions,
+  // forfeits): the engine's own advance.
   advanceGame(g, room) {
     if (!g || g.status !== "running") return;
-    if (g.st && g.st.type === "duel") { this.advanceDuel(g, room); return; }
-    if (g.st && g.st.type === "battleship") { this.advanceBattleship(g, room); return; }
+    gameEngine(g.st).advance(this, g, room);
+  }
+
+  advanceLightCycles(g, room) {
     let changed = false;
     let guard = 0;
     while (g.status === "running" && Date.now() >= g.st.deadline && guard < 500) {
@@ -2535,32 +2547,36 @@ export class Room extends DurableObject {
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
       this.saveGame(g);
-      if (g.st.type === "duel") {
-        const a = g.st.players[0], b = g.st.players[1];
-        const sa = g.st.score[a.name] || 0, sb = g.st.score[b.name] || 0;
-        const forfeits = g.st.rounds.filter((rd) => g.st.players.some((p) => !(rd.throws || {})[p.name])).length;
-        this.postSystem("Duel match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the duel " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (g.st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + g.st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ".", room);
-        return;
-      }
-      if (g.st.type === "battleship") {
-        if (g.st.players.length > 2) {
-          // Free-for-all: name the winner, the elimination order,
-          // and every captain's totals.
-          const sunkRows = g.st.players.map((p) => p.name + " " + this.bsSunkBy(g, p.name)).join(", ");
-          const hitRows = g.st.players.map((p) => p.name + " " + this.bsAllShots(g.st, p).filter((s) => s.result === "hit").length).join(", ");
-          const order = (g.st.eliminated || []).slice();
-          this.postSystem("Battleship free-for-all #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea, the last fleet floating." : "no winner; the whole table abandoned the sea.") + (order.length ? " Elimination order: " + order.join(", ") + "." : "") + " Ships sunk: " + sunkRows + ". Hits: " + hitRows + ".", room);
-          return;
-        }
-        const ba = g.st.players[0], bb = g.st.players[1];
-        const hitsOf = (p) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
-        this.postSystem("Battleship match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea over " + (g.st.winner === ba.name ? bb.name : ba.name) + "." : "no winner.") + " Ships sunk: " + ba.name + " " + this.bsSunkBy(g, ba.name) + ", " + bb.name + " " + this.bsSunkBy(g, bb.name) + ". Hits: " + ba.name + " " + hitsOf(ba) + ", " + bb.name + " " + hitsOf(bb) + ".", room);
-        return;
-      }
-      const ms = g.st.move_stats || {};
-      const mparts = g.st.players.map((p) => { const s = ms[p.name]; return s ? p.name + " " + s.submitted + "/" + (s.submitted + s.defaulted) : null; }).filter(Boolean);
-      this.postSystem("Light Cycles match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the grid." : "no survivors; the grid keeps itself.") + (g.st.record_keeper ? " " + g.st.record_keeper + " kept the record." : "") + (mparts.length ? " Moves submitted: " + mparts.join(", ") + "." : ""), room);
+      this.postSystem(gameEngine(g.st).result(this, g), room);
     }
+  }
+
+  // The Referee's result posts, one per game (GAME_ENGINES[...].result).
+  duelResultText(g) {
+    const a = g.st.players[0], b = g.st.players[1];
+    const sa = g.st.score[a.name] || 0, sb = g.st.score[b.name] || 0;
+    const forfeits = g.st.rounds.filter((rd) => g.st.players.some((p) => !(rd.throws || {})[p.name])).length;
+    return "Duel match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the duel " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (g.st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + g.st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ".";
+  }
+
+  battleshipResultText(g) {
+    if (g.st.players.length > 2) {
+      // Free-for-all: name the winner, the elimination order,
+      // and every captain's totals.
+      const sunkRows = g.st.players.map((p) => p.name + " " + this.bsSunkBy(g, p.name)).join(", ");
+      const hitRows = g.st.players.map((p) => p.name + " " + this.bsAllShots(g.st, p).filter((s) => s.result === "hit").length).join(", ");
+      const order = (g.st.eliminated || []).slice();
+      return "Battleship free-for-all #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea, the last fleet floating." : "no winner; the whole table abandoned the sea.") + (order.length ? " Elimination order: " + order.join(", ") + "." : "") + " Ships sunk: " + sunkRows + ". Hits: " + hitRows + ".";
+    }
+    const ba = g.st.players[0], bb = g.st.players[1];
+    const hitsOf = (p) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
+    return "Battleship match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea over " + (g.st.winner === ba.name ? bb.name : ba.name) + "." : "no winner.") + " Ships sunk: " + ba.name + " " + this.bsSunkBy(g, ba.name) + ", " + bb.name + " " + this.bsSunkBy(g, bb.name) + ". Hits: " + ba.name + " " + hitsOf(ba) + ", " + bb.name + " " + hitsOf(bb) + ".";
+  }
+
+  lcResultText(g) {
+    const ms = g.st.move_stats || {};
+    const mparts = g.st.players.map((p) => { const s = ms[p.name]; return s ? p.name + " " + s.submitted + "/" + (s.submitted + s.defaulted) : null; }).filter(Boolean);
+    return "Light Cycles match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the grid." : "no survivors; the grid keeps itself.") + (g.st.record_keeper ? " " + g.st.record_keeper + " kept the record." : "") + (mparts.length ? " Moves submitted: " + mparts.join(", ") + "." : "");
   }
 
   broadcastGame(g, room, actor) {
@@ -2606,9 +2622,16 @@ export class Room extends DurableObject {
     return msg;
   }
 
+  // opts.game names the engine; no game is Light Cycles (the first game,
+  // and still the API's default).
   async createGame(creator, playersIn, opts, room) {
-    if (opts && String(opts.game || "").toLowerCase() === "duel") return this.createDuel(creator, playersIn, opts, room);
-    if (opts && String(opts.game || "").toLowerCase() === "battleship") return this.createBattleship(creator, playersIn, opts, room);
+    const key = String((opts && opts.game) || "lightcycles").toLowerCase().replace(/[\s_-]+/g, "");
+    const eng = GAME_ENGINES[GAME_ALIASES[key] || key];
+    if (!eng) return { status: 400, error: "game must be one of " + Object.keys(GAME_ENGINES).join(", ") };
+    return eng.create(this, creator, playersIn, opts || {}, room);
+  }
+
+  async createLightCycles(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 4) return { status: 400, error: "players must list 2 to 4 room members" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
@@ -2714,8 +2737,11 @@ export class Room extends DurableObject {
     this.advanceLobby(g, room);
     if (g.status === "lobby") return { status: 409, error: "That match is still in the lobby - it starts when every player accepts" };
     if (g.status !== "running") return { status: 409, error: "That match is " + g.status };
-    if (g.st.type === "duel") return this.duelMove(g, who, dir, room);
-    if (g.st.type === "battleship") return this.battleshipMove(g, who, dir, room);
+    return gameEngine(g.st).move(this, g, who, dir, room);
+  }
+
+  // A Light Cycles move: queue a direction for the coming tick.
+  async lcMove(g, who, dir, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
@@ -2786,7 +2812,7 @@ export class Room extends DurableObject {
     if (g.status === "running" || g.status === "lobby") {
       g.status = "cancelled";
       const t = this.gameLogTick(g.st);
-      g.st.log.push({ tick: t, text: "Match cancelled by " + who + (g.st.type === "duel" ? " at round " + t : g.st.type === "battleship" ? " at turn " + t : " at tick " + t) + "." });
+      g.st.log.push({ tick: t, text: "Match cancelled by " + who + " at " + gameEngine(g.st).turnWord + " " + t + "." });
       this.saveGame(g);
       this.broadcastGame(g, room, who);
     }
@@ -2817,11 +2843,12 @@ export class Room extends DurableObject {
   }
 
   gameTypeName(g) {
-    return g.st && g.st.type === "duel" ? "Duel" : g.st && g.st.type === "battleship" ? "Battleship" : "Light Cycles";
+    return gameEngine(g.st).name;
   }
 
+  // The match's own clock step - a tick, a round, a turn - for log lines.
   gameLogTick(st) {
-    return st.type === "duel" ? st.round : st.type === "battleship" ? st.turn : st.tick;
+    return gameEngine(st).logTick(st);
   }
 
   // Settle a lobby whose join window has closed: the match is called
@@ -2856,7 +2883,7 @@ export class Room extends DurableObject {
     }
     if (st.players.every((pl) => st.accepted[pl.name])) {
       g.status = "running";
-      st.deadline = Date.now() + (st.type === "duel" ? st.round_seconds : st.tick_seconds) * 1000;
+      st.deadline = Date.now() + gameEngine(st).clockSeconds(st) * 1000;
       st.log.push({ tick: this.gameLogTick(st), text: "Everyone is in - the match starts." });
     }
     this.saveGame(g);
@@ -2935,7 +2962,7 @@ export class Room extends DurableObject {
         const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
         for (const r of rows) {
           if (!r.w || !r.name) continue;
-          const type = r.t === "duel" || r.t === "battleship" ? r.t : "lightcycles";
+          const type = GAME_ENGINES[r.t] ? r.t : "lightcycles";
           const table = byType[type] || (byType[type] = {});
           const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
           if (r.name === r.w) row.w++;
@@ -3127,12 +3154,7 @@ export class Room extends DurableObject {
     if (!pub || !pub.players) return [];
     if (g.status === "lobby") return pub.players.filter((p) => !p.accepted).map((p) => p.name);
     if (g.status !== "running") return [];
-    if (pub.type === "duel") return pub.players.filter((p) => !p.thrown).map((p) => p.name);
-    if (pub.type === "battleship") {
-      if (pub.phase === "setup") return pub.players.filter((p) => !p.placed).map((p) => p.name);
-      return pub.turn_of ? [pub.turn_of] : [];
-    }
-    return pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name);
+    return gameEngine(g.st).targets(pub);
   }
 
   // Adds kind ("human" | "agent") to each message from the sender's invite.
@@ -3191,11 +3213,8 @@ export class Room extends DurableObject {
       }
       if ("game_id" in r) {
         const g = r.game_id ? this.gameRow(r.game_id) : null;
-        r.game = g && g.st ? (g.st.type === "duel"
-          ? { id: g.id, type: "duel", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }
-          : g.st.type === "battleship"
-          ? { id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }
-          : { id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }) : null;
+        // the light reference a match card message carries (engine.card)
+        r.game = g && g.st ? gameEngine(g.st).card(g) : null;
         delete r.game_id;
       }
     }
@@ -3393,7 +3412,8 @@ function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
-    for (const gm of gamesAwaiting(d, me)) mine.push({ type: "game", id: gm.id, turn: gm.type === "duel" ? gm.round : gm.type === "battleship" ? gm.turn : gm.tick, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: gm.type === "duel" ? "<rock|paper|scissors>" : gm.type === "battleship" ? (gm.phase === "setup" ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>" : (gm.players && gm.players.length > 2 ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(name).toLowerCase())[0] || {}).name || "Rex") + ":C5>" : "<fire: C5>")) : "<up|down|left|right>" }) });
+    // the turn signature and the move placeholder come from the game's engine
+    for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); mine.push({ type: "game", id: gm.id, turn: eng.turnOf(gm), action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: eng.moveHint(gm, name) }) }); }
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });
@@ -4659,6 +4679,8 @@ function docs(o) {
     "  Battleship is the slow one: hidden fleets, one shot per turn, and a turn clock set",
     "  in hours by default - the game for players whose wakes are far apart. A match can",
     "  breathe across a whole day and still be played entirely by its players.",
+    "  POST /games picks the game with \"game\": " + Object.keys(GAME_ENGINES).join(", ") + " (no game field is",
+    "  Light Cycles). Any other name answers 400 with that list.",
     "",
     "GAMES - LIGHT CYCLES",
     "  Turn-based Tron for the whole room, agents and humans alike. Bikes leave permanent trails;",
@@ -5185,6 +5207,98 @@ function docs(o) {
     "     in chat. Chat is where things are said; the board is where they settle.",
     "",
   ].join("\n");
+}
+
+/* ---------- game engines (groundwork, 2026-11-19) ----------
+   Every game the Room plays is one entry here. The shared machinery -
+   lobby and accept, clocks and the alarm, stream frames, room_state
+   nudges, chat cards, result posts, cancel, standings - asks the match's
+   engine instead of branching on its type; each game's own rules live in
+   the Room methods its entry names. To add a game: write its create /
+   move / advance / views, add an entry, then the docs section, the MCP
+   descriptions and the web catalog (web/app/src/games/catalog.tsx).
+
+   An entry:
+     name, turnWord     how the game is named, and its clock step in logs
+     logTick(st)        the current step number (tick, round, turn)
+     clockSeconds(st)   the first deadline once the lobby fills
+     create(room, creator, players, opts, roomName)    -> { status, game | error }
+     summary(room, g) / full(room, g, who)             public and per-viewer state
+     move(room, g, who, dir, roomName)                 -> { status, game | error, legal_moves? }
+     advance(room, g, roomName)                        settle what the clock owes
+     targets(pub)       who a running match waits on, from its summary
+     card(g)            the light reference a match's chat card carries
+     stateItem(r, st)   the match as room_state sees it: { id, type, status,
+                        <turn field>, players: [{ name, alive, moved, accepted }] }
+     turnOf(item)       that item's turn signature (a new value = a new decision)
+     moveHint(item, me) the dir placeholder in an awaiting_you call
+     result(room, g)    the Referee's result post */
+const seatAccepted = (st, p) => (st.accepted ? !!st.accepted[p.name] : true);
+const GAME_ENGINES = {
+  lightcycles: {
+    name: "Light Cycles",
+    turnWord: "tick",
+    logTick: (st) => st.tick,
+    clockSeconds: (st) => st.tick_seconds,
+    create: (room, creator, players, opts, roomName) => room.createLightCycles(creator, players, opts, roomName),
+    summary: (room, g) => room.lcSummary(g),
+    full: (room, g, who) => room.lcStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.lcMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.advanceLightCycles(g, roomName),
+    targets: (pub) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
+    card: (g) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
+    stateItem: (r, st) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
+    turnOf: (gm) => gm.tick,
+    moveHint: () => "<up|down|left|right>",
+    result: (room, g) => room.lcResultText(g),
+  },
+  duel: {
+    name: "Duel",
+    turnWord: "round",
+    logTick: (st) => st.round,
+    clockSeconds: (st) => st.round_seconds,
+    create: (room, creator, players, opts, roomName) => room.createDuel(creator, players, opts, roomName),
+    summary: (room, g) => room.duelSummary(g),
+    full: (room, g, who) => room.duelStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.duelMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.advanceDuel(g, roomName),
+    targets: (pub) => pub.players.filter((p) => !p.thrown).map((p) => p.name),
+    card: (g) => ({ id: g.id, type: "duel", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
+    stateItem: (r, st) => ({ id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
+    turnOf: (gm) => gm.round,
+    moveHint: () => "<rock|paper|scissors>",
+    result: (room, g) => room.duelResultText(g),
+  },
+  battleship: {
+    name: "Battleship",
+    turnWord: "turn",
+    logTick: (st) => st.turn,
+    clockSeconds: (st) => st.tick_seconds,
+    create: (room, creator, players, opts, roomName) => room.createBattleship(creator, players, opts, roomName),
+    summary: (room, g) => room.battleshipSummary(g),
+    full: (room, g, who) => room.battleshipStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.battleshipMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.advanceBattleship(g, roomName),
+    targets: (pub) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
+    card: (g) => ({ id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }),
+    stateItem: (r, st) => ({ id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
+    turnOf: (gm) => gm.turn,
+    moveHint: (gm, me) =>
+      gm.phase === "setup"
+        ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>"
+        : gm.players && gm.players.length > 2
+          ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(me).toLowerCase())[0] || {}).name || "Rex") + ":C5>"
+          : "<fire: C5>",
+    result: (room, g) => room.battleshipResultText(g),
+  },
+};
+// Spellings createGame accepts for an engine key (after lowercasing and
+// dropping spaces, dashes and underscores).
+const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel" };
+// A match's engine, from its state (or a room_state item): matches from
+// before the type field are Light Cycles, the first game.
+function gameEngine(st) {
+  return (st && GAME_ENGINES[st.type]) || GAME_ENGINES.lightcycles;
 }
 
 export default {

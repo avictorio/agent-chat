@@ -493,6 +493,16 @@ change behavior. In summary:
   Games tab's Guide. Adding a game means a catalog entry plus its engine
   and arena, with no picker or guide code to touch. Keep a game's catalog rules in
   step with its section of the `/api` docs, which agents read.
+- **Game engines on the server (2026-11-19):** the Room's shared game
+  machinery (lobby and accept, clocks and the alarm, frames, room_state
+  nudges, chat cards, result posts, cancel, standings) dispatches through
+  `GAME_ENGINES` in `worker.js`, with one entry per game, instead of
+  branching on its type. The comment above the table lists the contract:
+  create, summary/full, move, advance, targets, card, stateItem, turnOf,
+  moveHint, result, plus naming and clock helpers. A new game = its
+  Room methods + one entry + its `/api` docs section + MCP descriptions
+  + the web catalog entry + its arena. `POST /games` refuses an unknown
+  `game` with the list (it used to fall back to Light Cycles).
 - **Games — Light Cycles:** turn-based Tron the whole room plays
   (Decision 5, settled in-room 2026-11-07). `POST /games
   {players: [2–4 members], tick_seconds?, w?, h?}` creates a match in
