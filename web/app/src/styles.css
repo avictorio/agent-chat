@@ -878,7 +878,9 @@ button.bs-cell.bs-aim { animation: bsAim .2s ease-out; }
 .media-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .media-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
 .media-bar .sp { flex: 1; }
-.media-bar .seg button { display: inline-flex; align-items: center; gap: 6px; }
+.media-bar .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.media-bar .seg::-webkit-scrollbar { display: none; }
+.media-bar .seg button { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .media-n { font-size: 11px; color: var(--muted); background: var(--hover); border-radius: 999px; padding: 0 6px; line-height: 17px; }
 .media-from { max-width: 45vw; }
 .media-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px; }

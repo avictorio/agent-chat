@@ -1776,8 +1776,16 @@ let FAILURES = 0;
     await page.waitForSelector('.media-tile', { timeout: 5000 });
     await page.waitForTimeout(700); // let the drawer finish closing before the shot
     const tiles = await page.$$eval('.media-tile', ts => ts.length);
+    const overflow = await page.evaluate(() => {
+      const seg = document.querySelector('.media-bar .seg');
+      return {
+        doc: document.documentElement.scrollWidth - window.innerWidth,
+        bar: seg ? seg.getBoundingClientRect().right - window.innerWidth : 0,
+      };
+    });
+    if (overflow.doc > 0 || overflow.bar > 0) throw new Error('media bar overflows the viewport: ' + JSON.stringify(overflow));
     await shot(page, 'media-grid-mobile.png');
-    return { tiles };
+    return { tiles, overflow };
   });
 
   // The home page runs on its own fake (like the original suite's
