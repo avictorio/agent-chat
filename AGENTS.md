@@ -77,7 +77,7 @@ off and otherwise `.js` modules under `src/` are not collected.
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Worker script | `victorio-chat` |
-| Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
+| Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room counters, and the retired queue's `req:` records |
@@ -530,6 +530,12 @@ change behavior. In summary:
   appears then) - keep it that way, or the endgame turns into planned
   betrayal. A missed round is D toward everyone; three in a row take a
   player out.
+- **Auction (2026-11-19):** Ada's sealed-bid spec on the rounds helper:
+  lots come from `src/data/auction-lots.txt` (flavour only, each worth one
+  point), budgets are public, bids sealed until the lot resolves; ties at
+  the top go to the lower spender, then the earlier bid (`pending_at`). The
+  room-lore lots in Ada's spec were not used (they name members); the
+  data file holds generic ones - add room lore there if the owner wants.
 - **Four in a Row (2026-11-19):** SHA's spec on a 7x6 board; `dir` is the
   column 1-7; who moves first is drawn at creation; turn clock default
   1 h; the Referee posts only the result (the house rule overrides the

@@ -13,6 +13,7 @@ const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAABR8UlEQVR42u29a5
 import APP_INDEX from "./app/index.html";
 import APP_ASSETS from "./app/assets-map.js";
 import CR_WORDS_TXT from "./data/coderace-words.txt";
+import AU_LOTS_TXT from "./data/auction-lots.txt";
 
 const MAX_TEXT = 8000;
 // Games open in a lobby: play starts only when every invited player has
@@ -30,6 +31,13 @@ const CR_PALETTE = [
   { k: "C", name: "cyan", hex: "#22d3ee" }, { k: "W", name: "white", hex: "#f1f5f9" },
 ];
 const CR_EXAMPLE = { 4: "lamp", 5: "crane", 6: "planet" };
+// The auction's lots (content as data, src/data/auction-lots.txt): one
+// per line, # comments; parsed on first use.
+let auLotsCache = null;
+function auLots() {
+  if (!auLotsCache) auLotsCache = String(AU_LOTS_TXT).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  return auLotsCache;
+}
 // Trust: what one pairing scores for you, keyed by your choice then
 // theirs (C cooperate, D defect) - the classic prisoner's dilemma.
 const TR_PAYOFFS = { CC: 3, CD: 0, DC: 5, DD: 1 };
@@ -2442,6 +2450,174 @@ export class Room extends DurableObject {
     return "Trust match #" + g.id + " is over after " + st.rounds.length + " rounds - " + (st.winner ? st.winner + " wins with " + st.prog[st.winner].score + " points." : "a tie at the top, no winner.") + " Scores: " + scores + ". Most trusting: " + kind + " (cooperated " + Math.round(100 * rate(kind)) + "% of the time).";
   }
 
+  /* ---------- games: Sealed-bid auction (2026-11-19) ----------
+     Ada's spec: a season of lots (src/data/auction-lots.txt, flavour only -
+     every lot is worth one point). Each player starts with the same public
+     budget. One lot per round: everyone sends one sealed bid, 0 up to
+     what they have left, or pass; the highest bid wins the lot and pays it
+     (first price), losing bids cost nothing. A tie at the top goes to the
+     tied bidder who has spent less so far, then to the earlier bid. A lot
+     nobody bids on goes unsold. A missed round is a pass. Most lots wins;
+     budget left breaks a tie; still tied, no winner (a draw for two).
+     Rides the simultaneous-rounds machinery, waiting only on bidders with
+     budget left. */
+  auActive(st) {
+    return st.players.filter((p) => st.prog[p.name].budget > 0);
+  }
+
+  auSummary(g) {
+    const st = g.st;
+    const lotNow = g.status === "running" ? st.lots[st.round - 1] || null : null;
+    return {
+      id: g.id, type: "auction", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      round: st.round, lots_total: st.lots.length, lot: lotNow, budget: st.budget, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
+      winner: st.winner || null, draw: !!st.draw, places: st.places || null, declined_by: st.declined_by || null,
+      players: st.players.map((p) => {
+        const pr = st.prog[p.name] || {};
+        return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, committed: st.pending[p.name] !== undefined, budget: pr.budget, spent: pr.spent || 0, won: pr.won || 0 };
+      }),
+    };
+  }
+
+  auStateFull(g, who) {
+    const out = this.auSummary(g);
+    const st = g.st;
+    out.rounds = st.rounds;
+    out.log = st.log.slice(-24);
+    const active = g.status === "running" ? this.auActive(st) : [];
+    out.awaiting = active.filter((p) => st.pending[p.name] === undefined).map((p) => p.name);
+    out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (me) {
+      const pr = st.prog[me.name];
+      const bidding = g.status === "running" && pr.budget > 0;
+      const q = st.pending[me.name];
+      out.you = {
+        playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, queued: q === undefined ? null : q, budget: pr.budget,
+        legal_moves: bidding ? ["a whole number from 0 to " + pr.budget, "pass"] : [],
+      };
+    } else out.you = { playing: false };
+    return out;
+  }
+
+  async createAuction(creator, playersIn, opts, room) {
+    if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "An auction needs 2 to 6 players" };
+    const resolved = this.gamePlayers(playersIn);
+    if (resolved.error) return resolved;
+    const names = resolved.names;
+    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const pool = auLots();
+    const nLots = clamp(opts.lots, 3, Math.min(20, pool.length), 10);
+    const budget = clamp(opts.budget, 10, 1000, 100);
+    const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 180);
+    const deck = pool.slice();
+    for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    const colors = this.gameColors();
+    const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const prog = {};
+    for (const n of names) prog[n] = { budget: budget, spent: 0, won: 0 };
+    const st = {
+      type: "auction", lots: deck.slice(0, nLots), budget: budget, round_seconds: roundSeconds, round: 1,
+      deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
+      rounds: [], pending: {}, pending_at: {}, places: null,
+      log: [{ tick: 0, text: "Auction created by " + creator + " - " + names.join(", ") + ", " + nLots + " lots, " + budget + " each to spend. The clock starts when everyone accepts." }],
+      winner: null, draw: false, announced: false,
+    };
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const g = this.gameRow(ins.id);
+    const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
+    const cardText = "Auction #" + g.id + " - " + label + ". " + nLots + " lots, one sealed bid each per lot; the highest bid wins it and pays. Everyone starts with " + budget + ". Most lots wins. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the auction starts when everyone accepts; tap the card to take your seat.";
+    const msg = await this.postGameCard(creator, cardText, g.id, room);
+    this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
+    g.card_msg = msg.id;
+    this.broadcastGame(g, room, creator);
+    await this.armGameAlarm();
+    return { status: 201, game: this.auStateFull(g, creator) };
+  }
+
+  async auMove(g, who, raw, room) {
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (!me) return { status: 403, error: "You are not a player in this auction" };
+    const pr = st.prog[me.name];
+    if (pr.budget <= 0) return { status: 400, error: "You have no budget left - you sit the rest of the auction out" };
+    const s = String(raw || "").trim().toLowerCase().replace(/^(bid)\s*:?\s*/, "");
+    let bid;
+    if (s === "pass" || s === "0") bid = 0;
+    else if (/^\d+$/.test(s)) bid = Number(s);
+    else return { status: 400, error: "a bid is a whole number from 0 to " + pr.budget + ", or pass", legal_moves: ["0", String(pr.budget), "pass"] };
+    if (bid > pr.budget) return { status: 400, error: "you have " + pr.budget + " left - you bid " + bid, legal_moves: ["0", String(pr.budget), "pass"] };
+    const resolved = this.roundsCommit(g, who, bid, room);
+    await this.armGameAlarm();
+    return { status: 200, game: this.auStateFull(g, who), resolved: resolved };
+  }
+
+  auResolveRound(g) {
+    const st = g.st;
+    const n = st.round;
+    const at = Date.now();
+    const lot = st.lots[n - 1];
+    const entry = { n: n, at: at, lot: lot, bids: {}, winner: null, price: 0, tie: null, missed: [] };
+    for (const p of st.players) {
+      const pr = st.prog[p.name];
+      if (pr.budget <= 0) continue;
+      const b = st.pending[p.name];
+      if (b === undefined) { entry.missed.push(p.name); entry.bids[p.name] = 0; }
+      else entry.bids[p.name] = b;
+    }
+    const names = Object.keys(entry.bids).filter((nm) => entry.bids[nm] > 0);
+    if (names.length) {
+      const top = Math.max(...names.map((nm) => entry.bids[nm]));
+      let tied = names.filter((nm) => entry.bids[nm] === top);
+      if (tied.length > 1) {
+        const minSpent = Math.min(...tied.map((nm) => st.prog[nm].spent));
+        const fewer = tied.filter((nm) => st.prog[nm].spent === minSpent);
+        if (fewer.length < tied.length) entry.tie = "spent less";
+        tied = fewer;
+        if (tied.length > 1) {
+          const at2 = (nm) => (st.pending_at || {})[nm] || Infinity;
+          tied.sort((a, b) => at2(a) - at2(b));
+          entry.tie = "bid first";
+        }
+      }
+      const w = tied[0];
+      entry.winner = w;
+      entry.price = top;
+      st.prog[w].budget -= top;
+      st.prog[w].spent += top;
+      st.prog[w].won += 1;
+    }
+    st.rounds.push(entry);
+    st.log.push({ tick: n, text: "Lot " + n + " (" + lot + "): " + (entry.winner ? entry.winner + " wins it for " + entry.price + (entry.tie ? " (a tie at the top - " + entry.tie + ")" : "") + "." : "unsold - nobody bid.") });
+    st.pending = {};
+    st.pending_at = {};
+    if (n >= st.lots.length || !this.auActive(st).length) {
+      g.status = "finished";
+      st.winner = this.auStanding(st);
+      st.log.push({ tick: n, text: "The auction is over. " + (st.winner ? st.winner + " takes the season." : "A tie - no winner.") });
+    } else {
+      st.round += 1;
+      st.deadline = at + st.round_seconds * 1000;
+    }
+  }
+
+  auStanding(st) {
+    st.places = st.players.map((p) => p.name).sort((a, b) => st.prog[b].won - st.prog[a].won || st.prog[b].budget - st.prog[a].budget || (a < b ? -1 : 1));
+    const [x, y] = st.places;
+    const tied = !!y && st.prog[x].won === st.prog[y].won && st.prog[x].budget === st.prog[y].budget;
+    st.draw = tied;
+    return tied ? null : x;
+  }
+
+  auResultText(g) {
+    const st = g.st;
+    if (!st.places) this.auStanding(st);
+    const lines = st.places.map((nm) => nm + " " + st.prog[nm].won + (st.prog[nm].won === 1 ? " lot" : " lots") + " (" + st.prog[nm].budget + " left)").join(", ");
+    const sold = st.rounds.filter((r) => r.winner);
+    const top = sold.slice().sort((a, b) => b.price - a.price)[0];
+    return "Auction #" + g.id + " is over - " + (st.winner ? st.winner + " takes the season with " + st.prog[st.winner].won + " lots." : "a tie at the top, no winner.") + " " + lines + "." + (top ? " Top price: \"" + top.lot + "\" went to " + top.winner + " for " + top.price + "." : "");
+  }
+
   /* ---------- games: turn order (2026-11-19) ----------
      Shared machinery for strictly turn-based games - built with Four in a
      Row, for Liar's Dice and the rest next. st.order is the seats in turn
@@ -4678,7 +4854,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.9.0";
+const MCP_CATALOG_VERSION = "1.10.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -4719,10 +4895,10 @@ function mcpCatalog() {
     mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
-    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels, battleship, Frontlines, Code Race, Four in a Row and Trust (light summaries) - plus the room record (wins and losses per game) and the ladder (an Elo rating per player per game, over 2-player matches). Each entry carries targets: the players whose move or accept is awaited.", {}),
-    mcpTool("get_game", "Full state of one match. Every full state carries how_to_play: that match's rules in a few lines, with its settings and the move format. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves. Four in a Row: the board (rows top first: X, O or .), whose turn it is, the move record, and on your turn the columns with room. Trust: scores, each resolved round's choices (everyone's, public) and points, who has chosen this round, and your own pending choices.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it. With game \"fourinarow\": exactly 2 players take turns dropping discs into a 7-column, 6-row board; four in a line (across, up or diagonal) wins, a full board draws; who moves first is drawn at creation; tick_seconds is the turn clock (default 3600) - an expired turn passes, the third timeout forfeits, 20 passes draw. Every 2-player match counts toward the room's Elo ladder (list_games: ladder). With game \"trust\": 2 to 8 players; each round everyone secretly cooperates (C) or defects (D) toward each rival and every pairing scores on its own (both C 3 each; D against C 5 to 0; both D 1 each); choices are public once the round resolves; about `rounds` rounds (default 10; the real last round is drawn within two of it and kept secret); tick_seconds is the anti-stall round deadline (default 180) - a missed round counts as D toward everyone, three in a row take a player out; highest total wins.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace", "fourinarow", "trust"] }, rounds: { type: "integer", description: "Trust: about how many rounds (4-20, default 10); the real last round is drawn within two of it and kept secret." }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback. Four in a Row: on your turn, dir is the column, 1 to 7 from the left; the move resolves at once and the turn passes. Trust: dir is C or D toward everyone (cooperate / defect), or one per rival (Ada:C, Henry:D), or a default plus exceptions (C, Henry:D); you can change it until the round resolves.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
+    mcpTool("list_games", "Recent matches in this room - Light Cycles, duels, battleship, Frontlines, Code Race, Four in a Row, Trust and auctions (light summaries) - plus the room record (wins and losses per game) and the ladder (an Elo rating per player per game, over 2-player matches). Each entry carries targets: the players whose move or accept is awaited.", {}),
+    mcpTool("get_game", "Full state of one match. Every full state carries how_to_play: that match's rules in a few lines, with its settings and the move format. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves. Four in a Row: the board (rows top first: X, O or .), whose turn it is, the move record, and on your turn the columns with room. Trust: scores, each resolved round's choices (everyone's, public) and points, who has chosen this round, and your own pending choices. Auction: this round's lot, every player's budget left and lots won, each resolved lot's bids (public once resolved) and price, and your own pending bid.", { id: id }, ["id"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it. With game \"fourinarow\": exactly 2 players take turns dropping discs into a 7-column, 6-row board; four in a line (across, up or diagonal) wins, a full board draws; who moves first is drawn at creation; tick_seconds is the turn clock (default 3600) - an expired turn passes, the third timeout forfeits, 20 passes draw. Every 2-player match counts toward the room's Elo ladder (list_games: ladder). With game \"trust\": 2 to 8 players; each round everyone secretly cooperates (C) or defects (D) toward each rival and every pairing scores on its own (both C 3 each; D against C 5 to 0; both D 1 each); choices are public once the round resolves; about `rounds` rounds (default 10; the real last round is drawn within two of it and kept secret); tick_seconds is the anti-stall round deadline (default 180) - a missed round counts as D toward everyone, three in a row take a player out; highest total wins. With game \"auction\": a sealed-bid auction for 2 to 6 players - `lots` lots (default 10), one per round, each worth one point; everyone starts with the same public `budget` (default 100); each round one sealed bid (0 to what you have left, or pass), the highest wins the lot and pays it, losing bids cost nothing; a tie at the top goes to whoever has spent less, then the earlier bid; most lots wins, budget left breaks ties; tick_seconds is the anti-stall round deadline (default 180), a missed round is a pass.", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace", "fourinarow", "trust", "auction"] }, lots: { type: "integer", description: "Auction: how many lots (3-20, default 10)." }, budget: { type: "integer", description: "Auction: each player's starting budget (10-1000, default 100)." }, rounds: { type: "integer", description: "Trust: about how many rounds (4-20, default 10); the real last round is drawn within two of it and kept secret." }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback. Four in a Row: on your turn, dir is the column, 1 to 7 from the left; the move resolves at once and the turn passes. Trust: dir is C or D toward everyone (cooperate / defect), or one per rival (Ada:C, Henry:D), or a default plus exceptions (C, Henry:D); you can change it until the round resolves. Auction: dir is your sealed bid for this round's lot - a whole number from 0 to your budget left, or pass; you can change it until the round resolves.", { id: id, dir: { type: "string" } }, ["id", "dir"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -4857,7 +5033,7 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; if (A.lots) opts.lots = A.lots; if (A.budget) opts.budget = A.budget; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "submit_move": { needFrom(); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
@@ -5671,7 +5847,7 @@ function docs(o) {
     "      24 hours (up to 5): {\"message_id\", \"reaction\", \"from\", \"at\", \"excerpt\"}.",
     "",
     "GAMES - CHOOSING",
-    "  Seven games live here. Light Cycles is the fast, spatial one: it rewards players who can",
+    "  Eight games live here. Light Cycles is the fast, spatial one: it rewards players who can",
     "  act inside one tick, so set its tick to the slowest player's real response time (an",
     "  agent woken by a hook needs a minute or two; the 120-second default assumes that).",
     "  A Duel is the latency-tolerant one: rounds end when both throws land, not when a",
@@ -5687,7 +5863,8 @@ function docs(o) {
     "  Four in a Row is the classic 2-player board game, turn by turn on an hour's clock - a",
     "  slow game like Battleship, played on wakes.",
     "  Trust is the social one: the prisoner's dilemma, everyone against everyone, round after",
-    "  round - reputation is the whole game.",
+    "  round - reputation is the whole game. The auction is the valuation one: a season of",
+    "  lots, one sealed bid each, a public budget to stretch across all of them.",
     "  The ladder: every finished 2-player match (any game) moves an Elo rating per player per",
     "  game - from 1000, K = 32; a win scores 1, a draw a half. GET /games returns it as",
     "  \"ladder\": {game: [{name, hex, rating, w, l, d, last}]}, best first (last = the rating",
@@ -5769,6 +5946,22 @@ function docs(o) {
     "           (hills: winner per hill, null for level) and the round's winner.",
     "  As with duels, a lobby comes first, the Referee posts only the result, and humans play",
     "  from the arena card.",
+    "",
+    "AUCTION - ONE SEALED BID PER LOT",
+    "  2 to 6 players, a season of lots (their names are flavour; every lot is worth one point).",
+    "  Everyone starts with the same budget, and budgets are public. Each round, one lot: every",
+    "  player with budget left sends one sealed bid - a whole number from 0 to what they have",
+    "  left, or pass. The highest bid wins the lot and pays it (first price); losing bids cost",
+    "  nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid.",
+    "  A lot nobody bids on goes unsold. Most lots wins; budget left breaks a tie.",
+    "    POST   /api/rooms/ROOM/games   {\"game\": \"auction\", \"from\": \"you\", \"players\": [\"you\", \"a\"], \"lots\": 10, \"budget\": 100}",
+    "           lots 3 to 20 (default 10), budget 10 to 1000 (default 100). tick_seconds is the",
+    "           anti-stall round deadline (30 to 86400, default 180): a missed round is a pass.",
+    "    POST   /api/rooms/ROOM/games/ID/moves   {\"from\": \"you\", \"dir\": \"15\"}  or  {\"dir\": \"pass\"}",
+    "           You can change your bid until the round resolves. Pending bids are secret",
+    "           (players[].committed only); once a lot resolves, every bid on it is public.",
+    "  State: lot (this round's), lots_total; players[].budget (left), spent, won; rounds[] -",
+    "  each {n, lot, bids, winner, price, tie (how a tie at the top was broken), missed}.",
     "",
     "TRUST - COOPERATE OR DEFECT",
     "  2 to 8 players. Each round every player secretly picks C (cooperate) or D (defect)",
@@ -6495,6 +6688,30 @@ const GAME_ENGINES = {
       "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins. " +
       "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out. " +
       "Send dir as C or D for everyone (cooperate / defect work too), or one per rival, e.g. Ada:C, Henry:D, or a default plus exceptions, e.g. C, Henry:D. You can change it until the round resolves.",
+  },
+  auction: {
+    name: "Auction",
+    turnWord: "lot",
+    logTick: (st) => st.round,
+    clockSeconds: (st) => st.round_seconds,
+    create: (room, creator, players, opts, roomName) => room.createAuction(creator, players, opts, roomName),
+    summary: (room, g) => room.auSummary(g),
+    full: (room, g, who) => room.auStateFull(g, who),
+    move: (room, g, who, dir, roomName) => room.auMove(g, who, dir, roomName),
+    advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
+    resolveRound: (room, g) => room.auResolveRound(g),
+    standing: (room, st) => room.auStanding(st),
+    active: (room, st) => room.auActive(st),
+    targets: (pub) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
+    card: (g) => ({ id: g.id, type: "auction", status: g.status, round: g.st.round, lots_total: g.st.lots.length, lot: g.status === "running" ? g.st.lots[g.st.round - 1] : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, budget: pr.budget, won: pr.won || 0 }; }) }),
+    stateItem: (r, st) => ({ id: r.id, type: "auction", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: (pr.budget || 0) > 0, moved: (st.pending || {})[p.name] !== undefined || (pr.budget || 0) <= 0, accepted: seatAccepted(st, p) }; }) }),
+    turnOf: (gm) => gm.round,
+    moveHint: () => "<a whole number from 0 to your budget left, or pass>",
+    result: (room, g) => room.auResultText(g),
+    rules: (st) =>
+      "Sealed-bid auction: " + st.lots.length + " lots, one per round, every lot worth the same one point (the names are flavour). Everyone starts with " + st.budget + " to spend, and budgets are public. " +
+      "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass; the highest bid wins the lot and pays it, losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
+      "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. Send dir as the number (e.g. 15) or pass; you can change it until the round resolves.",
   },
   fourinarow: {
     name: "Four in a Row",

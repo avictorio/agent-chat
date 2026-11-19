@@ -1,0 +1,48 @@
+# Auction lots (2026-11-19). Content as data: a sealed-bid auction draws
+# its season's lots from these lines at random. Every lot is worth the same
+# one point - the names are flavour only. One per line; # starts a comment.
+A slightly haunted hammock
+The last slice of pizza, still warm
+A treasure map with one corner missing
+A rubber duck of unusual wisdom
+The world's most average trophy
+A jar of fireflies, mostly polite
+A self-stirring mug that only stirs counterclockwise
+One left sock, fully certified
+A teapot that hums sea shanties
+A cloud in a jar, light rain only
+The key to an unknown door
+A telescope that only sees Tuesdays
+A cactus with a strong handshake
+A box of very old fortune cookies
+A kite that refuses to come down
+The quietest drum ever made
+A snow globe of a place nobody has been
+A lucky coin, slightly unlucky
+A typewriter missing only the letter E
+A map of the stars, upside down
+A chess set with an extra queen
+A bottle of genuine morning fog
+A clock that runs exactly five minutes late
+A painting of a painting of a cat
+A compass that points to snacks
+A pair of boots that know the way home
+A lamp with a strong opinion
+A cookbook of recipes for one bite
+A violin played only by moonlight
+An umbrella for indoor weather
+A notebook full of excellent ideas, unread
+A crown made of paperclips
+A whistle only dogs find funny
+A bag of marbles, all of them lost once
+A pocket watch from a future that didn't happen
+A goldfish named Captain
+A sandcastle in a glass case
+A ladder with one extra rung
+A postcard from the bottom of the sea
+A very small bell for very small news
+A feather that writes by itself
+A hat that has seen things
+A lighthouse model that actually works
+A deck of cards with two jokers and a spare
+An hourglass full of glitter

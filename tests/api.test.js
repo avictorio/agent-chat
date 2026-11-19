@@ -1163,6 +1163,35 @@ async function waitUp() {
     check('trust ends at its secret last round; Rex wins by 2', trG.status === 'finished' && trG.winner === 'Rex' && trG.last_round === trG.rounds.length && trG.last_round >= 3 && trG.last_round <= 6 && trG.players.find((p) => p.name === 'Rex').score - trG.players.find((p) => p.name === 'Poc').score === 2, JSON.stringify({ status: trG.status, winner: trG.winner, last: trG.last_round, n: (trG.rounds || []).length, players: trG.players }));
     rt = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Trust result', (rt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trust match #' + tr0.id + ' is over after') && x.text.includes('Rex wins with')), JSON.stringify((rt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
+    // Sealed-bid auction (2026-11-19): lots from data, sealed bids, first
+    // price, a tie at the top to the lower spender then the earlier bid.
+    let rau = await req('POST', R2 + '/games', { token: TP, json: { game: 'auction', from: 'Poc', players: ['Poc'] } });
+    check('an auction needs 2 to 6 -> 400', rau.status === 400 && /2 to 6/.test(rau.json.error), rau.status);
+    rau = await req('POST', R2 + '/games', { token: TP, json: { game: 'auction', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], lots: 3, budget: 50, tick_seconds: 3600 } });
+    const au = rau.json.game || {};
+    check('an auction is created in a lobby', rau.status === 201 && au.type === 'auction' && au.status === 'lobby' && au.lots_total === 3 && au.budget === 50 && au.lot === null && au.players.every((p) => p.budget === 50), rau.status + ' ' + rau.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + au.id + '/accept', { token: TRex, json: {} });
+    rau = await req('POST', R2 + '/games/' + au.id + '/accept', { token: TRae, json: {} });
+    check('the auction opens on its first lot', rau.status === 200 && rau.json.game.status === 'running' && typeof rau.json.game.lot === 'string' && rau.json.game.lot.length > 3 && /3 lots/.test(rau.json.game.how_to_play || ''), JSON.stringify(rau.json.game).slice(0, 200));
+    rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: TP, json: { dir: '60' } });
+    check('a bid over your budget -> 400', rau.status === 400 && /you have 50 left/.test(rau.json.error), rau.status + ' ' + rau.text.slice(0, 120));
+    rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: TP, json: { dir: 'lots' } });
+    check('a bid that is not a number -> 400', rau.status === 400 && /whole number/.test(rau.json.error), rau.status + ' ' + rau.text.slice(0, 120));
+    rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: TP, json: { dir: 'bid 20' } });
+    check('a bid commits without resolving', rau.status === 200 && rau.json.resolved === false && rau.json.game.you.queued === 20, rau.status + ' ' + rau.text.slice(0, 160));
+    rau = await req('GET', R2 + '/games/' + au.id, { token: TRex });
+    check('a bid stays sealed from rivals', (rau.json.game.players.find((p) => p.name === 'Poc') || {}).committed === true && rau.json.game.you.queued === null && rau.json.game.rounds.length === 0, JSON.stringify(rau.json.game).slice(0, 200));
+    await req('POST', R2 + '/games/' + au.id + '/moves', { token: TRex, json: { dir: '20' } });
+    rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: TRae, json: { dir: 'pass' } });
+    const auR1 = ((rau.json.game || {}).rounds || [])[0] || {};
+    check('a tie at the top goes to the earlier bid (equal spend)', rau.json.resolved === true && auR1.winner === 'Poc' && auR1.price === 20 && auR1.tie === 'bid first' && JSON.stringify(auR1.bids) === '{"Poc":20,"Rex":20,"Rae":0}' && rau.json.game.players.find((p) => p.name === 'Poc').budget === 30, JSON.stringify(auR1));
+    for (const [tok, b] of [[TP, '10'], [TRex, '25'], [TRae, '5']]) rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: tok, json: { dir: b } });
+    const auR2 = ((rau.json.game || {}).rounds || [])[1] || {};
+    check('the highest bid wins and pays; losing bids cost nothing', auR2.winner === 'Rex' && auR2.price === 25 && rau.json.game.players.find((p) => p.name === 'Rex').budget === 25 && rau.json.game.players.find((p) => p.name === 'Rae').budget === 50, JSON.stringify(auR2));
+    for (const [tok, b] of [[TP, '30'], [TRex, '25'], [TRae, '0']]) rau = await req('POST', R2 + '/games/' + au.id + '/moves', { token: tok, json: { dir: b } });
+    check('most lots takes the season', rau.json.game.status === 'finished' && rau.json.game.winner === 'Poc' && JSON.stringify(rau.json.game.places) === '["Poc","Rex","Rae"]' && rau.json.game.players.find((p) => p.name === 'Poc').won === 2, JSON.stringify(rau.json.game).slice(0, 240));
+    rau = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the auction result', (rau.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Auction #' + au.id + ' is over - Poc takes the season with 2 lots')), JSON.stringify((rau.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -
