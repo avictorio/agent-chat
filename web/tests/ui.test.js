@@ -32,6 +32,7 @@ function fresh(opts) {
       ...(opts.fl ? [{ id: 13, ts: now - 40e3, from: 'Ada', kind: 'agent', text: 'Frontlines match #12 - Ada (cyan) vs Anthony (orange). Split 100 troops across 5 hills in secret, first to 3.', game: { id: 12, type: 'frontlines', status: 'running', round: 3, target: 3, round_seconds: 180, variant: 'classic', winner: null, score: { Ada: 1, Anthony: 0 }, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 1 }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0 }] } }] : []),
       ...(opts.cr ? [{ id: 15, ts: now - 35e3, from: 'Ada', kind: 'agent', text: 'Code Race match #14 - Ada (cyan), Henry (orange) and Anthony (pink). Everyone cracks the same secret.', game: { id: 14, type: 'coderace', status: 'running', round: 3, max_rounds: opts.crWords ? 6 : 10, mode: opts.crWords ? 'words' : 'colors', length: opts.crWords ? 5 : 4, colors: opts.crWords ? null : 6, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee' }, { name: 'Henry', color: 'orange', hex: '#fb923c' }, { name: 'Anthony', color: 'pink', hex: '#f472b6' }] } }] : []),
       ...(opts.c4 ? [{ id: 17, ts: now - 32e3, from: 'Ada', kind: 'agent', text: 'Four in a Row match #16 - Anthony (orange) vs Ada (cyan). Drop discs on a 7x6 board; four in a line wins.', game: { id: 16, type: 'fourinarow', status: opts.c4Done ? 'finished' : 'running', turn: opts.c4Done ? 12 : 7, turn_of: opts.c4Done ? null : 'Anthony', winner: opts.c4Done ? 'Ada' : null, draw: false, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', piece: 'X' }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', piece: 'O' }] } }] : []),
+      ...(opts.tr ? [{ id: 19, ts: now - 31e3, from: 'Henry', kind: 'agent', text: 'Trust match #18 - Anthony (pink), Ada (cyan) and Henry (orange). Cooperate or defect with every rival.', game: { id: 18, type: 'trust', status: 'running', round: 3, rounds_about: 10, winner: null, draw: false, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', score: 14, out: false }, { name: 'Henry', color: 'orange', hex: '#fb923c', score: 9, out: false }, { name: 'Anthony', color: 'pink', hex: '#f472b6', score: 12, out: false }] } }] : []),
       ...(opts.duelLobby ? [{ id: 11, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'Duel match #3 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Lobby open - the match starts when both players accept; tap the card to take your seat.', game: { id: 3, type: 'duel', status: 'lobby', round: 1, target: 3, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false }] } }] : []),
       ...(opts.bs ? [{ id: 12, ts: now - 25e3, from: 'Henry', kind: 'agent', text: 'Battleship match #5 - Ada (cyan) vs Henry (orange). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 5, type: 'battleship', status: 'running', phase: 'play', turn: 80, turn_of: 'Henry', winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 }, { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 }] } }] : []),
       ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
@@ -98,6 +99,19 @@ function fresh(opts) {
       ],
       log: [], awaiting: ['Anthony'], awaiting_accept: [],
       you: { playing: true, accepted: true, queued: null, legal_moves: ['five whole numbers adding up to 100', 'even', 'random'] } } : null,
+    tr: opts.tr ? { id: 18, type: 'trust', status: 'running', created_by: 'Henry', card_msg: 19, round: 3, rounds_about: 10, last_round: null, round_seconds: 180, deadline: now + 150e3, lobby_deadline: null,
+      payoffs: { CC: 3, CD: 0, DC: 5, DD: 1 }, winner: null, draw: false, places: null, declined_by: null,
+      players: [
+        { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, committed: true, score: 14, out: false, coop: 0.5 },
+        { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, committed: false, score: 9, out: false, coop: 0.75 },
+        { name: 'Anthony', color: 'pink', hex: '#f472b6', accepted: true, committed: false, score: 12, out: false, coop: 1 },
+      ],
+      rounds: [
+        { n: 1, at: now - 600e3, moves: { Ada: { Henry: 'C', Anthony: 'C' }, Henry: { Ada: 'C', Anthony: 'C' }, Anthony: { Ada: 'C', Henry: 'C' } }, missed: [], dropped: [], points: { Ada: 6, Henry: 6, Anthony: 6 }, totals: { Ada: 6, Henry: 6, Anthony: 6 } },
+        { n: 2, at: now - 300e3, moves: { Ada: { Henry: 'D', Anthony: 'D' }, Henry: { Ada: 'C', Anthony: 'D' }, Anthony: { Ada: 'C', Henry: 'C' } }, missed: [], dropped: [], points: { Ada: 8, Henry: 3, Anthony: 6 }, totals: { Ada: 14, Henry: 9, Anthony: 12 } },
+      ],
+      log: [], awaiting: ['Henry', 'Anthony'], awaiting_accept: [],
+      you: { playing: true, accepted: true, queued: null, out: false, rivals: ['Ada', 'Henry'], legal_moves: ['C', 'D', 'Ada:C, Henry:D'] } } : null,
     c4: opts.c4 ? (() => {
       // Anthony (X) to move at turn 7; Ada (O) just dropped in column 4.
       // Done (a separate game, 12 moves): Ada's diagonal from (3,1) to
@@ -290,7 +304,7 @@ async function setup(page, S, calls) {
     calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
     const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
     S.av = S.av || {};
-    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup, S.bsFfa, S.fl, S.cr, S.c4].find(g => g && g.id == id) || null;
+    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup, S.bsFfa, S.fl, S.cr, S.c4, S.tr].find(g => g && g.id == id) || null;
     let am;
     if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
     if (p.endsWith('/avatar')) {
@@ -341,7 +355,7 @@ async function setup(page, S, calls) {
     if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); const mid = new Date(); mid.setHours(0, 0, 0, 0); if (S.duel) list.push(Object.assign({}, S.duel, { id: 21, status: 'finished', winner: 'Anthony', round: 5, score: { Anthony: 3, Ada: 1 }, created: mid.getTime() - 50 * 3600e3, ended: mid.getTime() - 48 * 3600e3 + 600e3 })); if (S.bs) { list.push(Object.assign({}, S.bs, { id: 3, status: 'finished', winner: 'Ada', turn: 62, created: mid.getTime() - 8 * 3600e3, ended: mid.getTime() - 3 * 3600e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, created: Date.now() - 3 * 3600e3, ended: Date.now() - 60e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); } return J({ room: 'demo', games: list, record: { battleship: [{ name: 'Ada', hex: '#22d3ee', w: 2, l: 0 }, { name: 'Henry', hex: '#fb923c', w: 0, l: 2 }], duel: [{ name: 'Anthony', hex: '#fb923c', w: 1, l: 0 }, { name: 'Ada', hex: '#22d3ee', w: 0, l: 1 }] }, ladder: { battleship: [{ name: 'Ada', hex: '#22d3ee', rating: 1031, w: 2, l: 0, d: 0, last: 15 }, { name: 'Henry', hex: '#fb923c', rating: 969, w: 0, l: 2, d: 0, last: -15 }] } }); }
     if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; if (body.game === 'battleship') { const players = (body.players || []).map((n, i) => ({ name: n, color: cols[i][0], hex: cols[i][1], accepted: false, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 })); const g = { id: 7, type: 'battleship', status: 'lobby', created_by: 'Anthony', card_msg: null, phase: null, turn: 0, turn_of: null, turn_seconds: body.tick_seconds || 3600, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, declined_by: null, players, boards: [], last_move: null, log: [], awaiting: [], awaiting_accept: players.map(p => p.name), you: { playing: false } }; S.bs = g; return J({ room: 'demo', game: g }, 201); } const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
-    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (gm.type === 'fourinarow') { const c = Number(body.dir); if (!(c >= 1 && c <= 7)) return J({ error: 'dir is a column, 1 to 7 from the left', legal_moves: gm.you.legal_moves }, 400); const cells = gm.board.map((x) => x.split('')); let k = 5; while (k >= 0 && cells[k][c - 1] !== '.') k -= 1; if (k < 0) return J({ error: 'Column ' + c + ' is full', legal_moves: gm.you.legal_moves }, 400); cells[k][c - 1] = 'X'; gm.board = cells.map((x) => x.join('')); gm.last_move = { n: gm.moves.length + 1, by: 'Anthony', col: c, row: 6 - k }; gm.moves.push(gm.last_move); gm.turn += 1; gm.turn_of = 'Ada'; gm.awaiting = ['Ada']; gm.you = Object.assign({}, gm.you, { your_turn: false, legal_moves: [] }); return J({ room: 'demo', game: gm, resolved: true }); } if (gm.type === 'coderace') { const raw = String(body.dir || ''); const v = gm.mode === 'words' ? raw.toLowerCase().replace(/[^a-z]/g, '') : raw.toUpperCase().replace(/[^A-Z]/g, ''); if (v.length !== gm.length) return J({ error: 'a guess is ' + gm.length + ' long' }, 400); if (gm.mode === 'words' && v === 'xqzzt') return J({ error: '"xqzzt" is not in the word list - try another 5-letter word' }, 400); gm.you.queued = v; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); } if (gm.type === 'frontlines') { const split = String(body.dir).split(',').map(Number); if (split.length !== 5 || split.reduce((a, b) => a + b, 0) !== 100) return J({ error: 'the five numbers must add up to exactly 100' }, 400); gm.you.queued = split; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = []; return J({ room: 'demo', game: gm, resolved: false }); } gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
+    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (gm.type === 'trust') { const q = {}; for (const t of String(body.dir || '').split(',')) { const m = t.trim().match(/^(\w+):([CD])$/); if (m) q[m[1]] = m[2]; } if (Object.keys(q).length !== 2) return J({ error: 'one choice per rival' }, 400); gm.you.queued = q; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = ['Henry']; return J({ room: 'demo', game: gm, resolved: false }); } if (gm.type === 'fourinarow') { const c = Number(body.dir); if (!(c >= 1 && c <= 7)) return J({ error: 'dir is a column, 1 to 7 from the left', legal_moves: gm.you.legal_moves }, 400); const cells = gm.board.map((x) => x.split('')); let k = 5; while (k >= 0 && cells[k][c - 1] !== '.') k -= 1; if (k < 0) return J({ error: 'Column ' + c + ' is full', legal_moves: gm.you.legal_moves }, 400); cells[k][c - 1] = 'X'; gm.board = cells.map((x) => x.join('')); gm.last_move = { n: gm.moves.length + 1, by: 'Anthony', col: c, row: 6 - k }; gm.moves.push(gm.last_move); gm.turn += 1; gm.turn_of = 'Ada'; gm.awaiting = ['Ada']; gm.you = Object.assign({}, gm.you, { your_turn: false, legal_moves: [] }); return J({ room: 'demo', game: gm, resolved: true }); } if (gm.type === 'coderace') { const raw = String(body.dir || ''); const v = gm.mode === 'words' ? raw.toLowerCase().replace(/[^a-z]/g, '') : raw.toUpperCase().replace(/[^A-Z]/g, ''); if (v.length !== gm.length) return J({ error: 'a guess is ' + gm.length + ' long' }, 400); if (gm.mode === 'words' && v === 'xqzzt') return J({ error: '"xqzzt" is not in the word list - try another 5-letter word' }, 400); gm.you.queued = v; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); } if (gm.type === 'frontlines') { const split = String(body.dir).split(',').map(Number); if (split.length !== 5 || split.reduce((a, b) => a + b, 0) !== 100) return J({ error: 'the five numbers must add up to exactly 100' }, 400); gm.you.queued = split; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = []; return J({ room: 'demo', game: gm, resolved: false }); } gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
     if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/attachments')) {
       const all = S.shelf || [];
@@ -979,7 +993,7 @@ let FAILURES = 0;
     const cc = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
     out.createCall = cc;
     const body = JSON.parse(cc.slice(cc.indexOf('{')));
-    if (out.gallery.join(',') !== 'duel,frontlines,coderace,fourinarow,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
+    if (out.gallery.join(',') !== 'duel,frontlines,coderace,trust,fourinarow,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
     if (!out.galleryFacts.every((f) => /players/.test(f))) throw new Error('every gallery card must carry its facts: ' + JSON.stringify(out.galleryFacts));
     if (!out.howtoFolded || !out.howtoFoldedAgain) throw new Error('How to play must start folded: ' + JSON.stringify(out));
     if (!out.howtoOpensOnTap) throw new Error('a tap on How to play opens the rules');
@@ -1233,6 +1247,40 @@ let FAILURES = 0;
       return out;
     });
   }
+  // Trust (2026-11-19): the card shows the scores; the arena puts the
+  // scoreboard first, then a Cooperate / Defect pair per rival (Lock in
+  // waits for both), then the last round's who-trusted-whom grid.
+  for (const [label, o] of [['trust-arena', {}], ['trust-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { tr: true }, init: () => { try { localStorage.setItem('ac:tr3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
+      out.cardOrder = await page.$$eval('.game-card .tr-name', (n) => n.map((x) => x.textContent));
+      await page.click('.game-card.kind-trust');
+      await page.waitForSelector('#viewer .tr-plan', { timeout: 6000 });
+      out.scores = await page.$$eval('#viewer .tr-scores .tr-score', (n) => n.map((x) => x.textContent).join(','));
+      out.grid = await page.$$eval('#viewer .tr-grid tr', (rows) => rows.slice(1).map((r) => [...r.querySelectorAll('td.tr-cell')].map((c) => c.textContent).join('')).join('|'));
+      out.goOff = await page.$eval('#viewer .tr-go', (b) => b.disabled);
+      out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
+      await shot(page, label + '-plan.png');
+      await page.click('#viewer .tr-choice:nth-of-type(2) .tr-pick.c');
+      out.halfOff = await page.$eval('#viewer .tr-go', (b) => b.disabled);
+      await page.click('#viewer .tr-choice:nth-of-type(3) .tr-pick.d');
+      out.goOn = await page.$eval('#viewer .tr-go', (b) => !b.disabled);
+      await page.click('#viewer .tr-go');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/18/moves')).pop() || '';
+      out.locked = await page.$eval('#viewer .tr-go', (b) => b.textContent);
+      await shot(page, label + '-locked.png');
+      if (out.cardOrder.join(',') !== 'Ada,Anthony (you),Henry') throw new Error('the card ranks by score: ' + out.cardOrder);
+      if (out.scores !== '14,12,9') throw new Error('the scoreboard ranks by score: ' + out.scores);
+      if (out.grid !== '✗✗|✓✗|✓✓') throw new Error('the round 2 grid (rows choose, columns receive): ' + out.grid);
+      if (!out.goOff || !out.halfOff || !out.goOn) throw new Error('Lock in waits for a choice per rival: ' + JSON.stringify(out));
+      if (!/"dir":"Ada:C, Henry:D"/.test(out.moveCall)) throw new Error('the choices go per rival: ' + out.moveCall);
+      if (!/Locked in/.test(out.locked)) throw new Error('the planner reads locked: ' + out.locked);
+      if (!/Your choices · round 3/.test(out.banner)) throw new Error('the turn banner asks for choices: ' + out.banner);
+      return out;
+    });
+  }
   // Four in a Row in 3D (the default): the board scene loads first, the
   // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
   // sends the column, and 2D brings the grid back.
@@ -1349,7 +1397,7 @@ let FAILURES = 0;
     await page.waitForTimeout(250);
     out.helpClosed = await page.$eval('#gameHelpDlg', (d) => !d.open);
     out.arenaStillOpen = await page.$eval('#viewer', (v) => !v.hidden);
-    if (out.guide.join(',') !== 'duel,frontlines,coderace,fourinarow,lightcycles,battleship') throw new Error('guide must list every game: ' + out.guide);
+    if (out.guide.join(',') !== 'duel,frontlines,coderace,trust,fourinarow,lightcycles,battleship') throw new Error('guide must list every game: ' + out.guide);
     if (!out.rulesShown) throw new Error('an open guide entry shows the rules');
     if (out.setupFromGuide !== 'battleship') throw new Error('Start in the guide opens that game\'s setup: ' + out.setupFromGuide);
     if (!/How to play Light Cycles/.test(out.helpTitle)) throw new Error('the ? opens this game\'s rules: ' + out.helpTitle);

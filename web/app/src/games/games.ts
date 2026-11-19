@@ -6,6 +6,7 @@ import { matchTitle } from "./catalog";
 import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
 import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
 import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
+import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
 import {
   battleshipBoard,
   boardSvg,
@@ -188,6 +189,8 @@ export function createGameStore(opts: {
     r3dCommit?: (() => void) | null;
     // Code Race: the guess being made (kept across repaints, reset each round)
     crDraft?: { round: number; v: string } | null;
+    // Trust: the choices being made (kept across repaints, reset each round)
+    trDraft?: { round: number; d: TrDraft } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -284,6 +287,16 @@ export function createGameStore(opts: {
           sub = "If the clock runs out, a lone split takes the round.";
         }
       } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
+    } else if (g.type === "trust") {
+      dur = (g.round_seconds || 180) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
+      if (you.playing && you.out) text = "You're out of this match" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
+      else if (you.playing && you.queued) text = "Your choices are in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+      else if (you.playing) {
+        mine = true;
+        text = "Your choices · round " + g.round;
+        sub = "If the clock runs out, you defect on everyone this round.";
+      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
     } else if (g.type === "fourinarow") {
       dur = (g.turn_seconds || 3600) * 1000;
       if (you.playing && you.your_turn) {
@@ -402,6 +415,10 @@ export function createGameStore(opts: {
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
       if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    } else if (g.type === "trust") {
+      body.game = "trust";
+      body.rounds = g.rounds_about;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
@@ -528,7 +545,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
@@ -581,6 +598,8 @@ export function createGameStore(opts: {
       n = crHistoryRows(g, row, histWho, list);
     } else if (g.type === "fourinarow") {
       n = c4HistoryRows(g, row, histWho, list);
+    } else if (g.type === "trust") {
+      n = trHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1119,6 +1138,82 @@ export function createGameStore(opts: {
         f.setSelectionRange(n, n);
       }
     }
+  }
+
+  /* Trust (2026-11-19): the scoreboard, your choices (a Cooperate /
+     Defect pair per rival), then the last round's who-trusted-whom grid.
+     The draft lives on gameView so a poll never wipes it; it resets each
+     round. */
+  function renderTrustView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const queued: TrDraft | null = you.queued || null;
+    if (!gv.trDraft || gv.trDraft.round !== g.round) gv.trDraft = { round: g.round, d: queued ? Object.assign({}, queued) : {} };
+    const key = [
+      g.status,
+      g.round,
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+      JSON.stringify(queued || {}),
+      JSON.stringify(gv.trDraft.d),
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    wrap.appendChild(trScores(g, me));
+    if (g.status === "running" && you.playing && !you.out) {
+      const hint = arenaHint("trust", "Every pairing scores on its own: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. The last round is a secret.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        trPlanner(
+          g,
+          gv.trDraft.d,
+          (d) => {
+            if (gameView !== gv) return;
+            gv.trDraft = { round: g.round, d };
+            renderTrustView(g, true);
+          },
+          (dir) => {
+            if (gameView !== gv) return;
+            if (gv.r3dCommit) gv.r3dCommit();
+            void sendMove(g.id, dir, note);
+          }
+        )
+      );
+      note.textContent = queued ? "You can change your choices until the round resolves." : "Your choices stay secret until everyone has chosen.";
+      wrap.appendChild(note);
+    } else if (g.status === "running" && !you.playing) {
+      note.textContent = "Spectating - choices are revealed together when each round resolves.";
+      wrap.appendChild(note);
+    }
+    const last = trLastRound(g);
+    wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
+    wrap.appendChild(trGrid(g, last, me));
   }
 
   /* Four in a Row (2026-11-19): who plays which disc, then the board -
@@ -1891,6 +1986,10 @@ export function createGameStore(opts: {
       renderFourView(g, force);
       return;
     }
+    if (g.type === "trust") {
+      renderTrustView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2071,7 +2170,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2123,6 +2222,8 @@ export function createGameStore(opts: {
           if (!mine.committed && !mine.solved && !mine.out) n++;
         } else if (g.type === "fourinarow") {
           if (g.turn_of === me) n++;
+        } else if (g.type === "trust") {
+          if (!mine.committed && !mine.out) n++;
         } else if (g.type === "battleship") {
           if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
         } else if (mine.alive && !mine.moved) n++;

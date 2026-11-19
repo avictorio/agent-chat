@@ -8,6 +8,7 @@ import { matchTitle } from "./catalog";
 import { flField, flLastRound } from "./frontlines";
 import { crCardBoard } from "./coderace";
 import { c4Board } from "./fourinarow";
+import { trCardBoard } from "./trust";
 import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
@@ -23,7 +24,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -46,6 +47,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     } else if (g.type === "fourinarow") {
       board.textContent = "";
       board.appendChild(c4Board(g, { compact: true }));
+    } else if (g.type === "trust") {
+      board.textContent = "";
+      board.appendChild(trCardBoard(g, store.meName()));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
@@ -181,6 +185,7 @@ function gameSignature(g: any): string | null {
     return ["bs", g.status, g.phase || "", g.turn || 0, lm ? lm.by + lm.cell + (lm.sunk || "") : ""].join("|");
   }
   if (g.type === "fourinarow") return ["c4", g.status, g.turn || 0, (g.board || []).join("")].join("|");
+  if (g.type === "trust") return ["tr", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "coderace") {
     const solved = (g.players || []).filter((p: any) => p.solved).length;
     return ["cr", g.status, g.round || 0, (g.rounds || []).length, solved].join("|");
