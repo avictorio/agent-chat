@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../lib";
 import { matchTitle } from "./catalog";
 import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
+import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
 import {
   battleshipBoard,
   boardSvg,
@@ -182,6 +183,8 @@ export function createGameStore(opts: {
     fl3d?: Host3d | null;
     fl3dSeq?: number;
     flCommit?: (() => void) | null;
+    // Code Race: the guess being made (kept across repaints, reset each round)
+    crDraft?: { round: number; v: string } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -278,6 +281,19 @@ export function createGameStore(opts: {
           sub = "If the clock runs out, a lone split takes the round.";
         }
       } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
+    } else if (g.type === "coderace") {
+      dur = (g.round_seconds || 3600) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && !p.solved && !p.out && p.name !== me).map((p: GL) => p.name);
+      if (you.playing && you.solved) text = "You cracked it in round " + you.solved + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
+      else if (you.playing && you.out) text = "You're out of this race" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
+      else if (you.playing && you.queued) text = "Your guess is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+      else if (you.playing) {
+        mine = true;
+        text = "Your guess · round " + g.round + " of " + (g.max_rounds || "?");
+        sub = waiting.length ? "The round resolves when every racer still racing has guessed." : "Everyone else is in · your guess resolves the round.";
+        const missed = (g.rounds || []).slice(-2).filter((r: GL) => (r.missed || []).indexOf(me) >= 0).length;
+        if (missed >= 2) sub = "You've missed two rounds in a row - miss this one and you're out.";
+      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
     } else if (g.type === "battleship") {
       dur = (g.turn_seconds || 3600) * 1000;
       if (g.phase === "setup") {
@@ -374,6 +390,13 @@ export function createGameStore(opts: {
       body.best_of = g.best_of;
       body.tick_seconds = g.round_seconds;
       if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    } else if (g.type === "coderace") {
+      body.game = "coderace";
+      body.mode = g.mode;
+      body.length = g.length;
+      if (g.colors) body.colors = g.colors;
+      body.max_rounds = g.max_rounds;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "battleship") {
       body.game = "battleship";
       body.tick_seconds = g.turn_seconds;
@@ -490,7 +513,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
     return ticks.size;
@@ -538,6 +561,8 @@ export function createGameStore(opts: {
     let n = 0;
     if (g.type === "frontlines") {
       n = flHistoryRows(g, row, histWho, list);
+    } else if (g.type === "coderace") {
+      n = crHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -955,6 +980,102 @@ export function createGameStore(opts: {
     row.appendChild(mk("2D", false));
     row.appendChild(mk("3D", true));
     return row;
+  }
+
+  /* Code Race (2026-11-19): the race board (your lane with your guesses,
+     then each rival's feedback), the secret once it's over, and for a
+     racer still racing the guess input. The draft lives on gameView so a
+     poll or a rival's guess never wipes it; it resets each round. */
+  function renderCodeRaceView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const queued: string | null = you.queued || null;
+    if (!gv.crDraft || gv.crDraft.round !== g.round) gv.crDraft = { round: g.round, v: queued || "" };
+    const key = [
+      g.status,
+      g.round,
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.solved || 0) + (p.out ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
+      queued || "",
+      g.mode === "words" ? "" : gv.crDraft.v,
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    // a repaint while typing a word keeps the field's focus
+    const typing = document.activeElement && (document.activeElement as HTMLElement).classList.contains("cr-word");
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const sec = crSecretEl(g);
+    if (sec) wrap.appendChild(sec);
+    const racing = g.status === "running" && you.playing && !you.solved && !you.out;
+    if (racing) {
+      const hint = arenaHint(
+        "coderace",
+        g.mode === "words"
+          ? "Everyone is cracking the same word. You see rivals' colours, never their letters."
+          : "Everyone is cracking the same code. You see rivals' pegs, never their colours."
+      );
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        crInput(
+          g,
+          gv.crDraft.v,
+          (v) => {
+            if (gameView !== gv) return;
+            gv.crDraft = { round: g.round, v };
+            renderCodeRaceView(g, true);
+          },
+          (v) => {
+            if (gameView !== gv) return;
+            gv.crDraft = { round: g.round, v };
+            void sendMove(g.id, g.mode === "words" ? v : v.split("").join(" "), note);
+          },
+          (v) => {
+            if (gameView === gv) gv.crDraft = { round: g.round, v };
+          }
+        )
+      );
+      note.textContent = queued
+        ? "You can change your guess until the round resolves."
+        : g.mode === "words"
+          ? "Any real " + (g.length || 5) + "-letter word. Rivals see only your colours until the race ends."
+          : "Rivals see only your pegs until the race ends.";
+      wrap.appendChild(note);
+    } else if (g.status === "running" && !you.playing) {
+      note.textContent = "Spectating - guesses stay hidden until the race ends; feedback shows each round.";
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(crBoard(g, { me }));
+    if (typing) {
+      const f = wrap.querySelector(".cr-word") as HTMLInputElement | null;
+      if (f) {
+        f.focus();
+        const n = f.value.length;
+        f.setSelectionRange(n, n);
+      }
+    }
   }
 
   function renderBattleshipView(g: GL, force?: boolean) {
@@ -1658,6 +1779,10 @@ export function createGameStore(opts: {
       renderFrontlinesView(g, force);
       return;
     }
+    if (g.type === "coderace") {
+      renderCodeRaceView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -1838,7 +1963,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -1886,6 +2011,8 @@ export function createGameStore(opts: {
           if (!mine.thrown) n++;
         } else if (g.type === "frontlines") {
           if (!mine.committed) n++;
+        } else if (g.type === "coderace") {
+          if (!mine.committed && !mine.solved && !mine.out) n++;
         } else if (g.type === "battleship") {
           if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
         } else if (mine.alive && !mine.moved) n++;

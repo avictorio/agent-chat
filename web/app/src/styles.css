@@ -311,6 +311,76 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .kind-battleship { --ga: 56, 189, 248; --gbg: #030b16; }
 .kind-duel { --ga: 245, 158, 11; --gbg: #0d0903; }
 .kind-frontlines { --ga: 74, 222, 128; --gbg: #050c08; }
+.kind-coderace { --ga: 192, 132, 252; --gbg: #0a0612; }
+/* Code Race (2026-11-19): lanes of guesses; pegs with dot/ring feedback
+   (Colors) or letter tiles (Words). Feedback keeps a second channel
+   beside colour: dots vs rings, and tiles carry their letters. */
+.cr-board { display: grid; gap: 10px; margin-top: 10px; }
+.cr-lane { background: var(--gbg); border: 1px solid rgba(148, 163, 184, .2); border-left: 3px solid var(--who); border-radius: 12px; padding: 10px 12px; color: #e9e3fb; min-width: 0; }
+.cr-lane.mine { border-color: rgba(var(--ga), .45); border-left-color: var(--who); box-shadow: 0 0 0 1px rgba(var(--ga), .15); }
+.cr-lane.solved { background: linear-gradient(90deg, color-mix(in srgb, var(--who) 12%, var(--gbg)), var(--gbg) 60%); }
+.cr-lane.out { opacity: .6; }
+.cr-lane-head { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; flex-wrap: wrap; }
+.cr-lane-name { font-weight: 700; }
+.cr-lane-st { margin-left: auto; font-size: 12.5px; color: #b9b0d6; }
+.cr-lane.solved .cr-lane-st { color: var(--who); font-weight: 700; }
+.cr-place { font-weight: 800; font-size: 13px; color: #fde68a; min-width: 22px; }
+.cr-rows { display: grid; gap: 5px; }
+.cr-row { display: flex; align-items: center; gap: 10px; }
+.cr-row.sealed { opacity: .75; }
+.cr-row.cracked .cr-n { color: #fde68a; }
+.cr-n { width: 18px; text-align: right; font-size: 11.5px; color: #8c84a8; font-variant-numeric: tabular-nums; flex: none; }
+.cr-sealed { font-size: 11px; color: #b9b0d6; border: 1px dashed rgba(185, 176, 214, .5); border-radius: 999px; padding: 0 7px; }
+.cr-none { font-size: 12.5px; color: #8c84a8; }
+.cr-pegs { display: inline-flex; gap: 5px; }
+.cr-peg { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 9.5px; font-weight: 800; color: rgba(0, 0, 0, .55); background: var(--peg, #334155); box-shadow: inset 0 -2px 3px rgba(0, 0, 0, .35), inset 0 2px 2px rgba(255, 255, 255, .25); flex: none; }
+.cr-peg.empty { background: transparent; border: 1.5px dashed rgba(185, 176, 214, .45); box-shadow: none; }
+.cr-peg.hidden { background: rgba(148, 163, 184, .16); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .4); }
+.cr-pips { display: inline-grid; grid-template-columns: repeat(var(--pc, 2), 8px); gap: 3px; padding: 3px 5px; border-radius: 7px; background: rgba(0, 0, 0, .3); }
+.cr-pip { width: 8px; height: 8px; border-radius: 50%; background: rgba(148, 163, 184, .18); }
+.cr-pip.hit { background: #f8fafc; box-shadow: 0 0 6px rgba(248, 250, 252, .6); }
+.cr-pip.near { background: transparent; border: 1.5px solid #f8fafc; }
+.cr-tiles { display: inline-flex; gap: 4px; }
+.cr-tile { width: 28px; height: 28px; border-radius: 6px; display: inline-grid; place-items: center; font-weight: 800; font-size: 15px; color: #fff; background: #3f3a4f; border: 1px solid rgba(255, 255, 255, .06); flex: none; }
+.cr-tile.g { background: #16a34a; }
+.cr-tile.y { background: #ca8a04; }
+.cr-tile.n { background: #3f3a4f; }
+.cr-tile.open { background: transparent; border: 1.5px solid rgba(185, 176, 214, .45); }
+.cr-lane:not(.mine) .cr-tile { width: 18px; height: 18px; font-size: 10px; border-radius: 4px; }
+.cr-secret { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0 2px; padding: 8px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); color: #e9e3fb; }
+.cr-secret-label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #b9b0d6; }
+.cr-input { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #e9e3fb; }
+.cr-input.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.cr-input-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.cr-input-title { font-weight: 700; font-size: 15px; }
+.cr-legend { font-size: 12px; color: #b9b0d6; white-space: pre; }
+.cr-slots { display: flex; gap: 8px; justify-content: center; }
+.cr-slot { padding: 3px; border: 0; background: transparent; border-radius: 50%; cursor: pointer; }
+.cr-slot:disabled { cursor: default; }
+.cr-slot .cr-peg { width: 38px; height: 38px; font-size: 13px; }
+.cr-palette { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cr-color { width: 40px; height: 40px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .15); background: var(--peg); color: rgba(0, 0, 0, .6); font-weight: 800; font-size: 13px; cursor: pointer; box-shadow: inset 0 -3px 4px rgba(0, 0, 0, .35), inset 0 2px 3px rgba(255, 255, 255, .3); }
+.cr-color:disabled { opacity: .35; cursor: default; }
+.cr-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cr-acts .duel-btn.sm { font-size: 13px; padding: 7px 11px; }
+.cr-go { margin-left: auto; }
+.cr-word-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.cr-word-row .cr-go { flex: none; }
+.cr-word { flex: 1 1 0; width: 100%; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid rgba(var(--ga), .45); background: #07040d; color: #f5f3ff; font: inherit; font-size: 22px; font-weight: 800; letter-spacing: .35em; text-align: center; text-transform: uppercase; }
+.cr-card { padding: 8px 10px 10px; color: #e9e3fb; display: grid; gap: 6px; }
+.cr-card-cap { text-align: center; font-size: 12px; color: #b9b0d6; }
+.cr-card-list { display: grid; gap: 4px; }
+.cr-card-row { display: flex; align-items: center; gap: 7px; font-size: 13px; min-width: 0; }
+.cr-card-row.out { opacity: .6; }
+.cr-card-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.cr-card-st { margin-left: auto; font-size: 12px; color: #b9b0d6; white-space: nowrap; }
+.cr-card-row.solved .cr-card-st { color: #fde68a; font-weight: 700; }
+.cr-card .cr-tile { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
+.cr-card .cr-secret { margin: 0; padding: 5px 8px; }
+.cr-card .cr-secret .cr-tile { width: 20px; height: 20px; font-size: 11px; }
+.cr-card .cr-secret .cr-peg { width: 18px; height: 18px; font-size: 8px; }
+.hist-seg .cr-tiles .cr-tile { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
+.gm-rec-places { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
 /* Frontlines (2026-11-19): the field - a column per hill, both armies as
    bars once a round resolves, the hill tinted by who took it - and the
    planner a commander fills in. Game surfaces are dark in both themes. */

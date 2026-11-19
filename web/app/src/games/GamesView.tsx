@@ -78,11 +78,15 @@ function stateLine(g: GL): string {
     return head + " · " + ps.map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
   }
   if (g.type === "duel" || g.type === "frontlines") return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
+  if (g.type === "coderace") {
+    const cracked = ps.filter((p: GL) => p.solved).map((p: GL) => p.name);
+    return "Round " + (g.round || 1) + " of " + (g.max_rounds || "?") + " · " + (cracked.length ? cracked.join(", ") + " cracked it" : "nobody has cracked it");
+  }
   const alive = ps.filter((p: GL) => p.alive).length;
   return "Tick " + (g.tick || 0) + " · " + alive + " still riding";
 }
 
-type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; l: number }>>;
+type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; l: number; p2?: number; p3?: number }>>;
 
 /* The Games tab as a to-do list (2026-11-13): matches waiting on YOU
    come first, soonest deadline first, each with what it wants ("Your
@@ -99,6 +103,7 @@ function waitingOn(g: GL): string[] {
   if (g.status !== "running") return [];
   if (g.type === "duel") return ps.filter((p) => !p.thrown).map((p) => p.name);
   if (g.type === "frontlines") return ps.filter((p) => !p.committed).map((p) => p.name);
+  if (g.type === "coderace") return ps.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name);
   if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
   return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
 }
@@ -106,11 +111,12 @@ const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_dea
 const durOf = (g: GL): number =>
   g.status === "lobby"
     ? 3600e3
-    : 1000 * (g.type === "duel" || g.type === "frontlines" ? g.round_seconds || 180 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+    : 1000 * (g.type === "duel" || g.type === "frontlines" ? g.round_seconds || 180 : g.type === "coderace" ? g.round_seconds || 3600 : g.type === "battleship" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
 function youLabel(g: GL): string {
   if (g.status === "lobby") return "Your invite";
   if (g.type === "duel") return "Your throw";
   if (g.type === "frontlines") return "Your split";
+  if (g.type === "coderace") return "Your guess";
   if (g.type === "battleship") return g.phase === "setup" ? "Place your fleet" : "Your shot";
   return "Your move";
 }
@@ -159,7 +165,7 @@ function whenLabel(t: number, group: string): string {
 function lengthLine(g: GL): string {
   if (g.type === "battleship") return (g.turn || 0) + " turns";
   if (g.type === "duel") return (g.round || 0) + " rounds";
-  if (g.type === "frontlines") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
+  if (g.type === "frontlines" || g.type === "coderace") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
   return (g.tick || 0) + " ticks";
 }
 
@@ -472,6 +478,11 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                     {r.w}–{r.l}
                   </span>
                   <span className="gm-rec-pct">{Math.round((100 * r.w) / Math.max(1, r.w + r.l)) + "%"}</span>
+                  {r.p2 || r.p3 ? (
+                    <span className="gm-rec-places" title="2nd and 3rd places">
+                      {(r.p2 ? "2nd ×" + r.p2 : "") + (r.p2 && r.p3 ? " · " : "") + (r.p3 ? "3rd ×" + r.p3 : "")}
+                    </span>
+                  ) : null}
                   {st && st.n >= 2 ? (
                     <span className={"gm-rec-streak" + (st.kind === "W" ? " hot" : "")}>
                       {st.kind === "W" ? "🔥 " : ""}

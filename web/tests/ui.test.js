@@ -30,6 +30,7 @@ function fresh(opts) {
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
       ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
       ...(opts.fl ? [{ id: 13, ts: now - 40e3, from: 'Ada', kind: 'agent', text: 'Frontlines match #12 - Ada (cyan) vs Anthony (orange). Split 100 troops across 5 hills in secret, first to 3.', game: { id: 12, type: 'frontlines', status: 'running', round: 3, target: 3, round_seconds: 180, variant: 'classic', winner: null, score: { Ada: 1, Anthony: 0 }, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 1 }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0 }] } }] : []),
+      ...(opts.cr ? [{ id: 15, ts: now - 35e3, from: 'Ada', kind: 'agent', text: 'Code Race match #14 - Ada (cyan), Henry (orange) and Anthony (pink). Everyone cracks the same secret.', game: { id: 14, type: 'coderace', status: 'running', round: 3, max_rounds: opts.crWords ? 6 : 10, mode: opts.crWords ? 'words' : 'colors', length: opts.crWords ? 5 : 4, colors: opts.crWords ? null : 6, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee' }, { name: 'Henry', color: 'orange', hex: '#fb923c' }, { name: 'Anthony', color: 'pink', hex: '#f472b6' }] } }] : []),
       ...(opts.duelLobby ? [{ id: 11, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'Duel match #3 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Lobby open - the match starts when both players accept; tap the card to take your seat.', game: { id: 3, type: 'duel', status: 'lobby', round: 1, target: 3, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: 0, thrown: false, accepted: true }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: 0, thrown: false, accepted: false }] } }] : []),
       ...(opts.bs ? [{ id: 12, ts: now - 25e3, from: 'Henry', kind: 'agent', text: 'Battleship match #5 - Ada (cyan) vs Henry (orange). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 5, type: 'battleship', status: 'running', phase: 'play', turn: 80, turn_of: 'Henry', winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 }, { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 }] } }] : []),
       ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
@@ -96,6 +97,41 @@ function fresh(opts) {
       ],
       log: [], awaiting: ['Anthony'], awaiting_accept: [],
       you: { playing: true, accepted: true, queued: null, legal_moves: ['five whole numbers adding up to 100', 'even', 'random'] } } : null,
+    cr: opts.cr ? (() => {
+      const words = !!opts.crWords;
+      const pal = [['R', 'red', '#ef4444'], ['G', 'green', '#22c55e'], ['B', 'blue', '#3b82f6'], ['Y', 'yellow', '#facc15'], ['O', 'orange', '#f97316'], ['P', 'purple', '#a855f7']].map(([k, name, hex]) => ({ k, name, hex }));
+      const rounds = words
+        ? [
+            { n: 1, at: now - 600e3, guesses: { Ada: { fb: 'Y..G.' }, Henry: { fb: '.Y...' }, Anthony: { guess: 'crane', fb: '..G.Y', at: now - 610e3 } }, solved: [], missed: [], dropped: [] },
+            { n: 2, at: now - 300e3, guesses: { Ada: { fb: 'GG.G.' }, Henry: { fb: 'YY.Y.' }, Anthony: { guess: 'plate', fb: 'Y.GGY', at: now - 310e3 } }, solved: [], missed: [], dropped: [] },
+          ]
+        : [
+            { n: 1, at: now - 600e3, guesses: { Ada: { fb: [1, 1] }, Henry: { fb: [0, 2] }, Anthony: { guess: 'RGBY', fb: [1, 2], at: now - 610e3 } }, solved: [], missed: [], dropped: [] },
+            { n: 2, at: now - 300e3, guesses: { Ada: { fb: [2, 1] }, Henry: { fb: [1, 1] }, Anthony: { guess: 'RRGO', fb: [2, 0], at: now - 310e3 } }, solved: [], missed: [], dropped: [] },
+          ];
+      const g = { id: 14, type: 'coderace', status: 'running', created_by: 'Ada', card_msg: 15, round: 3, max_rounds: words ? 6 : 10, round_seconds: 3600, deadline: now + 3000e3, lobby_deadline: null,
+        mode: words ? 'words' : 'colors', length: words ? 5 : 4, colors: words ? null : 6, palette: words ? null : pal, winner: null, declined_by: null, places: null, secret: null,
+        players: [
+          { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, committed: true, solved: null, out: false, guesses: 2, best: 21 },
+          { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, committed: false, solved: null, out: false, guesses: 2, best: 11 },
+          { name: 'Anthony', color: 'pink', hex: '#f472b6', accepted: true, committed: false, solved: null, out: false, guesses: 2, best: 20 },
+        ],
+        rounds, log: [], awaiting: ['Henry', 'Anthony'], awaiting_accept: [],
+        you: { playing: true, accepted: true, queued: null, solved: null, out: false, legal_moves: words ? ['one 5-letter word from the word list, e.g. crane'] : ['4 colours in order from R G B Y O P, e.g. R G B Y', 'random'] } };
+      // the race over (colors): Ada cracked R G B O in round 3, Anthony in
+      // 4, Henry never; every guess is out in the open now
+      if (opts.crDone) {
+        const open = { Ada: ['RRBB', 'RGBB', 'RGBO'], Henry: ['GRYY', 'GBRR', 'BBRR', 'YYRR'] };
+        g.rounds.forEach((r) => Object.keys(open).forEach((n) => { if (r.guesses[n]) r.guesses[n].guess = open[n][r.n - 1]; }));
+        g.rounds.push({ n: 3, at: now - 200e3, guesses: { Ada: { guess: 'RGBO', fb: [4, 0] }, Henry: { guess: 'BBRR', fb: [1, 1] }, Anthony: { guess: 'RGBY', fb: [3, 0] } }, solved: ['Ada'], missed: [], dropped: [] });
+        g.rounds.push({ n: 4, at: now - 100e3, guesses: { Henry: { guess: 'YYRR', fb: [0, 1] }, Anthony: { guess: 'RGBO', fb: [4, 0] } }, solved: ['Anthony'], missed: [], dropped: [] });
+        Object.assign(g, { status: 'finished', round: 4, winner: 'Ada', places: ['Ada', 'Anthony', 'Henry'], secret: ['R', 'G', 'B', 'O'], deadline: null, awaiting: [] });
+        g.players[0].solved = 3; g.players[2].solved = 4; g.players[1].guesses = 4;
+        g.players.forEach((p) => (p.committed = false));
+        g.you = { playing: true, accepted: true, queued: null, solved: 4, out: false, legal_moves: [] };
+      }
+      return g;
+    })() : null,
     duel: (opts.duel || opts.duelDone) ? { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', created_by: 'Ada', card_msg: 10, round: opts.duelDone ? 7 : 4, best_of: 5, target: 3, round_seconds: 600, deadline: now + 400e3, winner: opts.duelDone ? 'Anthony' : null,
       score: opts.duelDone ? { Ada: 2, Anthony: 3 } : { Ada: 1, Anthony: 0 },
       players: [
@@ -232,7 +268,7 @@ async function setup(page, S, calls) {
     calls && calls.push(m + ' ' + p + u.search + (req.postData() ? ' ' + req.postData() : ''));
     const J = (o, s) => route.fulfill({ status: s || 200, contentType: 'application/json', body: JSON.stringify(o) });
     S.av = S.av || {};
-    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup, S.bsFfa, S.fl].find(g => g && g.id == id) || null;
+    const findGame = (id) => [S.duel, S.game, S.duelLobby, S.bs, S.bsPlay, S.bsSetup, S.bsFfa, S.fl, S.cr].find(g => g && g.id == id) || null;
     let am;
     if ((am = p.match(/\/avatars\/([^\/]+)$/))) { const a = S.av[decodeURIComponent(am[1]).toLowerCase()]; return a ? route.fulfill({ status: 200, contentType: a.type, body: a.buf }) : route.fulfill({ status: 404, body: 'none' }); }
     if (p.endsWith('/avatar')) {
@@ -283,7 +319,7 @@ async function setup(page, S, calls) {
     if (p.endsWith('/games') && m === 'GET') { const list = [S.bs, S.bsPlay, S.duel, S.game].filter(Boolean); const mid = new Date(); mid.setHours(0, 0, 0, 0); if (S.duel) list.push(Object.assign({}, S.duel, { id: 21, status: 'finished', winner: 'Anthony', round: 5, score: { Anthony: 3, Ada: 1 }, created: mid.getTime() - 50 * 3600e3, ended: mid.getTime() - 48 * 3600e3 + 600e3 })); if (S.bs) { list.push(Object.assign({}, S.bs, { id: 3, status: 'finished', winner: 'Ada', turn: 62, created: mid.getTime() - 8 * 3600e3, ended: mid.getTime() - 3 * 3600e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); list.push(Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, created: Date.now() - 3 * 3600e3, ended: Date.now() - 60e3, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) })); } return J({ room: 'demo', games: list, record: { battleship: [{ name: 'Ada', hex: '#22d3ee', w: 2, l: 0 }, { name: 'Henry', hex: '#fb923c', w: 0, l: 2 }], duel: [{ name: 'Anthony', hex: '#fb923c', w: 1, l: 0 }, { name: 'Ada', hex: '#22d3ee', w: 0, l: 1 }] } }); }
     if (p.endsWith('/games') && m === 'POST') { const cols = [['cyan', '#22d3ee'], ['orange', '#fb923c'], ['pink', '#f472b6'], ['lime', '#a3e635']]; if (body.game === 'battleship') { const players = (body.players || []).map((n, i) => ({ name: n, color: cols[i][0], hex: cols[i][1], accepted: false, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 })); const g = { id: 7, type: 'battleship', status: 'lobby', created_by: 'Anthony', card_msg: null, phase: null, turn: 0, turn_of: null, turn_seconds: body.tick_seconds || 3600, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, declined_by: null, players, boards: [], last_move: null, log: [], awaiting: [], awaiting_accept: players.map(p => p.name), you: { playing: false } }; S.bs = g; return J({ room: 'demo', game: g }, 201); } const isDuel = body.game === 'duel'; const players = (body.players || []).map((n, i) => isDuel ? { name: n, color: cols[i][0], hex: cols[i][1], wins: 0, thrown: false, accepted: n === 'Anthony' } : { name: n, color: cols[i][0], hex: cols[i][1], dir: ['right', 'left', 'down', 'up'][i], alive: true, x: 5 + i * 3, y: 5, moved: false, accepted: n === 'Anthony' }); const waiting = (body.players || []).filter(n => n !== 'Anthony'); const g = isDuel ? { id: 7, type: 'duel', status: 'lobby', created_by: 'Anthony', card_msg: null, round: 1, target: Math.floor((body.best_of || 5) / 2) + 1, best_of: body.best_of || 5, round_seconds: body.tick_seconds || 60, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, score: {}, players, rounds: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } } : { id: 7, type: 'lightcycles', status: 'lobby', created_by: 'Anthony', card_msg: null, w: 30, h: 22, tick: 0, tick_seconds: body.tick_seconds || 120, deadline: null, lobby_deadline: Date.now() + 3600e3, winner: null, players, trails: [], log: [], awaiting: [], awaiting_accept: waiting, you: { playing: true, queued: null, accepted: true } }; if (isDuel) S.duel = g; else S.game = g; return J({ room: 'demo', game: g }, 201); }
     if ((mm = p.match(/games\/(\d+)\/(accept|decline)$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (mm[2] === 'decline') { gm.status = 'cancelled'; gm.declined_by = 'Anthony'; return J({ room: 'demo', game: gm }); } gm.players.forEach(x => { x.accepted = true; }); if (gm.you) gm.you.accepted = true; gm.awaiting_accept = []; gm.status = 'running'; gm.deadline = Date.now() + (gm.round_seconds || gm.tick_seconds || 60) * 1000; return J({ room: 'demo', game: gm }); }
-    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (gm.type === 'frontlines') { const split = String(body.dir).split(',').map(Number); if (split.length !== 5 || split.reduce((a, b) => a + b, 0) !== 100) return J({ error: 'the five numbers must add up to exactly 100' }, 400); gm.you.queued = split; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = []; return J({ room: 'demo', game: gm, resolved: false }); } gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
+    if ((mm = p.match(/games\/(\d+)\/moves$/)) && m === 'POST') { const gm = findGame(mm[1]); if (!gm) return J({ error: 'No game' }, 404); if (gm.type === 'coderace') { const raw = String(body.dir || ''); const v = gm.mode === 'words' ? raw.toLowerCase().replace(/[^a-z]/g, '') : raw.toUpperCase().replace(/[^A-Z]/g, ''); if (v.length !== gm.length) return J({ error: 'a guess is ' + gm.length + ' long' }, 400); if (gm.mode === 'words' && v === 'xqzzt') return J({ error: '"xqzzt" is not in the word list - try another 5-letter word' }, 400); gm.you.queued = v; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); } if (gm.type === 'frontlines') { const split = String(body.dir).split(',').map(Number); if (split.length !== 5 || split.reduce((a, b) => a + b, 0) !== 100) return J({ error: 'the five numbers must add up to exactly 100' }, 400); gm.you.queued = split; const me = gm.players.find(x => x.name === 'Anthony'); if (me) me.committed = true; gm.awaiting = []; return J({ room: 'demo', game: gm, resolved: false }); } gm.you.queued = body.dir; const pl = gm.players.find(x => x.name === 'Anthony'); if (pl) { pl.moved = true; pl.thrown = true; } if (gm.awaiting) gm.awaiting = gm.awaiting.filter(n => n !== 'Anthony'); return J({ room: 'demo', game: gm, resolved: false }); }
     if ((mm = p.match(/games\/(\d+)$/))) { const gm = mm[1] === '4' && S.bs ? Object.assign({}, S.bs, { id: 4, status: 'finished', winner: 'Ada', turn: 81, players: S.bs.players.map((p, i) => i === 0 ? Object.assign({}, p, { sunk: 5 }) : Object.assign({}, p, { sunk: 4, afloat: 0 })) }) : findGame(mm[1]); if (!gm) return J({ error: 'No game with that id' }, 404); return J({ room: 'demo', game: gm }); }
     if (p.endsWith('/attachments')) {
       const all = S.shelf || [];
@@ -919,7 +955,7 @@ let FAILURES = 0;
     const cc = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
     out.createCall = cc;
     const body = JSON.parse(cc.slice(cc.indexOf('{')));
-    if (out.gallery.join(',') !== 'duel,frontlines,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
+    if (out.gallery.join(',') !== 'duel,frontlines,coderace,lightcycles,battleship') throw new Error('gallery must list every catalog game: ' + out.gallery);
     if (!out.galleryFacts.every((f) => /players/.test(f))) throw new Error('every gallery card must carry its facts: ' + JSON.stringify(out.galleryFacts));
     if (!out.howtoFolded || !out.howtoFoldedAgain) throw new Error('How to play must start folded: ' + JSON.stringify(out));
     if (!out.howtoOpensOnTap) throw new Error('a tap on How to play opens the rules');
@@ -1029,6 +1065,100 @@ let FAILURES = 0;
       return out;
     });
   }
+  // Code Race (2026-11-19): the card shows each racer's latest feedback;
+  // the arena puts your lane first with your guesses, a rival's lane
+  // shows feedback only (pegs hidden); the palette fills the slots, Guess
+  // sends them in order, and the round's guess shows sealed in your lane.
+  for (const [label, o] of [['coderace-arena', {}], ['coderace-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
+      out.cardRows = await page.$$eval('.game-card .cr-card-row', (r) => r.map((x) => x.querySelector('.cr-card-name').textContent));
+      await page.click('.game-card.kind-coderace');
+      await page.waitForSelector('#viewer .cr-input', { timeout: 6000 });
+      out.lanes = await page.$$eval('#viewer .cr-lane .cr-lane-name', (n) => n.map((x) => x.textContent));
+      out.myPegs = await page.$$eval('#viewer .cr-lane.mine .cr-row:first-child .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      out.rivalHidden = await page.$$eval('#viewer .cr-lane:not(.mine) .cr-peg', (p) => p.every((x) => x.classList.contains('hidden') && !x.textContent));
+      out.rivalPips = await page.$$eval('#viewer .cr-board > .cr-lane:nth-child(2) .cr-row:nth-child(2) .cr-pip.hit', (p) => p.length);
+      out.goOff = await page.$eval('#viewer .cr-go', (b) => b.disabled);
+      out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
+      await shot(page, label + '-board.png');
+      for (const k of ['R', 'G', 'B', 'Y']) await page.click('#viewer .cr-color[aria-label="Add ' + { R: 'red', G: 'green', B: 'blue', Y: 'yellow' }[k] + '"]');
+      out.slots = await page.$$eval('#viewer .cr-slot .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      // a tap on a slot takes that peg out
+      await page.click('#viewer .cr-slot:nth-child(2)');
+      out.afterClear = await page.$$eval('#viewer .cr-slot .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      await page.click('#viewer .cr-color[aria-label="Add green"]');
+      out.goOn = await page.$eval('#viewer .cr-go', (b) => !b.disabled);
+      await page.click('#viewer .cr-go');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/14/moves')).pop() || '';
+      out.sealed = await page.$$eval('#viewer .cr-lane.mine .cr-row.sealed .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      await shot(page, label + '-guessed.png');
+      if (out.cardRows.length !== 3) throw new Error('the card lists every racer: ' + out.cardRows);
+      if (out.lanes[0] !== 'Anthony (you)') throw new Error('your lane comes first: ' + out.lanes);
+      if (out.myPegs !== 'RGBY') throw new Error('your own guess shows in full: ' + out.myPegs);
+      if (!out.rivalHidden) throw new Error('a rival\'s pegs stay hidden');
+      if (out.rivalPips !== 2) throw new Error('a rival\'s feedback shows (Ada round 2: 2 right place): ' + out.rivalPips);
+      if (!out.goOff || !out.goOn) throw new Error('Guess waits for every slot: ' + JSON.stringify(out));
+      if (out.slots !== 'RGBY' || out.afterClear !== 'RBY') throw new Error('the palette fills slots and a tap clears one: ' + JSON.stringify(out));
+      if (!/"dir":"R B Y G"/.test(out.moveCall)) throw new Error('the guess goes in order: ' + out.moveCall);
+      if (out.sealed !== 'RBYG') throw new Error('the round\'s guess shows sealed in your lane: ' + out.sealed);
+      if (!/Your guess · round 3 of 10/.test(out.banner)) throw new Error('the turn banner asks for a guess: ' + out.banner);
+      return out;
+    });
+  }
+  // A finished race: the code is shown, the lanes run in place order with
+  // the winner's trophy, and every rival's guess is out in the open.
+  for (const [label, o] of [['coderace-done', {}], ['coderace-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { cr: true, crDone: true } }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .cr-card .cr-secret', { timeout: 6000 });
+      await page.click('.game-card.kind-coderace');
+      await page.waitForSelector('#viewer .cr-secret', { timeout: 6000 });
+      out.secret = await page.$$eval('#viewer .cr-secret .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      out.lanes = await page.$$eval('#viewer .cr-lane .cr-lane-name', (n) => n.map((x) => x.textContent));
+      out.trophy = await page.$eval('#viewer .cr-lane:first-child .cr-place', (e) => e.textContent);
+      out.adaGuess = await page.$$eval('#viewer .cr-board > .cr-lane:first-child .cr-row:first-child .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      out.input = !!(await page.$('#viewer .cr-input'));
+      out.meta = await page.$eval('#viewer .lc-meta', (e) => e.textContent);
+      await shot(page, label + '.png');
+      if (out.secret !== 'RGBO') throw new Error('the code is shown once the race is over: ' + out.secret);
+      if (out.lanes.join(',') !== 'Ada,Anthony (you),Henry' || out.trophy !== '🏆') throw new Error('lanes in place order, the winner first: ' + JSON.stringify(out));
+      if (out.adaGuess !== 'RRBB') throw new Error('a rival\'s guesses are out in the open: ' + out.adaGuess);
+      if (out.input) throw new Error('no guess input once the race is over');
+      if (!/Cracked in round 3 · 4 rounds · 4 pegs · 6 colours/.test(out.meta)) throw new Error('the record line: ' + out.meta);
+      return out;
+    });
+  }
+  // Words: rivals' rows are bare coloured tiles; you type the word; a word
+  // not in the list is refused with the server's reason; Enter sends.
+  for (const [label, o] of [['coderace-words', {}], ['coderace-words-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { cr: true, crWords: true } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
+      await page.click('.game-card.kind-coderace');
+      await page.waitForSelector('#viewer .cr-word', { timeout: 6000 });
+      out.myTiles = await page.$$eval('#viewer .cr-lane.mine .cr-row:first-child .cr-tile', (t) => t.map((x) => x.textContent + ':' + x.className.split(' ')[1]).join(','));
+      out.rivalLetters = await page.$$eval('#viewer .cr-lane:not(.mine) .cr-tile', (t) => t.map((x) => x.textContent).join(''));
+      await page.fill('#viewer .cr-word', 'xqzzt');
+      await page.click('#viewer .cr-go');
+      await page.waitForTimeout(400);
+      out.refused = await page.$eval('#viewer .lc-note', (e) => e.textContent);
+      await page.fill('#viewer .cr-word', 'crane');
+      await page.press('#viewer .cr-word', 'Enter');
+      await page.waitForTimeout(500);
+      out.moveCall = calls.filter((c) => c.includes('/games/14/moves')).pop() || '';
+      out.sealed = await page.$$eval('#viewer .cr-lane.mine .cr-row.sealed .cr-tile', (t) => t.map((x) => x.textContent).join(''));
+      await shot(page, label + '.png');
+      if (out.myTiles !== 'C:n,R:n,A:g,N:n,E:y') throw new Error('your tiles carry letters and colours: ' + out.myTiles);
+      if (out.rivalLetters !== '') throw new Error('rival tiles carry no letters: ' + out.rivalLetters);
+      if (!/not in the word list/.test(out.refused)) throw new Error('a word not in the list is refused: ' + out.refused);
+      if (!/"dir":"crane"/.test(out.moveCall)) throw new Error('Enter sends the word: ' + out.moveCall);
+      if (out.sealed !== 'CRANE') throw new Error('the sealed guess shows in your lane: ' + out.sealed);
+      return out;
+    });
+  }
   // Frontlines in 3D (the default): the scene loads above the score and
   // the planner, the round's numbers follow the planner, a lock-in still
   // sends the split, and 2D drops the scene for the DOM field.
@@ -1090,7 +1220,7 @@ let FAILURES = 0;
     await page.waitForTimeout(250);
     out.helpClosed = await page.$eval('#gameHelpDlg', (d) => !d.open);
     out.arenaStillOpen = await page.$eval('#viewer', (v) => !v.hidden);
-    if (out.guide.join(',') !== 'duel,frontlines,lightcycles,battleship') throw new Error('guide must list every game: ' + out.guide);
+    if (out.guide.join(',') !== 'duel,frontlines,coderace,lightcycles,battleship') throw new Error('guide must list every game: ' + out.guide);
     if (!out.rulesShown) throw new Error('an open guide entry shows the rules');
     if (out.setupFromGuide !== 'battleship') throw new Error('Start in the guide opens that game\'s setup: ' + out.setupFromGuide);
     if (!/How to play Light Cycles/.test(out.helpTitle)) throw new Error('the ? opens this game\'s rules: ' + out.helpTitle);

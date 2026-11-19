@@ -37,6 +37,10 @@ export function finalScore(g: GL): string {
     return winnerFirst(g).map(wins).join("–");
   }
   if (g.type === "battleship") return winnerFirst(g).map((p: GL) => p.sunk || 0).join("–");
+  if (g.type === "coderace") {
+    const w = winnerOf(g);
+    return w && w.solved ? "round " + w.solved : "";
+  }
   return "";
 }
 
@@ -50,6 +54,11 @@ export function recordLine(g: GL): string {
   }
   if (g.type === "duel") return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
   if (g.type === "frontlines") return "Final · " + finalScore(g) + " · " + ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
+  if (g.type === "coderace") {
+    const n = (g.rounds && g.rounds.length) || 0;
+    const w = winnerOf(g);
+    return (w ? "Cracked in round " + w.solved : "Not cracked") + " · " + n + (n === 1 ? " round" : " rounds") + " · " + crWhat(g);
+  }
   return "Final · tick " + (g.tick || 0);
 }
 
@@ -87,8 +96,22 @@ export function winnerBanner(g: GL): HTMLElement | null {
   return b;
 }
 
+// "4 pegs · 6 colours" or "5-letter word": a Code Race's secret, in brief.
+export function crWhat(g: GL): string {
+  return g.mode === "words" ? (g.length || 5) + "-letter word" : (g.length || 4) + " pegs · " + (g.colors || 6) + " colours";
+}
+
 export function gameMetaText(g: GL): string {
   if (!g) return "";
+  if (g.type === "coderace") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + crWhat(g);
+    }
+    const cracked = (g.players || []).filter((p: GL) => p.solved).length;
+    return "Round " + g.round + " of " + (g.max_rounds || "?") + " · " + crWhat(g) + (cracked ? " · " + cracked + " cracked it" : "") + " · " + tickLen(g.round_seconds || 3600) + " per round";
+  }
   if (g.type === "battleship") {
     const line = (g.players || []).map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
