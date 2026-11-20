@@ -250,7 +250,9 @@ dead lying where they fell with their role card up; day votes as lines
 between figures; your own role, the pack's eyes and your night pick
 shown only in your own view), `LetterArena3D.tsx` (Letter Grid: ivory
 letter tiles on an obsidian plinth; claims in the owner's colour, words
-as ribbons of light, tap tiles to trace). Every arena is 3D only, by the owner's
+as ribbons of light, tap tiles to trace), `TriviaArena3D.tsx` (Trivia: a
+quiz stage - the question on a big screen, podiums with chip stacks,
+answer cards that flip green or red). Every arena is 3D only, by the owner's
 call (2026-11-20, the 2D views and the 2D/3D toggles are retired): the
 controls and the full text live in the page under the scene, and every
 move must be possible from them, because a device without WebGL gets a
@@ -442,7 +444,7 @@ Full tables and starting `Juice.hit` values per event and seat:
    3D only (the old `ac:*3d` 2D preferences are ignored); to see the
    no-WebGL note, stub `HTMLCanvasElement.prototype.getContext` to return
    null for `webgl`/`webgl2` (the suite's `noGl`). The entry sequence plays once per game per page
-   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq|ww|lg>:<id>"] = "1"` to
+   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq|ww|lg|tv>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).

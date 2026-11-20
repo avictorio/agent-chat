@@ -546,7 +546,37 @@ them thin and dim).
 **Catch-up.** `ac-lg-seen:<path>:<id>` (rounds seen); the latest unseen
 round replays on open; a tap skips; reduced motion lands it.
 
-## 16. A new arena
+## 16. Trivia: the quiz stage
+
+**World.** A glossy black stage with a violet neon ring under `TV_SKY`;
+a big screen at the back (a canvas texture: the round, the quizmaster,
+the question word-wrapped to fit) and a podium per player in a shallow
+arc in front of it, edges lit in the player's colour, a name plate with
+the balance (the second channel), and a chip stack on top - one chip per
+10 points, eased on the juice clock. The quizmaster's podium stands in a
+dim spotlight cone. A lamp over a podium says an answer is sealed, never
+what it is.
+
+**Reveal.** Beat 0 turns the screen over to the answer; then each answer
+card flips in seat order (`FLIP` apart): green with the stack rising for
+a right answer, red and falling for a wrong one, grey for none; a split
+table adds a gold "split! +10" over the quizmaster. Balances on show are
+the round before's totals plus each swing as its card lands, so the
+stacks move with the reveal, not before it.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you send a question, an answer or a ruling | `lock` + `BUZZ.commit` |
+| the answer goes up | `charge` |
+| a right card / a wrong card | `ping` / `buzzer`; yours: `BUZZ.scored` / `BUZZ.hitYou` |
+| the round, you answered | "+N" good or "−N" bad, with the answer |
+| the round, you asked | "+10 · your question split the table" good, else "NO SPLIT" neutral |
+| the end | VICTORY / DEFEAT (or NAME WINS / DRAW), a pillar over the winner |
+
+**Catch-up.** `ac-tv-seen:<path>:<id>` (rounds seen); the latest unseen
+round replays on open (a forfeit lands at once); a tap skips.
+
+## 17. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

@@ -639,7 +639,12 @@ change behavior. In summary:
   Matching (`tvMatch`): NFKD fold, punctuation and articles out, number
   words as digits, one letter off for answers of 5+ letters. Structured
   fields `question`, `answer`, `accept`, `wager` ride `moveFields`; plain
-  dir also works ("Q? = answer | variant", "answer @ wager").
+  dir also works ("Q? = answer | variant", "answer @ wager"). Web (3D
+  only): `trivia.ts` (scores, the question, the quizmaster's form, the
+  answer-and-wager form, the judge panel, the reveal, history, card) and
+  `TriviaArena3D.tsx`. Drafts live on `gameView` keyed by round and phase;
+  typing never rebuilds the view, and a rebuild re-focuses the field that
+  had focus.
 - **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
   rotating role. Deviations from the spec, on purpose: the answerer
   rotates in seat order (the spec's "winner answers next" never ends);

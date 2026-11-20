@@ -13,6 +13,7 @@ import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter,
 import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
 import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
+import { tvAnswerForm, tvAskForm, tvHistoryRows, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores, type TvAnsDraft, type TvAskDraft } from "./trivia";
 import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid";
 import {
   battleshipBoard,
@@ -204,6 +205,8 @@ export function createGameStore(opts: {
     tqDraft?: { key: string; text: string } | null;
     wwDraft?: { town: string; den: string } | null;
     lgDraft?: LgDraft | null;
+    tvAsk?: { key: string; d: TvAskDraft } | null;
+    tvAns?: { key: string; d: TvAnsDraft } | null;
     lgPanel?: LgPanel | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
@@ -295,6 +298,27 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "trivia") {
+      dur = (g.round_seconds || 3600) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && p.name !== g.asker && p.name !== me).map((p: GL) => p.name);
+      if (you.playing && you.asker) {
+        if (g.phase === "ask") {
+          mine = true;
+          text = "You're the quizmaster · ask a question";
+          sub = "If the clock runs out, you forfeit the round.";
+        } else if (g.phase === "judge") {
+          mine = true;
+          text = "Judge the answers the match missed";
+          sub = "If the clock runs out, the reveal counts them wrong.";
+        } else text = "Your question is up · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
+      } else if (g.phase === "ask") text = (g.asker || "The quizmaster") + " is writing a question · round " + g.round + " of " + g.rounds_total;
+      else if (g.phase === "judge") text = (g.asker || "The quizmaster") + " is judging the answers";
+      else if (you.playing && you.queued) text = "Your answer is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
+      else if (you.playing) {
+        mine = true;
+        text = "Your answer · round " + g.round + " of " + g.rounds_total;
+        sub = "If the clock runs out, you score nothing (and lose nothing).";
+      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
     } else if (g.type === "lettergrid") {
       dur = (g.round_seconds || 3600) * 1000;
       const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
@@ -519,6 +543,10 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "trivia") {
+      body.game = "trivia";
+      body.rotations = g.rotations || 1;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "lettergrid") {
       body.game = "lettergrid";
       body.rounds = g.rounds_total;
@@ -670,7 +698,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" || g.type === "trivia") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     if (g.type === "corpse") return (g.beats || []).length;
@@ -741,6 +769,8 @@ export function createGameStore(opts: {
       n = wwHistoryRows(g, row, histWho, list);
     } else if (g.type === "lettergrid") {
       n = lgHistoryRows(g, row, histWho, list);
+    } else if (g.type === "trivia") {
+      n = tvHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1073,6 +1103,7 @@ export function createGameStore(opts: {
     twenty: { cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
     werewolf: { cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
     lettergrid: { cls: "lg-3d-host", load: () => import("./LetterArena3D"), comp: null },
+    trivia: { cls: "tv-3d-host", load: () => import("./TriviaArena3D"), comp: null },
     liarsdice: { cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function load3d(kind: string) {
@@ -1389,6 +1420,93 @@ export function createGameStore(opts: {
     const last = trLastRound(g);
     wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
     wrap.appendChild(trGrid(g, last, me));
+  }
+
+  /* Trivia (2026-11-20, 3D only): the stage first, then the question,
+     your form (the quizmaster's question, an answer and a wager, or the
+     judge panel), the scores and the last round's reveal. Drafts live on
+     gameView keyed by round and phase, and typing never rebuilds the
+     view, so a poll cannot steal focus; a rebuild restores the focused
+     field. */
+  function renderTriviaView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const dkey = g.round + ":" + (g.phase || "");
+    if (!gv.tvAsk || gv.tvAsk.key !== dkey) gv.tvAsk = { key: dkey, d: { q: "", a: "", acc: "" } };
+    if (!gv.tvAns || gv.tvAns.key !== dkey) gv.tvAns = { key: dkey, d: you.queued ? { a: you.queued.answer, w: you.queued.wager } : { a: "", w: Math.min(10, you.max_wager != null ? you.max_wager : 10) } };
+    const key = [
+      g.status,
+      g.round,
+      g.phase || "",
+      g.question || "",
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.balance || 0)).join(","),
+      JSON.stringify(you.queued || {}),
+      JSON.stringify(you.to_judge || []),
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const act = document.activeElement as HTMLElement | null;
+    const focusCls = act && gv.wrap.contains(act) && act.classList.contains("tv-in") ? Array.from(act.classList).find((c) => /^tv-in-/.test(c)) || null : null;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const h = host3d("trivia");
+    wrap.appendChild(h.host);
+    paint3d("trivia", g, h);
+    const qb = tvQuestion(g);
+    if (qb) wrap.appendChild(qb);
+    const send = (dir: string) => {
+      if (gameView !== gv) return;
+      if (gv.r3dCommit) gv.r3dCommit();
+      void sendMove(g.id, dir, note);
+    };
+    if (g.status === "running" && you.playing) {
+      if (you.asker && g.phase === "ask") {
+        const hint = arenaHint("trivia-ask", "Ask about you, the room, anything you know the answer to. A question some get and some miss pays you 10.");
+        if (hint) wrap.appendChild(hint);
+        wrap.appendChild(tvAskForm(gv.tvAsk.d, (d) => { if (gameView === gv && gv.tvAsk) gv.tvAsk.d = d; }, send));
+      } else if (you.asker && g.phase === "judge") wrap.appendChild(tvJudgeForm(g, send));
+      else if (!you.asker && g.phase === "answer") {
+        const hint = arenaHint("trivia", "Bet what you're sure of: a right answer wins your wager, a wrong one loses it. No answer costs nothing.");
+        if (hint) wrap.appendChild(hint);
+        wrap.appendChild(tvAnswerForm(g, gv.tvAns.d, (d) => { if (gameView === gv && gv.tvAns) gv.tvAns.d = d; }, send));
+      } else if (you.asker && g.phase === "answer") note.textContent = "Your answer: " + (you.answer || "?") + ((you.accept || []).length ? " (also: " + you.accept.join(", ") + ")" : "") + " - sealed until the reveal.";
+      wrap.appendChild(note);
+      if (focusCls) {
+        const f = wrap.querySelector("." + focusCls) as HTMLElement | null;
+        if (f) f.focus();
+      }
+    } else if (g.status === "running") {
+      note.textContent = "Spectating - answers and wagers are revealed together when each round resolves.";
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(tvScores(g, me));
+    const rv = tvReveal(g, tvLastRound(g), me);
+    if (rv) wrap.appendChild(rv);
   }
 
   /* Letter Grid (2026-11-20, 3D only): the grid first (tap tiles to trace
@@ -2531,6 +2649,10 @@ export function createGameStore(opts: {
       renderLetterView(g, force);
       return;
     }
+    if (g.type === "trivia") {
+      renderTriviaView(g, force);
+      return;
+    }
     if (g.type === "auction") {
       renderAuctionView(g, force);
       return;
@@ -2728,7 +2850,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "trivia" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2786,6 +2908,8 @@ export function createGameStore(opts: {
           if (g.phase === "write" ? g.turn_of === me : !mine.committed) n++;
         } else if (g.type === "twenty") {
           if (g.phase === "ask" ? g.answerer !== me : g.answerer === me) n++;
+        } else if (g.type === "trivia") {
+          if (g.phase === "answer" ? g.asker !== me && !mine.committed : g.asker === me) n++;
         } else if (g.type === "werewolf") {
           const y = g.you || {};
           if (mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act)) n++;
