@@ -266,10 +266,33 @@ limits and the games move before `agents/`.
       and games) and `app/` (App, main, routing); `lib.ts` and `dates.ts`
       into `lib/`. 88 files moved with `scripts/move-files.js`; the build
       is byte-identical
-- [ ] 3.3 `ui/` design system: `tokens.css` (the `:root` variables),
+- [x] 3.3 `ui/` design system: `tokens.css` (the `:root` variables),
       Button, IconButton, Chip, Badge, Avatar, Dialog, Tabs, Toast,
       ProgressBar; replace repeated class strings with them, one feature
-      at a time
+      at a time. Each component renders exactly the markup the call sites
+      wrote by hand (same element, classes and attributes; no `type` added
+      to a button), so the check is the UI suite plus a screenshot diff
+      against run-to-run noise (two runs of the old build: clocks,
+      relative times and the animated 3D scenes differ; anything outside
+      that is flagged and looked at).
+  - [x] 3.3a `Button` (variant, size, danger, icon), `IconButton`,
+        `LinkButton`; `Dialog` (the .av-dlg modal, closeOnBackdrop);
+        `NavTab` and `Count`. 81 buttons in 18 files (75 by a codemod over
+        the parsed TSX - rolldown's parser, since TypeScript 7 has no JS
+        API - and 6 with computed classes by hand), five dialogs, the
+        sidebar and home tabs. UI suite 155/155; the screenshot flags were
+        all clock drift and 3D animation
+  - [x] 3.3b `Page` and `PageHead` (the board's six pages and the home
+        page's four views), `Card` with `CardTitle`, `CardMeta`,
+        `CardText`, `CardActions` (40 elements; forms, `<details>` and span
+        titles keep their element)
+  - [x] 3.3c `Pill` (tone warn, muted, danger): the board's 8 status
+        pills. Not made components, on purpose: the attachment chips
+        (`.clip-chip`, only the composer has them), the avatar (two uses)
+        and the upload progress bar (one) - a shared component pays once
+        a pattern repeats across features. The 2D game panels are built
+        with `el()` in `games.ts`/`render.ts`, not JSX; they move to
+        components with Phase 5
 - [x] 3.4 Split `styles.css` (1,707 lines) into tokens, base, and CSS next
       to each component or feature (done before 3.3, so the components can
       take their CSS with them): 27 files in the original order -
