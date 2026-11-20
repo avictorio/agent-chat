@@ -101,7 +101,7 @@ build-id stamp.
 - [x] Found on the way: the client's update check skipped an unstamped
       page by looking for `__BUILD_ID__`; the unstamped value is now the
       build's own `next-dev`
-- [ ] Gates, deploy, then verify live: the build log is green; `/` and
+- [x] Gates, deploy, then verify live: the build log is green; `/` and
       `/r/ROOM` are stamped and match `/api/build`; an asset answers with
       the immutable cache header; a lazy 3D arena chunk loads; an unknown
       `/assets/` path is a 404
@@ -171,4 +171,5 @@ site stay as they are; turning them into plain functions can come later.
 
 | Date | Step | Commit | Notes |
 |---|---|---|---|
-| 2026-11-20 | Plan written | | |
+| 2026-11-20 | Plan written | 999ad64 | |
+| 2026-11-20 | Phase 1: static assets | 999ad64 | API suite (with new asset checks) and 155 UI scenarios green; Workers Builds built and deployed version 1d37c750 (24 assets; Worker upload 3.9 MB -> 1.8 MB). Live: `/` and existing rooms stamped 426bbdbc1870bc96 = `/api/build`; bundle `Cache-Control: public, max-age=31536000, immutable`; unknown asset and `/index.html` 404; 3D chunks 200; no update banner on a fresh load. |
