@@ -20,7 +20,12 @@ which reads the sender address from config), so at the owner's request
 `.claude/settings.json` turns it off; that only applies in a new session.
 
 1. `npm i` at the repo root (the split tool's acorn), `npm i` in `web/`,
-   `npm run build`.
+   `npm run build`. The UI suite in a cloud sandbox:
+   `cd web && node -r ./tests/system-chromium.js tests/ui.test.js`.
+   First check the plugin really is off: run step 2.2's first move with
+   `--dry`. If the privacy plugin still refuses it, the setting did not
+   take for built-in plugins: do the small moves by hand with the file
+   tools (the plugin only watches shell commands) and tell the owner.
 2. Step 2.2, the four `lib/` modules:
    ```
    T="node scripts/split-module.js move"

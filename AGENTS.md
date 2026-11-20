@@ -1363,7 +1363,9 @@ looked at in both sizes.
 
 1. **Use the real build.** `web/tests/ui.test.js` serves the built app
    (`web/app/dist`) through a fake API, scenario by scenario
-   (`ONLY=name1,name2` runs a subset); its screenshots land in
+   (`ONLY=name1,name2` runs a subset; in a Claude cloud sandbox run it as
+   `node -r ./tests/system-chromium.js tests/ui.test.js` from `web/` to use
+   the preinstalled Chromium); its screenshots land in
    `web/tests/shots/`. A scenario fails on an uncaught page error, on a
    request the fake API doesn't handle (a missing stub route or a broken
    path: add the route), and on a console error other than "Failed to
