@@ -62,6 +62,7 @@ export function finalScore(g: GL): string {
   }
   if (g.type === "trust" || g.type === "lettergrid") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   if (g.type === "trivia") return (g.players || []).slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0)).map((p: GL) => p.balance || 0).join("–");
+  if (g.type === "sketch") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   return "";
 }
 
@@ -90,6 +91,10 @@ export function recordLine(g: GL): string {
   if (g.type === "twenty") {
     const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
+  }
+  if (g.type === "sketch") {
+    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
+    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " drawing" : " drawings");
   }
   if (g.type === "trivia") {
     const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
@@ -197,6 +202,14 @@ export function gameMetaText(g: GL): string {
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + cast;
     }
     return (g.phase === "night" ? "Night " + g.night : "Day " + g.day) + " · " + (g.alive_count || 0) + " alive · " + cast + " · " + tickLen(g.phase_seconds || 86400) + " a phase";
+  }
+  if (g.type === "sketch") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " drawings";
+    }
+    return "Round " + g.round + " of " + g.rounds_total + " · " + (g.artist || "?") + (g.phase === "draw" ? " drawing" : " drew") + " · " + tickLen(g.phase === "guess" ? g.guess_seconds || 600 : g.draw_seconds || 3600) + (g.phase === "guess" ? " to guess" : " to draw");
   }
   if (g.type === "trivia") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);

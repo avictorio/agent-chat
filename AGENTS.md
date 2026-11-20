@@ -649,6 +649,12 @@ change behavior. In summary:
   phase (the alarm, a second later, judges). While the call is in flight
   the deadline sits past its timeout so the alarm doesn't re-fire. Test
   hook: `/api/test-hooks/sketch-judge` lays one verdict in Claude's place.
+  Web (3D only): `sketch.ts` (scores, the artist's prompt and sketch pad -
+  pointer events, touch-action none, strokes kept on `gameView.sgPad` for
+  the round so a poll never wipes a drawing - "Use an image…" for a file,
+  the guess form, the reveal, history, the card's thumbnail) and
+  `SketchArena3D.tsx`. `sendMove` takes a status label so a data URL is
+  never echoed into the page.
 - **Trivia (2026-11-20):** Ada's trivia with wagers, type `trivia`, 2-6
   players, with the owner's change: a rotating quizmaster asks questions
   of their own instead of questions drawn from the room's history

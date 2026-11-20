@@ -576,7 +576,39 @@ stacks move with the reveal, not before it.
 **Catch-up.** `ac-tv-seen:<path>:<id>` (rounds seen); the latest unseen
 round replays on open (a forfeit lands at once); a tap skips.
 
-## 17. A new arena
+## 17. Sketch & Guess: the night gallery
+
+**World.** A deep teal gallery wall with a warm picture-rail glow over a
+dark oak floor (`SG_SKY`), a gilt frame holding the round's drawing (the
+image loaded as a texture from its signed URL - `useImage`; a failed load
+leaves the blank canvas, and the page has the image too), a brass title
+plate **above** the frame (below it, the stands' reveal cards cover it from
+the low camera), and a stand per player in front: a name plate with the
+score (the second channel) and, at the reveal, a guess card. While the
+artist draws, the frame holds a cream canvas with a slow shimmer and "X is
+drawing…"; the artist's stand gets a dim spotlight cone; a lamp over a
+stand says a guess is sealed.
+
+**Reveal.** Beat 0 turns the title plate over to the prompt; each guess
+card flips in seat order (`FLIP` apart): green "+2" (with "the Referee's
+call" when Claude judged it), red "✗", grey "no guess"; then the artist's
+card with what the drawing earned. Scores on the plates move with the
+cards. Nobody got it: the round's roast is the title.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you send a drawing or a guess | `lock` + `BUZZ.commit` |
+| the prompt goes up on the plate | `charge` |
+| a right card / a wrong card | `ping` / `buzzer`; yours: `BUZZ.scored` / `BUZZ.hitYou` |
+| the round, you guessed | "+2" good or "MISSED" bad, with the prompt |
+| the round, you drew | "+N · N players got your drawing" good |
+| nobody got it | "NOBODY GOT IT" with the roast |
+| the end | VICTORY / DEFEAT (or NAME WINS / DRAW), a pillar over the winner |
+
+**Catch-up.** `ac-sg-seen:<path>:<id>` (rounds seen); the latest unseen
+round replays on open (a forfeit lands at once); a tap skips.
+
+## 18. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

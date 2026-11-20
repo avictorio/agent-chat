@@ -13,6 +13,7 @@ import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter,
 import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
 import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
+import { sgArtistPanel, sgGuessForm, sgHistoryRows, sgLastRound, sgMakePad, sgReveal, sgScores, type SgPad } from "./sketch";
 import { tvAnswerForm, tvAskForm, tvHistoryRows, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores, type TvAnsDraft, type TvAskDraft } from "./trivia";
 import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid";
 import {
@@ -207,6 +208,8 @@ export function createGameStore(opts: {
     lgDraft?: LgDraft | null;
     tvAsk?: { key: string; d: TvAskDraft } | null;
     tvAns?: { key: string; d: TvAnsDraft } | null;
+    sgPad?: SgPad | null;
+    sgGuess?: { key: string; d: string } | null;
     lgPanel?: LgPanel | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
@@ -298,6 +301,23 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "sketch") {
+      dur = (g.phase === "guess" ? g.guess_seconds || 600 : g.draw_seconds || 3600) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && p.name !== g.artist && p.name !== me).map((p: GL) => p.name);
+      if (g.phase === "judging") text = "The Referee is judging the guesses…";
+      else if (you.playing && you.artist) {
+        if (g.phase === "draw") {
+          mine = true;
+          text = "You're the artist · draw your prompt";
+          sub = "If the clock runs out, you forfeit the round.";
+        } else text = "Your drawing is up · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
+      } else if (g.phase === "draw") text = (g.artist || "The artist") + " is drawing · round " + g.round + " of " + g.rounds_total;
+      else if (you.playing && you.queued) text = "Your guess is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
+      else if (you.playing) {
+        mine = true;
+        text = "Guess " + (g.artist || "the artist") + "'s drawing · round " + g.round + " of " + g.rounds_total;
+        sub = "If the clock runs out, you score nothing this round.";
+      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
     } else if (g.type === "trivia") {
       dur = (g.round_seconds || 3600) * 1000;
       const waiting = players.filter((p: GL) => !p.committed && p.name !== g.asker && p.name !== me).map((p: GL) => p.name);
@@ -543,6 +563,11 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "sketch") {
+      body.game = "sketch";
+      body.rotations = g.rotations || 1;
+      body.draw_seconds = g.draw_seconds;
+      body.guess_seconds = g.guess_seconds;
     } else if (g.type === "trivia") {
       body.game = "trivia";
       body.rotations = g.rotations || 1;
@@ -672,8 +697,8 @@ export function createGameStore(opts: {
     return wrap;
   }
 
-  async function sendMove(id: number, dir: string, note: HTMLElement | null) {
-    if (note) note.textContent = "Queuing " + dir + "…";
+  async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
+    if (note) note.textContent = label || "Queuing " + dir + "…";
     try {
       const d = await client.submitMove(id, dir);
       if (d.game) {
@@ -698,7 +723,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" || g.type === "trivia") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" || g.type === "trivia" || g.type === "sketch") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     if (g.type === "corpse") return (g.beats || []).length;
@@ -771,6 +796,8 @@ export function createGameStore(opts: {
       n = lgHistoryRows(g, row, histWho, list);
     } else if (g.type === "trivia") {
       n = tvHistoryRows(g, row, histWho, list);
+    } else if (g.type === "sketch") {
+      n = sgHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1104,6 +1131,7 @@ export function createGameStore(opts: {
     werewolf: { cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
     lettergrid: { cls: "lg-3d-host", load: () => import("./LetterArena3D"), comp: null },
     trivia: { cls: "tv-3d-host", load: () => import("./TriviaArena3D"), comp: null },
+    sketch: { cls: "sg-3d-host", load: () => import("./SketchArena3D"), comp: null },
     liarsdice: { cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function load3d(kind: string) {
@@ -1420,6 +1448,110 @@ export function createGameStore(opts: {
     const last = trLastRound(g);
     wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
     wrap.appendChild(trGrid(g, last, me));
+  }
+
+  /* Sketch & Guess (2026-11-20, 3D only): the gallery first, then your
+     part - the artist's prompt and sketch pad (or an image of their own),
+     or the guess form - the scores and the last round's reveal. The pad
+     lives on gameView for the round, so a poll never wipes a half-drawn
+     picture; the guess draft too, and typing never rebuilds the view. */
+  function renderSketchView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const gkey = g.round + ":" + (g.phase || "");
+    if (!gv.sgGuess || gv.sgGuess.key !== gkey) gv.sgGuess = { key: gkey, d: you.queued || "" };
+    if (!gv.sgPad || gv.sgPad.round !== g.round) gv.sgPad = null;
+    const key = [
+      g.status,
+      g.round,
+      g.phase || "",
+      (g.image && g.image.url) || "",
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+      String(you.queued || ""),
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const act = document.activeElement as HTMLElement | null;
+    const hadFocus = !!(act && gv.wrap.contains(act) && act.classList.contains("sg-in"));
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const h = host3d("sketch");
+    wrap.appendChild(h.host);
+    paint3d("sketch", g, h);
+    if (g.status === "running" && you.playing) {
+      if (you.artist && g.phase === "draw") {
+        if (!gv.sgPad) gv.sgPad = sgMakePad(g.round);
+        const hint = arenaHint("sketch-draw", "Draw your secret prompt - no letters or words. Guessable but not trivial: you score for each player who gets it, up to 2.");
+        if (hint) wrap.appendChild(hint);
+        wrap.appendChild(
+          sgArtistPanel(
+            g,
+            gv.sgPad,
+            (image) => {
+              if (gameView !== gv) return;
+              if (gv.r3dCommit) gv.r3dCommit();
+              void sendMove(g.id, image, note, "Sending your drawing…");
+            },
+            (msg) => {
+              note.textContent = msg;
+            }
+          )
+        );
+      } else if (!you.artist && g.phase === "guess") {
+        const hint = arenaHint("sketch-guess", "Name what the drawing shows. Close counts - the Referee rules on near misses.");
+        if (hint) wrap.appendChild(hint);
+        wrap.appendChild(
+          sgGuessForm(
+            g,
+            gv.sgGuess.d,
+            (s) => {
+              if (gameView === gv && gv.sgGuess) gv.sgGuess.d = s;
+            },
+            (s) => {
+              if (gameView !== gv) return;
+              if (gv.r3dCommit) gv.r3dCommit();
+              void sendMove(g.id, s, note, "Sealing your guess…");
+            }
+          )
+        );
+        if (hadFocus) {
+          const f = wrap.querySelector(".sg-in") as HTMLElement | null;
+          if (f) f.focus();
+        }
+      } else if (you.artist && g.phase === "guess") note.textContent = "Your prompt: " + (you.prompt || "?") + " - the others are guessing.";
+      wrap.appendChild(note);
+    } else if (g.status === "running") {
+      note.textContent = "Spectating - the prompt is revealed when each round ends.";
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(sgScores(g, me));
+    const rv = sgReveal(g, sgLastRound(g), me);
+    if (rv) wrap.appendChild(rv);
   }
 
   /* Trivia (2026-11-20, 3D only): the stage first, then the question,
@@ -2653,6 +2785,10 @@ export function createGameStore(opts: {
       renderTriviaView(g, force);
       return;
     }
+    if (g.type === "sketch") {
+      renderSketchView(g, force);
+      return;
+    }
     if (g.type === "auction") {
       renderAuctionView(g, force);
       return;
@@ -2850,7 +2986,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "trivia" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "trivia" || game.type === "sketch" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2910,6 +3046,8 @@ export function createGameStore(opts: {
           if (g.phase === "ask" ? g.answerer !== me : g.answerer === me) n++;
         } else if (g.type === "trivia") {
           if (g.phase === "answer" ? g.asker !== me && !mine.committed : g.asker === me) n++;
+        } else if (g.type === "sketch") {
+          if (g.phase === "draw" ? g.artist === me : g.phase === "guess" ? g.artist !== me && !mine.committed : false) n++;
         } else if (g.type === "werewolf") {
           const y = g.you || {};
           if (mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act)) n++;

@@ -16,6 +16,7 @@ import { ecCardBoard } from "./corpse";
 import { tqCardBoard } from "./twenty";
 import { lgCardBoard } from "./lettergrid";
 import { tvCardBoard } from "./trivia";
+import { sgCardBoard } from "./sketch";
 import { wwCardBoard } from "./werewolf";
 import type { GameStore } from "./games";
 
@@ -32,7 +33,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && cur.type !== "lettergrid" && cur.type !== "trivia" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && cur.type !== "lettergrid" && cur.type !== "trivia" && cur.type !== "sketch" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -82,6 +83,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     } else if (g.type === "trivia") {
       board.textContent = "";
       board.appendChild(tvCardBoard(g, store.meName()));
+    } else if (g.type === "sketch") {
+      board.textContent = "";
+      board.appendChild(sgCardBoard(g, store.meName()));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
@@ -220,6 +224,7 @@ function gameSignature(g: any): string | null {
   if (g.type === "trust") return ["tr", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "lettergrid") return ["lg", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "trivia") return ["tv", g.status, g.round || 0, g.phase || "", (g.rounds || []).length].join("|");
+  if (g.type === "sketch") return ["sg", g.status, g.round || 0, g.phase || "", (g.rounds || []).length].join("|");
   if (g.type === "auction") return ["au", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "werewolf") return ["ww", g.status, g.phase || "", g.night || 0, g.day || 0, (g.players || []).filter((p: any) => p.alive).length].join("|");
   if (g.type === "twenty") return ["tq", g.status, g.round || 0, g.phase || "", g.asked || 0].join("|");
@@ -252,6 +257,7 @@ function gameMoverHex(g: any): string | null {
   else if (g.type === "corpse" && g.status === "running") name = g.turn_of;
   else if (g.type === "twenty" && g.status === "running") name = g.answerer;
   else if (g.type === "trivia" && g.status === "running") name = g.asker;
+  else if (g.type === "sketch" && g.status === "running") name = g.artist;
   else if (g.type === "liarsdice" && g.status !== "finished") name = g.bid ? g.bid.by : g.last_round ? g.last_round.loser : null;
   else if (g.status === "finished") name = g.winner;
   if (!name) return null;
