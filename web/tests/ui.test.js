@@ -1203,7 +1203,7 @@ let FAILURES = 0;
       await shot(page, label + '-locked.png');
       if (out.cardHills !== 5) throw new Error('the card shows the five hills: ' + out.cardHills);
       if (!/Round 2 level/.test(out.cardCap)) throw new Error('the card names the last round: ' + out.cardCap);
-      if (!/Round 2 on the field/.test(out.fieldCap)) throw new Error('the arena shows the last resolved round: ' + out.fieldCap);
+      if (!/Round 2 in numbers/.test(out.fieldCap)) throw new Error('the arena shows the last resolved round: ' + out.fieldCap);
       if (out.flags.join(',') !== 'level,Anthony,Ada,level,level') throw new Error('round 2 flags: ' + out.flags);
       if (!out.lockOffAtZero || !out.lockOnAt100) throw new Error('Lock in waits for exactly 100: ' + JSON.stringify(out));
       if (!/All 100 placed/.test(out.left) || !/5 left to place/.test(out.leftAfterNudge)) throw new Error('the troop counter: ' + JSON.stringify(out));
