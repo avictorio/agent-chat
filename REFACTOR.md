@@ -13,8 +13,10 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and step 2.1 are live; 4.6 is done. Next is
-step 2.2. Claude Code's built-in `cc-plugin-privacy` plugin had blocked
+State on 2026-11-20: phase 1 and steps 2.1-2.2 are live; 4.6 is done.
+Next is step 2.3 (its moves dry-run clean: `platform/r2-s3.js`,
+`webpush.js`, `gmail.js`, `cartesia.js`, `claude.js` (the Sketch referee),
+`webfetch.js`, plus `lib/media.js` for media signing and serving). Claude Code's built-in `cc-plugin-privacy` plugin had blocked
 the split tool: the Worker held the owner's account email (as the VAPID
 subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -161,8 +163,11 @@ site stay as they are; turning them into plain functions can come later.
       `fallthrough = false` drops wrangler's default module rules, so
       sibling `.js` modules would not upload without it), and
       `scripts/check-worker.js` syntax-checks every module (`npm run check`)
-- [ ] 2.2 `lib/`: http helpers (json, html, CORS, SSE), crypto (SHA-256,
-      HMAC, base64url, HKDF), file sniffing, text helpers
+- [x] 2.2 `lib/`: http helpers (json, html, CORS, SSE), crypto (SHA-256,
+      HMAC, base64url, HKDF), file sniffing, text helpers - `lib/http.js`,
+      `lib/crypto.js`, `lib/sniff.js`, `lib/text.js` (index.js 11,746 ->
+      11,488 lines); the sniffImage and roomExists comments put back
+      where they belong
 - [ ] 2.3 `platform/`: R2 S3 signing and ListParts, Web Push, Gmail,
       Cartesia voices, the Claude referee
 - [ ] 2.4 `agents/`: MCP catalog and tool calls, the API docs text,
