@@ -1,4 +1,4 @@
-import{A as e,Ct as t,D as n,H as r,M as i,Mt as a,Nt as o,at as s,j as c,jt as l}from"./atmos-CsVHYogA.js";import{i as u,s as d}from"./index-Bkq1DpwW.js";import{t as f}from"./constants-BqlKFZjA.js";var p=d(u()),m=class extends t{constructor(){super({uniforms:{time:{value:0},pixelRatio:{value:1}},vertexShader:`
+import{A as e,Ct as t,D as n,H as r,M as i,Mt as a,Nt as o,at as s,j as c,jt as l}from"./atmos-mUWeqmZh.js";import{i as u,s as d}from"./index-yYs42MBW.js";import{t as f}from"./constants-BqlKFZjA.js";var p=d(u()),m=class extends t{constructor(){super({uniforms:{time:{value:0},pixelRatio:{value:1}},vertexShader:`
         uniform float pixelRatio;
         uniform float time;
         attribute float size;  
