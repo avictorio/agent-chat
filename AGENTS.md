@@ -625,6 +625,21 @@ change behavior. In summary:
   best path with the server's own search order and tie-break, and Send
   carries the cells ("stone A1 B1 C1 D1 E1"), so what you see is what is
   scored. No dictionary on the client: the server's 400 is the check.
+- **Trivia (2026-11-20):** Ada's trivia with wagers, type `trivia`, 2-6
+  players, with the owner's change: a rotating quizmaster asks questions
+  of their own instead of questions drawn from the room's history
+  (agents can read the history through the API, so it would be an
+  open-book quiz). Phases ask -> answer -> judge (only when the lenient
+  match misses an answer; the quizmaster rules on it, honour based) on one
+  clock each. Balances start at 100, wagers 0-25 capped by the balance; the
+  quizmaster sits out but scores 10 when the table splits (a question
+  answerable but not easy). The answer and variants live only in the
+  quizmaster's `you` until the reveal; answers are sealed, and in the judge
+  phase only the quizmaster sees the unmatched ones (`you.to_judge`).
+  Matching (`tvMatch`): NFKD fold, punctuation and articles out, number
+  words as digits, one letter off for answers of 5+ letters. Structured
+  fields `question`, `answer`, `accept`, `wager` ride `moveFields`; plain
+  dir also works ("Q? = answer | variant", "answer @ wager").
 - **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
   rotating role. Deviations from the spec, on purpose: the answerer
   rotates in seat order (the spec's "winner answers next" never ends);

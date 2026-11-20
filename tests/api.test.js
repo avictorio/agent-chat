@@ -1473,6 +1473,60 @@ async function waitUp() {
     check('a full tie goes to the earlier final-round word', lgG.status === 'finished' && lgG.winner === 'Rex' && JSON.stringify(lgG.places) === '["Rex","Poc","Rae"]' && lgG.players.find((p) => p.name === 'Rex').score === 14 && lgG.players.find((p) => p.name === 'Poc').score === 14 && lgG.players.find((p) => p.name === 'Poc').cells === 2 && Array.isArray(lgG.top_words) && lgG.top_words.length > 0, JSON.stringify(lgG).slice(0, 260));
     rlg = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Letter Grid result', (rlg.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Letter Grid match #' + lg.id + ' is over after 3 rounds - Rex wins with 14 points.')), JSON.stringify((rlg.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
+    // Trivia (2026-11-20, the owner's call: a rotating quizmaster asks
+    // their own questions): a sealed answer, wagers capped, lenient
+    // matching, the quizmaster's judging, the split bonus, a missed answer
+    // and a forfeit ask.
+    let rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'trivia', from: 'Poc', players: ['Poc'] } });
+    check('trivia needs 2 to 6 -> 400', rtv.status === 400 && /2 to 6/.test(rtv.json.error), rtv.status);
+    rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'quiz', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rotations: 1 } });
+    const tv = rtv.json.game || {};
+    check('trivia is created in a lobby (the quiz alias works)', rtv.status === 201 && tv.type === 'trivia' && tv.status === 'lobby' && tv.rounds_total === 3 && tv.players.every((p) => p.balance === 100) && tv.max_wager === 25, rtv.status + ' ' + rtv.text.slice(0, 200));
+    for (const n of ['Rex', 'Rae']) await req('POST', R2 + '/games/' + tv.id + '/accept', { token: ldTok[n], json: {} });
+    const [Q0, Q1, Q2] = tv.order || [];
+    const tvMove = (who, body) => req('POST', R2 + '/games/' + tv.id + '/moves', { token: ldTok[who], json: body });
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q0] });
+    check('the first quizmaster is asked for a question', rtv.json.game.status === 'running' && rtv.json.game.phase === 'ask' && rtv.json.game.asker === Q0 && rtv.json.game.you.asker === true, rtv.text.slice(0, 160));
+    rtv = await tvMove(Q1, { answer: 'x', wager: 1 });
+    check('answering before the question is up -> 409', rtv.status === 409, rtv.status);
+    rtv = await tvMove(Q0, { dir: 'What is my cat called?' });
+    check('a question without its answer -> 400', rtv.status === 400 && /send question and answer/.test(rtv.json.error), rtv.status + ' ' + rtv.text.slice(0, 120));
+    rtv = await tvMove(Q0, { question: 'What is my cat called?', answer: 'Biscuit', accept: ['Bisquit'] });
+    check('a structured question opens the answers', rtv.status === 200 && rtv.json.game.phase === 'answer' && rtv.json.game.you.answer === 'Biscuit', rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q1] });
+    check('the question is public, the answer sealed', rtv.json.game.question === 'What is my cat called?' && !/Biscuit/i.test(rtv.text) && rtv.json.game.you.max_wager === 25, rtv.text.slice(0, 200));
+    rtv = await tvMove(Q0, { answer: 'Biscuit', wager: 5 });
+    check('the quizmaster cannot answer -> 409', rtv.status === 409, rtv.status);
+    rtv = await tvMove(Q1, { answer: 'biscuit!', wager: 30 });
+    check('a wager over 25 -> 400', rtv.status === 400 && /at most 25/.test(rtv.json.error), rtv.status + ' ' + rtv.text.slice(0, 120));
+    rtv = await tvMove(Q1, { answer: 'The Biscuit', wager: 20 });
+    check('an answer and a wager are sealed', rtv.status === 200 && rtv.json.resolved === false && rtv.json.game.you.queued.wager === 20, rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q2] });
+    check('another answer stays hidden from the table', rtv.json.game.players.find((p) => p.name === Q1).committed === true && !/The Biscuit/.test(rtv.text), rtv.text.slice(0, 160));
+    rtv = await tvMove(Q2, { dir: 'my cat Bisc @ 10' });
+    check('an answer the match misses goes to the quizmaster to judge', rtv.status === 200 && rtv.json.resolved === false && rtv.json.game.phase === 'judge', rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q0] });
+    check('the quizmaster sees only the answers to judge', JSON.stringify(rtv.json.game.you.to_judge) === JSON.stringify([{ name: Q2, answer: 'my cat Bisc', accepted: false }]) && rtv.json.game.you.legal_moves.includes('accept ' + Q2), JSON.stringify(rtv.json.game.you));
+    rtv = await tvMove(Q2, { dir: 'Biscuit @ 10' });
+    check('answers are closed while the quizmaster judges -> 409', rtv.status === 409, rtv.status);
+    rtv = await tvMove(Q0, { dir: 'accept Nobody' });
+    check('judging someone with no answer waiting -> 400', rtv.status === 400 && /no answer waiting/.test(rtv.json.error), rtv.status + ' ' + rtv.text.slice(0, 120));
+    rtv = await tvMove(Q0, { dir: 'done' });
+    let tvR = ((rtv.json.game || {}).rounds || [])[0] || {};
+    check('round 1: right gains the wager, wrong loses it, a split pays the quizmaster', rtv.json.resolved === true && tvR.answers[Q1].right === true && tvR.answers[Q2].right === false && tvR.split === true && tvR.deltas[Q0] === 10 && tvR.totals[Q0] === 110 && tvR.totals[Q1] === 120 && tvR.totals[Q2] === 90 && rtv.json.game.asker === Q1 && rtv.json.game.phase === 'ask', JSON.stringify(tvR).slice(0, 260));
+    rtv = await tvMove(Q1, { dir: 'How many legs does a spider have? = eight | 8' });
+    check('a question as dir (Question? = answer | variant)', rtv.status === 200 && rtv.json.game.phase === 'answer' && JSON.stringify(rtv.json.game.you.accept) === '["8"]', rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await tvMove(Q0, { dir: 'Eight! @ 25' });
+    await ttExpire(tv.id);
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: TP });
+    tvR = (rtv.json.game.rounds || [])[1] || {};
+    check('round 2: the clock closes the answers; a missed answer is 0, no split', tvR.answers[Q0].right === true && tvR.deltas[Q0] === 25 && tvR.missed.includes(Q2) && tvR.deltas[Q2] === 0 && tvR.split === false && rtv.json.game.asker === Q2, JSON.stringify(tvR).slice(0, 240));
+    await ttExpire(tv.id);
+    rtv = await req('GET', R2 + '/games/' + tv.id, { token: TP });
+    const tvG = rtv.json.game || {};
+    check('a quizmaster who runs out forfeits; the last round ends the game', tvG.status === 'finished' && tvG.rounds[2].forfeit === true && tvG.winner === Q0 && JSON.stringify(tvG.places) === JSON.stringify([Q0, Q1, Q2]) && tvG.players.find((p) => p.name === Q0).balance === 135, JSON.stringify(tvG).slice(0, 240));
+    rtv = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Trivia result', (rtv.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trivia #' + tv.id + ' is over - ' + Q0 + ' wins with 135 points.') && x.text.includes('Best quizmaster: ' + Q0 + ' (split the table 1 time).')), JSON.stringify((rtv.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -
