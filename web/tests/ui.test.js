@@ -9,6 +9,9 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const DIST = __dirname + '/../app/dist';
 const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="next-dev"', 'content="uitestbuild1"');
+// The app icon the install strip shows (the live Worker serves /icons/*):
+// a 1x1 PNG is enough for the stubs.
+const ICON_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const FIXTURES = require('path').join(__dirname, '..', '..', 'tests', 'fixtures') + '/';
 const OUT = __dirname + '/shots/';
 fs.mkdirSync(OUT, { recursive: true });
@@ -504,6 +507,10 @@ async function setup(page, S, calls) {
       return J({ room: 'demo', attachments: pageItems, counts, next_cursor: next });
     }
     if (p.endsWith('/members')) return J(S.mb);
+    if (p.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
+    // Anything else is a request the stub doesn't know: record it, so a
+    // scenario can tell a missing route (or a broken path) from a real 404.
+    (S.unhandled = S.unhandled || []).push(m + ' ' + p);
     return route.fulfill({ status: 404, body: 'nf' });
   });
 }
@@ -526,6 +533,9 @@ let FAILURES = 0;
       const r = await fn(page, S, calls);
       const fatal = errs.filter(e => !e.startsWith('console:'));
       if (fatal.length) throw new Error('uncaught page errors: ' + JSON.stringify(fatal));
+      const stray = S.unhandled || [];
+      const cons = errs.filter(e => e.startsWith('console:'));
+      if (stray.length || cons.length) console.log('NOTE ' + name + ' ' + JSON.stringify({ unhandled: stray, console: cons }));
       console.log('PASS ' + name + (r ? ' ' + JSON.stringify(r) : ''));
     } catch (e) {
       FAILURES++;
@@ -3422,6 +3432,8 @@ let FAILURES = 0;
       if (pth.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
       if (pth.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
       if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch (e) { return route.fulfill({ status: 404, body: 'nf' }); } }
+      if (pth.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
+      errs.push('unhandled: ' + route.request().method() + ' ' + pth);
       return route.fulfill({ status: 404, body: 'nf' });
     });
     await page.addInitScript(() => {
