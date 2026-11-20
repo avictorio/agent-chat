@@ -320,6 +320,7 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .kind-corpse { --ga: 202, 138, 4; --gbg: #0b0904; }
 .kind-twenty { --ga: 167, 139, 250; --gbg: #08060f; }
 .kind-werewolf { --ga: 147, 197, 253; --gbg: #04070f; }
+.kind-lettergrid { --ga: 250, 204, 21; --gbg: #0d0b04; }
 /* Werewolf (werewolf.ts): your role, your move, the discussion panel,
    the timeline and the villagers, under the village. */
 .ww-role { margin-top: 12px; display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); color: #e0f2fe; }
@@ -637,6 +638,56 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .tr-grid-empty { text-align: center; color: var(--dim); font-size: 13px; padding: 10px; }
 .tr-card { color: #dff7f2; }
 .tr-card-cap { text-align: center; font-size: 12px; color: #8fc9bf; padding: 0 10px 8px; }
+/* Letter Grid (2026-11-20): the word panel under the scene (typing
+   traces the path live; the cells show as chips, free ones in the
+   accent), the scores with cells claimed, the last round's words, and the
+   card's small flat grid. Game surfaces are dark in both themes. */
+.lg-panel { margin-top: 10px; display: grid; gap: 8px; background: var(--gbg); border: 1px solid rgba(var(--ga), .4); border-radius: 12px; padding: 12px; color: #fdf6dc; box-shadow: 0 0 0 1px rgba(var(--ga), .2), 0 0 18px rgba(var(--ga), .12); }
+.lg-word-row { display: flex; gap: 6px; align-items: center; }
+.lg-word { flex: 1 1 auto; width: 0; min-width: 0; height: 42px; border-radius: 10px; border: 1px solid rgba(var(--ga), .45); background: #070604; color: #fff7d6; font: inherit; font-size: 18px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 0 12px; }
+.lg-word:focus { outline: 2px solid rgba(var(--ga), .7); outline-offset: 1px; }
+.lg-word::placeholder { letter-spacing: 0; text-transform: none; font-weight: 500; font-size: 14px; color: #9c916b; }
+.lg-send { height: 42px; padding: 0 16px; flex: none; }
+.lg-clear { flex: none; }
+.lg-clear { height: 42px; }
+.lg-trace { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-height: 22px; font-size: 13px; }
+.lg-hint { color: #b9ad86; }
+.lg-bad { color: #fca5a5; font-weight: 700; }
+.lg-cellrow { display: flex; flex-wrap: wrap; gap: 4px; }
+.lg-cell { font-size: 12px; font-weight: 700; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, .35); color: #d6ceb2; font-variant-numeric: tabular-nums; }
+.lg-cell.free { border-color: rgba(var(--ga), .7); color: rgb(var(--ga)); }
+.lg-preview { color: rgb(var(--ga)); font-weight: 800; }
+.lg-scores { display: grid; gap: 4px; margin-top: 10px; background: var(--gbg); border: 1px solid rgba(var(--ga), .3); border-radius: 12px; padding: 10px 12px; color: #fdf6dc; }
+.lg-scores.compact { margin: 0; border: 0; border-radius: 0; padding: 8px 10px 4px; background: transparent; }
+.lg-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.lg-row.mine .lg-name { text-decoration: underline; text-decoration-color: rgba(var(--ga), .6); text-underline-offset: 3px; }
+.lg-row.out { opacity: .55; }
+.lg-rank { width: 14px; color: #a39566; font-size: 12px; text-align: right; flex: none; }
+.lg-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lg-cells { margin-left: auto; font-size: 12px; color: var(--who); font-weight: 700; flex: none; }
+.lg-st { font-size: 11.5px; color: #b9ad86; flex: none; }
+.lg-score { font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; flex: none; }
+.lg-yours { margin-top: 8px; display: grid; gap: 6px; font-size: 13px; color: #e8dfbd; }
+.lg-queued { font-weight: 700; color: rgb(var(--ga)); }
+.lg-played, .lg-top { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.lg-top { margin-top: 10px; font-size: 13px; }
+.lg-played-cap { color: #b9ad86; font-size: 12.5px; }
+.lg-chip { font-size: 12px; font-weight: 800; letter-spacing: .06em; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(var(--ga), .4); color: #fdf3c7; background: rgba(var(--ga), .08); }
+.lg-reveal { margin-top: 10px; display: grid; gap: 4px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; padding: 10px 12px; color: #fdf6dc; }
+.lg-reveal .fl-cap { margin: 0 0 2px; }
+.lg-rv { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.lg-rv.mine .lg-rv-name { text-decoration: underline; text-underline-offset: 3px; }
+.lg-rv-name { font-weight: 700; white-space: nowrap; }
+.lg-rv-word { font-weight: 800; letter-spacing: .08em; color: var(--who); }
+.lg-rv-word.none { color: #9c916b; font-weight: 600; letter-spacing: 0; }
+.lg-rv-note { font-size: 12px; color: #b9ad86; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.lg-rv-pts { margin-left: auto; font-weight: 800; color: rgb(var(--ga)); flex: none; }
+.lg-card { display: flex; gap: 10px; align-items: center; padding: 8px 10px; color: #fdf6dc; }
+.lg-mini { display: grid; gap: 2px; width: 96px; flex: none; }
+.lg-mini-cell { aspect-ratio: 1; display: grid; place-items: center; font-size: 10px; font-weight: 800; border-radius: 3px; background: #e9e1cd; color: #1f1a12; }
+.lg-mini-cell.owned { background: var(--who); color: #fff; }
+.lg-card-side { flex: 1; min-width: 0; }
+.lg-card-cap { font-size: 12px; color: #c7b98a; padding: 0 10px 4px; }
 /* Four in a Row (2026-11-19): the board as a grid of holes; discs in the
    player's colour, X solid and O ringed (a second channel beside colour);
    the last disc ringed white, the winning four glowing. */
@@ -862,6 +913,7 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .lc-3d-host.tq-3d-host { height: min(44vh, 400px); }
 /* Werewolf: the village square. */
 .lc-3d-host.ww-3d-host { height: min(46vh, 420px); }
+.lc-3d-host.lg-3d-host { height: min(52vh, 460px); }
 .c4-under .c4-wrap { margin-top: 8px; }
 /* 3D host layers (games.ts makeHost3d, arena3d.tsx ArenaFrame). */
 .arena3d-mount { position: absolute; inset: 0; }
@@ -950,6 +1002,7 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
   .lc-3d-host.ec-3d-host { height: min(42vh, 340px); }
   .lc-3d-host.tq-3d-host { height: min(38vh, 300px); }
   .lc-3d-host.ww-3d-host { height: min(40vh, 320px); }
+  .lc-3d-host.lg-3d-host { height: min(48vh, 380px); }
   .lc-board-big.duel-board-under { display: none; }
 }
 /* One finger scrolls the page over a 3D board (and taps it); two

@@ -13,6 +13,7 @@ import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter,
 import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
 import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
+import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid";
 import {
   battleshipBoard,
   bsGrid,
@@ -202,6 +203,8 @@ export function createGameStore(opts: {
     ecDraft?: { turn: number; text: string } | null;
     tqDraft?: { key: string; text: string } | null;
     wwDraft?: { town: string; den: string } | null;
+    lgDraft?: LgDraft | null;
+    lgPanel?: LgPanel | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -291,6 +294,16 @@ export function createGameStore(opts: {
         mine = true;
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
+      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "lettergrid") {
+      dur = (g.round_seconds || 3600) * 1000;
+      const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
+      if (you.playing && you.out) text = "You're out of this match" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
+      else if (you.playing && you.queued) text = "Your word is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+      else if (you.playing) {
+        mine = true;
+        text = "Your word · round " + g.round + " of " + g.rounds_total;
+        sub = "If the clock runs out, you score nothing this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
     } else if (g.type === "werewolf") {
       dur = (g.phase_seconds || 86400) * 1000;
@@ -506,6 +519,12 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "lettergrid") {
+      body.game = "lettergrid";
+      body.rounds = g.rounds_total;
+      body.size = g.size;
+      body.min_length = g.min_len;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "werewolf") {
       body.game = "werewolf";
       body.tick_seconds = g.phase_seconds;
@@ -651,7 +670,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     if (g.type === "corpse") return (g.beats || []).length;
@@ -720,6 +739,8 @@ export function createGameStore(opts: {
       n = tqHistoryRows(g, row, histWho, list);
     } else if (g.type === "werewolf") {
       n = wwHistoryRows(g, row, histWho, list);
+    } else if (g.type === "lettergrid") {
+      n = lgHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1039,7 +1060,7 @@ export function createGameStore(opts: {
      view is 3D only (2026-11-20, the owner's call: the 2D views and the
      2D/3D toggles are retired); a device without WebGL gets a note and
      plays with the controls under it. */
-  type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void };
+  type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void; draft?: { word: string; path: number[][] | null } | null; onCell?: (r: number, c: number) => void };
   type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
   const KIND3D: Record<string, Kind3d> = {
     frontlines: { cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
@@ -1051,6 +1072,7 @@ export function createGameStore(opts: {
     corpse: { cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
     twenty: { cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
     werewolf: { cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
+    lettergrid: { cls: "lg-3d-host", load: () => import("./LetterArena3D"), comp: null },
     liarsdice: { cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function load3d(kind: string) {
@@ -1367,6 +1389,110 @@ export function createGameStore(opts: {
     const last = trLastRound(g);
     wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
     wrap.appendChild(trGrid(g, last, me));
+  }
+
+  /* Letter Grid (2026-11-20, 3D only): the grid first (tap tiles to trace
+     a word), then the word panel, the scores, your words, and the last
+     round's words. The draft lives on gameView so a poll never wipes it;
+     typing updates the panel in place and repaints only the scene, so
+     the field keeps focus. A sent word clears the draft once the server
+     shows it sealed. */
+  function renderLetterView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const queued: GL = you.queued || null;
+    if (!gv.lgDraft || gv.lgDraft.round !== g.round) gv.lgDraft = { round: g.round, word: "", path: null, tapped: false };
+    if (queued && gv.lgDraft.word && gv.lgDraft.word === queued.word) gv.lgDraft = { round: g.round, word: "", path: null, tapped: false };
+    const key = [
+      g.status,
+      g.round,
+      (g.rounds || []).length,
+      (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+      JSON.stringify(queued || {}),
+      youSig(g),
+      gv.tab || "game",
+    ].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const hadFocus = !!(gv.lgPanel && document.activeElement === gv.lgPanel.input);
+    gv.lgPanel = null;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const canPlay = g.status === "running" && you.playing && !you.out;
+    const h = host3d("lettergrid");
+    wrap.appendChild(h.host);
+    const paintScene = () => {
+      const d = gv.lgDraft;
+      paint3d("lettergrid", g, h, {
+        draft: d && d.path ? { word: d.word, path: d.path } : null,
+        onCell: canPlay
+          ? (r: number, c: number) => {
+              if (gameView !== gv || !gv.lgDraft) return;
+              gv.lgDraft = lgTap(g, gv.lgDraft, r, c);
+              if (gv.lgPanel) gv.lgPanel.setDraft(gv.lgDraft);
+              paintScene();
+            }
+          : undefined,
+      });
+    };
+    paintScene();
+    if (canPlay) {
+      const hint = arenaHint("lettergrid", "Trace a word through touching tiles - diagonals count. Cells nobody has used yet are yours for a bonus point each.");
+      if (hint) wrap.appendChild(hint);
+      const panel = lgPanel(
+        g,
+        gv.lgDraft,
+        (d) => {
+          if (gameView !== gv) return;
+          gv.lgDraft = d;
+          paintScene();
+        },
+        (d) => {
+          if (gameView !== gv) return;
+          if (gv.r3dCommit) gv.r3dCommit();
+          void sendMove(g.id, lgDir(d), note);
+        }
+      );
+      gv.lgPanel = panel;
+      wrap.appendChild(panel.el);
+      if (hadFocus) panel.input.focus();
+      note.textContent = queued ? "Sealed until everyone has a word in - send another to change it." : "Your word stays secret until the round resolves.";
+      wrap.appendChild(note);
+    } else if (g.status === "running" && !you.playing) {
+      note.textContent = "Spectating - the words are revealed together when each round resolves.";
+      wrap.appendChild(note);
+    }
+    wrap.appendChild(lgScores(g, me));
+    const yours = lgYours(g);
+    if (yours) wrap.appendChild(yours);
+    const rv = lgReveal(g, lgLastRound(g), me);
+    if (rv) wrap.appendChild(rv);
+    if (g.status === "finished") {
+      const top = lgTopWords(g);
+      if (top) wrap.appendChild(top);
+    }
   }
 
   /* Four in a Row (2026-11-19): who plays which disc, then the board -
@@ -2401,6 +2527,10 @@ export function createGameStore(opts: {
       renderTrustView(g, force);
       return;
     }
+    if (g.type === "lettergrid") {
+      renderLetterView(g, force);
+      return;
+    }
     if (g.type === "auction") {
       renderAuctionView(g, force);
       return;
@@ -2598,7 +2728,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2659,7 +2789,7 @@ export function createGameStore(opts: {
         } else if (g.type === "werewolf") {
           const y = g.you || {};
           if (mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act)) n++;
-        } else if (g.type === "trust") {
+        } else if (g.type === "trust" || g.type === "lettergrid") {
           if (!mine.committed && !mine.out) n++;
         } else if (g.type === "auction") {
           if (!mine.committed && (mine.budget || 0) > 0) n++;

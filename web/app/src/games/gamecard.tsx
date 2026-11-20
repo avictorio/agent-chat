@@ -14,6 +14,7 @@ import { ldCardBoard } from "./liarsdice";
 import { ttCardBoard } from "./twotruths";
 import { ecCardBoard } from "./corpse";
 import { tqCardBoard } from "./twenty";
+import { lgCardBoard } from "./lettergrid";
 import { wwCardBoard } from "./werewolf";
 import type { GameStore } from "./games";
 
@@ -30,7 +31,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
 
   useEffect(() => {
     const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && !cur.trails)) void store.fetch(id);
+    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && cur.type !== "lettergrid" && !cur.trails)) void store.fetch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
@@ -74,6 +75,9 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     } else if (g.type === "werewolf") {
       board.textContent = "";
       board.appendChild(wwCardBoard(g, store.meName()));
+    } else if (g.type === "lettergrid") {
+      board.textContent = "";
+      board.appendChild(lgCardBoard(g, store.meName()));
     } else if (g.trails) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
@@ -210,6 +214,7 @@ function gameSignature(g: any): string | null {
   }
   if (g.type === "fourinarow") return ["c4", g.status, g.turn || 0, (g.board || []).join("")].join("|");
   if (g.type === "trust") return ["tr", g.status, g.round || 0, (g.rounds || []).length].join("|");
+  if (g.type === "lettergrid") return ["lg", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "auction") return ["au", g.status, g.round || 0, (g.rounds || []).length].join("|");
   if (g.type === "werewolf") return ["ww", g.status, g.phase || "", g.night || 0, g.day || 0, (g.players || []).filter((p: any) => p.alive).length].join("|");
   if (g.type === "twenty") return ["tq", g.status, g.round || 0, g.phase || "", g.asked || 0].join("|");

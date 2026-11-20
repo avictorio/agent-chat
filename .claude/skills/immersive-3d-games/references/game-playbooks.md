@@ -508,7 +508,45 @@ name for a spectator) and pillars over the living winners.
 **Catch-up.** `ac-ww-seen:<path>:<id>` (events seen); the latest unseen
 event replays on open; a tap skips; reduced motion lands it.
 
-## 15. A new arena
+## 15. Letter Grid: the tile garden
+
+**World.** A square of ivory letter tiles on an obsidian plinth with a
+teal rim, a pool of teal light under it, `LG_SKY` (deep teal night) and a
+warm lamp from the viewer's side; the camera looks down steeply
+(`fitHome`, 56° desktop, 64° phone) so every letter reads. A claimed tile
+takes its owner's colour, a halo under it, and the owner's first two
+letters in its corner (the second channel: two players can share an
+initial). Letters are canvas textures (a serif face, cached per letter
+and ink) - never drei `<Text>`.
+
+**Input.** The page's word panel is the control (typing traces the best
+path, the same rule as the server); a tap on a tile in the scene extends
+the path (a touching, unused tile), steps back (the last tile) or starts
+over. The draft lifts its tiles and runs a white ribbon through them; your
+sealed word shows to you alone as a faint ribbon. Typing repaints only
+the scene - the panel updates in place so the field keeps focus.
+
+**Reveal.** Each word draws in as a tube of light in its owner's colour
+(`setDrawRange` on the tube's index buffer, so a prefix of the buffer is a
+prefix of the path), lowest score first, the tiles popping as it reaches
+them; on landing its claimed tiles flip to the owner with a `Burst`, a
+contested tile sparks white, a shared word draws grey and claims nothing.
+The last round's ribbons linger faintly (they cross the letters, so keep
+them thin and dim).
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you send a word | `lock` + `BUZZ.commit` |
+| a word lands | `ping` (a shared word: `lock`); 3+ cells claimed: a pulse, yours `BUZZ.scored` |
+| the round, your word the best | "+N" good, "WORD - the round's best", `BUZZ.scored` |
+| the round, your word | "+N" neutral |
+| the round, no word from you | "NO WORD" bad, `BUZZ.hitYou` |
+| the end | VICTORY / DEFEAT (or NAME WINS / DRAW), a pillar and a ring |
+
+**Catch-up.** `ac-lg-seen:<path>:<id>` (rounds seen); the latest unseen
+round replays on open; a tap skips; reduced motion lands it.
+
+## 16. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

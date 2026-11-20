@@ -85,6 +85,7 @@ function stateLine(g: GL): string {
   if (g.type === "twotruths") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.teller ? " · " + g.teller + (g.phase === "write" ? " writing" : " told") : "") + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
   if (g.type === "liarsdice") return "Round " + (g.round || 1) + (g.turn_of ? " · " + g.turn_of + " to bid" : "") + " · " + ps.filter((p: GL) => !p.out).map((p: GL) => p.name + " " + (p.dice || 0)).join(" · ");
   if (g.type === "auction") return "Lot " + (g.round || 1) + " of " + (g.lots_total || "?") + " · " + ps.slice().sort((a: GL, b: GL) => (b.won || 0) - (a.won || 0)).map((p: GL) => p.name + " " + (p.won || 0)).join(" · ");
+  if (g.type === "lettergrid") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
   if (g.type === "trust") return "Round " + (g.round || 1) + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
   if (g.type === "coderace") {
     const cracked = ps.filter((p: GL) => p.solved).map((p: GL) => p.name);
@@ -138,7 +139,7 @@ function waitingOn(g: GL): string[] {
   if (g.type === "twenty") return g.phase === "ask" ? ps.filter((p) => p.name !== g.answerer).map((p) => p.name) : g.answerer ? [g.answerer] : [];
   if (g.type === "corpse") return g.phase === "write" ? (g.turn_of ? [g.turn_of] : []) : ps.filter((p) => !p.committed).map((p) => p.name);
   if (g.type === "twotruths") return g.phase === "write" ? (g.teller ? [g.teller] : []) : ps.filter((p) => p.name !== g.teller && !p.committed).map((p) => p.name);
-  if (g.type === "trust") return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
+  if (g.type === "trust" || g.type === "lettergrid") return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
   if (g.type === "auction") return ps.filter((p) => !p.committed && (p.budget || 0) > 0).map((p) => p.name);
   if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
   return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
@@ -147,7 +148,7 @@ const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_dea
 const durOf = (g: GL): number =>
   g.status === "lobby"
     ? 3600e3
-    : 1000 * (g.type === "duel" || g.type === "frontlines" || g.type === "trust" || g.type === "auction" ? g.round_seconds || 180 : g.type === "coderace" || g.type === "twotruths" || g.type === "twenty" ? g.round_seconds || 3600 : g.type === "corpse" ? g.turn_seconds || 86400 : g.type === "werewolf" ? g.phase_seconds || 86400 : g.type === "battleship" || g.type === "fourinarow" || g.type === "liarsdice" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+    : 1000 * (g.type === "duel" || g.type === "frontlines" || g.type === "trust" || g.type === "auction" ? g.round_seconds || 180 : g.type === "coderace" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" ? g.round_seconds || 3600 : g.type === "corpse" ? g.turn_seconds || 86400 : g.type === "werewolf" ? g.phase_seconds || 86400 : g.type === "battleship" || g.type === "fourinarow" || g.type === "liarsdice" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
 function youLabel(g: GL): string {
   if (g.status === "lobby") return "Your invite";
   if (g.type === "duel") return "Your throw";
@@ -155,6 +156,7 @@ function youLabel(g: GL): string {
   if (g.type === "coderace") return "Your guess";
   if (g.type === "fourinarow") return "Your move";
   if (g.type === "trust") return "Your choices";
+  if (g.type === "lettergrid") return "Your word";
   if (g.type === "auction" || g.type === "liarsdice") return "Your bid";
   if (g.type === "twotruths") return g.phase === "write" ? "Your story" : "Your vote";
   if (g.type === "corpse") return g.phase === "write" ? "Your segment" : "Your favourite";
@@ -208,7 +210,7 @@ function whenLabel(t: number, group: string): string {
 function lengthLine(g: GL): string {
   if (g.type === "battleship") return (g.turn || 0) + " turns";
   if (g.type === "duel") return (g.round || 0) + " rounds";
-  if (g.type === "frontlines" || g.type === "coderace" || g.type === "trust") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
+  if (g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "lettergrid") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
   if (g.type === "fourinarow") return ((g.last_move && g.last_move.n) || 0) + " moves";
   if (g.type === "auction") return ((g.rounds && g.rounds.length) || g.lots_total || 0) + " lots";
   if (g.type === "corpse") return (g.segments || 0) + " segments";

@@ -616,7 +616,15 @@ change behavior. In summary:
   silent: a cell two different words take first in one round stays free;
   your own words cannot repeat. Claims land after the round is scored.
   `top_words` (the grid's longest) is hidden until the match ends. Test
-  hook: `/api/test-hooks/lettergrid` lays known rows.
+  hook: `/api/test-hooks/lettergrid` lays known rows. Web (3D only):
+  `lettergrid.ts` (scores, the word panel, the reveal list, history, the
+  card's small grid) and `LetterArena3D.tsx`. The panel's input and a tap
+  on a tile in the scene both edit one draft on `gameView.lgDraft`; typing
+  updates the panel in place and repaints only the scene (a rebuild would
+  drop the field's focus - the Two Truths lesson). The client traces the
+  best path with the server's own search order and tie-break, and Send
+  carries the cells ("stone A1 B1 C1 D1 E1"), so what you see is what is
+  scored. No dictionary on the client: the server's 400 is the check.
 - **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
   rotating role. Deviations from the spec, on purpose: the answerer
   rotates in seat order (the spec's "winner answers next" never ends);
