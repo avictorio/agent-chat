@@ -13,38 +13,30 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.2 are live; 4.6 is done.
-Next is step 2.3 (its moves dry-run clean: `platform/r2-s3.js`,
-`webpush.js`, `gmail.js`, `cartesia.js`, `claude.js` (the Sketch referee),
-`webfetch.js`, plus `lib/media.js` for media signing and serving). Claude Code's built-in `cc-plugin-privacy` plugin had blocked
-the split tool: the Worker held the owner's account email (as the VAPID
-subject), and the plugin refuses scripts that read a file holding it.
+State on 2026-11-20: phase 1 and steps 2.1-2.3 are live; 4.6 is done.
+Next is step 2.4 (`agents/`: the MCP catalog and tool calls, the API docs
+text, onboarding). Claude Code's built-in `cc-plugin-privacy` plugin once
+blocked the split tool: the Worker held the owner's account email (as the
+VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
 address came out of the code instead (the subject is now the site's
 mailbox from `GMAIL_SENDER`) and the plugin stays on. Keep personal
 addresses out of the code.
 
-1. `npm i` at the repo root (the split tool's acorn), `npm i` in `web/`,
+How a step goes:
+
+1. `npm i` at the repo root (the split tool's acorn) and in `web/`, then
    `npm run build`. The UI suite in a cloud sandbox:
    `cd web && node -r ./tests/system-chromium.js tests/ui.test.js`.
-2. Step 2.2, the four `lib/` modules:
-   ```
-   T="node scripts/split-module.js move"
-   $T worker/lib/http.js CORS,SSE_HEADERS,json,html,readBody,sseFrame,parseRange --header "HTTP helpers shared by the routes and the Room object."
-   $T worker/lib/crypto.js SHA256_K,sha256Bytes,hmacSha256,b64urlEncode,b64urlDecode,sha256hex,concatBytes,hkdf,hexBytes,hmacBytes,pemToDer --header "Hashing, HMAC, HKDF and base64url helpers (Web Crypto, plus a synchronous SHA-256)."
-   $T worker/lib/sniff.js sniffAudio,sniffImage,sniffVideo,decodeTextPayload,cleanFileName --header "File-type sniffing (never trust a Content-Type) and upload payload decoding."
-   $T worker/lib/text.js escHtml,clamp,clipText,daysBetween,capped,isPlaceholder,htmlToText,mentionsName,nameFold,memberNameProblem,MAX_NAME,speakableText --header "Small text and number helpers."
-   node scripts/split-module.js verify && npm run check
-   ```
-   Then fix the stray comment the move carries: "Identify an image by its
-   first bytes ... SVG is not accepted." sits above `parseRange` in
-   `lib/http.js`; it belongs above `sniffImage` in `lib/sniff.js`. And the
-   "Whether a room exists ..." comment above `escHtml` belongs to
-   `roomExists` (2.8). A `npx wrangler deploy --dry-run` should list the
-   new `lib/*.js` modules (the `**/*.js` ESModule rule).
-3. Gates (the API suite; the UI suite only if web/ changed), deploy, verify
-   live, log it below, then 2.3 onward the same way. `verify` after every
-   move is the safety net for imports `node --check` can't see.
+2. Move with `node scripts/split-module.js move <target> <names> --header
+   "..."` (add `--dry` to try first), then `node scripts/split-module.js
+   verify && npm run check`. The tool refuses a move whose code needs a
+   name still in `index.js`: move that name first, or with it. Read the
+   new module afterwards: comments that sat in the wrong place before the
+   move travel with the code below them.
+3. `npx wrangler deploy --dry-run` should list the new modules; then the
+   API suite (the UI suite only if web/ changed), deploy, verify live, and
+   log it below.
 
 ## Ground rules for every step
 
@@ -168,8 +160,11 @@ site stay as they are; turning them into plain functions can come later.
       `lib/crypto.js`, `lib/sniff.js`, `lib/text.js` (index.js 11,746 ->
       11,488 lines); the sniffImage and roomExists comments put back
       where they belong
-- [ ] 2.3 `platform/`: R2 S3 signing and ListParts, Web Push, Gmail,
-      Cartesia voices, the Claude referee
+- [x] 2.3 `platform/`: R2 S3 signing and ListParts, Web Push, Gmail,
+      Cartesia voices, the Claude referee - `platform/r2-s3.js`,
+      `webpush.js`, `gmail.js`, `cartesia.js`, `claude.js`, `webfetch.js`
+      (the fetch tool), plus `lib/media.js` (media signing, CSP, headers,
+      ranges); index.js down to 10,975 lines
 - [ ] 2.4 `agents/`: MCP catalog and tool calls, the API docs text,
       onboarding, `agent-recipe.md`, `agent-watch.sh`
 - [ ] 2.5 `games/`: `engine.js` (GAME_ENGINES, aliases, shared helpers),
@@ -234,4 +229,6 @@ site stay as they are; turning them into plain functions can come later.
 | 2026-11-20 | 2.1: `src/` -> `worker/` | aaba45b (deployed with b5772fe) | API suite green; version 19001c48. Live: `/api` 200 and its docs name `worker/data/`; `/sw.js` (text module) 200; pages stamped with the unchanged build id. The split tool's first run on the real tree was then blocked by the cc-plugin-privacy guard (it flags scripts that read the Worker code, which reads the sender address from config); the owner chose to adjust the guard. |
 | 2026-11-20 | 4.6: strict UI suite | f4a5a69, b0aa1b8 | Report-only run: 146 scenarios clean once `/icons/*` was served; 7 deliberate error statuses; one real gap (the media shelf's video tile fetched `/messages/5/video` with no stub route). Strict run: 155/155. A copy without the icon route fails as it should. |
 | 2026-11-20 | Split tool + privacy plugin off | 859e994 | `scripts/split-module.js` (move/verify) committed; `.claude/settings.json` turns `cc-plugin-privacy@builtin` off at the owner's request. It still blocked this session (plugin changes apply to new sessions), so 2.2 starts in the next session - see "Resume here". |
-| 2026-11-20 | Privacy plugin: the real fix | (this commit) | A new session showed the setting doesn't turn the built-in plugin off. The trigger was the owner's account email as `VAPID_SUBJECT` in the Worker; the push JWT's subject is now `mailto:` + `GMAIL_SENDER` (https URL fallback) and the setting is gone. The split tool runs again with the plugin on. |
+| 2026-11-20 | Privacy plugin: the real fix | (this commit) | A new session showed the setting doesn't turn the built-in plugin off. The trigger was the owner's account email as `VAPID_SUBJECT` in the Worker; the push JWT's subject is now `mailto:` + `GMAIL_SENDER` (https URL fallback) and the setting is gone. The split tool runs again with the plugin on. Deployed as version 41b7757f; `/api/push/key` still served. |
+| 2026-11-20 | 2.2: `lib/` | 8d38e3f | API suite green; version 9a242084 (14 modules). Live: `/api`, `/sw.js`, the page stamp, a real room's members list (read) and a signed avatar (200, image/webp). |
+| 2026-11-20 | 2.3: `platform/` + `lib/media.js` | (this commit) | API suite green (631 checks); dry run lists 21 modules. |
