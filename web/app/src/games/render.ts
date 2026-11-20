@@ -428,23 +428,15 @@ export function setClockBar(bar: HTMLElement) {
   const pct = Math.max(0, Math.min(100, (left / dur) * 100));
   if (bar.firstChild) (bar.firstChild as HTMLElement).style.width = pct + "%";
   bar.classList.toggle("low", pct < 20 && left > 0);
-  const wrap = bar.parentElement;
-  const lab = wrap ? wrap.querySelector(".duel-clocklabel") : null;
-  if (lab) {
-    const s = Math.ceil(left / 1000);
-    lab.textContent =
-      left > 0 ? Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2) + " left in the round" : "round closing…";
-  }
 }
 
-export function clockBar(g: GL, withLabel: boolean): HTMLElement {
+export function clockBar(g: GL): HTMLElement {
   const w = el("div", "duel-clockwrap");
   const bar = el("div", "duel-clockbar");
   bar.setAttribute("data-duel-deadline", String(g.deadline));
   bar.setAttribute("data-duel-dur", String((g.round_seconds || 600) * 1000));
   bar.appendChild(el("div", ""));
   w.appendChild(bar);
-  if (withLabel) w.appendChild(el("div", "duel-clocklabel duel-stateline", ""));
   setClockBar(bar);
   return w;
 }
@@ -557,7 +549,7 @@ export function duelBoard(g: GL, slim?: boolean): HTMLElement {
     if (g.you.queued) wrap.appendChild(el("span", "duel-pill locked", "✓ LOCKED · " + g.you.queued));
     else wrap.appendChild(el("span", "duel-pill your-throw", "YOUR THROW"));
   }
-  if (!slim && g.status === "running" && g.deadline) wrap.appendChild(clockBar(g, false));
+  if (!slim && g.status === "running" && g.deadline) wrap.appendChild(clockBar(g));
   return wrap;
 }
 

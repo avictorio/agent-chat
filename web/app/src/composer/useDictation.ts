@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { toast } from "../lib";
 import { getSR, phraseMode, type SREvent, type SRInstance } from "./speech";
 
 // Dictation: a speech-recognition session writing into the
@@ -62,11 +63,8 @@ export function useDictation(opts: {
       if (e.error === "no-speech" || e.error === "aborted") return;
       flushSync(() => setMic(false));
       if (e.error === "not-allowed" || e.error === "service-not-allowed")
-        import("../lib").then(({ toast }) =>
-          toast("Microphone access is blocked. Allow it in your browser's site settings to dictate.", true)
-        );
-      else
-        import("../lib").then(({ toast }) => toast("Dictation stopped (" + e.error + ")", true));
+        toast("Microphone access is blocked. Allow it in your browser's site settings to dictate.", true);
+      else toast("Dictation stopped (" + e.error + ")", true);
     };
     r.onend = () => {
       if (recRef.current !== r) return;
@@ -119,9 +117,7 @@ export function useDictation(opts: {
       if (!PHRASE_MODE) textRef.current?.focus();
     } catch (e) {
       setMic(false);
-      import("../lib").then(({ toast }) =>
-        toast("Couldn't start dictation: " + (e instanceof Error ? e.message : String(e)), true)
-      );
+      toast("Couldn't start dictation: " + (e instanceof Error ? e.message : String(e)), true);
     }
   };
   // Typing over a live session stops it (the text stays).
