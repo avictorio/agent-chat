@@ -1,4 +1,5 @@
 import { toast } from "../../lib/index";
+import { Button } from "../../ui/Button";
 
 // The room's shell-level views (locked, agent gate) and the board
 // pages as their static frames — board content lands in M4. The chat
@@ -56,12 +57,12 @@ export function AgentGateView({
           {block}
         </pre>
         <div className="agent-actions">
-          <button type="button" className="btn primary" id="agentCopy" onClick={copy}>
+          <Button type="button" variant="primary" id="agentCopy" onClick={copy}>
             Copy the setup block
-          </button>
-          <button type="button" className="btn" id="agentApp" onClick={onEscape}>
+          </Button>
+          <Button type="button" id="agentApp" onClick={onEscape}>
             Open the web app anyway
-          </button>
+          </Button>
         </div>
         <p className="agent-note">
           Nothing is restricted: the same invite also works in this web app and on the REST API.

@@ -13,6 +13,7 @@ import {
   runWith,
   useEditing,
 } from "./shared";
+import { Button } from "../../ui/Button";
 
 // The board's five content sections, ported from the current app.
 
@@ -38,9 +39,9 @@ export function ConstitutionView() {
                 Write down what this room is for and how people here work together.
               </div>
               <div className="card-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn primary sm"
+                  variant="primary" size="sm"
                   onClick={() =>
                     ed.setEdit({
                       fields: [{ key: "text", label: "Constitution", value: "", multiline: true, rows: 10, max: 4000 }],
@@ -50,7 +51,7 @@ export function ConstitutionView() {
                   }
                 >
                   Write the first version
-                </button>
+                </Button>
               </div>
             </>
           ) : (
@@ -65,9 +66,9 @@ export function ConstitutionView() {
                 <Linkify text={c.text} />
               </div>
               <div className="card-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn sm"
+                  size="sm"
                   onClick={() =>
                     ed.setEdit({
                       fields: [{ key: "text", label: "Constitution", value: c.text, multiline: true, rows: 12, max: 4000 }],
@@ -77,7 +78,7 @@ export function ConstitutionView() {
                   }
                 >
                   Edit
-                </button>
+                </Button>
               </div>
             </>
           )}
@@ -95,7 +96,7 @@ export function ConstitutionView() {
                 <div className="card-text">{h.text}</div>
                 <div className="card-actions">
                   <ActionButton
-                    className="btn sm"
+                    size="sm"
                     label="Restore this version"
                     okText="Restored"
                     fn={async (n) => {
@@ -159,7 +160,8 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
           )}
           <div className="card-actions">
             <ActionButton
-              className={mine ? "btn sm" : "btn sm primary"}
+              size="sm"
+              variant={mine ? undefined : "primary"}
               label={mine ? "Remove my signature" : "Sign"}
               okText={mine ? "Signature removed" : "Signed"}
               fn={async (n) => {
@@ -168,9 +170,9 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
               }}
             />
             <span className="spacer"></span>
-            <button
+            <Button
               type="button"
-              className="btn sm quiet"
+              variant="quiet" size="sm"
               onClick={() =>
                 ed.setEdit({
                   fields: [
@@ -183,7 +185,7 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
               }
             >
               Edit
-            </button>
+            </Button>
             <DeleteButton path={"/decisions/" + x.id} noun="decision" />
           </div>
         </>
@@ -217,9 +219,9 @@ export function DecisionsView({ avatars }: { avatars: Record<string, string> }) 
         <input className="grow" id="dcTitle" ref={titleRef} maxLength={300} placeholder="Record a decision the room has settled" aria-label="Decision" />
         <div className="row">
           <input className="grow" id="dcNote" ref={noteRef} maxLength={1000} placeholder="Context or reasoning (optional)" aria-label="Note" />
-          <button className="btn primary" type="submit" ref={btnRef}>
+          <Button variant="primary" type="submit" ref={btnRef}>
             Add decision
-          </button>
+          </Button>
         </div>
       </form>
       <div id="dcList">
@@ -268,15 +270,15 @@ function QuestionCard({ x }: { x: Question }) {
           ) : null}
           <div className="card-actions">
             {x.status === "open" && (
-              <ActionButton className="btn sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
+              <ActionButton size="sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
             )}
             {x.status === "claimed" && (
-              <ActionButton className="btn sm" label="Unclaim" okText="Unclaimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "unclaim" })} />
+              <ActionButton size="sm" label="Unclaim" okText="Unclaimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "unclaim" })} />
             )}
             {!resolved ? (
-              <button
+              <Button
                 type="button"
-                className="btn sm primary"
+                variant="primary" size="sm"
                 onClick={() =>
                   ed.setEdit({
                     fields: [{ key: "note", label: "How was it resolved? (optional)", value: "", multiline: true, rows: 3, max: 1000 }],
@@ -287,14 +289,14 @@ function QuestionCard({ x }: { x: Question }) {
                 }
               >
                 Resolve
-              </button>
+              </Button>
             ) : (
-              <ActionButton className="btn sm" label="Reopen" okText="Reopened" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "reopen" })} />
+              <ActionButton size="sm" label="Reopen" okText="Reopened" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "reopen" })} />
             )}
             <span className="spacer"></span>
-            <button
+            <Button
               type="button"
-              className="btn sm quiet"
+              variant="quiet" size="sm"
               onClick={() =>
                 ed.setEdit({
                   fields: [{ key: "text", label: "Question", value: x.text, multiline: true, rows: 3, max: 500 }],
@@ -304,7 +306,7 @@ function QuestionCard({ x }: { x: Question }) {
               }
             >
               Edit
-            </button>
+            </Button>
             <DeleteButton path={"/questions/" + x.id} noun="question" />
           </div>
         </>
@@ -337,9 +339,9 @@ export function QuestionsView() {
     <>
       <form className="card add" id="qForm" onSubmit={submit}>
         <input className="grow" id="qInput" ref={inputRef} maxLength={500} placeholder="Ask something the room should answer" aria-label="Question" />
-        <button className="btn primary" type="submit" ref={btnRef}>
+        <Button variant="primary" type="submit" ref={btnRef}>
           Add question
-        </button>
+        </Button>
       </form>
       <div className="filters">
         <div className="seg" role="group" aria-label="Show">
@@ -412,15 +414,15 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
           </div>
           <div className="card-actions">
             <ActionButton
-              className="btn sm"
+              size="sm"
               label={isDone ? "Reopen" : "Mark done"}
               okText={isDone ? "Reopened" : "Marked done"}
               fn={(n) => api.api("/stakes/" + x.id, "POST", { from: n, action: isDone ? "reopen" : "done" })}
             />
             <span className="spacer"></span>
-            <button
+            <Button
               type="button"
-              className="btn sm quiet"
+              variant="quiet" size="sm"
               onClick={() =>
                 ed.setEdit({
                   fields: [
@@ -435,7 +437,7 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
               }
             >
               Edit
-            </button>
+            </Button>
             <DeleteButton path={"/stakes/" + x.id} noun="stake" />
           </div>
         </>
@@ -480,9 +482,9 @@ export function StakesView() {
         <div className="row">
           <input id="sDate" type="date" ref={dateRef} aria-label="Date (optional)" title="Date (optional)" />
           <input className="grow" id="sNote" ref={noteRef} maxLength={1000} placeholder="Note (optional)" aria-label="Note" />
-          <button className="btn primary" type="submit" ref={btnRef}>
+          <Button variant="primary" type="submit" ref={btnRef}>
             Add stake
-          </button>
+          </Button>
         </div>
       </form>
       <div id="sList">
@@ -548,9 +550,9 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
           </div>
           <div className="card-actions">
             <span className="spacer"></span>
-            <button
+            <Button
               type="button"
-              className="btn sm quiet"
+              variant="quiet" size="sm"
               onClick={() =>
                 ed.setEdit({
                   fields: [{ key: "text", label: "Digest", value: x.text, multiline: true, rows: 8, max: 8000 }],
@@ -560,7 +562,7 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
               }
             >
               Edit
-            </button>
+            </Button>
             <DeleteButton path={"/digests/" + x.id} noun="digest" />
           </div>
         </>
@@ -611,9 +613,9 @@ export function MemoryView({ avatars }: { avatars: Record<string, string> }) {
               "Anyone with access can read them."}
           </span>
           <span style={{ flex: 1 }}></span>
-          <button className="btn primary" type="submit" ref={btnRef}>
+          <Button variant="primary" type="submit" ref={btnRef}>
             Post digest
-          </button>
+          </Button>
         </div>
       </form>
       <div id="dList">

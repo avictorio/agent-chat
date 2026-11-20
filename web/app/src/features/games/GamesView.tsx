@@ -5,6 +5,7 @@ import { finalScore, formatLeft, type GL } from "./shared/render";
 import { chimeMuted, setChimeMuted } from "./shared/chime";
 import { pressable } from "../../lib/index";
 import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
+import { Button } from "../../ui/Button";
 
 // Standings with motion, from the finished list (newest first): each
 // player's current streak, and their rank before the kind's most
@@ -272,9 +273,10 @@ function ChimeToggle() {
           : "Your-move chime: a short sound plays when a match is waiting on you. Tap to mute it.";
   return (
     <span className="gm-chime">
-      <button
+      <Button
         type="button"
-        className={"btn quiet gm-chime-btn" + (muted ? " off" : "")}
+        variant="quiet"
+        className={"gm-chime-btn" + (muted ? " off" : "")}
         aria-pressed={!muted}
         aria-label="Your-move chime"
         aria-describedby="gm-chime-tip"
@@ -315,7 +317,7 @@ function ChimeToggle() {
             <path key={d} d={d} />
           ))}
         </svg>
-      </button>
+      </Button>
       <span id="gm-chime-tip" role="tooltip" className={"gm-tip" + (tip ? " on" : "")}>
         {text}
       </span>
@@ -629,9 +631,9 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
               </summary>
               <div className="gm-guide-body">
                 <HowToPlay def={d} />
-                <button type="button" className="btn primary sm" onClick={() => onNewGame(d.id)}>
+                <Button type="button" variant="primary" size="sm" onClick={() => onNewGame(d.id)}>
                   Start {d.name}
-                </button>
+                </Button>
               </div>
             </details>
           ))}
@@ -657,21 +659,21 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                   </>
                 ) : null}
                 <div className="gm-start">
-                  <button type="button" className="btn primary gm-start-btn" onClick={() => onNewGame()}>
+                  <Button type="button" variant="primary" className="gm-start-btn" onClick={() => onNewGame()}>
                     Start a match
-                  </button>
+                  </Button>
                 </div>
               </>
             ) : (
               <div className="gm-empty">
                 <p>Nothing live right now.</p>
-                <button type="button" className="btn primary gm-start-btn" onClick={() => onNewGame()}>
+                <Button type="button" variant="primary" className="gm-start-btn" onClick={() => onNewGame()}>
                   Start a match
-                </button>
+                </Button>
                 {done.length ? (
-                  <button type="button" className="btn quiet" onClick={() => pick("history")}>
+                  <Button type="button" variant="quiet" onClick={() => pick("history")}>
                     Browse history
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             )
@@ -695,9 +697,9 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                   </section>
                 ))}
                 {filtered.length > shown ? (
-                  <button type="button" className="btn quiet gm-more" onClick={() => setShown((n) => n + PAGE)}>
+                  <Button type="button" variant="quiet" className="gm-more" onClick={() => setShown((n) => n + PAGE)}>
                     Show more · {filtered.length - shown} older
-                  </button>
+                  </Button>
                 ) : null}
               </>
             ) : (

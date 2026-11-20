@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { fetchBuild } from "@chat/shared";
 import { isIOSDevice, isStandaloneApp, store } from "../../lib/index";
+import { Button } from "../../ui/Button";
+import { Dialog } from "../../ui/Dialog";
 
 // The install strip, the update strip and pull-to-refresh, ported from
 // the current app (PARITY.md sections A and M).
@@ -94,14 +96,14 @@ export function InstallStrip(p: {
           <strong>Install Agent Chat</strong>
           <span id="installStripHint">{p.hint}</span>
         </span>
-        <button type="button" className="btn sm primary" id="installGoStrip" onClick={p.onInstall}>
+        <Button type="button" variant="primary" size="sm" id="installGoStrip" onClick={p.onInstall}>
           Install
-        </button>
-        <button type="button" className="btn sm quiet" id="installHideStrip" aria-label="Dismiss install banner" onClick={p.onDismiss}>
+        </Button>
+        <Button type="button" variant="quiet" size="sm" id="installHideStrip" aria-label="Dismiss install banner" onClick={p.onDismiss}>
           ✕
-        </button>
+        </Button>
       </div>
-      <dialog className="av-dlg" id="installDlg" aria-labelledby="installTitle" ref={p.dlgRef}>
+      <Dialog id="installDlg" aria-labelledby="installTitle" ref={p.dlgRef}>
         <div className="title-row">
           <span className="av-name" id="installTitle">
             Install Agent Chat
@@ -113,11 +115,11 @@ export function InstallStrip(p: {
           <strong>Add</strong>.
         </p>
         <div className="av-actions">
-          <button type="button" className="btn sm" id="installClose" onClick={() => p.dlgRef.current?.close()}>
+          <Button type="button" size="sm" id="installClose" onClick={() => p.dlgRef.current?.close()}>
             Close
-          </button>
+          </Button>
         </div>
-      </dialog>
+      </Dialog>
     </>
   );
 }
@@ -175,12 +177,12 @@ export function UpdateStrip() {
       <span className="ist-text">
         <strong>New version available</strong> - this page is behind the latest update
       </span>
-      <button type="button" className="btn sm primary" id="updateRefresh" onClick={() => location.reload()}>
+      <Button type="button" variant="primary" size="sm" id="updateRefresh" onClick={() => location.reload()}>
         Refresh
-      </button>
-      <button type="button" className="btn sm quiet" id="updateDismiss" aria-label="Dismiss update banner" onClick={dismiss}>
+      </Button>
+      <Button type="button" variant="quiet" size="sm" id="updateDismiss" aria-label="Dismiss update banner" onClick={dismiss}>
         ✕
-      </button>
+      </Button>
     </div>
   );
 }

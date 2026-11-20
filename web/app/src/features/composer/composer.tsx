@@ -18,6 +18,7 @@ import {
   type UpItem,
   type UpState,
 } from "./uploads";
+import { IconButton, LinkButton } from "../../ui/Button";
 
 // The composer, ported from the current app: name handling, the
 // mention highlight overlay and autocomplete menu, dictation (one-
@@ -361,9 +362,9 @@ export function Composer(p: ComposerProps) {
               <div className="upl" id="uplCard" role="status" aria-live="polite">
                 <div className="upl-row">
                   <span className="upl-name">Uploading {up.label}</span>
-                  <button type="button" className="linkbtn" id="uplCancel" onClick={() => abortRef.current?.abort()}>
+                  <LinkButton type="button" id="uplCancel" onClick={() => abortRef.current?.abort()}>
                     Cancel
-                  </button>
+                  </LinkButton>
                 </div>
                 <div className="upl-bar" aria-hidden="true">
                   <span style={{ width: (up.total ? Math.min(100, (up.sent / up.total) * 100) : 0) + "%" }}></span>
@@ -384,9 +385,9 @@ export function Composer(p: ComposerProps) {
               <span id="imgChip" className="clip-chip">
                 <img id="imgThumb" className="img-thumb" alt="" src={image ? image.thumb : undefined} />
                 <span id="imgName">{image ? image.name : ""}</span>{" "}
-                <button type="button" className="linkbtn" id="imgRemove" onClick={() => setImage(null)}>
+                <LinkButton type="button" id="imgRemove" onClick={() => setImage(null)}>
                   Remove
-                </button>
+                </LinkButton>
               </span>
             </div>
             <div className="textWrap">
@@ -437,9 +438,9 @@ export function Composer(p: ComposerProps) {
               />
             </div>
             <div className="compose-tools">
-              <button id="imgBtn" className="btn quiet icon-btn" type="button" aria-label="Attach an image" title="Attach an image" onClick={() => imgFileRef.current?.click()}>
+              <IconButton id="imgBtn" variant="quiet" type="button" label="Attach an image" title="Attach an image" onClick={() => imgFileRef.current?.click()}>
                 <I d={["M21 16l-5-5-9.5 9.5"]} extra={<><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="1.6" /></>} />
-              </button>
+              </IconButton>
               <input
                 id="imgFile"
                 type="file"
@@ -452,9 +453,9 @@ export function Composer(p: ComposerProps) {
                   void onImgFile(f || null);
                 }}
               />
-              <button id="clip" className="btn quiet icon-btn" type="button" aria-label="Attach an audio clip" title="Attach an audio clip" onClick={() => clipFileRef.current?.click()}>
+              <IconButton id="clip" variant="quiet" type="button" label="Attach an audio clip" title="Attach an audio clip" onClick={() => clipFileRef.current?.click()}>
                 <I d={["M9 18V6l10-2v11"]} extra={<><circle cx="6.5" cy="18" r="2.5" /><circle cx="16.5" cy="15" r="2.5" /></>} />
-              </button>
+              </IconButton>
               <input
                 id="clipFile"
                 type="file"
@@ -467,9 +468,9 @@ export function Composer(p: ComposerProps) {
                   void onClipFile(f || null);
                 }}
               />
-              <button id="vidBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a video" title="Attach a video" onClick={() => vidFileRef.current?.click()}>
+              <IconButton id="vidBtn" variant="quiet" type="button" label="Attach a video" title="Attach a video" onClick={() => vidFileRef.current?.click()}>
                 <I d={["M15 10l6-3v10l-6-3"]} extra={<rect x="3" y="6" width="12" height="12" rx="2" />} />
-              </button>
+              </IconButton>
               <input
                 id="vidFile"
                 type="file"
@@ -482,9 +483,9 @@ export function Composer(p: ComposerProps) {
                   void onVidFile(f || null);
                 }}
               />
-              <button id="fileBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a file" title="Attach a file (any type, any size)" onClick={() => anyFileRef.current?.click()}>
+              <IconButton id="fileBtn" variant="quiet" type="button" label="Attach a file" title="Attach a file (any type, any size)" onClick={() => anyFileRef.current?.click()}>
                 <I d={["M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"]} />
-              </button>
+              </IconButton>
               <input
                 id="anyFile"
                 type="file"
@@ -496,9 +497,9 @@ export function Composer(p: ComposerProps) {
                   void onAnyFile(f || null);
                 }}
               />
-              <button id="artBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a page or document" title="Attach an HTML page or Markdown document" onClick={() => artFileRef.current?.click()}>
+              <IconButton id="artBtn" variant="quiet" type="button" label="Attach a page or document" title="Attach an HTML page or Markdown document" onClick={() => artFileRef.current?.click()}>
                 <I d={["M6 2h9l5 5v15H6z", "M14 2v6h6"]} />
-              </button>
+              </IconButton>
               <input
                 id="artFile"
                 type="file"
@@ -511,11 +512,12 @@ export function Composer(p: ComposerProps) {
                   void onArtFile(f || null);
                 }}
               />
-              <button
+              <IconButton
                 id="rec"
-                className={"btn quiet icon-btn" + (recActive ? " recording" : "")}
+                variant="quiet"
+                className={recActive ? "recording" : undefined}
                 type="button"
-                aria-label="Record a voice message"
+                label="Record a voice message"
                 title={recActive ? "Stop recording" : "Record a voice message"}
                 hidden={!rec.supported}
                 onClick={() => void recClick()}
@@ -524,32 +526,33 @@ export function Composer(p: ComposerProps) {
                   <circle cx="12" cy="12" r="8" />
                   <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
                 </svg>
-              </button>
-              <button
+              </IconButton>
+              <IconButton
                 id="mic"
-                className={"btn quiet icon-btn" + (micOn ? " on" : "")}
+                variant="quiet"
+                className={micOn ? "on" : undefined}
                 type="button"
-                aria-label={micOn ? "Stop dictation" : "Dictate a message"}
+                label={micOn ? "Stop dictation" : "Dictate a message"}
                 title={micOn ? "Listening… click to stop" : "Dictate a message"}
                 aria-pressed={micOn}
                 hidden={!dict.supported}
                 onClick={micClick}
               >
                 <I d={["M5 11a7 7 0 0 0 14 0M12 18v3"]} extra={<rect x="9" y="3" width="6" height="11" rx="3" />} />
-              </button>
+              </IconButton>
               <span className="tools-spacer"></span>
-              <button id="send" className="btn primary icon-btn" type="submit" aria-label="Send" title="Send" disabled={sending}>
+              <IconButton id="send" variant="primary" type="submit" label="Send" title="Send" disabled={sending}>
                 <I d={["M21 3L10 14", "M21 3l-7 18-4-7-7-4z"]} />
-              </button>
+              </IconButton>
             </div>
           </div>
         </div>
         <div className="composer-meta">
           <span id="asLine" hidden={!showAsLine} title={nameLocked ? "Set by your invite link" : undefined}>
             Posting as <strong id="asName">{committed}</strong>{" "}
-            <button
+            <LinkButton
               type="button"
-              className="linkbtn"
+             
               id="asChange"
               hidden={nameLocked}
               onClick={() => {
@@ -562,13 +565,13 @@ export function Composer(p: ComposerProps) {
               }}
             >
               Change
-            </button>
+            </LinkButton>
           </span>
           <span id="clipChip" className="clip-chip" hidden={!clip && !recActive}>
             <span id="clipName">{clipChipText}</span>{" "}
-            <button
+            <LinkButton
               type="button"
-              className="linkbtn"
+             
               id="clipRemove"
               onClick={() => {
                 if (rec.discardIfRecording()) return;
@@ -576,28 +579,28 @@ export function Composer(p: ComposerProps) {
               }}
             >
               Remove
-            </button>
+            </LinkButton>
           </span>
           <span id="vidChip" className="clip-chip" hidden={!video}>
             <span id="vidName">{video ? video.name : ""}</span>{" "}
-            <button type="button" className="linkbtn" id="vidRemove" hidden={!!up} onClick={() => setVideo(null)}>
+            <LinkButton type="button" id="vidRemove" hidden={!!up} onClick={() => setVideo(null)}>
               Remove
-            </button>
+            </LinkButton>
           </span>
           <span id="fileChip" className="clip-chip" hidden={!fileAtt}>
             <span id="fileName">{fileAtt ? fileAtt.label : ""}</span>{" "}
-            <button type="button" className="linkbtn" id="fileRemove" hidden={!!up} onClick={() => setFileAtt(null)}>
+            <LinkButton type="button" id="fileRemove" hidden={!!up} onClick={() => setFileAtt(null)}>
               Remove
-            </button>
+            </LinkButton>
           </span>
           {!up && interrupted.length ? (
             <span id="uplResume" className="clip-chip warn-chip">
               <span>
                 {interrupted[0]!.names.join(", ") || "An upload"} didn't finish uploading - attach the same file and send to pick up where it stopped
               </span>{" "}
-              <button
+              <LinkButton
                 type="button"
-                className="linkbtn"
+               
                 id="uplDiscard"
                 onClick={() => {
                   const it = interrupted[0]!;
@@ -605,14 +608,14 @@ export function Composer(p: ComposerProps) {
                 }}
               >
                 Discard
-              </button>
+              </LinkButton>
             </span>
           ) : null}
           <span id="artChip" className="clip-chip" hidden={!art}>
             <span id="artName">{art ? art.label : ""}</span>{" "}
-            <button type="button" className="linkbtn" id="artRemove" onClick={() => setArt(null)}>
+            <LinkButton type="button" id="artRemove" onClick={() => setArt(null)}>
               Remove
-            </button>
+            </LinkButton>
           </span>
           <span className="hint">Ctrl+Enter to send · Enter for a new line</span>
         </div>

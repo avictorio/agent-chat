@@ -1,6 +1,8 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./shared/catalog";
+import { Button } from "../../ui/Button";
+import { Dialog } from "../../ui/Dialog";
 
 // The New game dialog, in two steps (2026-11-19). First a gallery of
 // the games - each card says what the game is, how many play, how long
@@ -116,16 +118,16 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       : def.summary(opts, picked);
 
   return (
-    <dialog className="av-dlg ng-dlg" id="newGameDlg" aria-labelledby="ngTitle" ref={dlgRef}>
+    <Dialog className="ng-dlg" id="newGameDlg" aria-labelledby="ngTitle" ref={dlgRef}>
       {!def ? (
         <>
           <div className="vd-head">
             <span className="av-name" id="ngTitle">
               New game
             </span>
-            <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
+            <Button type="button" variant="quiet" size="sm" aria-label="Close" onClick={close}>
               ✕
-            </button>
+            </Button>
           </div>
           <p className="ng-sub">Pick a game. You'll choose the players next.</p>
           <div className="ng-gallery">
@@ -149,9 +151,9 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
       ) : (
         <div style={accentStyle(def)} data-setup={def.id}>
           <div className="vd-head ng-setup-head">
-            <button type="button" className="btn sm quiet ng-back" aria-label="Back to all games" onClick={back}>
+            <Button type="button" variant="quiet" size="sm" className="ng-back" aria-label="Back to all games" onClick={back}>
               ‹
-            </button>
+            </Button>
             <span className="ng-game-ic sm">
               <GameIcon def={def} size={18} />
             </span>
@@ -159,9 +161,9 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
               {def.name}
             </span>
             <span className="sp"></span>
-            <button type="button" className="btn sm quiet" aria-label="Close" onClick={close}>
+            <Button type="button" variant="quiet" size="sm" aria-label="Close" onClick={close}>
               ✕
-            </button>
+            </Button>
           </div>
           <details className="ng-howto" open={howOpen} onToggle={(e) => setHowOpen(e.currentTarget.open)}>
             <summary>How to play</summary>
@@ -212,15 +214,15 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
             {note || hint}
           </div>
           <div className="actions">
-            <button type="button" className="btn" onClick={back}>
+            <Button type="button" onClick={back}>
               Back
-            </button>
-            <button type="button" className="btn primary" id="ngStart" disabled={!valid || busy} onClick={start}>
+            </Button>
+            <Button type="button" variant="primary" id="ngStart" disabled={!valid || busy} onClick={start}>
               {busy ? "Starting…" : "Start " + def.name}
-            </button>
+            </Button>
           </div>
         </div>
       )}
-    </dialog>
+    </Dialog>
   );
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchBuild } from "@chat/shared";
 import { store } from "../../lib/index";
+import { Button } from "../../ui/Button";
 
 // The home page's install affordances and update strip: same
 // dismissal keys and build check as the room shell's, with the
@@ -89,12 +90,12 @@ export function HomeInstallStrip({
         <strong>Install Agent Chat</strong>
         <span id="installSteps">{inst.steps}</span>
       </span>
-      <button type="button" className="btn sm primary" id="installGo" onClick={() => inst.runInstall(goToRooms)}>
+      <Button type="button" variant="primary" size="sm" id="installGo" onClick={() => inst.runInstall(goToRooms)}>
         Install
-      </button>
-      <button type="button" className="btn sm quiet" id="installHide" aria-label="Dismiss install banner" onClick={inst.dismiss}>
+      </Button>
+      <Button type="button" variant="quiet" size="sm" id="installHide" aria-label="Dismiss install banner" onClick={inst.dismiss}>
         ✕
-      </button>
+      </Button>
     </div>
   );
 }
@@ -136,12 +137,12 @@ export function HomeUpdateStrip() {
       <span className="ib-text">
         <strong>New version available</strong> - this page is behind the latest update
       </span>
-      <button type="button" className="btn sm primary" id="updateRefresh" onClick={() => location.reload()}>
+      <Button type="button" variant="primary" size="sm" id="updateRefresh" onClick={() => location.reload()}>
         Refresh
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
-        className="btn sm quiet"
+        variant="quiet" size="sm"
         id="updateDismiss"
         aria-label="Dismiss update banner"
         onClick={() => {
@@ -150,7 +151,7 @@ export function HomeUpdateStrip() {
         }}
       >
         ✕
-      </button>
+      </Button>
     </div>
   );
 }

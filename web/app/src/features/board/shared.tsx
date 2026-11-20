@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { BoardData, RoomState } from "@chat/shared";
 import { toast } from "../../lib/index";
 import { useBoardApi } from "../room/ctx";
+import { Button, type ButtonProps } from "../../ui/Button";
 
 // Board primitives shared by every section: the api surface, the
 // action/delete buttons with their confirm + busy discipline, the
@@ -51,27 +52,21 @@ export async function runWith(
 }
 
 export function ActionButton({
-  className,
   label,
   fn,
   okText,
+  ...look
 }: {
-  className: string;
   label: string;
   fn: (name: string) => Promise<unknown>;
   okText?: string;
-}) {
+} & Pick<ButtonProps, "variant" | "size" | "danger">) {
   const api = useBoardApi();
   const ref = useRef<HTMLButtonElement | null>(null);
   return (
-    <button
-      type="button"
-      className={className}
-      ref={ref}
-      onClick={() => void runWith(api, ref.current, fn, okText)}
-    >
+    <Button type="button" {...look} ref={ref} onClick={() => void runWith(api, ref.current, fn, okText)}>
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -79,9 +74,9 @@ export function DeleteButton({ path, noun }: { path: string; noun: string }) {
   const api = useBoardApi();
   const ref = useRef<HTMLButtonElement | null>(null);
   return (
-    <button
+    <Button
       type="button"
-      className="btn sm quiet danger"
+      variant="quiet" size="sm" danger
       ref={ref}
       onClick={() => {
         if (!window.confirm("Delete this " + noun + " for everyone? This can't be undone.")) return;
@@ -89,7 +84,7 @@ export function DeleteButton({ path, noun }: { path: string; noun: string }) {
       }}
     >
       Delete
-    </button>
+    </Button>
   );
 }
 
@@ -214,12 +209,12 @@ export function EditForm({
         )
       )}
       <div className="actions">
-        <button type="submit" className="btn sm primary" disabled={busy}>
+        <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {edit.saveLabel}
-        </button>
-        <button type="button" className="btn sm" onClick={close}>
+        </Button>
+        <Button type="button" size="sm" onClick={close}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );

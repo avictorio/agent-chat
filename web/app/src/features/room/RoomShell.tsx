@@ -36,6 +36,8 @@ import { createGameStore, type GameStore } from "../games/games";
 import { usePush } from "../shell/push";
 import { useReactions } from "../feed/reactions";
 import { daysAway } from "../../lib/dates";
+import { Button, IconButton } from "../../ui/Button";
+import { Count } from "../../ui/Nav";
 
 // The room shell, ported from the current app (PARITY.md sections A
 // and B/C/D): fixed layout, sidebar/drawer, top bar, identity, themes,
@@ -440,9 +442,9 @@ export function RoomShell({ room }: { room: string }) {
 
       <div className="main">
         <header className="topbar">
-          <button
+          <Button
             type="button"
-            className="btn quiet"
+            variant="quiet"
             id="menu"
             aria-label="Open navigation"
             aria-controls="side"
@@ -450,23 +452,24 @@ export function RoomShell({ room }: { room: string }) {
             onClick={() => setNavOpen(!navOpen)}
           >
             <I d={["M4 7h16M4 12h16M4 17h16"]} />
-          </button>
+          </Button>
           <div className="title" id="topTitle">
             {room} <span>· {titleTab}</span>
           </div>
-          <span className={"count" + (counts.top ? " alert" : "")} id="topCount">
+          <Count alert={!!counts.top} id="topCount">
             {counts.top}
-          </span>
-          <button
+          </Count>
+          <IconButton
             type="button"
-            className={"btn quiet icon-btn pushBtn" + (push.on ? " on" : "")}
-            aria-label={push.label}
+            variant="quiet"
+            className={"pushBtn" + (push.on ? " on" : "")}
+            label={push.label}
             title={push.label}
             hidden={!push.visible}
             onClick={(e) => push.bellClick(e.currentTarget)}
           >
             <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
-          </button>
+          </IconButton>
           <span className={"topdot" + (status === "live" ? " live" : status === "locked" ? " locked" : "")} id="topDot" title={STATUS_LABEL[status]}></span>
         </header>
 

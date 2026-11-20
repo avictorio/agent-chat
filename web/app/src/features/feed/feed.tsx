@@ -6,6 +6,7 @@ import { RxChips } from "./reactions";
 import { MediaBlocks } from "./media";
 import { same } from "../../lib/index";
 import { useFeed, useMembers, useSession } from "../room/ctx";
+import { Button } from "../../ui/Button";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -261,9 +262,9 @@ export function ChatFeed({
         )}
       </div>
       <div className="jump-wrap">
-        <button
+        <Button
           type="button"
-          className="btn sm jump"
+          size="sm" className="jump"
           id="jump"
           hidden={!jumpVisible}
           onClick={(e) => {
@@ -273,7 +274,7 @@ export function ChatFeed({
           }}
         >
           New messages ↓
-        </button>
+        </Button>
       </div>
     </div>
   );

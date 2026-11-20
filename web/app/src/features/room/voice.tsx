@@ -2,6 +2,8 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { VoiceState } from "@chat/shared";
 import { toast } from "../../lib/index";
 import { useSession } from "./ctx";
+import { Button } from "../../ui/Button";
+import { Dialog } from "../../ui/Dialog";
 
 // The "Your voice" dialog, ported from the current app: record the
 // script (or upload a sample file), the server clones it, and the
@@ -242,8 +244,8 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
     };
 
     return (
-      <dialog
-        className="av-dlg voice-dlg"
+      <Dialog
+        className="voice-dlg"
         id="voiceDlg"
         aria-labelledby="voiceTitle"
         ref={dlgRef}
@@ -263,15 +265,15 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
           <span className="av-name" id="voiceTitle">
             Your voice
           </span>
-          <button
+          <Button
             type="button"
-            className="btn sm quiet"
+            variant="quiet" size="sm"
             id="voiceClose"
             aria-label="Close"
             onClick={() => dlgRef.current?.close()}
           >
             ✕
-          </button>
+          </Button>
         </div>
         <p className="vd-status" id="voiceStatus">
           {status}
@@ -280,15 +282,17 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
         <p className="vd-label">Read this aloud</p>
         <p className="voice-script">{SCRIPT}</p>
         <div className="vd-row">
-          <button
+          <Button
             type="button"
-            className={"btn sm primary" + (recording ? " recording" : "")}
+            size="sm"
+            variant="primary"
+            className={recording ? "recording" : undefined}
             id="voiceRec"
             hidden={!canRecord}
             onClick={() => void recClick()}
           >
             {recBtnLabel}
-          </button>
+          </Button>
           <span className="vd-meta" id="voiceRecMeta">
             {recMeta}
           </span>
@@ -313,15 +317,15 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
         </div>
         <p className="vd-hint">Or upload a file instead — MP3, WAV, M4A, OGG or WebM, up to 10 MB.</p>
         <div className="vd-actions">
-          <button type="button" className="btn sm" id="voiceRemove" onClick={() => void remove()}>
+          <Button type="button" size="sm" id="voiceRemove" onClick={() => void remove()}>
             Remove voice
-          </button>
+          </Button>
           <span className="vd-sp"></span>
-          <button type="button" className="btn sm primary" id="voiceUpload" onClick={() => void upload()}>
+          <Button type="button" variant="primary" size="sm" id="voiceUpload" onClick={() => void upload()}>
             Upload sample
-          </button>
+          </Button>
         </div>
-      </dialog>
+      </Dialog>
     );
   }
 );

@@ -3,6 +3,8 @@ import type { MembersResponse } from "@chat/shared";
 import { same, toast } from "../../lib/index";
 import { Avatar, KindTag } from "../feed/feed";
 import { errText, type BoardApi } from "./shared";
+import { Button } from "../../ui/Button";
+import { Dialog } from "../../ui/Dialog";
 
 // Your photo: file validation, the canvas downscale (animated GIFs
 // pass through untouched), the upload, and the dialog.
@@ -113,16 +115,7 @@ export function AvatarDialog({
   });
   const kind = member?.kind;
   return (
-    <dialog
-      className="av-dlg"
-      id="avDlg"
-      ref={dlgRef}
-      aria-label="Member picture"
-      onClose={onClose}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) e.currentTarget.close();
-      }}
-    >
+    <Dialog id="avDlg" ref={dlgRef} aria-label="Member picture" onClose={onClose} closeOnBackdrop>
       {name && (
         <>
           <div className="av-big" id="avBig">
@@ -139,12 +132,12 @@ export function AvatarDialog({
               {kind ? <KindTag kind={kind} /> : null}
             </span>
           </div>
-          <button type="button" className="btn sm" id="avClose" ref={closeRef} onClick={() => dlgRef.current?.close()}>
+          <Button type="button" size="sm" id="avClose" ref={closeRef} onClick={() => dlgRef.current?.close()}>
             Close
-          </button>
+          </Button>
         </>
       )}
-    </dialog>
+    </Dialog>
   );
 }
 

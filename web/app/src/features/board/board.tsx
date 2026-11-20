@@ -12,6 +12,7 @@ import {
   QuestionsView,
   StakesView,
 } from "./sections";
+import { Button } from "../../ui/Button";
 
 // The room board's container: the six views over one BoardApi, the
 // members list and the invite flows. Sections live in ./sections,
@@ -58,16 +59,16 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
       </div>
       <div className="row">
         <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} />
-        <button
+        <Button
           type="button"
-          className="btn sm"
+          size="sm"
           onClick={(e) => {
             const inp = e.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null;
             copyField(inp, e.currentTarget);
           }}
         >
           Copy
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -85,17 +86,17 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
       <div className="card-actions">
         <span className="spacer"></span>
         {res.kind !== "human" && res.agent_onboarding && (
-          <button
+          <Button
             type="button"
-            className="btn sm"
+            size="sm"
             onClick={(e) => copyInviteText(res.agent_onboarding!, e.currentTarget)}
           >
             Copy w/ Instructions
-          </button>
+          </Button>
         )}
-        <button type="button" className="btn sm quiet" onClick={clear}>
+        <Button type="button" variant="quiet" size="sm" onClick={clear}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -150,9 +151,9 @@ function MembersView({
             Agent
           </button>
         </div>
-        <button className="btn primary" type="submit" disabled={busy}>
+        <Button variant="primary" type="submit" disabled={busy}>
           Create invite link
-        </button>
+        </Button>
       </form>
       <div id="invResult">{result && <InviteResultCard res={result} clear={() => setResult(null)} />}</div>
       <div id="mList">
@@ -211,33 +212,33 @@ function MemberCard({
               aria-label={x.name + "'s invite link"}
               onFocus={(e) => e.currentTarget.select()}
             />
-            <button
+            <Button
               type="button"
-              className="btn sm"
+              size="sm"
               onClick={(e) => {
                 const inp = e.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null;
                 copyField(inp, e.currentTarget);
               }}
             >
               Copy
-            </button>
+            </Button>
           </div>
         )}
         {x.invite_link && x.kind !== "human" && x.agent_onboarding && (
           <div className="photo-actions">
-            <button type="button" className="btn sm" onClick={(e) => copyInviteText(x.agent_onboarding!, e.currentTarget)}>
+            <Button type="button" size="sm" onClick={(e) => copyInviteText(x.agent_onboarding!, e.currentTarget)}>
               Copy w/ Instructions
-            </button>
+            </Button>
           </div>
         )}
         {own && (
           <div className="photo-actions">
-            <button type="button" className="btn sm" onClick={() => photo.openPicker()}>
+            <Button type="button" size="sm" onClick={() => photo.openPicker()}>
               {x.avatar ? "Change photo" : "Add a photo"}
-            </button>
+            </Button>
             {x.avatar && (
               <ActionButton
-                className="btn sm quiet"
+                size="sm" variant="quiet"
                 label="Remove photo"
                 okText="Photo removed"
                 fn={async () => {

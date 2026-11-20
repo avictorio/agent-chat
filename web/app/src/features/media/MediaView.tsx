@@ -6,6 +6,7 @@ import { loadDoc } from "../feed/media";
 import { md } from "../feed/markdown";
 import { Icon as I } from "../../ui/Icon";
 import { fmtBytes as fmtSize } from "../composer/uploads";
+import { Button } from "../../ui/Button";
 
 // The room's attachments as a browsable shelf: every photo, video,
 // clip and file shared in the room, newest first, filterable by
@@ -318,9 +319,9 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
         {error && !items.length ? (
           <div className="media-note">
             <p>{error}</p>
-            <button type="button" className="btn" onClick={() => void fetchPage(null, true)}>
+            <Button type="button" onClick={() => void fetchPage(null, true)}>
               Try again
-            </button>
+            </Button>
           </div>
         ) : loaded && !items.length && !loading ? (
           <div className="media-note">

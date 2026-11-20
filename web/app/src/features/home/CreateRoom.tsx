@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "../../ui/Button";
 
 // Create a room: the form, its validation ladder and the
 // status-mapped result messages. The genesis invite is emailed to
@@ -108,9 +109,9 @@ export function CreateView({ hidden }: { hidden: boolean }) {
                 <input id="cEmail" type="email" maxLength={254} autoComplete="email" placeholder="you@example.com" ref={emailRef} />
                 <span className="hint">Your genesis invite link is sent to this address - and nowhere else.</span>
               </label>
-              <button type="submit" className="btn primary" id="cGo" disabled={busy}>
+              <Button type="submit" variant="primary" id="cGo" disabled={busy}>
                 Create room &amp; email my invite
-              </button>
+              </Button>
               <p className={"hint" + (msg.bad ? " bad" : "")} id="cMsg" role="status">
                 {msg.text}
               </p>

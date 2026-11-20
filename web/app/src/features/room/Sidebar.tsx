@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { Icon as I } from "../../ui/Icon";
+import { Button } from "../../ui/Button";
+import { Count, NavTab } from "../../ui/Nav";
 
 // The room sidebar: brand, room name + lock, connection status,
 // the tab list with its counts, and the foot rows (theme, copy
@@ -103,21 +105,13 @@ export function Sidebar(p: SidebarProps) {
   const tabBtn = (id: string, label: string) => {
     const c = countFor(id);
     return (
-      <button
-        type="button"
-        className="tab"
-        data-tab={id}
-        key={id}
-        disabled={p.tabsDisabled}
-        aria-current={p.tab === id && !p.denied && !p.gate ? "page" : undefined}
-        onClick={() => p.show(id)}
-      >
+      <NavTab data-tab={id} key={id} disabled={p.tabsDisabled} current={p.tab === id && !p.denied && !p.gate} onClick={() => p.show(id)}>
         {ICONS[id]}
         {label}
-        <span className={"count" + (c.alert ? " alert" : "")} id={"c-" + id}>
+        <Count alert={c.alert} id={"c-" + id}>
           {c.text}
-        </span>
-      </button>
+        </Count>
+      </NavTab>
     );
   };
   return (
@@ -169,15 +163,16 @@ export function Sidebar(p: SidebarProps) {
             </div>
           </div>
           <div className="foot-row">
-            <button type="button" className="btn sm" id="copy" onClick={p.copyLink}>
+            <Button type="button" size="sm" id="copy" onClick={p.copyLink}>
               <I d={["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"]} />
               <span>{p.copied ? "Link copied" : "Copy room link"}</span>
-            </button>
+            </Button>
           </div>
           <div className="foot-row">
-            <button
+            <Button
               type="button"
-              className={"btn sm pushBtn" + (p.push.on ? " on" : "")}
+              size="sm"
+              className={"pushBtn" + (p.push.on ? " on" : "")}
               hidden={!p.push.visible}
               title={p.push.label}
               aria-label={p.push.label}
@@ -185,19 +180,19 @@ export function Sidebar(p: SidebarProps) {
             >
               <I d={["M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z", "M10 20a2.2 2.2 0 0 0 4 0"]} />
               <span className="pushLabel">{p.push.label}</span>
-            </button>
+            </Button>
           </div>
           <div className="foot-row">
-            <button type="button" className="btn sm" id="voiceBtn" hidden={p.voiceHidden} onClick={p.onVoice}>
+            <Button type="button" size="sm" id="voiceBtn" hidden={p.voiceHidden} onClick={p.onVoice}>
               <I d={["M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0", "M12 18v3"]} />
               <span>Your voice</span>
-            </button>
+            </Button>
           </div>
           <div className="foot-row">
-            <button type="button" className="btn sm" id="installBtn" hidden={!p.install.buttonVisible} onClick={p.install.runInstall}>
+            <Button type="button" size="sm" id="installBtn" hidden={!p.install.buttonVisible} onClick={p.install.runInstall}>
               <I d={["M12 3v10m0 0l-4-4m4 4l4-4", "M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"]} />
               <span>Install app</span>
-            </button>
+            </Button>
           </div>
         </div>
       </aside>

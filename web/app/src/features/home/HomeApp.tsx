@@ -7,6 +7,8 @@ import { store } from "../../lib/index";
 import { registerServiceWorker } from "../shell/shell";
 import { usePullToRefresh } from "../shell/strips";
 import "./home.css";
+import { Button } from "../../ui/Button";
+import { Count, NavTab } from "../../ui/Nav";
 
 // The home page, ported from src/home.html: your rooms on this
 // device (invite tokens + identities kept in local storage by the
@@ -190,46 +192,44 @@ export default function HomeApp() {
             </div>
           </div>
           <nav className="tabs" id="tabs">
-            <button type="button" className="tab" data-view="rooms" aria-current={view === "rooms" ? "page" : undefined} onClick={() => show("rooms")}>
+            <NavTab data-view="rooms" current={view === "rooms"} onClick={() => show("rooms")}>
               <I d={["M4 5h16v11H9l-5 4z"]} />
               Your rooms
-              <span className="count" id="c-rooms">
-                {rooms.length ? String(rooms.length) : ""}
-              </span>
-            </button>
-            <button type="button" className="tab" data-view="create" aria-current={view === "create" ? "page" : undefined} onClick={() => show("create")}>
+              <Count id="c-rooms">{rooms.length ? String(rooms.length) : ""}</Count>
+            </NavTab>
+            <NavTab data-view="create" current={view === "create"} onClick={() => show("create")}>
               <svg className="i" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 8v8M8 12h8" />
               </svg>
               Create a room
-            </button>
+            </NavTab>
             <div className="nav-label">Learn</div>
-            <button type="button" className="tab" data-view="how" aria-current={view === "how" ? "page" : undefined} onClick={() => show("how")}>
+            <NavTab data-view="how" current={view === "how"} onClick={() => show("how")}>
               <svg className="i" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.4" />
                 <path d="M12 17h.01" />
               </svg>
               How it works
-            </button>
-            <button type="button" className="tab" data-view="agents" aria-current={view === "agents" ? "page" : undefined} onClick={() => show("agents")}>
+            </NavTab>
+            <NavTab data-view="agents" current={view === "agents"} onClick={() => show("agents")}>
               <I d={["M4 17l6-5-6-5", "M12 19h8"]} />
               For agents
-            </button>
+            </NavTab>
           </nav>
           <div className="side-foot">
             <div className="foot-row">
-              <button
+              <Button
                 type="button"
-                className="btn sm"
+                size="sm"
                 id="installSide"
                 hidden={!inst.sideVisible}
                 onClick={() => inst.runInstall(() => show("rooms"))}
               >
                 <I d={["M12 3v10m0 0l-4-4m4 4l4-4", "M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"]} />
                 <span>Install app</span>
-              </button>
+              </Button>
             </div>
             <div className="foot-row">
               <div className="seg full" role="group" aria-label="Color theme">
@@ -252,9 +252,9 @@ export default function HomeApp() {
 
         <div className="main">
           <header className="topbar">
-            <button
+            <Button
               type="button"
-              className="btn quiet"
+              variant="quiet"
               id="menu"
               aria-label="Open navigation"
               aria-controls="side"
@@ -262,7 +262,7 @@ export default function HomeApp() {
               onClick={() => setNavOpen(!navOpen)}
             >
               <I d={["M4 7h16M4 12h16M4 17h16"]} />
-            </button>
+            </Button>
             <div className="title" id="topTitle">
               {VIEWS[view]}
             </div>
@@ -284,9 +284,9 @@ export default function HomeApp() {
                   <h2>Have an invite link?</h2>
                   <form className="row" id="joinlink" onSubmit={onJoin}>
                     <input id="link" placeholder="Paste invite link" maxLength={512} autoCapitalize="off" spellCheck={false} aria-label="Invite link" />
-                    <button type="submit" className="btn primary">
+                    <Button type="submit" variant="primary">
                       Open
-                    </button>
+                    </Button>
                   </form>
                   <p className={"hint" + (hintState.bad ? " bad" : "")} id="hint">
                     {hintState.msg}
@@ -326,9 +326,9 @@ export default function HomeApp() {
                 <div className="empty" id="roomsEmpty" hidden={rooms.length > 0}>
                   <I d={["M4 5h16v11H9l-5 4z"]} />
                   <p>No rooms yet. Open an invite link above, or create your own.</p>
-                  <button type="button" className="btn primary" id="emptyCreate" onClick={() => show("create")}>
+                  <Button type="button" variant="primary" id="emptyCreate" onClick={() => show("create")}>
                     Create a room
-                  </button>
+                  </Button>
                 </div>
                 <dialog
                   id="forgetDlg"
@@ -348,9 +348,9 @@ export default function HomeApp() {
                     invite for it. You will need the invite link again to get back in. The room itself is not deleted.
                   </p>
                   <div className="dlg-actions">
-                    <button
+                    <Button
                       type="button"
-                      className="btn"
+                     
                       id="forgetNo"
                       onClick={() => {
                         setForgetRoom(null);
@@ -358,10 +358,10 @@ export default function HomeApp() {
                       }}
                     >
                       Cancel
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
-                      className="btn danger-solid"
+                      className="danger-solid"
                       id="forgetYes"
                       onClick={() => {
                         if (forgetRoom) doForget(forgetRoom);
@@ -369,7 +369,7 @@ export default function HomeApp() {
                       }}
                     >
                       Forget
-                    </button>
+                    </Button>
                   </div>
                 </dialog>
               </div>
