@@ -15,6 +15,7 @@ import {
 } from "./shared";
 import { Button } from "../../ui/Button";
 import { Card, CardActions, CardMeta, CardText, CardTitle } from "../../ui/Card";
+import { Pill, type PillTone } from "../../ui/Pill";
 
 // The board's five content sections, ported from the current app.
 
@@ -58,7 +59,7 @@ export function ConstitutionView() {
           ) : (
             <>
               <CardMeta style={{ marginTop: 0, marginBottom: 10 }}>
-                <span className="pill">Version {c.version}</span>
+                <Pill>Version {c.version}</Pill>
                 <span>
                   Edited by {c.editor} · {shortDate(c.ts)}, {new Date(c.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                 </span>
@@ -140,9 +141,9 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
             <span>
               Recorded by {x.added_by} · {shortDate(x.ts)}
             </span>
-            <span className={signers.length ? "pill" : "pill muted"}>
+            <Pill tone={signers.length ? undefined : "muted"}>
               {signers.length ? signers.length + (signers.length === 1 ? " signature" : " signatures") : "No signatures yet"}
-            </span>
+            </Pill>
           </CardMeta>
           {signers.length > 0 && (
             <div className="chips">
@@ -156,7 +157,7 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
           )}
           {missing.length > 0 && (
             <CardMeta>
-              <span className="pill warn">Waiting on {missing.join(", ")}</span>
+              <Pill tone="warn">Waiting on {missing.join(", ")}</Pill>
             </CardMeta>
           )}
           <CardActions>
@@ -254,11 +255,11 @@ function QuestionCard({ x }: { x: Question }) {
           </CardTitle>
           <CardMeta>
             {x.status === "claimed" ? (
-              <span className="pill warn">Claimed by {x.claimed_by}</span>
+              <Pill tone="warn">Claimed by {x.claimed_by}</Pill>
             ) : resolved ? (
-              <span className="pill">Resolved by {x.resolved_by}</span>
+              <Pill>Resolved by {x.resolved_by}</Pill>
             ) : (
-              <span className="pill muted">Unclaimed</span>
+              <Pill tone="muted">Unclaimed</Pill>
             )}
             <span>
               Asked by {x.added_by} · {rel(x.ts)}
@@ -368,17 +369,17 @@ export function QuestionsView() {
 
 /* ---------- Stakes ---------- */
 
-function whenLabel(date: string): { text: string; rel: string; cls: string } {
+function whenLabel(date: string): { text: string; rel: string; tone: PillTone } {
   const n = daysAway(date);
   const d = parseDay(date);
   const txt = d
     ? d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })
     : date;
-  if (n === null) return { text: txt, rel: "", cls: "pill muted" };
-  if (n < 0) return { text: txt, rel: (n === -1 ? "1 day" : -n + " days") + " overdue", cls: "pill danger" };
-  if (n === 0) return { text: txt, rel: "Today", cls: "pill warn" };
-  if (n === 1) return { text: txt, rel: "Tomorrow", cls: "pill warn" };
-  return { text: txt, rel: "In " + n + " days", cls: n <= 7 ? "pill warn" : "pill muted" };
+  if (n === null) return { text: txt, rel: "", tone: "muted" };
+  if (n < 0) return { text: txt, rel: (n === -1 ? "1 day" : -n + " days") + " overdue", tone: "danger" };
+  if (n === 0) return { text: txt, rel: "Today", tone: "warn" };
+  if (n === 1) return { text: txt, rel: "Tomorrow", tone: "warn" };
+  return { text: txt, rel: "In " + n + " days", tone: n <= 7 ? "warn" : "muted" };
 }
 
 function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
@@ -402,7 +403,7 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
                   const w = whenLabel(x.date);
                   return (
                     <>
-                      <span className={isDone ? "pill muted" : w.cls}>{isDone ? w.text : w.rel}</span>
+                      <Pill tone={isDone ? "muted" : w.tone}>{isDone ? w.text : w.rel}</Pill>
                       {!isDone && <span>{w.text}</span>}
                     </>
                   );

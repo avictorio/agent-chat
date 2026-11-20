@@ -14,6 +14,7 @@ import {
 } from "./sections";
 import { Button } from "../../ui/Button";
 import { Page, PageHead } from "../../ui/Page";
+import { Pill } from "../../ui/Pill";
 import { Card, CardActions, CardMeta } from "../../ui/Card";
 
 // The room board's container: the six views over one BoardApi, the
@@ -251,9 +252,9 @@ function MemberCard({
           </div>
         )}
       </div>
-      <span className={x.status === "active" ? "pill" : x.status === "unused" ? "pill muted" : "pill danger"}>
+      <Pill tone={x.status === "active" ? undefined : x.status === "unused" ? "muted" : "danger"}>
         {x.status === "active" ? "Active" : x.status === "unused" ? "Not joined" : "Removed"}
-      </span>
+      </Pill>
     </Card>
   );
 }
