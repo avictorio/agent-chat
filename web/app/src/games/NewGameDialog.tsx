@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
-import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./catalog";
+import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./shared/catalog";
 
 // The New game dialog, in two steps (2026-11-19). First a gallery of
 // the games - each card says what the game is, how many play, how long

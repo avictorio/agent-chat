@@ -509,7 +509,7 @@ change behavior. In summary:
   fully self-contained; anything less strict would let a posted page
   reach the room API with the viewer's invite.
 - **Game catalog and picker (2026-11-19):** everything the web app says
-  about a game lives in one entry in `web/app/src/games/catalog.tsx`:
+  about a game lives in one entry in `web/app/src/games/shared/catalog.tsx`:
   name, icon, accent, gallery pitch and facts (players, length, pace),
   How to play, setup options and the create-call body. The New game
   dialog is a gallery of those entries, then the chosen game's setup

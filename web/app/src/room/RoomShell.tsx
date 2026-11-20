@@ -25,7 +25,7 @@ import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
 import { GamesView } from "../games/GamesView";
 import { MediaView } from "../media/MediaView";
-import { playYourMoveChime, unlockChime } from "../games/chime";
+import { playYourMoveChime, unlockChime } from "../games/shared/chime";
 import type { BoardApi } from "../board/shared";
 import { AvatarDialog, usePhotoUpload } from "../board/avatar";
 import { useViewerHost } from "../shell/viewer";

@@ -241,8 +241,17 @@ limits and the games move before `agents/`.
 
 ## Phase 3: reorganize the web app
 
-- [ ] 3.1 `games/` into `games/shared/`, `games/three/` and one folder per
-      game (moves and import paths only)
+- [x] 3.1 `games/` into `games/shared/`, `games/three/` and one folder per
+      game (moves and import paths only): 43 files moved with the new
+      `scripts/move-files.js` (git mv, then every relative import that
+      names a moved file, or that a moved file makes, rewritten - 152
+      specifiers in 40 files). `three/` holds the arena primitives
+      (arena3d, juice, atmos, sfx, fire), `shared/` the 2D side every game
+      shares (catalog, render, gamecard, WinnerBanner, chime), and each of
+      the 16 games has a folder with its arena, its panel helpers and its
+      own pieces (battleship/ ocean and ships, lightcycles/ cycles and
+      lcmodel). `games.ts` and the views RoomShell opens stay at the top.
+      The skill, AGENTS.md and web/README.md name the new paths
 - [ ] 3.2 `features/` (room, feed, composer, board, media, home, shell)
       and `app/` (App, main, routing)
 - [ ] 3.3 `ui/` design system: `tokens.css` (the `:root` variables),
@@ -296,3 +305,4 @@ limits and the games move before `agents/`.
 | 2026-11-20 | 2.3: `platform/` + `lib/media.js` | fe4a36c | API suite green (631 checks); version 169da5fb (21 modules). Live: `/api`, `/api/push/key`, a signed avatar, attachment media full (200) and ranged (206). |
 | 2026-11-20 | 2.6: `agents/` | f5a6560 | API suite green (631); version 651e09e2. Live (re-checked with 2.7): `/api`, `/api.txt`, `/llms.txt`, a real room's `agent-recipe` and MCP `tools/list` (22 tools). |
 | 2026-11-20 | 2.7: `routes/` | 0c146fe | API suite green (631); version f909aee6. Live, read only: `/api`, `/api/build` and the page stamp (426bbdbc1870bc96), `/sw.js`, the manifest, an icon, `/emoji.json`, `/api/push/key`; on a real room its page, messages, members, welcome, games and a match's full state, the board (constitution, questions, digests, stakes, decisions), attachments, tools, invites, the agent recipe, MCP `tools/list`, a signed avatar, and an attachment full (200) and ranged (206). |
+| 2026-11-20 | 2.8: `room/` | efa5e62 (deployed with a740c58) | API suite green (631); version 4cedccf9. Live, read only: the same set as 2.7 - pages, docs, a real room's reads (messages, members, welcome, games and a match's full state, the board, attachments, tools, invites, recipe), MCP `tools/list`, a signed avatar, an attachment full and ranged. |

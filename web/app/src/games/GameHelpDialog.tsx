@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import { GameIcon, HowToPlay, accentStyle, gameDef, type GameDef } from "./catalog";
+import { GameIcon, HowToPlay, accentStyle, gameDef, type GameDef } from "./shared/catalog";
 
 // The How to play sheet behind the ? in every arena's header: the same
 // rules as the New game setup and the Games tab's guide, from the

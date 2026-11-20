@@ -5,7 +5,7 @@ import { md } from "./markdown";
 import { pressable } from "../lib";
 import { fmtBytes } from "../composer/uploads";
 import type { ViewerApi } from "../shell/viewer";
-import { GameCardBlock } from "../games/gamecard";
+import { GameCardBlock } from "../games/shared/gamecard";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card

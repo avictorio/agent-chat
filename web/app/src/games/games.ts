@@ -1,22 +1,22 @@
-import type { Placing as BsPlacing } from "./BsArena3D";
+import type { Placing as BsPlacing } from "./battleship/BsArena3D";
 import type { RoomClient } from "@chat/shared";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../lib";
-import { matchTitle } from "./catalog";
-import { flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
-import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
-import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
-import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
-import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction";
-import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice";
-import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths";
-import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
-import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
-import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
-import { sgArtistPanel, sgGuessForm, sgHistoryRows, sgLastRound, sgMakePad, sgReveal, sgScores, type SgPad } from "./sketch";
-import { tvAnswerForm, tvAskForm, tvHistoryRows, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores, type TvAnsDraft, type TvAskDraft } from "./trivia";
-import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid";
+import { matchTitle } from "./shared/catalog";
+import { flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines/frontlines";
+import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace/coderace";
+import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow/fourinarow";
+import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust/trust";
+import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction/auction";
+import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice/liarsdice";
+import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths/twotruths";
+import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse/corpse";
+import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty/twenty";
+import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf/werewolf";
+import { sgArtistPanel, sgGuessForm, sgHistoryRows, sgLastRound, sgMakePad, sgReveal, sgScores, type SgPad } from "./sketch/sketch";
+import { tvAnswerForm, tvAskForm, tvHistoryRows, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores, type TvAnsDraft, type TvAskDraft } from "./trivia/trivia";
+import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid/lettergrid";
 import {
   battleshipBoard,
   bsGrid,
@@ -34,7 +34,7 @@ import {
   THROW_BEATS,
   THROW_EMOJI,
   type GL,
-} from "./render";
+} from "./shared/render";
 import type { ViewerApi } from "../shell/viewer";
 
 /* A 3D arena's host element, its React root and its status layer
@@ -1140,19 +1140,19 @@ export function createGameStore(opts: {
   type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void; draft?: { word: string; path: number[][] | null } | null; onCell?: (r: number, c: number) => void };
   type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
   const KIND3D: Record<string, Kind3d> = {
-    frontlines: { cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
-    coderace: { cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
-    fourinarow: { cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
-    trust: { cls: "tr-3d-host", load: () => import("./TrustArena3D"), comp: null },
-    auction: { cls: "au-3d-host", load: () => import("./AuctionArena3D"), comp: null },
-    twotruths: { cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
-    corpse: { cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
-    twenty: { cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
-    werewolf: { cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
-    lettergrid: { cls: "lg-3d-host", load: () => import("./LetterArena3D"), comp: null },
-    trivia: { cls: "tv-3d-host", load: () => import("./TriviaArena3D"), comp: null },
-    sketch: { cls: "sg-3d-host", load: () => import("./SketchArena3D"), comp: null },
-    liarsdice: { cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
+    frontlines: { cls: "fl-3d-host", load: () => import("./frontlines/FrontlinesArena3D"), comp: null },
+    coderace: { cls: "cr-3d-host", load: () => import("./coderace/CodeRaceArena3D"), comp: null },
+    fourinarow: { cls: "c4-3d-host", load: () => import("./fourinarow/FourArena3D"), comp: null },
+    trust: { cls: "tr-3d-host", load: () => import("./trust/TrustArena3D"), comp: null },
+    auction: { cls: "au-3d-host", load: () => import("./auction/AuctionArena3D"), comp: null },
+    twotruths: { cls: "tt-3d-host", load: () => import("./twotruths/TwoTruthsArena3D"), comp: null },
+    corpse: { cls: "ec-3d-host", load: () => import("./corpse/CorpseArena3D"), comp: null },
+    twenty: { cls: "tq-3d-host", load: () => import("./twenty/TwentyArena3D"), comp: null },
+    werewolf: { cls: "ww-3d-host", load: () => import("./werewolf/WerewolfArena3D"), comp: null },
+    lettergrid: { cls: "lg-3d-host", load: () => import("./lettergrid/LetterArena3D"), comp: null },
+    trivia: { cls: "tv-3d-host", load: () => import("./trivia/TriviaArena3D"), comp: null },
+    sketch: { cls: "sg-3d-host", load: () => import("./sketch/SketchArena3D"), comp: null },
+    liarsdice: { cls: "ld-3d-host", load: () => import("./liarsdice/LiarsArena3D"), comp: null },
   };
   function load3d(kind: string) {
     const k = KIND3D[kind]!;
@@ -2634,7 +2634,7 @@ export function createGameStore(opts: {
   function loadLc3d() {
     // A failed import is not remembered: the next paint tries again.
     if (!lc3dComp)
-      lc3dComp = import("./LcArena3D")
+      lc3dComp = import("./lightcycles/LcArena3D")
         .then((m) => m.default)
         .catch((e) => {
           lc3dComp = null;
@@ -2693,7 +2693,7 @@ export function createGameStore(opts: {
   function loadBs3d() {
     // A failed import is not remembered: the next paint tries again.
     if (!bs3dComp)
-      bs3dComp = import("./BsArena3D")
+      bs3dComp = import("./battleship/BsArena3D")
         .then((m) => m.default)
         .catch((e) => {
           bs3dComp = null;
@@ -2777,7 +2777,7 @@ export function createGameStore(opts: {
   > | null = null;
   function loadDuel3d() {
     if (!duel3dComp)
-      duel3dComp = import("./DuelArena3D")
+      duel3dComp = import("./duel/DuelArena3D")
         .then((m) => m.default)
         .catch((e) => {
           duel3dComp = null;

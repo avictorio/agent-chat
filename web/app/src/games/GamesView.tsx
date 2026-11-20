@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import type { GameSummary } from "@chat/shared";
 import { useFeed, useSession } from "../room/ctx";
-import { finalScore, formatLeft, type GL } from "./render";
-import { chimeMuted, setChimeMuted } from "./chime";
+import { finalScore, formatLeft, type GL } from "./shared/render";
+import { chimeMuted, setChimeMuted } from "./shared/chime";
 import { pressable } from "../lib";
-import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle } from "./catalog";
+import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
 
 // Standings with motion, from the finished list (newest first): each
 // player's current streak, and their rank before the kind's most

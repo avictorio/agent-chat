@@ -4,7 +4,7 @@ Read this before changing one specific arena or building a new one. Each
 playbook gives the look, arrival, idle, the event ladder mapped from the
 viewer's seat, async and spectator notes, and the current repo state. The
 `Juice.hit` starting values use the `Impact` fields in
-`web/app/src/games/juice.tsx` (`trauma`, `stop` ms, `slow` s, `pulse`,
+`web/app/src/games/three/juice.tsx` (`trauma`, `stop` ms, `slow` s, `pulse`,
 `flash`/`flashA`, `buzz`, `sound`, `title`); check that file for the current
 contract before relying on a field. All values are derived starting points.
 

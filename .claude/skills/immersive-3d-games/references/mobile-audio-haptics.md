@@ -58,7 +58,7 @@ calls < 200 mobile / < 500 desktop; triangles < 500K / < 2M; 60 fps budget <
 
 ## 2. The repo's quality profile
 
-`useQuality(still)` in `web/app/src/games/arena3d.tsx` returns
+`useQuality(still)` in `web/app/src/games/three/arena3d.tsx` returns
 `{ lite, dpr, ambientFps, msaa }`: lite = `(pointer: coarse)`; dpr `[1, 1.5]`
 lite / `[1, 1.75]` otherwise; ambient 24 / 30 fps, 0 when `still` (reduced
 motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and

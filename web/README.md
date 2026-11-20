@@ -18,6 +18,13 @@ the Room Durable Objects, the API) is its contract; see the root
   build, as in the panel. The game arenas are three.js scenes through
   React Three Fiber, drei and postprocessing (load the
   `immersive-3d-games` skill before touching them).
+- **Layout** (`app/src/`): `games/` is laid out by role - `three/` the
+  3D arena primitives, `shared/` what every game's 2D side shares (the
+  catalog, cards, panel helpers, the chime), one folder per game (its
+  arena, panel helpers and own pieces), and at the top `games.ts` (the
+  host that loads each arena) and the views the room opens. The other
+  folders are by feature: `room/`, `feed/`, `composer/`, `board/`,
+  `media/`, `home/`, `shell/`, and `ui/` for shared components.
 - **Deliberate divergences from the panel:** no Mantine (this app's
   design system is its own ported CSS — parity is visual as well as
   behavioral), and the markdown renderer (`app/src/feed/markdown.ts`)
