@@ -20,7 +20,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | `wrangler.toml` | Deploy config: bindings, vars, custom domain, and the web build (`web/app/dist`) as static assets |
 | `REFACTOR.md` | The codebase restructure in progress: plan and checklist |
 | `web/tests/ui.test.js` | Playwright tests for the web app against a fake API, with screenshots in `web/tests/shots/` |
-| `tests/api.test.js` | API tests against a local `wrangler dev` |
+| `tests/api/`, `tests/unit/`, `tests/fixtures/` | API tests against a local `wrangler dev`; unit tests (`node:test`) for the game helpers and the Light Cycles model; shared fixtures |
 | `AGENTS.md` | The single guide for agents working on the site. **Read it before changing anything.** |
 
 ## How changes go live
@@ -28,7 +28,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 **GitHub is the source of truth.** Every push to `main` deploys automatically through Cloudflare Workers Builds: it installs the root and web dependencies and builds the web app (`npm ci && npm ci --prefix web && npm run build --prefix web`), then runs `npx wrangler deploy` with the wrangler pinned in `package.json`, which uploads the Worker and the build as static assets. The build output is never committed.
 
 1. Change `worker/` for the server, or `web/` for the front end.
-2. Run `npm run build` (`npm i` at the root and in `web/` once), `npm run check`, `npm test` (the web suite) and `npm run test:api` (it serves the build). If the change touches `wrangler.toml` or dashboard config, also run `npm run check:config` before pushing and after the deploy lands (AGENTS.md section 7).
+2. Run `npm run build` (`npm i` at the root and in `web/` once), `npm run check`, `npm test` (the web suite), `npm run test:unit` and `npm run test:api` (it serves the build). If the change touches `wrangler.toml` or dashboard config, also run `npm run check:config` before pushing and after the deploy lands (AGENTS.md section 7).
 3. For UI changes, look at the screenshots in `web/tests/shots/` (light, dark and phone width).
 4. Commit and push to `main`. Cloudflare builds and deploys within a minute or two.
 5. Check the live site, using a throwaway room for anything that writes data.

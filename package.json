@@ -7,7 +7,8 @@
     "check": "node scripts/check-worker.js && node scripts/check-inline.js",
     "check:config": "node scripts/check-config.js",
     "test": "npm --prefix web test",
-    "test:api": "node tests/api.test.js"
+    "test:api": "node tests/api/api.test.js",
+    "test:unit": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/unit/register.mjs --test \"tests/unit/*.test.mjs\""
   },
   "devDependencies": {
     "acorn": "8.19.0",

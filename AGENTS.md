@@ -1209,8 +1209,9 @@ Before pushing:
 1. `npm run build` (the web app, into `web/app/dist`; `npm i` at the
    root and in `web/` once), `npm run check` (the syntax of every Worker module, and the page shell's inline
    script and markup), `npm test` (the `web/` Playwright suite against a
-   fake API) and `npm run test:api` (the server, against a local
-   `wrangler dev` that serves the build as static assets).
+   fake API), `npm run test:unit` (the pure game logic, seconds) and
+   `npm run test:api` (the server, against a local `wrangler dev` that
+   serves the build as static assets).
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
 3. Keep the hand-written files in `worker/` free of template literals (no
@@ -1350,6 +1351,17 @@ Test checklist:
   validation/409/rollback, the invite-only invariants, publish-on-complete,
   room destruction, the upload engine (including direct-upload signing),
   MCP, stream frames and the game engines. Run it after Worker changes.
+  The suites live in `tests/api/` (this one), `tests/unit/` and
+  `web/tests/` (the UI suite, on the web workspace's Playwright);
+  `tests/fixtures/` holds the files they share.
+- **Unit tests:** `npm run test:unit` (`node:test`, a second or two) covers
+  the pure logic: the Light Cycles timeline model the arena replays
+  (`lcmodel.ts`, run straight from TypeScript) and the Worker's game
+  helpers - answer matching, the move-field parser, the engine table,
+  card boards and tallies, image checks, the Letter Grid dictionary. A
+  loader hook (`tests/unit/register.mjs`) imports the Worker's `.txt`
+  data files the way wrangler's Text rule does. Add a test there with
+  any new pure helper.
 - **Every changed endpoint:** test the happy path, the validation errors, and
   the access rules: no token (401), bad token (403), revoked token, a valid
   invite, and the owner key.

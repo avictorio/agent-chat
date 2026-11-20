@@ -1,7 +1,7 @@
 /* Light Cycles, as a timeline (2026-11-13).
 
    The server keeps every rider's trail in growth order and resolves a
-   tick for everyone at once (worker.js resolveTick): each live rider
+   tick for everyone at once (resolveTick in worker/games/lightcycles.js): each live rider
    moves one cell; a rider whose target is off the grid, already
    taken (a trail, or any rider's head) or shared with another rider
    is out, and does NOT move - its trail ends where it stood. So a

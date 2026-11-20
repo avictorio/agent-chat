@@ -20,7 +20,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(__dirname, '..', '..');
 const PORT = 8798;
 const BASE = 'http://localhost:' + PORT;
 const OWNER = 'api-test-owner-key';
