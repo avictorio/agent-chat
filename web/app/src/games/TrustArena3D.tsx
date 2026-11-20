@@ -113,7 +113,7 @@ function Table({ n }: { n: number }) {
   );
 }
 
-function SeatMark({ s, lit, pulse, score, still, big }: { s: Seat; lit: boolean; pulse: number; score: number; still: boolean; big: boolean }) {
+function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: boolean; pulse: number; score: number; gain: number | null; still: boolean; big: boolean }) {
   const ring = useRef<MeshStandardMaterial>(null);
   const j = useJuice();
   useFrame(() => {
@@ -122,7 +122,8 @@ function SeatMark({ s, lit, pulse, score, still, big }: { s: Seat; lit: boolean;
     const breathe = still ? 0 : 0.15 * Math.sin(j.t * 2 + s.x);
     m.emissiveIntensity = s.out ? 0.1 : (lit ? 1.6 : 0.45 + breathe) + 1.2 * pulse;
   });
-  const sub = String(score) + (s.you ? " · you" : "") + (s.out ? " · out" : "");
+  // the round on the table's points ride the plate (the page's grid had them)
+  const sub = String(score) + (gain != null ? " (+" + gain + ")" : "") + (s.you ? " · you" : "") + (s.out ? " · out" : "");
   return (
     <group position={[s.x, 0, s.z]}>
       <mesh position={[0, 0.3, 0]}>
@@ -516,6 +517,12 @@ export default function TrustArena3D({
               <div className="duel-catchup" aria-hidden="true">
                 Round {round.n} · tap to skip
               </div>
+            ) : round ? (
+              <div className="arena3d-caption tr-caption">
+                Round {round.n}: <span className="tr-cap-c">teal</span> = cooperated · <span className="tr-cap-d">red</span> = defected
+              </div>
+            ) : running ? (
+              <div className="arena3d-caption tr-caption">Choices are revealed together</div>
             ) : null}
             <div className="sr-only" aria-live="polite">
               {say}
@@ -546,7 +553,16 @@ export default function TrustArena3D({
           <directionalLight position={[-4, 10, 8]} intensity={0.9} color="#e0f2fe" />
           <Table n={seats.length} />
           {seats.map((s) => (
-            <SeatMark key={s.name} s={s} lit={running && !playing && (s.committed || (s.you && sealed === g.round))} pulse={pulse[s.name] || 0} score={scoreOf(s.name)} still={still} big={hostW < PHONE_BELOW} />
+            <SeatMark
+              key={s.name}
+              s={s}
+              lit={running && !playing && (s.committed || (s.you && sealed === g.round))}
+              pulse={pulse[s.name] || 0}
+              score={scoreOf(s.name)}
+              gain={round && !playing && (round.moves || {})[s.name] ? (round.points || {})[s.name] || 0 : null}
+              still={still}
+              big={hostW < PHONE_BELOW}
+            />
           ))}
           <Threads seats={seats} round={round} t0={t0} gap={gap} still={still} />
           {playing && round && t0 == null ? <ClockStart key={"c" + playing.n} onStart={(t) => setPlaying((p) => (p && p.t0 == null ? { ...p, t0: t } : p))} /> : null}

@@ -562,12 +562,11 @@ change behavior. In summary:
   waters as a plain aiming grid (the scene was its only way to fire);
   its spectators get both captains' boards (a free-for-all: every board,
   yours and each rival's, the shot naming its target; placing a fleet,
-  the placement grid). TODO after wave 4 (the owner's call, 2026-11-20)
-  - 3D'fy what is still flat: the flat panels under the
-  scenes (Frontlines' round in numbers, Code Race's lanes, Trust's grid,
-  Liar's Dice's seats and cup, the Duel scoreboard) folded into the
-  scenes - keeping every control in the page and a text fallback for
-  devices without WebGL. Chat cards and history thumbnails stay flat.
+  the placement grid; the panels folded into the scenes, below). TODO
+  after wave 4 (the owner's call, 2026-11-20) - 3D'fy what is still
+  flat: Code Race's lanes folded into the vault scene - keeping every
+  control in the page and a text fallback for devices without WebGL.
+  Chat cards and history thumbnails stay flat.
   New games: 3D only, controls under the scene, nothing that only the
   scene can do (UI scenarios `no-webgl-*` pin this).
 - **Battleship free-for-all in 3D (2026-11-20, the first 3D'fy step):**
@@ -589,6 +588,23 @@ change behavior. In summary:
   ›) - a pill each ran under the frame's tools - and cycling to a live
   rival makes them the target. The 2D boards are the no-WebGL fallback
   only (`no-webgl-battleship-ffa`).
+- **Panels folded into the scenes (2026-11-20, the third step):** what a
+  flat panel under a scene said now lives in the scene, and the panel
+  shows only without WebGL. A scene that needs a line of text puts it
+  in a frame caption (`.arena3d-caption`, top left, clear of the tools;
+  hidden while a round replays). Frontlines: each hill's troop counts
+  under its letter (each side's colour, the hill's winner bright,
+  revealed with that hill's clash) and the round's result in the
+  caption (`fl-caption`); the field is the fallback. Trust: the threads
+  are the grid - each seat's plate adds the shown round's points
+  ("14 (+6)") and the caption keys the colours (`tr-caption`); the grid
+  is the fallback. Liar's Dice: your dice lie face up in the scene, each
+  seat's plate adds its latest bid this round, the canvas label reads
+  your cup, the wild-ones note is the caption (`ld-caption`); the cup and
+  the table are the fallback (the standing bid, the builder and the last
+  round stay in the page). Duel: the duellists' plates carry the win
+  pips (and a streak's flame from two wins in a row) and the record the
+  rounds; the scoreboard shows in the lobby and without WebGL.
 - **Fleet placement in 3D (2026-11-20, the second step):** the setup
   phase mounts the same scene with a `placing` prop (games.ts keeps the
   draft in `bsDrafts` and hands the scene `gameView.bsPlace`: the hulls

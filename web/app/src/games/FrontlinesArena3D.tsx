@@ -33,7 +33,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
-import { BufferGeometry, CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Float32BufferAttribute, Object3D, SphereGeometry, SRGBColorSpace, TubeGeometry, Vector3, type Group, type InstancedMesh, type MeshStandardMaterial } from "three";
+import { BufferGeometry, CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Float32BufferAttribute, Object3D, SphereGeometry, SRGBColorSpace, TubeGeometry, Vector3, type Group, type InstancedMesh, type MeshStandardMaterial, type Sprite } from "three";
 import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuality, useReducedMotion, type Ctl, type Home } from "./arena3d";
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "./juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
@@ -123,6 +123,42 @@ function labelTex(letter: string, val: number | null): CanvasTexture {
   return t;
 }
 
+/* The round in numbers on each hill (2026-11-20, the page's field
+   folded into the scene): each side's troops in its colour, the hill's
+   winner bright, a level hill's both dim. */
+type Count = { n: number; hex: string; won: boolean };
+const countCache = new Map<string, CanvasTexture>();
+function countTex(counts: Count[]): CanvasTexture {
+  const key = counts.map((c) => c.n + c.hex + (c.won ? "w" : "")).join("|");
+  const hit = countCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement("canvas");
+  c.width = 320;
+  c.height = 96;
+  const x = c.getContext("2d");
+  if (x) {
+    x.textAlign = "center";
+    x.textBaseline = "middle";
+    x.shadowColor = "rgba(0,0,0,0.9)";
+    x.shadowBlur = 10;
+    const slot = 320 / Math.max(1, counts.length);
+    counts.forEach((k, i) => {
+      x.globalAlpha = k.won ? 1 : 0.62;
+      x.font = (k.won ? "900 62px" : "700 54px") + " system-ui, -apple-system, Segoe UI, sans-serif";
+      x.fillStyle = k.hex;
+      x.fillText(String(k.n), slot * i + slot / 2, 50);
+    });
+    x.globalAlpha = 0.5;
+    x.fillStyle = "#e2e8f0";
+    x.font = "700 40px system-ui, -apple-system, Segoe UI, sans-serif";
+    if (counts.length === 2) x.fillText("·", 160, 48);
+  }
+  const t = new CanvasTexture(c);
+  t.colorSpace = SRGBColorSpace;
+  countCache.set(key, t);
+  return t;
+}
+
 /* ---------- the field ---------- */
 
 function Ground({ phone }: { phone: boolean }) {
@@ -147,9 +183,10 @@ function Ground({ phone }: { phone: boolean }) {
    on the crest in the colour of whoever holds it. During a reveal the
    banner rises with the hill's clash; settled, it stands (none on a
    level hill). */
-function HillMark({ i, phone, hex, letter, val, t0, still }: { i: number; phone: boolean; hex: string | null; letter: string; val: number | null; t0: number | null; still: boolean }) {
+function HillMark({ i, phone, hex, letter, val, t0, still, counts }: { i: number; phone: boolean; hex: string | null; letter: string; val: number | null; t0: number | null; still: boolean; counts: Count[] | null }) {
   const p = hillPos(i, phone);
   const flag = useRef<Group>(null);
+  const nums = useRef<Sprite>(null);
   const ring = useRef<MeshStandardMaterial>(null);
   const j = useJuice();
   const c = useMemo(() => new Color(hex || "#64748b"), [hex]);
@@ -162,6 +199,8 @@ function HillMark({ i, phone, hex, letter, val, t0, still }: { i: number; phone:
       flag.current.scale.set(1, Math.max(0.001, r), 1);
       flag.current.visible = !!hex && r > 0.001;
     }
+    // the numbers come up with the hill's clash, like its banner
+    if (nums.current) nums.current.visible = r > 0.5;
     // the ring keeps the hill's secret until its clash
     if (ring.current) {
       ring.current.emissive.copy(hex && r > 0.02 ? c : grey);
@@ -187,6 +226,11 @@ function HillMark({ i, phone, hex, letter, val, t0, still }: { i: number; phone:
       <sprite position={[0, RY + 1.85, 0]} scale={[1.5, 0.75, 1]} renderOrder={5}>
         <spriteMaterial map={labelTex(letter, val)} transparent depthWrite={false} depthTest={false} />
       </sprite>
+      {counts ? (
+        <sprite ref={nums} position={[0, RY + 1.28, 0]} scale={phone ? [2.3, 0.69, 1] : [1.9, 0.57, 1]} renderOrder={5}>
+          <spriteMaterial map={countTex(counts)} transparent depthWrite={false} depthTest={false} />
+        </sprite>
+      ) : null}
     </group>
   );
 }
@@ -742,6 +786,21 @@ export default function FrontlinesArena3D({
     "Frontlines arena, 3D view: " +
     sides.map((s) => s.name + (s.you ? " (you)" : "") + " " + s.wins + (running ? (s.committed ? ", committed" : ", planning") : "")).join(" versus ") +
     (round ? ". On the field: round " + round.n + "." : ". The field is empty.");
+  /* What the page's field said under the scene, now in the frame: the
+     round shown and how it went, or the round being planned. */
+  const caption = (() => {
+    if (round && round.hills) {
+      const tally = sides
+        .map((s) => {
+          const k = values ? (round.points || {})[s.name] || 0 : (round.held || {})[s.name] || 0;
+          return s.name + " " + k + (values ? " pts" : k === 1 ? " hill" : " hills");
+        })
+        .join(" · ");
+      const v = round.forfeit ? round.winner + " takes it by forfeit" : round.winner ? round.winner + " takes it" : "level";
+      return "Round " + round.n + ": " + tally + " — " + v;
+    }
+    return running ? "Round " + g.round + " · splits stay hidden until both are in" : "";
+  })();
   const intro = firstVisit ? { title: "Frontlines", sub: sides.map((s) => s.name).join(" vs ") || "Troops over hills", color: "#4ade80" } : null;
   return (
     <JuiceProvider juice={juice}>
@@ -761,6 +820,8 @@ export default function FrontlinesArena3D({
               <div className="duel-catchup" aria-hidden="true">
                 Round {round.n} · tap to skip
               </div>
+            ) : caption ? (
+              <div className="arena3d-caption fl-caption">{caption}</div>
             ) : null}
             <div className="sr-only" aria-live="polite">
               {say}
@@ -797,7 +858,8 @@ export default function FrontlinesArena3D({
           {Array.from({ length: HILLS }, (_, i) => {
             const owner = round && round.hills ? round.hills[i] : null;
             const ownerHex = owner ? (sides.find((s) => s.name === owner) || { hex: "#94a3b8" }).hex : null;
-            return <HillMark key={i} i={i} phone={phone} hex={ownerHex} letter={LETTERS[i] || ""} val={values ? (values[i] ?? null) : null} t0={t0} still={still} />;
+            const counts = round && round.hills ? sides.map((s) => ({ n: ((round.alloc || {})[s.name] || [])[i] || 0, hex: s.hex, won: owner === s.name })) : null;
+            return <HillMark key={i} i={i} phone={phone} hex={ownerHex} letter={LETTERS[i] || ""} val={values ? (values[i] ?? null) : null} t0={t0} still={still} counts={counts} />;
           })}
           {running && !playing
             ? sides.map((s) => <FrontLine key={s.name} side={s} phone={phone} lit={s.committed || (s.you && sealed === g.round)} still={still} />)

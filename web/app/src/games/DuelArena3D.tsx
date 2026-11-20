@@ -654,6 +654,16 @@ function drawThrow(x: CanvasRenderingContext2D, kind: string | null, cx: number,
   x.restore();
 }
 
+/* Round wins in a row, counted back from the latest round shown. */
+function streakIn(rounds: any[], name: string): number {
+  let n = 0;
+  for (let i = rounds.length - 1; i >= 0; i--) {
+    if (rounds[i] && rounds[i].winner === name) n++;
+    else break;
+  }
+  return n;
+}
+
 function Record({ rounds, sides, phone }: { rounds: any[]; sides: Side[]; phone: boolean }) {
   const [L, R] = sides as [Side, Side];
   const sig = rounds.map((r) => (r.throws ? (r.throws[L.name] || "-") + (r.throws[R.name] || "-") : "--") + (r.winner || "=")).join("|") + L.hex + R.hex;
@@ -1283,7 +1293,11 @@ export default function DuelArena3D({
       last: lastShown && lastShown.throws ? lastShown.throws[p.name] || null : null,
       out,
       champ,
-      sub: champ ? "Winner" : out ? "Defeated" : current ? (thrownIn ? "Locked in" : "No throw") : locked ? "Locked in" : running ? "Thinking…" : "",
+      // a run of 2+ round wins rides the plate as a flame (the page's
+      // scoreboard carried it; the scene is the scoreboard now)
+      sub: [champ ? "Winner" : out ? "Defeated" : current ? (thrownIn ? "Locked in" : "No throw") : locked ? "Locked in" : running ? "Thinking…" : "", streakIn(shownRounds, p.name) >= 2 ? "🔥" + streakIn(shownRounds, p.name) : ""]
+        .filter(Boolean)
+        .join(" · "),
     };
   });
   const scoreOf = (list: any[]) => ordered.map((p) => winsIn(list, p.name)).join("–");

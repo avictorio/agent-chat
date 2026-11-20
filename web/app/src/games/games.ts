@@ -948,9 +948,14 @@ export function createGameStore(opts: {
       wrap.appendChild(slot);
     } else dropDuel3d();
     const put = (n: HTMLElement) => (slot || wrap).appendChild(n);
-    const big = el("div", "lc-board-big" + (in3d ? " duel-board-under" : ""));
-    big.appendChild(duelBoard(g, true));
-    wrap.appendChild(big);
+    // The scene's name plates carry the score (win pips, a streak's
+    // flame) and its record the rounds, so the scoreboard is for the
+    // lobby and for devices without WebGL.
+    if (!in3d || !webglOk()) {
+      const big = el("div", "lc-board-big" + (in3d ? " duel-board-under" : ""));
+      big.appendChild(duelBoard(g, true));
+      wrap.appendChild(big);
+    }
     const tends = duelTendencies(g);
     if (tends.length) {
       const tw = el("div", "duel-tend");
@@ -1072,8 +1077,8 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    // the scene plays the last resolved round; the score, the planner and
-    // the round in numbers follow under it
+    // the scene plays the last resolved round (its numbers on the hills
+    // and in its caption); the score and the planner follow under it
     const h = host3d("frontlines");
     wrap.appendChild(h.host);
     paint3d("frontlines", g, h);
@@ -1120,8 +1125,12 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - splits stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
-    wrap.appendChild(fieldCap);
-    wrap.appendChild(field);
+    // The scene carries the round in numbers (counts on each hill, the
+    // result in its caption); the field is for devices without WebGL.
+    if (!webglOk()) {
+      wrap.appendChild(fieldCap);
+      wrap.appendChild(field);
+    }
   }
 
   /* The games' 3D views, lazy-loaded like the Duel's: one host per open
@@ -1428,7 +1437,7 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    // the table comes first; the scores, choices and grid follow
+    // the table comes first; the scores and choices follow
     const h = host3d("trust");
     wrap.appendChild(h.host);
     paint3d("trust", g, h);
@@ -1458,9 +1467,14 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - choices are revealed together when each round resolves.";
       wrap.appendChild(note);
     }
-    const last = trLastRound(g);
-    wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
-    wrap.appendChild(trGrid(g, last, me));
+    // The table's threads are the grid (teal trusts, red defects, the key
+    // in the frame's caption, each seat's points on its plate); the grid
+    // is for devices without WebGL.
+    if (!webglOk()) {
+      const last = trLastRound(g);
+      wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
+      wrap.appendChild(trGrid(g, last, me));
+    }
   }
 
   /* Sketch & Guess (2026-11-20, 3D only): the gallery first, then your
@@ -1881,7 +1895,11 @@ export function createGameStore(opts: {
     wrap.appendChild(h.host);
     paint3d("liarsdice", g, h);
     wrap.appendChild(ldBidNow(g));
-    if (g.status === "running" && you.playing && !you.out && (you.dice || []).length) wrap.appendChild(ldCup(g));
+    // The scene shows your dice face up and each seat's dice, turn and
+    // latest bid on its plate; the cup and the table are for devices
+    // without WebGL.
+    const flatLd = !webglOk();
+    if (flatLd && g.status === "running" && you.playing && !you.out && (you.dice || []).length) wrap.appendChild(ldCup(g));
     if (myTurn && dr) {
       const hint = arenaHint("liarsdice", "Raise the count, or the face at the same count - or call liar if you think the table can't hold the bid.");
       if (hint) wrap.appendChild(hint);
@@ -1907,7 +1925,7 @@ export function createGameStore(opts: {
         )
       );
     }
-    wrap.appendChild(ldTable(g, me));
+    if (flatLd) wrap.appendChild(ldTable(g, me));
     wrap.appendChild(ldRound(g, ldLastRound(g)));
     if (g.status === "running" && !you.playing) note.textContent = "Spectating - every cup stays hidden until someone calls liar.";
     else if (g.status === "running" && you.playing && you.out) note.textContent = "You're out of dice - watch the rest play it out.";

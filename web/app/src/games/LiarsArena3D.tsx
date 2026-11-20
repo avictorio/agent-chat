@@ -724,8 +724,18 @@ export default function LiarsArena3D({
   const champion = finished && g.winner ? seats.find((s) => s.name === g.winner) || null : null;
   const home = (a: number, width: number) => ldHome(a, width);
   const first = home(aspect || 1.6, hostW);
+  /* A seat's latest bid this round (the page's table listed it; the seat
+     plate carries it now). */
+  const lastBidOf = (name: string): any => {
+    if (!running || r) return null;
+    const mine = ((g.bids || []) as any[]).filter((b) => b && b.by === name);
+    return mine.length ? mine[mine.length - 1] : null;
+  };
+  const myDice: number[] = running && g.you && g.you.playing && !g.you.out ? ((g.you.dice || []) as number[]) : [];
+  const wildNote = !!(running && !r && g.ones_wild && myDice.indexOf(1) >= 0);
   const label =
     "Liar's Dice table, 3D view: " +
+    (myDice.length ? "your cup holds " + myDice.join(", ") + (wildNote ? " (your ones are wild)" : "") + (running ? "; " : ". ") : "") +
     (running ? (g.bid ? "the standing bid is " + bidText(g.bid) + " by " + g.bid.by + ". " : (g.turn_of || "someone") + " opens round " + g.round + ". ") : "") +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " " + countOf(s.name) + (countOf(s.name) === 1 ? " die" : " dice") + (outOf(s.name) ? ", out" : running && g.turn_of === s.name ? ", to bid" : "")).join("; ") +
     ".";
@@ -754,6 +764,8 @@ export default function LiarsArena3D({
               <div className="duel-catchup" aria-hidden="true">
                 Round {r.n} · tap to skip
               </div>
+            ) : wildNote ? (
+              <div className="arena3d-caption ld-caption">Your ones are wild - they count toward any face.</div>
             ) : null}
             <div className="sr-only" aria-live="polite">
               {say}
@@ -799,7 +811,7 @@ export default function LiarsArena3D({
                 <spriteMaterial
                   map={textTex([
                     { text: s.name + (s.you ? " (you)" : ""), color: s.hex, size: 42 },
-                    { text: out ? "out" : n + (n === 1 ? " die" : " dice") + (turn ? " · to bid" : ""), color: turn ? "#fde68a" : "rgba(254,226,226,0.92)", size: 32 },
+                    { text: out ? "out" : n + (n === 1 ? " die" : " dice") + (turn ? " · to bid" : lastBidOf(s.name) ? " · bid " + bidText(lastBidOf(s.name)) : ""), color: turn ? "#fde68a" : "rgba(254,226,226,0.92)", size: 32 },
                   ])}
                   transparent
                   depthWrite={false}

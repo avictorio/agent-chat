@@ -1362,11 +1362,12 @@ let FAILURES = 0;
     return out;
   });
   // Frontlines (2026-11-19): the card shows the score and the last round
-  // on a compact field; the arena shows the field and the planner. Lock
-  // in stays off until the split adds up to 100; Even fills it; the
-  // commit sends the split and the planner reads as locked.
+  // on a compact field; without WebGL the arena shows the field (with
+  // WebGL its numbers are in the scene, see frontlines-3d) and the
+  // planner. Lock in stays off until the split adds up to 100; Even
+  // fills it; the commit sends the split and the planner reads as locked.
   for (const [label, o] of [['frontlines-arena', {}], ['frontlines-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { fl: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
       out.cardHills = await page.$$eval('.game-card .fl-hill', (h) => h.length);
@@ -2009,11 +2010,12 @@ let FAILURES = 0;
     });
   }
   // Liar's Dice (2026-11-19): the card shows the standing bid and the
-  // table; the arena puts the bid first, then your cup, the bid builder
-  // (count, face, Bid or Liar!), the table and the last round's opened
-  // cups. Desktop raises; the phone calls liar.
+  // table; without WebGL the arena puts the bid first, then your cup, the
+  // bid builder (count, face, Bid or Liar!), the table and the last
+  // round's opened cups (with WebGL the cup and the seats are in the
+  // scene, see liarsdice-3d). Desktop raises; the phone calls liar.
   for (const [label, o] of [['liarsdice-arena', {}], ['liarsdice-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark', liar: true }]]) {
-    await run(label, Object.assign({ state: { ld: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { ld: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
       out.cardBid = await page.$eval('.game-card .ld-now-bid', (e) => e.textContent);
@@ -2100,9 +2102,11 @@ let FAILURES = 0;
   }
   // Trust (2026-11-19): the card shows the scores; the arena puts the
   // scoreboard first, then a Cooperate / Defect pair per rival (Lock in
-  // waits for both), then the last round's who-trusted-whom grid.
+  // waits for both), then - without WebGL - the last round's
+  // who-trusted-whom grid (with WebGL the table's threads are the grid,
+  // see trust-3d).
   for (const [label, o] of [['trust-arena', {}], ['trust-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { tr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
       out.cardOrder = await page.$$eval('.game-card .tr-name', (n) => n.map((x) => x.textContent));
@@ -2132,8 +2136,10 @@ let FAILURES = 0;
       return out;
     });
   }
-  // Trust in 3D (the default): the table loads first, then the scores,
-  // the choices and the grid; a lock-in still sends per-rival choices.
+  // Trust in 3D (the default): the table loads first, then the scores and
+  // the choices - the grid is the table's threads, with the colour key in
+  // the frame's caption and each seat's round points on its plate; a
+  // lock-in still sends per-rival choices.
   for (const [label, o] of [['trust-3d', {}], ['trust-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -2143,13 +2149,15 @@ let FAILURES = 0;
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .tr-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tr-scores|tr-plan|tr-grid-wrap/.test(c)));
+      out.caption = await page.$eval('#viewer .tr-caption', (e) => e.textContent);
       await shot(page, label + '.png');
       await page.click('#viewer .tr-acts button:has-text("Trust everyone")');
       await page.click('#viewer .tr-go');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/18/moves')).pop() || '';
       if (!/Trust arena, 3D view: Ada 14, chosen; Henry 9, thinking; Anthony \(you\) 12, thinking\. On the table: round 2\./.test(out.label)) throw new Error('the scene reads the table: ' + out.label);
-      if (out.order.join(',') !== 'lc-board-big,tr-scores,tr-plan,tr-grid-wrap') throw new Error('the table, then scores, choices and the grid: ' + JSON.stringify(out.order));
+      if (out.order.join(',') !== 'lc-board-big,tr-scores,tr-plan') throw new Error('the table, then scores and choices: ' + JSON.stringify(out.order));
+      if (out.caption !== 'Round 2: teal = cooperated · red = defected') throw new Error('the frame keys the threads: ' + out.caption);
       if (!/"dir":"Ada:C, Henry:C"/.test(out.moveCall)) throw new Error('Trust everyone sends C to each rival: ' + out.moveCall);
       return out;
     });
@@ -2166,12 +2174,14 @@ let FAILURES = 0;
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .ld-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ld-now|ld-cup|ld-bidder|ld-table|ld-reveal/.test(c)));
+      out.caption = await page.$eval('#viewer .ld-caption', (e) => e.textContent).catch(() => null);
       await shot(page, label + '.png');
       await page.click('#viewer .ld-liar');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/22/moves')).pop() || '';
-      if (!/Liar's Dice table, 3D view: the standing bid is 3 fours by Ada\. Ada 5 dice; Anthony \(you\) 5 dice, to bid; Henry 4 dice\./.test(out.label)) throw new Error('the scene reads the table: ' + out.label);
-      if (out.order.join(',') !== 'lc-board-big,ld-now,ld-cup,ld-bidder,ld-table,ld-reveal') throw new Error('the table, then the bid, your cup, the builder, the seats and the last round: ' + JSON.stringify(out.order));
+      if (!/Liar's Dice table, 3D view: your cup holds 1, 3, 4, 4, 6 \(your ones are wild\); the standing bid is 3 fours by Ada\. Ada 5 dice; Anthony \(you\) 5 dice, to bid; Henry 4 dice\./.test(out.label)) throw new Error('the scene reads your cup and the table: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,ld-now,ld-bidder,ld-reveal') throw new Error('the table (your cup and the seats in it), then the bid, the builder and the last round: ' + JSON.stringify(out.order));
+      if (out.caption !== 'Your ones are wild - they count toward any face.') throw new Error('the wild ones note is the frame\'s caption: ' + out.caption);
       if (!/"dir":"liar"/.test(out.moveCall)) throw new Error('Liar! sends the call: ' + out.moveCall);
       return out;
     });
@@ -2250,8 +2260,9 @@ let FAILURES = 0;
     });
   }
   // Frontlines in 3D (the default): the scene loads above the score and
-  // the planner, the round's numbers follow the planner, a lock-in still
-  // sends the split, and there is no 2D view to switch to.
+  // the planner; the round's numbers are in the scene (on the hills, and
+  // the result in the frame's caption - no flat field under it); a
+  // lock-in still sends the split; there is no 2D view to switch to.
   for (const [label, o] of [['frontlines-3d', {}], ['frontlines-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -2262,7 +2273,8 @@ let FAILURES = 0;
       out.label = await page.$eval('#viewer .fl-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
       out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /fl-3d-host|lc-board-big|fl-score|fl-plan|fl-cap/.test(c) || c === 'lc-board-big'));
-      out.fieldCap = await page.$eval('#viewer .fl-cap', (e) => e.textContent);
+      out.caption = await page.$eval('#viewer .fl-caption', (e) => e.textContent);
+      out.field = await page.$$eval('#viewer .fl-field, #viewer .fl-cap', (f) => f.length);
       await shot(page, label + '.png');
       await page.click('#viewer .fl-acts button:nth-child(1)');
       await page.click('#viewer .fl-go');
@@ -2272,9 +2284,9 @@ let FAILURES = 0;
       if (out.toggle) throw new Error('the 2D views are retired: no toggle');
       const iScene = out.order.indexOf('lc-board-big');
       const iPlan = out.order.indexOf('fl-plan');
-      const iCap = out.order.indexOf('fl-cap');
-      if (!(iScene >= 0 && iScene < iPlan && iPlan < iCap)) throw new Error('scene, then the planner, then the numbers: ' + JSON.stringify(out.order));
-      if (!/Round 2 in numbers/.test(out.fieldCap)) throw new Error('the numbers follow the planner in 3D: ' + out.fieldCap);
+      if (!(iScene >= 0 && iScene < iPlan)) throw new Error('scene, then the planner: ' + JSON.stringify(out.order));
+      if (out.caption !== 'Round 2: Anthony 1 hill · Ada 1 hill — level') throw new Error('the frame\'s caption gives the round in numbers: ' + out.caption);
+      if (out.field !== 0) throw new Error('no flat field under the scene: ' + out.field);
       if (!/"dir":"20,20,20,20,20"/.test(out.moveCall)) throw new Error('the 3D view still commits the split: ' + out.moveCall);
       return out;
     });
