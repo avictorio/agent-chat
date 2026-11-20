@@ -1,4 +1,4 @@
-// Source of truth: https://github.com/avictorio/agent-chat (worker/index.js).
+// Source of truth: https://github.com/avictorio/agent-chat (worker/; this is the main module).
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { CORS, json } from "./lib/http.js";

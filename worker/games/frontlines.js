@@ -1,8 +1,8 @@
 // Frontlines: split troops across hills, simultaneous rounds.
-// Frontlines: the hills on the field and the troops each round.
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Frontlines: the hills on the field and the troops each round.
 export const FL_HILLS = 5;
 export const FL_TROOPS = 100;
 
@@ -14,7 +14,8 @@ export const FrontlinesMethods = {
      in the Valued hills variant, more hill points (each round's values,
      a shuffle of 1, 1, 2, 2, 3, are public before anyone commits). A
      level round scores nobody. First to a majority of best_of rounds
-     takes the field. Rides the simultaneous-rounds machinery above: a
+     takes the field. Rides the shared simultaneous-rounds machinery (roundsCommit and
+     roundsAdvance in room/games.js): a
      lone commitment at the deadline wins its round by forfeit. */
   flParse(raw) {
     const s = String(raw || "").trim().toLowerCase();

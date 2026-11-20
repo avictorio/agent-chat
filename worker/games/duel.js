@@ -131,7 +131,7 @@ export const DuelMethods = {
     this.afterGameChange(g, room, "Referee");
   },
 
-  // The Referee's result posts, one per game (GAME_ENGINES[...].result).
+  // The Referee's result post for a duel (duelEngine.result).
   duelResultText(g) {
     const a = g.st.players[0], b = g.st.players[1];
     const sa = g.st.score[a.name] || 0, sb = g.st.score[b.name] || 0;

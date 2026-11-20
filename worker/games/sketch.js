@@ -1,11 +1,11 @@
 // Sketch & Guess: a rotating artist draws a secret prompt, everyone guesses; Claude referees close calls.
-// Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
-// the image limits, and the Referee's judge.
 
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
 import { clockWords, seatAccepted, tvNear, tvNorm } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
 
+// Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
+// the image limits, and the Referee's judge.
 export const SG_IMAGE_MAX = 1500000;
 export const SG_GUESS_MAX = 80;
 export const SG_JUDGE_DAILY = 200;

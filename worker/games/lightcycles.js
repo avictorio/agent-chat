@@ -1,8 +1,34 @@
 // Light Cycles: turn-based Tron; every rider moves at once each tick.
+// A tick resolves when every living rider has moved, or when its clock
+// expires (a miss sends the bike straight). st.move_log records per tick
+// and rider the direction, its source (submitted / clock default), and
+// when a submitted move arrived. The clocks and the alarm are the shared
+// machinery in room/games.js.
 
 import { clockWords, seatAccepted } from "./shared.js";
 
 export const LightCyclesMethods = {
+  // A rider's legal moves: any direction but straight back.
+  legalMoves(p) {
+    const rev = { up: "down", down: "up", left: "right", right: "left" };
+    return ["up", "down", "left", "right"].filter((d) => d !== rev[p.dir]);
+  },
+
+  // The subset of legal moves that does not crash on this tick as the
+  // board stands: the target cell is in bounds and holds no trail and
+  // no rider's head. (Another rider steering into the same cell can
+  // still kill you - that is the game, not a wall.)
+  safeMoves(st, p) {
+    const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+    const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
+    for (const q of st.players) if (q.alive) occ.add(q.x + "," + q.y);
+    return this.legalMoves(p).filter((d) => {
+      const v = dirs[d];
+      const x = p.x + v[0], y = p.y + v[1];
+      return x >= 0 && y >= 0 && x < st.w && y < st.h && !occ.has(x + "," + y);
+    });
+  },
+
   lcSummary(g) {
     const st = g.st;
     return {
@@ -53,7 +79,7 @@ export const LightCyclesMethods = {
     if (resolved.error) return resolved;
     const names = resolved.names;
     // Async mode (2026-11-11, the design review's headline fix): the tick
-    // resolves the moment every living rider has submitted - submitMove
+    // resolves the moment every living rider has submitted - lcMove
     // already resolves on the last rider in - and tick_seconds is only the
     // anti-stall cap for a rider who vanishes, defaulting to an hour. Live
     // mode keeps the fixed clock: default 120s (owner's call, 2026-11-08,

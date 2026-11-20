@@ -7,17 +7,13 @@ import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
 
 export const GameMachineryMethods = {
-  /* ---------- games: Light Cycles ----------
-     Turn-based Tron: simultaneous moves resolved in ticks. A tick resolves when
-     every living player has moved, or when its clock expires (a miss sends the
-     bike straight). The deadline is real: a Durable Object alarm is kept armed
-     at the nearest running match's deadline and resolves what is due when it
+  /* ---------- shared rows and clocks ----------
+     State is one JSON row per match in gm; m.game_id links the match's card
+     message. Deadlines are real: a Durable Object alarm is kept armed at the
+     nearest running match's deadline and resolves what is due when it
      fires, so a match keeps its cadence even while nobody is looking. Game
      calls still catch up anything overdue when they touch a match, and the
-     deadline arithmetic (deadline += tick) keeps cadence honest regardless.
-     State is one JSON row per match in gm; m.game_id links the card message;
-     st.move_log records per tick and rider the direction, its source
-     (submitted / clock default), and when a submitted move arrived. */
+     deadline arithmetic (deadline += tick) keeps cadence honest regardless. */
   gameColors() {
     return [
       { color: "cyan", hex: "#22d3ee" },
@@ -63,26 +59,6 @@ export const GameMachineryMethods = {
       names.push(canon);
     }
     return { names: names };
-  },
-
-  legalMoves(p) {
-    const rev = { up: "down", down: "up", left: "right", right: "left" };
-    return ["up", "down", "left", "right"].filter((d) => d !== rev[p.dir]);
-  },
-
-  // The subset of legal moves that does not crash on this tick as the
-  // board stands: the target cell is in bounds and holds no trail and
-  // no rider's head. (Another rider steering into the same cell can
-  // still kill you - that is the game, not a wall.)
-  safeMoves(st, p) {
-    const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-    const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
-    for (const q of st.players) if (q.alive) occ.add(q.x + "," + q.y);
-    return this.legalMoves(p).filter((d) => {
-      const v = dirs[d];
-      const x = p.x + v[0], y = p.y + v[1];
-      return x >= 0 && y >= 0 && x < st.w && y < st.h && !occ.has(x + "," + y);
-    });
   },
 
   // The public summary and the per-viewer full state of any match: each

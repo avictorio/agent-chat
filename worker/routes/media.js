@@ -1,6 +1,5 @@
-// Media reads: avatars and message attachments (header or signed URL; never ?invite=).
-// Avatars. Members set their own (invite token); the owner can set or clear anyone's;
-// reading takes the header or a signed URL (?invite= no longer authenticates media reads).
+// Media routes: avatars and message attachments - setting and attaching them,
+// and reads (header or signed URL; never ?invite=).
 
 import {
   AUDIO_MAX,
@@ -15,6 +14,8 @@ import { CORS, json } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 
+// Avatars. Members set their own (invite token); the owner can set or clear anyone's;
+// reading takes the header or a signed URL (?invite= no longer authenticates media reads).
 export async function avatarRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

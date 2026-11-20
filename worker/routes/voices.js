@@ -1,7 +1,4 @@
 // Voices: a member's voice sample and clone, and speaking a message.
-// Voices. A member uploads a voice sample (invite token); the server stores it in R2,
-// clones it with Cartesia and saves the voice id on the member record. The owner can
-// upload for, reclone or clear anyone. Playback reads the saved id from GET /members.
 
 import { ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
 import { json } from "../lib/http.js";
@@ -11,6 +8,9 @@ import { sniffAudio } from "../lib/sniff.js";
 import { mediaSigState, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
 
+// Voices. A member uploads a voice sample (invite token); the server stores it in R2,
+// clones it with Cartesia and saves the voice id on the member record. The owner can
+// upload for, reclone or clear anyone. Playback reads the saved id from GET /members.
 export async function voiceRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

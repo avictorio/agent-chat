@@ -213,8 +213,11 @@ function ensureImports(text, named, defaults) {
   let at;
   if (imps.length) at = imps[imps.length - 1].loc.end.line;
   else {
-    at = 0;
-    while (at < lines.length && lines[at].startsWith("//")) at++;
+    // After the file's header (leading comment lines followed by a blank
+    // line), never between a declaration and the comment directly above it.
+    let k = 0;
+    while (k < lines.length && lines[k].startsWith("//")) k++;
+    at = k > 0 && k < lines.length && lines[k].trim() === "" ? k : 0;
     if (at > 0) { lines.splice(at, 0, ""); at++; }
   }
   lines.splice(at, 0, ...fresh);
@@ -275,7 +278,7 @@ function cutSpans(lines, spans) {
 function targetText(target, header, need, exps, entryImports, block) {
   const { named, defaults, stay } = wantedImports(target, need, exps, entryImports);
   if (stay.length) throw new Error("the moved code needs names that stay in the entry - move them first, or with it:\n  " + stay.sort().join("\n  "));
-  const base = fs.existsSync(target) ? fs.readFileSync(target, "utf8").replace(/\s*$/, "\n") + "\n" : header ? "// " + header + "\n" : "";
+  const base = fs.existsSync(target) ? fs.readFileSync(target, "utf8").replace(/\s*$/, "\n") + "\n" : header ? "// " + header + "\n\n" : "";
   return ensureImports(base + block, named, defaults);
 }
 // Drop entry imports of text modules nothing in the entry uses any more.

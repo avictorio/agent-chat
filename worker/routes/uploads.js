@@ -1,11 +1,4 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
-// Stream one part's request body into its R2 multipart slot. Nothing is
-// buffered: R2 takes the request stream as it is (its length is known
-// from Content-Length). With sniff set (part 1 of an image, audio or
-// video upload) the first bytes are read and checked before anything is
-// stored, then rejoined to the rest through a FixedLengthStream, so a
-// wrong kind of file is refused at its first part, not after the whole
-// upload. Answers { part } - or { part: null } when the sniff fails.
 
 import { json, readBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
@@ -24,6 +17,13 @@ import {
 import { mediaSigParams } from "../lib/media.js";
 import { sniffVideo } from "../lib/sniff.js";
 
+// Stream one part's request body into its R2 multipart slot. Nothing is
+// buffered: R2 takes the request stream as it is (its length is known
+// from Content-Length). With sniff set (part 1 of an image, audio or
+// video upload) the first bytes are read and checked before anything is
+// stored, then rejoined to the rest through a FixedLengthStream, so a
+// wrong kind of file is refused at its first part, not after the whole
+// upload. Answers { part } - or { part: null } when the sniff fails.
 export async function streamUploadPart(up, n, body, len, sniff) {
   if (!sniff) return { part: await up.uploadPart(n, body) };
   const reader = body.getReader();
@@ -189,10 +189,6 @@ export function ticketUpload(origin, room, t) {
   };
 }
 
-// Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
-// begin_upload ticket. Deliberately NO access check: the ticket is the
-// credential (single-use, 15 minutes, hash-only at rest). The ticket is
-// never echoed back in any response.
 // Resumable upload links: the upload engine's part / sign / status /
 // finish / abort steps with the link as the credential, for one session.
 export async function uploadLinkStepRoute(rc, usm) {
@@ -208,6 +204,10 @@ export async function uploadLinkStepRoute(rc, usm) {
   return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
 }
 
+// Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
+// begin_upload ticket. Deliberately NO access check: the ticket is the
+// credential (single-use, 15 minutes, hash-only at rest). The ticket is
+// never echoed back in any response.
 export async function uploadLinkRoute(rc, um) {
   const { request, env } = rc;
   const uroom = decodeURIComponent(um[1]).toLowerCase();

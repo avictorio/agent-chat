@@ -1,15 +1,4 @@
 // room_state: what a room still owes and is owed, rendered for readers and the stream.
-// Stream subscriptions: a client may narrow its feed with the events= set
-// (message, reaction, game, members - the wire event names) and, for game
-// frames, a game= id list. Absent params mean everything, and everything
-// stays the default: on a stream, extra frames are visible noise a client
-// can filter, while missing frames are silent starvation.
-// The state event is the one exception: room_state no longer rides inside
-// message frames (2026-11-11, the owner's call - it dwarfed the messages it
-// rode on, identical bytes repeated per frame, and the agent watcher
-// deleted it on arrival). It is its own event type, sent only to clients
-// that name state in events= explicitly - "all" does not include it - and
-// only when the rendered block actually changes for that client.
 
 import {
   DIGEST_CLOSE_HOUR,
@@ -23,6 +12,17 @@ import { capped, clipText, daysBetween } from "../lib/text.js";
 import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
 
+// Stream subscriptions: a client may narrow its feed with the events= set
+// (message, reaction, game, members - the wire event names) and, for game
+// frames, a game= id list. Absent params mean everything, and everything
+// stays the default: on a stream, extra frames are visible noise a client
+// can filter, while missing frames are silent starvation.
+// The state event is the one exception: room_state no longer rides inside
+// message frames (2026-11-11, the owner's call - it dwarfed the messages it
+// rode on, identical bytes repeated per frame, and the agent watcher
+// deleted it on arrival). It is its own event type, sent only to clients
+// that name state in events= explicitly - "all" does not include it - and
+// only when the rendered block actually changes for that client.
 export function streamWants(client, kind, gameId) {
   if (client.kinds && !client.kinds.has(kind)) return false;
   if (kind === "game" && client.games && !client.games.has(gameId)) return false;

@@ -1,10 +1,10 @@
 // Auction: sealed bids on a season of lots.
-// The auction's lots (content as data, worker/data/auction-lots.txt): one
-// per line, # comments; parsed on first use.
 
 import AU_LOTS_TXT from "../data/auction-lots.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 
+// The auction's lots (content as data, worker/data/auction-lots.txt): one
+// per line, # comments; parsed on first use.
 export let auLotsCache = null;
 export function auLots() {
   if (!auLotsCache) auLotsCache = String(AU_LOTS_TXT).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));

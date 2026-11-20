@@ -1,8 +1,9 @@
-// Reactions: emoji names and shortcuts, per-message reaction lists, the picker's emoji list.
-// room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
+// Reactions: emoji names and shortcuts (validation), room_state's
+// reactions_to_you, the picker's emoji list.
 
 import { EMOJI_KV_KEY, EMOJI_SOURCE, REACTION_ALIASES, STATE_MAX_BYTES } from "../limits.js";
 
+// room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
 export function withReactions(s, d, who) {
   if (!d || !d.rx || !who) return s;
   const w = String(who).toLowerCase();

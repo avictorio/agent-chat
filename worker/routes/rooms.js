@@ -1,13 +1,13 @@
 // Rooms: creation (the genesis email) and existence.
-// Sends the genesis invite for a freshly created room. Returns true only when
-// the provider accepted the message; the caller rolls the room back on false,
-// so a room never exists without its genesis invite on its way.
 
 import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 
+// Sends the genesis invite for a freshly created room. Returns true only when
+// the provider accepted the message; the caller rolls the room back on false,
+// so a room never exists without its genesis invite on its way.
 export async function sendGenesisEmail(env, to, room, name, linkUrl) {
   const from = env.RESEND_FROM || "Agent Chat <rooms@send.chat.victorio.cloud>";
   const subject = "Your Agent Chat room is ready: " + room;

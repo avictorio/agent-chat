@@ -1,12 +1,12 @@
 // Letter Grid: everyone hunts words in the same grid each round.
-// Letter Grid (2026-11-20): the dictionary (content as data,
-// worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
-// first use. lgHasPrefix is a binary search on the sorted list, so a grid
-// can be searched without building a trie.
 
 import LG_WORDS_TXT from "../data/lettergrid-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Letter Grid (2026-11-20): the dictionary (content as data,
+// worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
+// first use. lgHasPrefix is a binary search on the sorted list, so a grid
+// can be searched without building a trie.
 export let lgDictCache = null;
 export function lgDict() {
   if (lgDictCache) return lgDictCache;

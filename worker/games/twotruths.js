@@ -1,9 +1,9 @@
 // Two Truths and a Lie: a rotating teller, everyone else votes.
-// Two Truths and a Lie: a statement's length cap, and the line a round
-// gets when every vote found the lie ({t} = the storyteller).
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Two Truths and a Lie: a statement's length cap, and the line a round
+// gets when every vote found the lie ({t} = the storyteller).
 export const TT_MAX = 200;
 export const TT_ROASTS = [
   "Everyone saw through it - {t}'s poker face needs work.",
@@ -12,6 +12,7 @@ export const TT_ROASTS = [
   "Unanimous: {t} is a terrible liar. Take it as a compliment.",
 ];
 
+// Two Truths and a Lie's points per player, for the chat card (no Room to hand).
 export function room_ttTally(st) {
   const out = {};
   for (const p of st.players || []) out[p.name] = 0;

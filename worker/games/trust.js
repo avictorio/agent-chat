@@ -1,9 +1,9 @@
 // Trust: the iterated prisoner's dilemma, simultaneous rounds.
-// Trust: what one pairing scores for you, keyed by your choice then
-// theirs (C cooperate, D defect) - the classic prisoner's dilemma.
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Trust: what one pairing scores for you, keyed by your choice then
+// theirs (C cooperate, D defect) - the classic prisoner's dilemma.
 export const TR_PAYOFFS = { CC: 3, CD: 0, DC: 5, DD: 1 };
 
 export const TrustMethods = {

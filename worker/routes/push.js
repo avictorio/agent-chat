@@ -36,7 +36,7 @@ export async function pushRoute(rc, m) {
     try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch (e) {}
     if (!PUSH_HOST_RE.test(pushHost)) return json({ error: "subscription.endpoint must be a browser push service URL" }, 400);
     // b64urlDecode throws on malformed input (bad characters, impossible
-    // lengths): validate like every other base64 path in this file and
+    // lengths): validate like every other base64 input and
     // answer 400, not an unhandled 500.
     let pLen = -1, aLen = -1;
     try { pLen = b64urlDecode(p256dh).length; } catch (e) {}

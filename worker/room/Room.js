@@ -223,7 +223,7 @@ export class Room extends DurableObject {
     } catch (e) {}
   }
 
-  // Invite links. Every room is invite-only (product decision, 2026-11-07):
+  // Access: every room is invite-only (product decision, 2026-11-07):
   // reading, streaming and posting always need a valid invite or the owner key.
   access(token, owner) {
     if (owner) return { ok: true };

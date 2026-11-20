@@ -1,5 +1,6 @@
-// The room as a Model Context Protocol surface: the tool catalog and tool calls (each one the same code path as its REST route).
-// ---------------------------------------------------------------------------
+// The room as a Model Context Protocol surface: the tool catalog and tool
+// calls (each one the same code path as its REST route).
+//
 // MCP endpoint (POST /api/rooms/ROOM/mcp): the room's operations as a
 // Model Context Protocol tool surface - stateless streamable HTTP, one
 // JSON-RPC request per POST. Same engine as the REST API (the same Room

@@ -3,6 +3,16 @@
 import { b64urlDecode, b64urlEncode, hmacSha256 } from "./crypto.js";
 import { CORS, json, parseRange } from "./http.js";
 
+// Signed media URLs (media plan phase E): media reads accept a
+// short-lived signature instead of a credential:
+// sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)), exp a unix
+// timestamp on an hour grid, one to two hours out (the grid keeps the
+// URL - and so the browser's cache entry - stable within the hour).
+// The room key is 32 random bytes kept in the room's own cfg
+// (media_sig_key; room/media.js), so there is no site-wide secret to
+// rotate. The HMAC is lib/crypto.js's synchronous one. Header auth keeps
+// working on the same routes (?invite= no longer authenticates media
+// reads); signatures are what listings, frames and the web app use.
 export function mediaSig(keyBytes, room, id, kind, exp) {
   return b64urlEncode(hmacSha256(keyBytes, new TextEncoder().encode(room + "|" + id + "|" + kind + "|" + exp)));
 }

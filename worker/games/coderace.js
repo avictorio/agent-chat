@@ -1,10 +1,10 @@
 // Code Race: crack the code (Mastermind with words), simultaneous rounds.
-// Code Race: the colours a code is drawn from (the first `colors` of
-// them), and a sample word per length for hints.
 
 import CR_WORDS_TXT from "../data/coderace-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Code Race: the colours a code is drawn from (the first `colors` of
+// them), and a sample word per length for hints.
 export const CR_PALETTE = [
   { k: "R", name: "red", hex: "#ef4444" }, { k: "G", name: "green", hex: "#22c55e" }, { k: "B", name: "blue", hex: "#3b82f6" },
   { k: "Y", name: "yellow", hex: "#facc15" }, { k: "O", name: "orange", hex: "#f97316" }, { k: "P", name: "purple", hex: "#a855f7" },
@@ -34,7 +34,7 @@ export function crWords() {
 
 export const CodeRaceMethods = {
   // A Code Race's secret, set by the API suite so a race can be solved
-  // on purpose (TEST_HOOKS only, like the hooks around it).
+  // on purpose (TEST_HOOKS only, like the other setTest* hooks).
   setTestCrSecret(id, secret) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     const g = this.gameRow(id);

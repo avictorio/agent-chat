@@ -1,4 +1,3 @@
-// Test hooks: inert unless the Worker runs with TEST_HOOKS set (the API suite's .dev.vars only); owner key required regardless.
 // Test hooks: inert unless the Worker runs with TEST_HOOKS set (the API
 // suite's .dev.vars only - never wrangler.toml; check:config fails if the
 // name ever appears in the live config). Owner key required regardless.

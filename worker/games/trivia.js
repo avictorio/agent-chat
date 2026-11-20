@@ -1,8 +1,8 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
-// Trivia (2026-11-20): balances, wagers, the quizmaster's split bonus.
 
 import { clockWords, seatAccepted, tvMatch } from "./shared.js";
 
+// Trivia (2026-11-20): balances, wagers, the quizmaster's split bonus.
 export const TV_START = 100;
 export const TV_MAX_WAGER = 25;
 export const TV_SPLIT = 10;

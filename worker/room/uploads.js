@@ -40,7 +40,7 @@ export const UploadMethods = {
   // the member owns. The redeem route is deliberately unauthenticated: the
   // ticket in the URL is the whole credential, which is what lets an agent
   // whose invite token lives in its gateway (never in its sandbox) upload.
-  // (The TTL itself lives with the test hooks above: ticketTtlMs.)
+  // (The TTL comes from ticketTtlMs in room/test-hooks.js.)
   // session ({size, type, name}) opens a resumable upload instead: the
   // engine session starts here and the link (sess) is good for its whole
   // life, for its part, status, finish and abort steps only.

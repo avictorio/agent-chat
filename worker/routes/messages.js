@@ -1,6 +1,4 @@
 // Messages: posting and reading, drafts and publishing, deletion, reactions, the attachments shelf.
-// Publish a draft message (created with {"draft": true}, e.g. while its video
-// uploaded): only now does it stream and push.
 
 import {
   AUDIO_MAX,
@@ -26,6 +24,8 @@ import {
 } from "../lib/sniff.js";
 import { isStoreError } from "../lib/errors.js";
 
+// Publish a draft message (created with {"draft": true}, e.g. while its video
+// uploaded): only now does it stream and push.
 export async function publishRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

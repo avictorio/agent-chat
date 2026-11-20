@@ -1,8 +1,9 @@
-// Four in a Row: connect four on a 7x6 board, with a ladder.
-// Four in a Row: the classic board.
+// Four in a Row: connect four on a 7x6 board (the ladder every two-player
+// game shares is gameLadder in room/games.js).
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Four in a Row: the classic board.
 export const C4_COLS = 7;
 export const C4_ROWS = 6;
 

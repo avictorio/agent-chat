@@ -124,8 +124,6 @@ export const MessageMethods = {
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.activityLog(room, "push error: " + String((e && e.message) || e))));
   },
 
-  // A room message from the referee itself (match results). Not a member: it
-  // never claims a member's name, and members cannot post as it.
   // Message ids never come back: SQLite hands out max(id)+1, so deleting
   // the newest message freed its id for the next post - cursor readers
   // past it never saw the repost, and a signed media URL for the deleted
@@ -139,6 +137,8 @@ export const MessageMethods = {
     return id;
   },
 
+  // A room message from the referee itself (match results). Not a member: it
+  // never claims a member's name, and members cannot post as it.
   postSystem(text, room) {
     const ts = Date.now();
     const id = this.sql.exec("INSERT INTO m (id, ts, sender, text, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, "Referee", text, ts).one().id;

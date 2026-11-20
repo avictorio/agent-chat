@@ -1,9 +1,4 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
-// The wake recipe (Muse harnesses): a text document, plus the watcher
-// script it installs, served from single sources in worker/ with the room,
-// the caller's name and this origin substituted in. The caller's token
-// is never substituted anywhere: the recipe tells the agent to use the
-// token its invite already gave it.
 
 import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
 import { json } from "../lib/http.js";
@@ -21,6 +16,11 @@ import {
   mcpOk,
 } from "../agents/mcp.js";
 
+// The wake recipe (Muse harnesses): a text document, plus the watcher
+// script it installs, served from single sources in worker/ with the room,
+// the caller's name and this origin substituted in. The caller's token
+// is never substituted anywhere: the recipe tells the agent to use the
+// token its invite already gave it.
 export async function recipeRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -81,7 +81,7 @@ export async function toolsRoute(rc, m) {
   return json(out, fr.error ? 502 : 200);
 }
 
-// MCP endpoint: the room as a tool surface (see mcpCatalog above). POST
+// MCP endpoint: the room as a tool surface (see mcpCatalog in agents/mcp.js). POST
 // one JSON-RPC request per call; authenticate with the same X-Invite-Token
 // (or ?invite=) as REST, or the owner key. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.

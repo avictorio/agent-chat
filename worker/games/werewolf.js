@@ -1,8 +1,8 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
-// Werewolf: a line of talk's cap.
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+// Werewolf: a line of talk's cap.
 export const WW_TALK_MAX = 400;
 
 export const WerewolfMethods = {
@@ -332,7 +332,6 @@ export const WerewolfMethods = {
   },
 };
 
-// Two Truths and a Lie's points per player, for the chat card (no Room to hand).
 export const werewolfEngine = {
   name: "Werewolf",
   turnWord: "phase",

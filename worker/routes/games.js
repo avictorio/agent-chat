@@ -1,6 +1,4 @@
 // Games: matches, moves, cancel/accept/decline, Sketch & Guess drawings.
-// Sketch & Guess drawings (2026-11-20): a signed URL (the hour grid of
-// message media, kind "sketch", id "GAME.ROUND") or the room credential.
 
 import { ROOM_RE } from "../limits.js";
 import { CORS, json, readBody } from "../lib/http.js";
@@ -8,6 +6,8 @@ import { MEDIA_CACHE, mediaCsp, mediaSigState } from "../lib/media.js";
 import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
 
+// Sketch & Guess drawings (2026-11-20): a signed URL (the hour grid of
+// message media, kind "sketch", id "GAME.ROUND") or the room credential.
 export async function sketchImageRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

@@ -1,9 +1,9 @@
 // Twenty Questions: a rotating answerer keeps a secret, everyone asks yes/no questions.
-// Twenty Questions: the drawn secrets (a data file), the budget and caps.
 
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
 
+// Twenty Questions: the drawn secrets (a data file), the budget and caps.
 export const TQ_BUDGET = 20;
 export const TQ_Q_MAX = 160;
 export const TQ_SECRET_MAX = 60;

@@ -1,18 +1,8 @@
 // Hashing, HMAC, HKDF and base64url helpers (Web Crypto, plus a synchronous SHA-256).
 
-// ---- Signed media URLs (media plan phase E) ----
-// Media reads accept a short-lived signature instead of a credential:
-// sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)), exp a unix
-// timestamp on an hour grid, one to two hours out (the grid keeps the
-// URL - and so the browser's cache entry - stable within the hour).
-// The room key is 32 random bytes kept in
-// the room's own cfg (media_sig_key), so there is no site-wide secret to
-// rotate. WebCrypto's subtle API is async-only, but message
-// serialization is sync, so the HMAC is computed with the plain-JS
-// SHA-256 below (verified against RFC 4231 vectors and node:crypto).
-// Header auth keeps working on the same routes (?invite= no longer
-// authenticates media reads); signatures are what listings, frames and
-// the web app use.
+// A synchronous SHA-256 and HMAC in plain JS: WebCrypto's subtle API is
+// async-only, but message serialization (signed media URLs) is sync.
+// Verified against RFC 4231 vectors and node:crypto.
 export const SHA256_K = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -116,7 +106,7 @@ export async function hkdf(ikm, salt, info, len) {
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: salt, info: info }, key, len * 8));
 }
 
-// Service-account JWT helpers (the Gmail sender below signs with them).
+// PEM to DER for the service-account key (platform/gmail.js signs with it).
 export function pemToDer(pem) {
   const b64 = String(pem || "").replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
   const bin = atob(b64);

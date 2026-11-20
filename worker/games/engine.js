@@ -23,10 +23,12 @@ import { triviaEngine } from "./trivia.js";
    nudges, chat cards, result posts, cancel, standings - asks the match's
    engine instead of branching on its type. Each game lives in its own
    games/<game>.js: its constants and data, its Room methods (an object
-   installed on the class in worker/index.js) and its entry here. To add a
-   game: write that module, install its methods and add its entry, then
-   the docs section, the MCP descriptions and the web catalog
-   (web/app/src/games/catalog.tsx).
+   installed on the class at the end of worker/room/Room.js) and its
+   engine entry, which is listed in GAME_ENGINES here. To add a game:
+   write that module, install its methods and list its entry, then the
+   docs section, the MCP descriptions and the web catalog
+   (web/app/src/games/shared/catalog.tsx) and a folder for its web side
+   (web/app/src/games/<game>/).
 
    An entry:
      name, turnWord     how the game is named, and its clock step in logs

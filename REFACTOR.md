@@ -15,7 +15,7 @@ delete this file.
 
 State on 2026-11-20: phase 1 and steps 2.1-2.8 are done (see the log for
 what is live); 4.6 is done. `worker/index.js` is the route table alone.
-Next is 2.9 (comments left in the wrong place), then phase 3. Claude Code's built-in `cc-plugin-privacy` plugin once
+Phase 2 is done; phase 3 (the web app) is under way. Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -233,8 +233,18 @@ limits and the games move before `agents/`.
       so install order cannot matter); `index.js` re-exports the class
       (a Durable Object class must be exported from the main module).
       index.js 2,863 -> 198 lines; 61 modules
-- [ ] 2.9 Fix comments left in the wrong place by earlier edits (the
-      sniffImage and roomExists ones are done)
+- [x] 2.9 Fix comments left in the wrong place by earlier edits: two
+      reviewers read every module (26 findings). The biggest pattern was a
+      split-tool bug: in a new module the imports went in after every
+      leading comment line, so the first declaration's comment ended up
+      above the import block, reading as a second header (22 modules;
+      the tool now puts imports after the header's blank line). The rest:
+      comments above the wrong function (postSystem, uploadLinkRoute,
+      room_ttTally), the signed-URL scheme note in lib/crypto.js (now
+      above mediaSig in lib/media.js), Light Cycles' rules heading the
+      shared machinery (now lightcycles.js's header, with legalMoves and
+      safeMoves, which only Light Cycles calls), and stale "above",
+      "below", "in index.js" and module-header wording
 - [x] 2.10 Remove `.claude/settings.json` (and its `.gitignore`
       exception): done early - it never took effect; the real trigger
       (the owner's email as the VAPID subject) left the code instead

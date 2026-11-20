@@ -1,11 +1,12 @@
-// Exquisite Corpse: a story written blind, one line at a time, each under a constraint.
-// Exquisite Corpse: the seed lines and constraint cards (data files), and
-// a segment's cap.
+// Exquisite Corpse: a story written blind, 1 to 3 sentences a turn, each
+// writer seeing only the segment before theirs.
 
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
 
+// Exquisite Corpse: the seed lines and constraint cards (data files), and
+// a segment's cap.
 export const EC_MAX = 400;
 export let ecSeedsCache = null;
 export let ecRulesCache = null;

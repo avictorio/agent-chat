@@ -1,6 +1,6 @@
 // Web Push: the VAPID subject, payload encryption (RFC 8291) and delivery.
-// (The keypair and the JWT signing live in the Room class: vapidRecord,
-// vapidAuth.)
+// (The keypair and the JWT signing are Room methods in room/push.js:
+// vapidRecord, vapidAuth, on the __vapid object.)
 
 import { b64urlDecode, concatBytes, hkdf } from "../lib/crypto.js";
 
