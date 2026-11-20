@@ -15,7 +15,6 @@ import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqRev
 import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
 import {
   battleshipBoard,
-  boardSvg,
   bsGrid,
   clockBar,
   duelBoard,
@@ -187,7 +186,6 @@ export function createGameStore(opts: {
     // Frontlines: the split being planned (kept across repaints) and the
     // number of rounds already shown (a new one plays its reveal)
     flDraft?: { round: number; vals: number[] } | null;
-    flShown?: number;
     // a rounds game's 3D view (Frontlines, Code Race): its host, the paint
     // sequence, and the scene's seal-my-move-now hook
     r3d?: Host3d | null;
@@ -208,32 +206,6 @@ export function createGameStore(opts: {
   } | null = null;
   let gameViewTimer = 0;
   let gameRenderKey = "";
-
-  function duelSide(p: GL, g: GL): HTMLElement {
-    const side = el("div", "duel-side");
-    side.style.borderColor = p.hex;
-    const myName = opts.meName();
-    const isViewer = !!(g.you && g.you.playing && myName && p.name === myName);
-    let icon = "…";
-    let state = "THINKING";
-    let hidden = false;
-    if (isViewer && g.you.queued) {
-      icon = THROW_EMOJI[g.you.queued] || "?";
-      state = "LOCKED";
-    } else if (p.thrown) {
-      icon = "❓";
-      state = "LOCKED";
-      hidden = true;
-    }
-    const name = el("div", "side-name", p.name + (isViewer ? " (you)" : ""));
-    name.style.color = p.hex;
-    side.appendChild(name);
-    const th = el("div", "side-throw", icon);
-    if (hidden) side.classList.add("hidden-throw");
-    side.appendChild(th);
-    side.appendChild(el("div", "side-state", state));
-    return side;
-  }
 
   // Teach by playing: one dismissible hint line per arena, shown on
   // first views only (the dismissal persists per kind).
@@ -872,8 +844,7 @@ export function createGameStore(opts: {
       return;
     }
     const players0 = g.players || [];
-    const in3d = duel3dPref() && players0.length === 2 && g.status !== "lobby";
-    if (players0.length === 2 && g.status !== "lobby") wrap.appendChild(duelViewToggle(g));
+    const in3d = players0.length === 2 && g.status !== "lobby";
     // In 3D the status line and the throw pad sit right under the scene
     // (the action next to the view - on a phone the pad must stay on
     // screen); the scoreboard and the rest follow.
@@ -910,13 +881,6 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
     }
     if (g.status === "running" && players.length === 2) {
-      if (!in3d) {
-        const arena = el("div", "duel-arena");
-        arena.appendChild(duelSide(players[0], g));
-        arena.appendChild(el("div", "duel-vs", "VS"));
-        arena.appendChild(duelSide(players[1], g));
-        wrap.appendChild(arena);
-      }
       // who's up and the round clock are the turn banner's, at the top
       if (g.you && g.you.playing) {
         const hint = arenaHint("duel", "Pick a throw — it stays hidden until both lock in.");
@@ -1017,15 +981,11 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    // the score, then the field: the last resolved round, played in when new
-    // (in 3D the scene plays it; the numbers follow under the planner)
-    const in3d = pref3d("frontlines");
-    wrap.appendChild(viewToggle3d("frontlines", g));
-    if (in3d) {
-      const h = host3d("frontlines");
-      wrap.appendChild(h.host);
-      paint3d("frontlines", g, h);
-    } else drop3d();
+    // the scene plays the last resolved round; the score, the planner and
+    // the round in numbers follow under it
+    const h = host3d("frontlines");
+    wrap.appendChild(h.host);
+    paint3d("frontlines", g, h);
     const score = el("div", "fl-score");
     (g.players || []).forEach((p: GL, i: number) => {
       if (i) score.appendChild(el("span", "fl-vs", "vs"));
@@ -1039,19 +999,9 @@ export function createGameStore(opts: {
       score.appendChild(s);
     });
     wrap.appendChild(score);
-    const rounds: GL[] = g.rounds || [];
     const field = flField(g, { me: opts.meName() });
-    if (!in3d && gv.flShown != null && rounds.length > gv.flShown) field.classList.add("reveal-in");
-    gv.flShown = rounds.length;
     const last = flLastRound(g);
-    const fieldCap = el("div", "fl-cap", last ? "Round " + last.n + (in3d ? " in numbers" : " on the field") : g.status === "running" ? "Round " + g.round + " · splits stay hidden until both are in" : "");
-    // 2D: the field before the planner; 3D: the scene shows it, the
-    // numbers follow the planner (the action next to the view)
-    const putField = () => {
-      wrap.appendChild(fieldCap);
-      wrap.appendChild(field);
-    };
-    if (!in3d) putField();
+    const fieldCap = el("div", "fl-cap", last ? "Round " + last.n + " in numbers" : g.status === "running" ? "Round " + g.round + " · splits stay hidden until both are in" : "");
     if (g.status === "running" && you.playing) {
       const hint = arenaHint("frontlines", "Put your troops where you think your rival won't. Hold 3 of the 5 hills to take the round.");
       if (hint) wrap.appendChild(hint);
@@ -1079,43 +1029,30 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - splits stay hidden until each round resolves.";
       wrap.appendChild(note);
     }
-    if (in3d) putField();
+    wrap.appendChild(fieldCap);
+    wrap.appendChild(field);
   }
 
-  /* The rounds games' 3D views (Frontlines, Code Race), lazy-loaded like
-     the Duel's: one host per open arena, kept across repaints; the scene
-     shows the last round and plays new ones in, the inputs and the
-     numbers stay in the page. 3D is the default; the 2D/3D toggle is
-     remembered per game (ac:fl3d, ac:cr3d, ac:c43d, ac:tr3d, ac:au3d, ac:ld3d). */
+  /* The games' 3D views, lazy-loaded like the Duel's: one host per open
+     arena, kept across repaints; the scene shows the last round and plays
+     new ones in, the inputs and the numbers stay in the page. The arena
+     view is 3D only (2026-11-20, the owner's call: the 2D views and the
+     2D/3D toggles are retired); a device without WebGL gets a note and
+     plays with the controls under it. */
   type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void };
-  type Kind3d = { key: string; cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
+  type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
   const KIND3D: Record<string, Kind3d> = {
-    frontlines: { key: "ac:fl3d", cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
-    coderace: { key: "ac:cr3d", cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
-    fourinarow: { key: "ac:c43d", cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
-    trust: { key: "ac:tr3d", cls: "tr-3d-host", load: () => import("./TrustArena3D"), comp: null },
-    auction: { key: "ac:au3d", cls: "au-3d-host", load: () => import("./AuctionArena3D"), comp: null },
-    // wave 3 games are 3D only (no 2D view, no toggle - the owner's call)
-    twotruths: { key: "ac:tt3d", cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
-    corpse: { key: "ac:ec3d", cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
-    twenty: { key: "ac:tq3d", cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
-    werewolf: { key: "ac:ww3d", cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
-    liarsdice: { key: "ac:ld3d", cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
+    frontlines: { cls: "fl-3d-host", load: () => import("./FrontlinesArena3D"), comp: null },
+    coderace: { cls: "cr-3d-host", load: () => import("./CodeRaceArena3D"), comp: null },
+    fourinarow: { cls: "c4-3d-host", load: () => import("./FourArena3D"), comp: null },
+    trust: { cls: "tr-3d-host", load: () => import("./TrustArena3D"), comp: null },
+    auction: { cls: "au-3d-host", load: () => import("./AuctionArena3D"), comp: null },
+    twotruths: { cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
+    corpse: { cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
+    twenty: { cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
+    werewolf: { cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
+    liarsdice: { cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
-  function pref3d(kind: string): boolean {
-    try {
-      return localStorage.getItem(KIND3D[kind]!.key) !== "0";
-    } catch {
-      return false;
-    }
-  }
-  function setPref3d(kind: string, on: boolean) {
-    try {
-      localStorage.setItem(KIND3D[kind]!.key, on ? "1" : "0");
-    } catch {
-      // storage unavailable: the toggle still works for this view
-    }
-  }
   function load3d(kind: string) {
     const k = KIND3D[kind]!;
     if (!k.comp)
@@ -1169,26 +1106,6 @@ export function createGameStore(opts: {
       }
     );
   }
-  function viewToggle3d(kind: string, g: GL): HTMLElement {
-    const row = el("div", "lc-view-toggle");
-    const on = pref3d(kind);
-    const mk = (label: string, is3d: boolean) => {
-      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
-      b.type = "button";
-      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
-      b.addEventListener("click", () => {
-        if (pref3d(kind) === is3d) return;
-        setPref3d(kind, is3d);
-        if (!is3d) drop3d();
-        renderGameView(g, true);
-      });
-      return b;
-    };
-    row.appendChild(mk("2D", false));
-    row.appendChild(mk("3D", true));
-    return row;
-  }
-
   /* Code Race (2026-11-19): the race board (your lane with your guesses,
      then each rival's feedback), the secret once it's over, and for a
      racer still racing the guess input. The draft lives on gameView so a
@@ -1236,13 +1153,10 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    // in 3D the vault comes first, the input right under it
-    wrap.appendChild(viewToggle3d("coderace", g));
-    if (pref3d("coderace")) {
-      const h = host3d("coderace");
-      wrap.appendChild(h.host);
-      paint3d("coderace", g, h);
-    } else drop3d();
+    // the vault comes first, the input right under it
+    const h = host3d("coderace");
+    wrap.appendChild(h.host);
+    paint3d("coderace", g, h);
     const sec = crSecretEl(g);
     if (sec) wrap.appendChild(sec);
     const racing = g.status === "running" && you.playing && !you.solved && !you.out;
@@ -1340,14 +1254,9 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    if (KIND3D.auction) {
-      wrap.appendChild(viewToggle3d("auction", g));
-      if (pref3d("auction")) {
-        const h = host3d("auction");
-        wrap.appendChild(h.host);
-        paint3d("auction", g, h);
-      } else drop3d();
-    }
+    const h = host3d("auction");
+    wrap.appendChild(h.host);
+    paint3d("auction", g, h);
     wrap.appendChild(auLot(g));
     if (g.status === "running" && you.playing && (you.budget || 0) > 0) {
       const hint = arenaHint("auction", "Every lot is worth the same. Bid low on the ones others want; save for the ones they don't.");
@@ -1425,13 +1334,10 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    // in 3D the table comes first; the scores, choices and grid follow
-    wrap.appendChild(viewToggle3d("trust", g));
-    if (pref3d("trust")) {
-      const h = host3d("trust");
-      wrap.appendChild(h.host);
-      paint3d("trust", g, h);
-    } else drop3d();
+    // the table comes first; the scores, choices and grid follow
+    const h = host3d("trust");
+    wrap.appendChild(h.host);
+    paint3d("trust", g, h);
     wrap.appendChild(trScores(g, me));
     if (g.status === "running" && you.playing && !you.out) {
       const hint = arenaHint("trust", "Every pairing scores on its own: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. The last round is a secret.");
@@ -1502,23 +1408,19 @@ export function createGameStore(opts: {
       if (gv.r3dCommit) gv.r3dCommit();
       void sendMove(g.id, String(col), note);
     };
-    // in 3D the scene is the board (its columns take a tap too); the
-    // seats and the 1-7 drop buttons stay in the page under it
-    const in3d = pref3d("fourinarow");
-    wrap.appendChild(viewToggle3d("fourinarow", g));
-    if (in3d) {
-      const h = host3d("fourinarow");
-      wrap.appendChild(h.host);
-      paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
-    } else drop3d();
+    // the scene is the board (its columns take a tap too); the seats and
+    // the 1-7 drop buttons stay in the page under it
+    const h = host3d("fourinarow");
+    wrap.appendChild(h.host);
+    paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
     wrap.appendChild(c4Seats(g, me));
     if (myTurn) {
-      const hint = arenaHint("fourinarow", in3d ? "Tap a column on the board (or a number) to drop your disc." : "Tap a column to drop your disc. Block your rival's three in a row before it becomes four.");
+      const hint = arenaHint("fourinarow", "Tap a column on the board (or a number) to drop your disc.");
       if (hint) wrap.appendChild(hint);
+      const under = el("div", "c4-under");
+      under.appendChild(c4Board(g, { open: you.legal_moves || [], onDrop: drop, headsOnly: true }));
+      wrap.appendChild(under);
     }
-    const big = el("div", in3d ? "c4-under" : "lc-board-big");
-    if (!in3d || myTurn) big.appendChild(c4Board(g, { open: myTurn ? you.legal_moves || [] : [], onDrop: myTurn ? drop : undefined, headsOnly: in3d }));
-    wrap.appendChild(big);
     if (g.status === "running" && !you.playing) note.textContent = "Spectating - the board updates as each disc drops.";
     else if (g.status === "running" && you.playing && !myTurn) note.textContent = "Your rival is thinking. You'll get a nudge when it's your turn.";
     if (note.textContent) wrap.appendChild(note);
@@ -1586,14 +1488,9 @@ export function createGameStore(opts: {
       wrap.appendChild(note);
       return;
     }
-    if (KIND3D.liarsdice) {
-      wrap.appendChild(viewToggle3d("liarsdice", g));
-      if (pref3d("liarsdice")) {
-        const h = host3d("liarsdice");
-        wrap.appendChild(h.host);
-        paint3d("liarsdice", g, h);
-      } else drop3d();
-    }
+    const h = host3d("liarsdice");
+    wrap.appendChild(h.host);
+    paint3d("liarsdice", g, h);
     wrap.appendChild(ldBidNow(g));
     if (g.status === "running" && you.playing && !you.out && (you.dice || []).length) wrap.appendChild(ldCup(g));
     if (myTurn && dr) {
@@ -1969,9 +1866,9 @@ export function createGameStore(opts: {
         if (banner) wrap.appendChild(banner);
         if (gameView) gameView.bsFire = null;
         // The 3D arena is a two-board scene: a free-for-all (3+
-        // captains) always spectates on the 2D boards below.
+        // captains) spectates on the boards below - its only view.
         if (players.length > 2) dropBs3d();
-        const use3d = players.length > 2 ? false : bsBoardsOr3d(g, wrap);
+        else bsScene(g, wrap);
         const boards = el("div", "bs-boards");
         g.boards.forEach((b: GL) => {
           const states: Record<string, string> = {};
@@ -1992,7 +1889,7 @@ export function createGameStore(opts: {
           side.appendChild(grid);
           boards.appendChild(side);
         });
-        if (!use3d) wrap.appendChild(boards);
+        if (players.length > 2) wrap.appendChild(boards);
         note.textContent = "Spectating - every shot is public; un-hit ships stay hidden.";
       } else {
         dropBs3d();
@@ -2173,42 +2070,7 @@ export function createGameStore(opts: {
       }
       wrap.appendChild(note);
     } else {
-      const boards = el("div", "bs-boards");
-      const ownStates: Record<string, string> = {};
-      (you.fleet || []).forEach((s: GL) => {
-        s.cells.forEach((c: string) => {
-          ownStates[c] = s.hits.indexOf(c) >= 0 ? (s.sunk ? "sunk" : "hit") : "ship";
-        });
-      });
-      Object.keys(you.incoming || {}).forEach((c) => {
-        if (!ownStates[c]) ownStates[c] = "miss";
-      });
-      const ownWrap = el("div", "bs-side");
-      ownWrap.appendChild(el("div", "bs-title", "Your waters"));
-      ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size), undefined, g.fleet_sizes));
-      const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || [], undefined, g);
-      markLastShot(ownGrid, g, myName, freshMove);
-      markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
-      ownWrap.appendChild(ownGrid);
-      boards.appendChild(ownWrap);
-      const oppStates: Record<string, string> = {};
-      Object.keys(you.shots || {}).forEach((c) => {
-        oppStates[c] = you.shots[c];
-      });
-      (you.sunk_ships || []).forEach((s: GL) => {
-        s.cells.forEach((c: string) => {
-          oppStates[c] = "sunk";
-        });
-      });
       const canFire = g.status === "running" && g.phase === "play" && you.your_turn;
-      const oppWrap = el("div", "bs-side");
-      oppWrap.appendChild(el("div", "bs-title", opp.name + "'s waters" + (canFire ? " - tap a cell to fire" : "")));
-      oppWrap.appendChild(fleetStrip(opp.hex, (you.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
-      const oppGrid = bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null, you.sunk_ships || [], undefined, g);
-      markLastShot(oppGrid, g, opp.name, freshMove);
-      markSinking(oppGrid, you.sunk_ships || [], g, opp.name, freshMove);
-      oppWrap.appendChild(oppGrid);
-      boards.appendChild(oppWrap);
       const banner = bsBanner(g, freshMove);
       if (banner) wrap.appendChild(banner);
       if (gameView) gameView.bsFire = canFire ? (label: string) => { void sendMove(g.id, label, note); } : null;
@@ -2224,7 +2086,26 @@ export function createGameStore(opts: {
         item.appendChild(fleetStrip(f.hex, f.sunk, undefined, g.fleet_sizes));
         strips.appendChild(item);
       });
-      if (!bsBoardsOr3d(g, wrap, strips)) wrap.appendChild(boards);
+      bsScene(g, wrap, strips);
+      // No WebGL: the scene is a note, and their waters are the only
+      // way to aim - a plain grid of your shots, a tap fires
+      if (!webglOk()) {
+        const oppStates: Record<string, string> = {};
+        Object.keys(you.shots || {}).forEach((c) => {
+          oppStates[c] = you.shots[c];
+        });
+        (you.sunk_ships || []).forEach((s: GL) => {
+          s.cells.forEach((c: string) => {
+            oppStates[c] = "sunk";
+          });
+        });
+        const aim = el("div", "bs-side bs-aim");
+        aim.appendChild(el("div", "bs-title", opp.name + "'s waters" + (canFire ? " - tap a cell to fire" : "")));
+        const oppGrid = bsGrid(oppStates, opp.hex, canFire ? (label) => { void sendMove(g.id, label, note); } : null, you.sunk_ships || [], undefined, g);
+        markLastShot(oppGrid, g, opp.name, freshMove);
+        aim.appendChild(oppGrid);
+        wrap.appendChild(aim);
+      }
       // whose shot it is, and the turn clock, are the turn banner's
       if (g.sonar && g.phase === "play" && g.status === "running")
         wrap.appendChild(el("div", "bs-sonar", "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."));
@@ -2235,12 +2116,10 @@ export function createGameStore(opts: {
           else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row forfeits the match."));
         });
         if (you.playing) {
-          const hint = bs3dPref()
-            ? arenaHint(
-                "bs-play-3d",
-                "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."
-              )
-            : arenaHint("bs-play", "Tap a cell in their waters to fire — ✕ is a hit, · is a miss, dark hulls are sunk.");
+          const hint = arenaHint(
+            "bs-play-3d",
+            "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."
+          );
           if (hint) wrap.appendChild(hint);
         }
       }
@@ -2277,7 +2156,25 @@ export function createGameStore(opts: {
     const h: Host3d = { root: null as unknown as Root, host, status, failed: false };
     h.root = createRoot(mount, { onUncaughtError: (err) => fail3d(h, err) });
     status.textContent = "Loading the 3D arena…";
+    // no WebGL at all: say so at once (no scene will ever draw, and a
+    // reload will not help) - the game plays on with the controls below
+    if (!webglOk()) {
+      h.failed = true;
+      host.classList.add("no-3d");
+      status.textContent = "3D isn't available on this device - play with the controls below.";
+    }
     return h;
+  }
+  let webglKnown: boolean | null = null;
+  function webglOk(): boolean {
+    if (webglKnown != null) return webglKnown;
+    try {
+      const c = document.createElement("canvas");
+      webglKnown = !!(c.getContext("webgl2") || c.getContext("webgl"));
+    } catch {
+      webglKnown = false;
+    }
+    return webglKnown;
   }
   function ready3d(h: Host3d) {
     if (!h.failed) h.status.hidden = true;
@@ -2285,11 +2182,13 @@ export function createGameStore(opts: {
   function fail3d(h: Host3d, err: unknown) {
     h.failed = true;
     const msg = String((err && (err as Error).message) || err || "");
-    const text = /webgl/i.test(msg)
-      ? "This device couldn't start 3D graphics (WebGL)."
-      : /import|module|fetch|load/i.test(msg)
-        ? "The 3D arena didn't load - the site was probably just updated."
-        : "The 3D arena hit an error.";
+    if (/webgl/i.test(msg)) {
+      h.host.classList.add("no-3d");
+      h.status.textContent = "3D isn't available on this device - play with the controls below.";
+      h.status.hidden = false;
+      return;
+    }
+    const text = /import|module|fetch|load/i.test(msg) ? "The 3D arena didn't load - the site was probably just updated." : "The 3D arena hit an error.";
     h.status.textContent = "";
     h.status.appendChild(el("div", "", text));
     const b = el("button", "btn sm", "Reload") as HTMLButtonElement;
@@ -2299,22 +2198,7 @@ export function createGameStore(opts: {
     h.status.hidden = false;
   }
 
-  const LC3D_KEY = "ac:lc3d";
   let lc3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; onSteer?: (dir: string) => void }>> | null = null;
-  function lc3dPref(): boolean {
-    try {
-      return localStorage.getItem(LC3D_KEY) !== "0";
-    } catch {
-      return false;
-    }
-  }
-  function setLc3dPref(on: boolean) {
-    try {
-      localStorage.setItem(LC3D_KEY, on ? "1" : "0");
-    } catch {
-      // storage unavailable: the toggle still works for this view
-    }
-  }
   function loadLc3d() {
     // A failed import is not remembered: the next paint tries again.
     if (!lc3dComp)
@@ -2364,25 +2248,6 @@ export function createGameStore(opts: {
       }
     );
   }
-  function lcViewToggle(g: GL): HTMLElement {
-    const row = el("div", "lc-view-toggle");
-    const on = lc3dPref();
-    const mk = (label: string, is3d: boolean) => {
-      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
-      b.type = "button";
-      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
-      b.addEventListener("click", () => {
-        if (lc3dPref() === is3d) return;
-        setLc3dPref(is3d);
-        if (!is3d) dropLc3d();
-        renderGameView(g, true);
-      });
-      return b;
-    };
-    row.appendChild(mk("2D", false));
-    row.appendChild(mk("3D", true));
-    return row;
-  }
 
   /* ---- Battleship 3D board (R3F, 2026-11-12) ----
      Same bridge pattern as the Light Cycles scene: ./BsArena3D is a
@@ -2392,24 +2257,9 @@ export function createGameStore(opts: {
      on gameView so re-appending the host keeps the canvas alive
      across repaints. The component receives the same per-viewer state
      as the 2D boards plus a fire callback wired to sendMove. */
-  const BS3D_KEY = "ac:bs3d";
   let bs3dComp: Promise<
     ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void; onReady?: () => void }>
   > | null = null;
-  function bs3dPref(): boolean {
-    try {
-      return localStorage.getItem(BS3D_KEY) !== "0";
-    } catch {
-      return false;
-    }
-  }
-  function setBs3dPref(on: boolean) {
-    try {
-      localStorage.setItem(BS3D_KEY, on ? "1" : "0");
-    } catch {
-      // storage unavailable: the toggle still works for this view
-    }
-  }
   function loadBs3d() {
     // A failed import is not remembered: the next paint tries again.
     if (!bs3dComp)
@@ -2456,37 +2306,13 @@ export function createGameStore(opts: {
       }
     );
   }
-  function bsViewToggle(g: GL): HTMLElement {
-    const row = el("div", "lc-view-toggle");
-    const on = bs3dPref();
-    const mk = (label: string, is3d: boolean) => {
-      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
-      b.type = "button";
-      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
-      b.addEventListener("click", () => {
-        if (bs3dPref() === is3d) return;
-        setBs3dPref(is3d);
-        if (!is3d) dropBs3d();
-        renderGameView(g, true);
-      });
-      return b;
-    };
-    row.appendChild(mk("2D", false));
-    row.appendChild(mk("3D", true));
-    return row;
-  }
-  /* Append the toggle (and, when the pref is on, the 3D host in place
-     of the 2D boards). Returns true when the caller should skip
-     building its 2D boards. */
-  function bsBoardsOr3d(g: GL, wrap: HTMLElement, under?: HTMLElement): boolean {
-    wrap.appendChild(bsViewToggle(g));
-    if (!bs3dPref()) return false;
-    if (!gameView) return false;
+  /* The two-captain scene, with what follows it right under it. */
+  function bsScene(g: GL, wrap: HTMLElement, under?: HTMLElement) {
+    if (!gameView) return;
     if (!gameView.bs3d) gameView.bs3d = makeHost3d("lc-board-big lc-3d-host bs-3d-host");
     wrap.appendChild(gameView.bs3d.host);
     if (under) wrap.appendChild(under);
     paintBs3d(g, gameView.bs3d);
-    return true;
   }
 
   /* ---- Duel 3D arena (2026-11-13) ----
@@ -2496,24 +2322,9 @@ export function createGameStore(opts: {
      so repaints keep the canvas. The scene replaces the two DOM duel
      sides; the throw pad, the verdict banner and the scoreboard stay
      in the page - the scene shows, the page acts. */
-  const DUEL3D_KEY = "ac:duel3d";
   let duel3dComp: Promise<
     ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: ((t: string) => void) | null) => void }>
   > | null = null;
-  function duel3dPref(): boolean {
-    try {
-      return localStorage.getItem(DUEL3D_KEY) !== "0";
-    } catch {
-      return false;
-    }
-  }
-  function setDuel3dPref(on: boolean) {
-    try {
-      localStorage.setItem(DUEL3D_KEY, on ? "1" : "0");
-    } catch {
-      // storage unavailable: the toggle still works for this view
-    }
-  }
   function loadDuel3d() {
     if (!duel3dComp)
       duel3dComp = import("./DuelArena3D")
@@ -2558,25 +2369,6 @@ export function createGameStore(opts: {
         if (current()) fail3d(h, err);
       }
     );
-  }
-  function duelViewToggle(g: GL): HTMLElement {
-    const row = el("div", "lc-view-toggle");
-    const on = duel3dPref();
-    const mk = (label: string, is3d: boolean) => {
-      const b = el("button", "lc-view-btn" + (on === is3d ? " on" : ""), label) as HTMLButtonElement;
-      b.type = "button";
-      b.setAttribute("aria-pressed", on === is3d ? "true" : "false");
-      b.addEventListener("click", () => {
-        if (duel3dPref() === is3d) return;
-        setDuel3dPref(is3d);
-        if (!is3d) dropDuel3d();
-        renderGameView(g, true);
-      });
-      return b;
-    };
-    row.appendChild(mk("2D", false));
-    row.appendChild(mk("3D", true));
-    return row;
   }
 
   function renderGameView(g: GL, force?: boolean) {
@@ -2658,16 +2450,9 @@ export function createGameStore(opts: {
       wrap.appendChild(historyList(g));
       return;
     }
-    wrap.appendChild(lcViewToggle(g));
-    if (lc3dPref()) {
-      if (!gameView.lc3d) gameView.lc3d = makeHost3d("lc-board-big lc-3d-host");
-      wrap.appendChild(gameView.lc3d.host);
-      paintLc3d(g, gameView.lc3d);
-    } else {
-      const big = el("div", "lc-board-big");
-      big.innerHTML = boardSvg(g);
-      wrap.appendChild(big);
-    }
+    if (!gameView.lc3d) gameView.lc3d = makeHost3d("lc-board-big lc-3d-host");
+    wrap.appendChild(gameView.lc3d.host);
+    paintLc3d(g, gameView.lc3d);
     const chips = el("div", "lc-players");
     (g.players || []).forEach((p: GL) => {
       const chip = el("span", "lc-chip" + (p.alive ? "" : " out"));
@@ -2714,7 +2499,7 @@ export function createGameStore(opts: {
         pad.appendChild(b);
       });
       wrap.appendChild(pad);
-      const onBoard = lc3dPref() ? " (or tap a marker on the board)" : "";
+      const onBoard = " (or tap a marker on the board)";
       note.textContent = g.you.queued
         ? "Queued: " + g.you.queued + " - tap another direction" + onBoard + " to change it before the tick resolves."
         : g.mode === "async"

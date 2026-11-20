@@ -528,7 +528,7 @@ let FAILURES = 0;
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
     return out;
   });
-  await run('battleship-spectator', { state: { bs: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page) => {
+  await run('battleship-spectator', { state: { bs: true } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     out.minis = await page.$$eval('.game-card .bs-mini-svg', els => els.length);
@@ -539,19 +539,13 @@ let FAILURES = 0;
     if (out.cardStrips !== 2) throw new Error('card should show two fleet strips, got ' + out.cardStrips);
     await shot(page, 'bs-card.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    // two captains: the 3D scene is the only arena view (2D retired 2026-11-20)
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 6000 });
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
-    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
     out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
-    out.axes = await page.$$eval('#viewer .bs-axis-x span', els => els.length);
-    out.segH = await page.$$eval('#viewer .bs-cell.seg-h', els => els.length);
-    out.segV = await page.$$eval('#viewer .bs-cell.seg-v', els => els.length);
-    if (out.grids !== 2) throw new Error('spectator arena should show two boards, got ' + out.grids);
-    if (out.axes !== 20) throw new Error('two boards should carry 20 column labels, got ' + out.axes);
-    if (!(out.segH > 0 && out.segV > 0)) throw new Error('sunk hulls should render as hull segments, got seg-h ' + out.segH + ' seg-v ' + out.segV);
+    if (out.grids !== 0) throw new Error('two captains spectate on the 3D scene, no 2D boards; got ' + out.grids);
     if (!/Ada fires A7 · HIT/.test(out.banner)) throw new Error('arena banner wrong: ' + out.banner);
-    if (out.ring !== 1) throw new Error('exactly one last-shot ring expected, got ' + out.ring);
     if (!/un-hit ships stay hidden/.test(out.note)) throw new Error('spectator note wrong: ' + out.note);
     await shot(page, 'bs-spectator-arena.png');
     if (await page.$('#viewer .lc-log') !== null) throw new Error('the plain-text record should be gone from the game tab');
@@ -564,46 +558,40 @@ let FAILURES = 0;
     await shot(page, 'bs-spectator-history.png');
     return out;
   });
-  await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page) => {
+  await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await shot(page, 'bs-card-mobile-dark.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host canvas', { timeout: 20000 });
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
-    if (out.grids !== 2) throw new Error('mobile spectator arena should show two boards, got ' + out.grids);
+    if (out.grids !== 0) throw new Error('mobile spectator: the 3D scene only, got ' + out.grids + ' 2D boards');
     await shot(page, 'bs-spectator-mobile-dark.png');
     return out;
   });
-  await run('battleship-player', { state: { bsPlay: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('battleship-player', { state: { bsPlay: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
-    out.ships = await page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    // the scene, then both fleet strips under it; firing is the scene's
+    // (battleship-3d-keyboard, battleship-3d-phone-aim-fire, no-webgl-battleship)
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 6000 });
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
-    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
-    out.segStart = await page.$$eval('#viewer .bs-cell.seg-start', els => els.length);
-    out.strips = await page.$$eval('#viewer .bs-side .bs-strip', els => els.length);
-    if (out.ships !== 16) throw new Error('own fleet should render 16 un-hit ship cells, got ' + out.ships);
-    if (out.segStart !== 5) throw new Error('own fleet should render five hull bows, got ' + out.segStart);
+    out.strips = await page.$$eval('#viewer .bs-strips3d .bs-strip3d', els => els.length);
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
     if (out.strips !== 2) throw new Error('arena should show two fleet strips, got ' + out.strips);
+    if (out.grids !== 0) throw new Error('no 2D boards for two captains, got ' + out.grids);
     if (!/Ada fires H5 · HIT/.test(out.banner)) throw new Error('player banner wrong: ' + out.banner);
-    if (out.ring !== 1) throw new Error('exactly one last-shot ring expected, got ' + out.ring);
     out.warn = await page.$eval('#viewer .bs-warn', e => e.textContent);
     if (!/Anthony has missed 2 turns in a row/.test(out.warn) || !/forfeits/.test(out.warn)) throw new Error('two missed turns should carry the forfeit warning: ' + out.warn);
     await shot(page, 'bs-player-arena.png');
-    await page.click('#viewer button.bs-cell[aria-label="Fire at C7"]');
-    await page.waitForTimeout(400);
-    out.moveCall = calls.filter(c => c.includes('/games/6/moves')).pop() || '';
-    if (!/"dir":"C7"/.test(out.moveCall)) throw new Error('fire call wrong: ' + out.moveCall);
     return out;
   });
   // Free-for-all (2026-11-17): a four-captain match renders your own
   // waters plus one board per rival, the eliminated captain as a
   // wreck (no fire buttons), and NEVER the 3D arena - this scenario
   // deliberately leaves the 3D preference at its default (on).
-  await run('battleship-ffa', { state: { bsFfa: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); localStorage.setItem('ac:lc3d', '0'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('battleship-ffa', { state: { bsFfa: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     out.cardText = await page.$eval('.game-card', e => e.textContent);
@@ -631,7 +619,7 @@ let FAILURES = 0;
     if (!/"dir":"Ada:C7"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
     return out;
   });
-  await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+  await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
@@ -643,7 +631,7 @@ let FAILURES = 0;
     await shot(page, 'bs-ffa-mobile-dark.png');
     return out;
   });
-  await run('battleship-3d-default', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+  await run('battleship-3d-default', { state: { bsPlay: true } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
@@ -652,26 +640,66 @@ let FAILURES = 0;
        loaded box - an 8s wait flaked twice on 2026-11-12 while the
        scene itself rendered fine. */
     await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
-    out.toggleOn = await page.$eval('#viewer .lc-view-btn.on', e => e.textContent);
-    if (out.toggleOn !== '3D') throw new Error('the 3D toggle should be the active one by default, got ' + out.toggleOn);
-    if (await page.$('#viewer .bs-grid') !== null) throw new Error('the 2D grids should not render when 3D is the default');
+    out.toggle = !!(await page.$('#viewer .lc-view-btn'));
+    if (out.toggle) throw new Error('the 2D views are retired: no 2D/3D toggle');
+    if (await page.$('#viewer .bs-grid') !== null) throw new Error('two captains play on the 3D scene only, no 2D grids');
     await shot(page, 'bs-3d-default.png');
     return out;
   });
   /* A deploy deletes the hashed chunk an open page was built against:
      the 3D host must say so with a Reload button, not sit blank, and
      the failed import must not surface as an uncaught page error. */
-  await run('battleship-3d-load-failure', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+  await run('battleship-3d-load-failure', { state: { bsPlay: true } }, async (page) => {
     await page.route(/\/assets\/BsArena3D-.*\.js$/, (route) => route.fulfill({ status: 404, body: 'nf' }));
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && !s.hidden && /didn't load/.test(s.textContent) && s.querySelector('button'); }, null, { timeout: 20000 });
     return { status: await page.$eval('#viewer .arena3d-status', e => e.textContent) };
   });
+  /* No WebGL (2026-11-20, the 2D views are retired): the arena box
+     shrinks to one note and the game plays on with the controls under
+     it - Battleship's two-captain view gives their waters as a plain
+     aiming grid (the scene was the only way to fire), Four in a Row
+     keeps its drop buttons. No Reload button: a reload won't help. */
+  const noGl = () => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return /webgl/i.test(t) ? null : g.call(this, t, ...a); }; };
+  for (const [label, o] of [['no-webgl-battleship', {}], ['no-webgl-battleship-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { bsPlay: true }, init: noGl }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+      await page.click('.game-card');
+      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+      out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
+      out.reload = !!(await page.$('#viewer .arena3d-status button'));
+      out.hostH = await page.$eval('#viewer .bs-3d-host', (e) => e.getBoundingClientRect().height);
+      out.grids = await page.$$eval('#viewer .bs-aim .bs-grid', (g) => g.length);
+      await shot(page, label + '.png');
+      const cell = await page.$('#viewer .bs-aim .bs-cell:not(.miss):not(.hit):not(.sunk)');
+      if (cell) await cell.click();
+      await page.waitForTimeout(400);
+      out.fire = calls.filter((c) => /\/games\/\d+\/moves/.test(c)).pop() || '';
+      if (!/3D isn't available on this device/.test(out.status)) throw new Error('the note: ' + out.status);
+      if (out.reload) throw new Error('no Reload button when the device has no WebGL');
+      if (out.hostH > 90) throw new Error('the empty arena box should shrink to the note, got ' + out.hostH + 'px');
+      if (out.grids !== 1) throw new Error('their waters as the aiming grid: ' + out.grids);
+      if (!out.fire) throw new Error('a tap on the aiming grid fires');
+      return out;
+    });
+  }
+  await run('no-webgl-fourinarow', { state: { c4: true }, init: noGl }, async (page) => {
+    const out = {};
+    await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 6000 });
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .no-3d .arena3d-status', { timeout: 8000 });
+    out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
+    out.drops = await page.$$eval('#viewer .c4-under button', (b) => b.length);
+    if (!/3D isn't available on this device/.test(out.status)) throw new Error('the note: ' + out.status);
+    if (out.drops < 7) throw new Error('the drop buttons stay: ' + out.drops);
+    return out;
+  });
   /* Keyboard play in the 3D arena: the frame takes focus, arrow keys
      aim from the centre cell (E5), Enter fires through the same move
      call a tap makes, and the live region speaks each step. */
-  await run('battleship-3d-keyboard', { state: { bsPlay: true }, init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('battleship-3d-keyboard', { state: { bsPlay: true } }, async (page, S, calls) => {
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.click('.game-card');
     await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
@@ -688,7 +716,7 @@ let FAILURES = 0;
   });
   /* Phone (touch, 390 px): the 3D arena shows one ocean - the enemy's
      on your turn - and a tap only aims; the Fire button fires. */
-  await run('battleship-3d-phone-aim-fire', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('battleship-3d-phone-aim-fire', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
@@ -713,7 +741,7 @@ let FAILURES = 0;
   // Touch screens: the page owns touch until Move is on (two-finger camera
   // gestures were unreliable - a drifting first finger handed the gesture to
   // the browser, which scrolled or, on iOS, zoomed the page).
-  await run('arena-3d-phone-move-mode', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark', init: () => { try { localStorage.removeItem('ac:bs3d'); } catch (e) {} } }, async (page) => {
+  await run('arena-3d-phone-move-mode', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
@@ -772,7 +800,7 @@ let FAILURES = 0;
      files ended matches as compact rows under day groups, filterable by
      game; Standings carries the room record. Arrow keys move between
      tabs; a history row opens its arena; Rematch re-creates the match. */
-  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac:bs3d', '0'); localStorage.setItem('ac:lc3d', '0'); localStorage.setItem('ac-games-tab', 'history'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch (e) {} } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
     await page.click('.tab[data-tab="games"]');
@@ -1149,7 +1177,7 @@ let FAILURES = 0;
   // in stays off until the split adds up to 100; Even fills it; the
   // commit sends the split and the planner reads as locked.
   for (const [label, o] of [['frontlines-arena', {}], ['frontlines-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { fl: true }, init: () => { try { localStorage.setItem('ac:fl3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
       out.cardHills = await page.$$eval('.game-card .fl-hill', (h) => h.length);
@@ -1189,7 +1217,7 @@ let FAILURES = 0;
   // shows feedback only (pegs hidden); the palette fills the slots, Guess
   // sends them in order, and the round's guess shows sealed in your lane.
   for (const [label, o] of [['coderace-arena', {}], ['coderace-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true }, init: () => { try { localStorage.setItem('ac:cr3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
       out.cardRows = await page.$$eval('.game-card .cr-card-row', (r) => r.map((x) => x.querySelector('.cr-card-name').textContent));
@@ -1230,7 +1258,7 @@ let FAILURES = 0;
   // A finished race: the code is shown, the lanes run in place order with
   // the winner's trophy, and every rival's guess is out in the open.
   for (const [label, o] of [['coderace-done', {}], ['coderace-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true, crDone: true }, init: () => { try { localStorage.setItem('ac:cr3d', '0'); } catch (e) {} } }, o), async (page) => {
+    await run(label, Object.assign({ state: { cr: true, crDone: true } }, o), async (page) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card .cr-secret', { timeout: 6000 });
       await page.click('.game-card.kind-coderace');
@@ -1253,7 +1281,7 @@ let FAILURES = 0;
   // Words: rivals' rows are bare coloured tiles; you type the word; a word
   // not in the list is refused with the server's reason; Enter sends.
   for (const [label, o] of [['coderace-words', {}], ['coderace-words-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true, crWords: true }, init: () => { try { localStorage.setItem('ac:cr3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { cr: true, crWords: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
       await page.click('.game-card.kind-coderace');
@@ -1283,7 +1311,7 @@ let FAILURES = 0;
   // bottom of its column and the turn passes; a finished match glows its
   // winning four and the result line counts the moves.
   for (const [label, o] of [['fourinarow-arena', {}], ['fourinarow-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { c4: true }, init: () => { try { localStorage.setItem('ac:c43d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
       out.cardDiscs = await page.$$eval('.game-card .c4-disc', (d) => d.length);
@@ -1311,7 +1339,7 @@ let FAILURES = 0;
     });
   }
   for (const [label, o] of [['fourinarow-done', {}], ['fourinarow-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { c4: true, c4Done: true }, init: () => { try { localStorage.setItem('ac:c43d', '0'); } catch (e) {} } }, o), async (page) => {
+    await run(label, Object.assign({ state: { c4: true, c4Done: true } }, o), async (page) => {
       const out = {};
       await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
       await page.click('.game-card.kind-fourinarow');
@@ -1579,7 +1607,7 @@ let FAILURES = 0;
   // (count, face, Bid or Liar!), the table and the last round's opened
   // cups. Desktop raises; the phone calls liar.
   for (const [label, o] of [['liarsdice-arena', {}], ['liarsdice-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark', liar: true }]]) {
-    await run(label, Object.assign({ state: { ld: true }, init: () => { try { localStorage.setItem('ac:ld3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { ld: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
       out.cardBid = await page.$eval('.game-card .ld-now-bid', (e) => e.textContent);
@@ -1635,7 +1663,7 @@ let FAILURES = 0;
   // arena puts the lot first, then your sealed bid (steps, quick amounts),
   // the bidders, and the last lot's opened bids.
   for (const [label, o] of [['auction-arena', {}], ['auction-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { au: true }, init: () => { try { localStorage.setItem('ac:au3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .au-card', { timeout: 6000 });
       out.cardLot = await page.$eval('.game-card .au-lot-name', (e) => e.textContent);
@@ -1668,7 +1696,7 @@ let FAILURES = 0;
   // scoreboard first, then a Cooperate / Defect pair per rival (Lock in
   // waits for both), then the last round's who-trusted-whom grid.
   for (const [label, o] of [['trust-arena', {}], ['trust-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { tr: true }, init: () => { try { localStorage.setItem('ac:tr3d', '0'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
       out.cardOrder = await page.$$eval('.game-card .tr-name', (n) => n.map((x) => x.textContent));
@@ -1701,7 +1729,7 @@ let FAILURES = 0;
   // Trust in 3D (the default): the table loads first, then the scores,
   // the choices and the grid; a lock-in still sends per-rival choices.
   for (const [label, o] of [['trust-3d', {}], ['trust-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { tr: true }, init: () => { try { localStorage.removeItem('ac:tr3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
       await page.click('.game-card.kind-trust');
@@ -1724,7 +1752,7 @@ let FAILURES = 0;
   // standing bid, your cup, the bid builder, the table and the last round;
   // Liar! still sends the call.
   for (const [label, o] of [['liarsdice-3d', {}], ['liarsdice-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { ld: true }, init: () => { try { localStorage.removeItem('ac:ld3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { ld: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
       await page.click('.game-card.kind-liarsdice');
@@ -1745,7 +1773,7 @@ let FAILURES = 0;
   // The auction in 3D (the default): the hall loads first, then the lot,
   // your bid and the bidders; a bid still sends the number.
   for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { au: true }, init: () => { try { localStorage.removeItem('ac:au3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .au-card', { timeout: 6000 });
       await page.click('.game-card.kind-auction');
@@ -1766,9 +1794,9 @@ let FAILURES = 0;
   }
   // Four in a Row in 3D (the default): the board scene loads first, the
   // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
-  // sends the column, and 2D brings the grid back.
+  // sends the column, and there is no 2D view to switch to.
   for (const [label, o] of [['fourinarow-3d', {}], ['fourinarow-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { c4: true }, init: () => { try { localStorage.removeItem('ac:c43d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
       await page.click('.game-card.kind-fourinarow');
@@ -1781,22 +1809,20 @@ let FAILURES = 0;
       await page.click('#viewer .c4-drop:nth-child(2)');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/16/moves')).pop() || '';
-      await page.click('#viewer .lc-view-btn:has-text("2D")');
-      await page.waitForTimeout(300);
-      out.after2d = { scene: !!(await page.$('#viewer .c4-3d-host')), grid: !!(await page.$('#viewer .c4-grid')) };
+      out.toggle = !!(await page.$('#viewer .lc-view-btn'));
       if (!/Four in a Row arena, 3D view: Anthony \(you\) plays solid discs; Ada plays ringed discs\. Anthony to move, turn 7\. 6 discs on the board\./.test(out.label)) throw new Error('the scene names the seats and the turn: ' + out.label);
       if (out.order.join(',') !== 'lc-board-big,c4-seats,c4-under') throw new Error('the scene, then the seats, then the drop buttons: ' + JSON.stringify(out.order));
       if (out.grid) throw new Error('no 2D grid under the 3D board');
       if (!/"dir":"2"/.test(out.moveCall)) throw new Error('a drop button still sends the column: ' + out.moveCall);
-      if (out.after2d.scene || !out.after2d.grid) throw new Error('2D swaps the scene for the grid: ' + JSON.stringify(out.after2d));
+      if (out.toggle) throw new Error('the 2D views are retired: no toggle');
       return out;
     });
   }
   // Code Race in 3D (the default): the vault loads above the guess input,
   // its label reads the race from the viewer's seat, a guess still goes
-  // out, and 2D drops the scene.
+  // out, and there is no 2D view to switch to.
   for (const [label, o] of [['coderace-3d', {}], ['coderace-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true }, init: () => { try { localStorage.removeItem('ac:cr3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
       await page.click('.game-card.kind-coderace');
@@ -1809,28 +1835,26 @@ let FAILURES = 0;
       await page.click('#viewer .cr-go');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/14/moves')).pop() || '';
-      await page.click('#viewer .lc-view-btn:has-text("2D")');
-      await page.waitForTimeout(300);
-      out.after2d = !!(await page.$('#viewer .cr-3d-host'));
+      out.toggle = !!(await page.$('#viewer .lc-view-btn'));
       if (!/Code Race arena, 3D view: Ada, guessed; Anthony \(you\), thinking; Henry, thinking\. On the pillars: round 2\./.test(out.label)) throw new Error('the scene reads the race from the viewer\'s seat: ' + out.label);
       if (out.order.join(',') !== 'lc-board-big,cr-input,cr-board') throw new Error('the vault, then the input, then the lanes: ' + JSON.stringify(out.order));
       if (!/"dir":"R G B Y"/.test(out.moveCall)) throw new Error('the 3D view still sends the guess: ' + out.moveCall);
-      if (out.after2d) throw new Error('2D drops the scene');
+      if (out.toggle) throw new Error('the 2D views are retired: no toggle');
       return out;
     });
   }
   // Frontlines in 3D (the default): the scene loads above the score and
   // the planner, the round's numbers follow the planner, a lock-in still
-  // sends the split, and 2D drops the scene for the DOM field.
+  // sends the split, and there is no 2D view to switch to.
   for (const [label, o] of [['frontlines-3d', {}], ['frontlines-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { fl: true }, init: () => { try { localStorage.removeItem('ac:fl3d'); } catch (e) {} } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
       await page.click('.game-card');
       await page.waitForSelector('#viewer:not([hidden]) .fl-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .fl-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.pressed = await page.$eval('#viewer .lc-view-btn[aria-pressed="true"]', (b) => b.textContent);
+      out.toggle = !!(await page.$('#viewer .lc-view-btn'));
       out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /fl-3d-host|lc-board-big|fl-score|fl-plan|fl-cap/.test(c) || c === 'lc-board-big'));
       out.fieldCap = await page.$eval('#viewer .fl-cap', (e) => e.textContent);
       await shot(page, label + '.png');
@@ -1838,18 +1862,14 @@ let FAILURES = 0;
       await page.click('#viewer .fl-go');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/12/moves')).pop() || '';
-      await page.click('#viewer .lc-view-btn:has-text("2D")');
-      await page.waitForTimeout(300);
-      out.after2d = { canvas: !!(await page.$('#viewer .fl-3d-host')), cap: await page.$eval('#viewer .fl-cap', (e) => e.textContent) };
       if (!/Frontlines arena, 3D view: Anthony \(you\) 0, planning versus Ada 1, committed\. On the field: round 2\./.test(out.label)) throw new Error('the scene names both sides from the viewer\'s seat: ' + out.label);
-      if (out.pressed !== '3D') throw new Error('3D is the default: ' + out.pressed);
+      if (out.toggle) throw new Error('the 2D views are retired: no toggle');
       const iScene = out.order.indexOf('lc-board-big');
       const iPlan = out.order.indexOf('fl-plan');
       const iCap = out.order.indexOf('fl-cap');
       if (!(iScene >= 0 && iScene < iPlan && iPlan < iCap)) throw new Error('scene, then the planner, then the numbers: ' + JSON.stringify(out.order));
       if (!/Round 2 in numbers/.test(out.fieldCap)) throw new Error('the numbers follow the planner in 3D: ' + out.fieldCap);
       if (!/"dir":"20,20,20,20,20"/.test(out.moveCall)) throw new Error('the 3D view still commits the split: ' + out.moveCall);
-      if (out.after2d.canvas || !/Round 2 on the field/.test(out.after2d.cap)) throw new Error('2D drops the scene for the DOM field: ' + JSON.stringify(out.after2d));
       return out;
     });
   }
@@ -2007,7 +2027,7 @@ let FAILURES = 0;
   /* Light Cycles 3D (2026-11-13): the arena opens in 3D by default with a
      tag over every cycle ("You" for the viewer), Zones toggles the floor
      tint, and Chase rides behind the viewer's cycle until Reset view. */
-  await run('lc-3d-arena', { state: { game: true }, init: () => { try { localStorage.removeItem('ac:lc3d'); } catch (e) {} } }, async (page) => {
+  await run('lc-3d-arena', { state: { game: true } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
     await page.click('.game-card');
@@ -2032,7 +2052,7 @@ let FAILURES = 0;
   /* Light Cycles 3D replay (2026-11-14): a finished match offers Replay
      race; it plays the race from the start line with a tick counter and
      End, and hands back the button when it's over. */
-  await run('lc-3d-replay', { state: { game: true }, init: () => { try { localStorage.removeItem('ac:lc3d'); } catch (e) {} } }, async (page, S) => {
+  await run('lc-3d-replay', { state: { game: true } }, async (page, S) => {
     const out = {};
     const g = S.game;
     g.status = 'finished';

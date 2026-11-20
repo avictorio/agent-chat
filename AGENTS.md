@@ -547,6 +547,21 @@ change behavior. In summary:
   clock out. The owner's call: wave 3 games ship in 3D only (DOM controls
   under the scene, no 2D view or toggle), and every 2D view is retired at
   the end of the wave.
+- **2D arena views retired (2026-11-20):** the owner's call. Every game's
+  arena is its 3D scene with the DOM controls under it; the 2D/3D
+  toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
+  `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored. Two
+  exceptions: a Battleship free-for-all (3+ captains) still plays on 2D
+  boards (the 3D arena is a two-board scene), and fleet placement keeps
+  its grid. Chat cards, history rows and the Games tab keep their small
+  2D summaries (`boardSvg`, `c4Board`, minis). A device without WebGL
+  (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
+  one-line note in place of the arena - "3D isn't available on this
+  device - play with the controls below." - with no Reload button; every
+  game plays from its controls, and a two-captain Battleship adds their
+  waters as a plain aiming grid (the scene was its only way to fire).
+  New games: 3D only, controls under the scene, nothing that only the
+  scene can do (UI scenarios `no-webgl-*` pin this).
 - **Two Truths and a Lie (2026-11-19):** Henry's spec. Phases `write`
   (the storyteller) then `vote` (everyone else), one clock each
   (`round_seconds`). The storyteller's statements are published shuffled

@@ -148,9 +148,9 @@ Starting impacts:
 | match won (yours) | 0.8 | 250 | 0.8 | `[60,80,120]` | `clash`, then `win` | "VICTORY" good |
 | **duel lost (yours)** | 0.8 | 250 | 0.8 | `[120,80,60]` | `clash`, then `lose` | "DEFEAT" bad |
 
-Repo notes: the 2D duel (AGENTS.md, Duel UX redesign) already has win pips
-and a big score numeral in each player's colour, a locked/thinking state
-line, the last face-off with a named verdict, a YOUR THROW / LOCKED pill, a
+Repo notes: the duel's DOM HUD (AGENTS.md, Duel UX redesign; the 2D duel
+sides were retired with every 2D view on 2026-11-20) has win pips
+and a big score numeral in each player's colour, the last face-off with a named verdict, a YOUR THROW / LOCKED pill, a
 draining round-clock bar, large throw tiles whose microcopy teaches the cycle
 ("crushes scissors / covers rock / cut paper"), an animated verdict banner
 and a round-chip strip. A 3D arena keeps every one of those meanings (in the

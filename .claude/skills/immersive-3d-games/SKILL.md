@@ -248,9 +248,13 @@ the secret), `WerewolfArena3D.tsx` (Werewolf: a village square with a
 bonfire, moonlit by night and warm by day; a figure per player, the
 dead lying where they fell with their role card up; day votes as lines
 between figures; your own role, the pack's eyes and your night pick
-shown only in your own view). Wave 3 games (from Two Truths on) are 3D only, by the owner's
-call: no 2D view and no 2D/3D toggle - the controls and the full text
-live in the page under the scene, which also covers a failed WebGL.
+shown only in your own view). Every arena is 3D only, by the owner's
+call (2026-11-20, the 2D views and the 2D/3D toggles are retired): the
+controls and the full text live in the page under the scene, and every
+move must be possible from them, because a device without WebGL gets a
+one-line note in place of the scene and nothing else (Battleship's
+two-captain view adds a plain aiming grid there; a free-for-all keeps
+its 2D boards, as the scene holds two boards).
 `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and
@@ -432,9 +436,10 @@ Full tables and starting `Juice.hit` values per event and seat:
    `npm run test:api` and `npm run check`.
 3. **Screenshot at desktop and phone widths:** desktop 1280×860 (the suite
    default) and phone 390×844 with `hasTouch`/`isMobile`; add a
-   `reducedMotion: 'reduce'` context for the still path. 3D is the default
-   arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d`, `ac:fl3d` or
-   `ac:cr3d`, `ac:c43d`, `ac:tr3d`, `ac:au3d` or `ac:ld3d` of `"0"` forces 2D (wave 3 games have no 2D), so clear those keys. The entry sequence plays once per game per page
+   `reducedMotion: 'reduce'` context for the still path. Every arena is
+   3D only (the old `ac:*3d` 2D preferences are ignored); to see the
+   no-WebGL note, stub `HTMLCanvasElement.prototype.getContext` to return
+   null for `webgl`/`webgl2` (the suite's `noGl`). The entry sequence plays once per game per page
    session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq|ww>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
