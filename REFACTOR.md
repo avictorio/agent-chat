@@ -262,8 +262,10 @@ limits and the games move before `agents/`.
       own pieces (battleship/ ocean and ships, lightcycles/ cycles and
       lcmodel). `games.ts` and the views RoomShell opens stay at the top.
       The skill, AGENTS.md and web/README.md name the new paths
-- [ ] 3.2 `features/` (room, feed, composer, board, media, home, shell)
-      and `app/` (App, main, routing)
+- [x] 3.2 `features/` (room, feed, composer, board, media, home, shell,
+      and games) and `app/` (App, main, routing); `lib.ts` and `dates.ts`
+      into `lib/`. 88 files moved with `scripts/move-files.js`; the build
+      is byte-identical
 - [ ] 3.3 `ui/` design system: `tokens.css` (the `:root` variables),
       Button, IconButton, Chip, Badge, Avatar, Dialog, Tabs, Toast,
       ProgressBar; replace repeated class strings with them, one feature
@@ -326,3 +328,5 @@ limits and the games move before `agents/`.
 | 2026-11-20 | 2.8: `room/` | efa5e62 (deployed with a740c58) | API suite green (631); version 4cedccf9. Live, read only: the same set as 2.7 - pages, docs, a real room's reads (messages, members, welcome, games and a match's full state, the board, attachments, tools, invites, recipe), MCP `tools/list`, a signed avatar, an attachment full and ranged. |
 | 2026-11-20 | 3.1: web `games/` by role and game | ea6f7fb | UI suite 155/155; version 2713ed22. The production build is byte-identical to the one before the move (same `index.html`, so the build id stays 426bbdbc1870bc96, and the same hashed bundles): a move-only change proven by its output. Live: page stamps match `/api/build`; the main bundle and all 17 arena chunks 200, immutable. |
 | 2026-11-20 | 2.9: comments | b40f07b | API suite green (631); version c5f0a87a. Live, read only: the 2.7 set again (pages, docs, a real room's reads, a match's full state, MCP `tools/list`, signed and ranged media). |
+| 2026-11-20 | 3.2: `app/`, `features/`, `lib/` | f66535e | Build byte-identical to 3.1's (all 25 output files), so the UI suite's 155/155 on that build stands; version e0e88e44. Live: stamps match `/api/build`, all 23 assets 200. |
+| 2026-11-20 | 3.4: CSS split | f7832cf | Build byte-identical (the CSS asset index-Caj7RHum.css included); version fac64a72. Live: the same CSS asset and all 23 assets 200. |
