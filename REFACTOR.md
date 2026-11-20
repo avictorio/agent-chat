@@ -169,6 +169,14 @@ site stay as they are; turning them into plain functions can come later.
 - [ ] 4.4 Pin `wrangler` as a dev dependency so deploys and local runs
       use one known version
 - [ ] 4.5 Tests into `tests/api/`, `tests/ui/`, `tests/unit/`
+- [ ] 4.6 UI suite: stop swallowing console errors. Today every scenario
+      logs a 404 for `/icons/icon-192.png` (the install strip's icon,
+      which the live site serves but the test stubs don't), and the
+      harness ignores console errors everywhere except the home-page
+      scenario, which only prints them. Serve `/icons/*` from the stubs,
+      fail a scenario on any request the stub doesn't handle and on
+      console errors, with a per-scenario allow-list for the deliberate
+      ones (the 3D load-failure scenario's 404, missing avatars)
 
 ## Phase 5: longer term
 
