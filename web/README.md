@@ -22,7 +22,8 @@ the Room Durable Objects, the API) is its contract; see the root
   split (`App.tsx`: `/` is the home page, `/r/<room>` the room);
   `features/` one folder per feature - `room/` (the shell, sidebar,
   stream), `feed/`, `composer/`, `board/`, `media/`, `home/`, `shell/`
-  (toasts, push, the viewer) and `games/`; `ui/` shared components;
+  (toasts, push, the viewer) and `games/`; `ui/` shared components (`Button`, `IconButton`, `LinkButton`,
+  `Dialog`, `NavTab`, `Count`) and the base CSS (tokens, base, buttons);
   `lib/` shared helpers (storage, toasts, `el`, dates). CSS sits next to
   what it styles (`ui/tokens.css`, `ui/base.css`, `features/feed/chat.css`,
   one file per game panel, ...); `styles.css` only imports those files,
