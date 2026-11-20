@@ -11,6 +11,7 @@ import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from ".
 import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice";
 import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths";
 import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
+import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
 import {
   battleshipBoard,
   boardSvg,
@@ -200,6 +201,7 @@ export function createGameStore(opts: {
     ldDraft?: { turn: number; qty: number; face: number } | null;
     ttDraft?: TtDraft | null;
     ecDraft?: { turn: number; text: string } | null;
+    tqDraft?: { key: string; text: string } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -316,6 +318,26 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "twenty") {
+      dur = (g.round_seconds || 3600) * 1000;
+      const left = (g.remaining != null ? g.remaining : 20) + " of 20 left";
+      if (you.playing && you.answerer) {
+        if (g.phase === "secret") {
+          mine = true;
+          text = "Your turn to answer · choose a secret";
+          sub = "If the clock runs out, one is drawn for you.";
+        } else if (g.phase === "answer") {
+          mine = true;
+          text = (g.pending ? g.pending.by : "Someone") + (g.pending && g.pending.kind === "guess" ? " guesses" : " asks") + " · answer";
+          sub = "If the clock runs out on a question, you forfeit the round.";
+        } else text = "You hold the secret · waiting for a question · " + left;
+      } else if (g.phase === "secret") text = (g.answerer || "The answerer") + " is choosing a secret · round " + g.round + " of " + g.rounds_total;
+      else if (g.phase === "answer") text = "Waiting on " + g.answerer + "'s answer · " + left;
+      else if (you.playing) {
+        mine = true;
+        text = "Ask " + g.answerer + " a question · " + left;
+        sub = g.mode === "table" ? "Anyone at the table may ask - one question at a time." : "A yes/no question, or a guess.";
+      } else text = "Questions for " + g.answerer + " · " + left;
     } else if (g.type === "corpse") {
       dur = (g.turn_seconds || 86400) * 1000;
       if (g.phase === "write") {
@@ -492,6 +514,10 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "twenty") {
+      body.game = "twenty";
+      body.rotations = g.rotations || 1;
+      body.tick_seconds = g.round_seconds;
     } else if (g.type === "corpse") {
       body.game = "corpse";
       body.rotations = g.rotations || 3;
@@ -630,7 +656,7 @@ export function createGameStore(opts: {
   const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths") return (g.rounds || []).length;
+    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     if (g.type === "corpse") return (g.beats || []).length;
@@ -694,6 +720,8 @@ export function createGameStore(opts: {
       n = ttHistoryRows(g, row, histWho, list);
     } else if (g.type === "corpse") {
       n = ecHistoryRows(g, row, histWho, list);
+    } else if (g.type === "twenty") {
+      n = tqHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1044,6 +1072,7 @@ export function createGameStore(opts: {
     // wave 3 games are 3D only (no 2D view, no toggle - the owner's call)
     twotruths: { key: "ac:tt3d", cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
     corpse: { key: "ac:ec3d", cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
+    twenty: { key: "ac:tq3d", cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
     liarsdice: { key: "ac:ld3d", cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
@@ -1720,6 +1749,63 @@ export function createGameStore(opts: {
     }
     wrap.appendChild(ecWriters(g, me));
     if (g.status === "running" && g.phase === "write" && !writing) note.textContent = (you.playing ? "The story stays folded until the last turn - " : "Spectating - the story stays folded until the last turn. ") + (you.playing ? "you'll get a nudge when it's yours." : "");
+    if (note.textContent) wrap.appendChild(note);
+  }
+
+  /* Twenty Questions: the box and candles (3D only), then the answerer's
+     or the questioner's controls, the budget, the Q/A log, the scores
+     and the last reveal. */
+  function renderTwentyView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const dkey = g.round + ":" + (g.asked || 0);
+    if (!gv.tqDraft || gv.tqDraft.key !== dkey) gv.tqDraft = { key: dkey, text: "" };
+    const key = [g.status, g.round, g.phase || "", g.answerer || "", g.asked || 0, (g.qa || []).map((x: GL) => (x.a || "") + (x.flagged ? "f" : "")).join(","), (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.score || 0)).join(","), youSig(g), you.secret || "", (g.rounds || []).length, gv.tab || "game"].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const h = host3d("twenty");
+    wrap.appendChild(h.host);
+    paint3d("twenty", g, h);
+    const send = (dir: string) => {
+      if (gameView !== gv) return;
+      if (gv.r3dCommit) gv.r3dCommit();
+      void sendMove(g.id, dir, note);
+    };
+    if (g.status === "running" && you.playing && you.answerer) wrap.appendChild(tqAnswerer(g, send));
+    else if (g.status === "running" && you.playing && g.phase === "ask" && gv.tqDraft) {
+      const hint = arenaHint("twenty", "Halve the possibilities each time: is it alive, is it bigger than a breadbox, is it made by people?");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(tqAsker(g, gv.tqDraft, send));
+    }
+    if (g.status === "running" && g.phase !== "secret") wrap.appendChild(tqBudget(g));
+    if (g.status === "running") wrap.appendChild(tqLog(g));
+    wrap.appendChild(tqScores(g, me));
+    wrap.appendChild(tqReveal(g, tqLastRound(g)));
+    if (g.status === "running" && !you.playing) note.textContent = "Spectating - the secret stays in the box until the round ends.";
     if (note.textContent) wrap.appendChild(note);
   }
 
@@ -2452,6 +2538,10 @@ export function createGameStore(opts: {
       renderCorpseView(g, force);
       return;
     }
+    if (g.type === "twenty") {
+      renderTwentyView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2632,7 +2722,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2688,6 +2778,8 @@ export function createGameStore(opts: {
           if (g.phase === "write" ? g.teller === me : g.teller !== me && !mine.committed) n++;
         } else if (g.type === "corpse") {
           if (g.phase === "write" ? g.turn_of === me : !mine.committed) n++;
+        } else if (g.type === "twenty") {
+          if (g.phase === "ask" ? g.answerer !== me : g.answerer === me) n++;
         } else if (g.type === "trust") {
           if (!mine.committed && !mine.out) n++;
         } else if (g.type === "auction") {

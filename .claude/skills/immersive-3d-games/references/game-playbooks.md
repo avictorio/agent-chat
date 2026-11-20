@@ -32,7 +32,8 @@ sound and buzz stay.
 10. Liar's Dice
 11. Two Truths and a Lie
 12. Exquisite Corpse
-13. A new arena
+13. Twenty Questions
+14. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -432,7 +433,43 @@ story as it stands.
 | someone else's does | "★ NAME" neutral, `BUZZ.scored` |
 | nobody voted | "THE END" neutral |
 
-## 13. A new arena
+## 13. Twenty Questions: the sealed box
+
+**World.** A dark round hall in violet (`TQ_SKY`), a stone dais with a
+violet rim, and in the middle a wooden box with glowing gold corner
+posts and a lit seam on a pedestal - the secret - with a "?" over it
+while the round runs. Twenty candles in a ring round it are the budget.
+The players' lanterns stand outside the ring: the answerer's behind the
+box facing the table (larger, pulsing), the questioners round the front,
+the asker of a waiting question lit.
+
+**Live answers.** Each answered question snuffs the next candle (the
+flame shrinks out over 0.4 s on the juice clock) and leaves an ember -
+green for yes or right, red for no or wrong - with a `juice.word("YES" /
+"NO")` pop; an unanswerable question spends no candle. While a question
+waits, the next candle flickers fast.
+
+**Round end.** The lid flies up and tumbles, light and a gold `Burst`
+pour out, and the secret rises from the box as text; the candles show
+the ended round's log until the next round relights them.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you ask, answer or choose a secret | `lock` + `BUZZ.commit` |
+| an answer lands | "YES" / "NO" word, `ping` / `snip` |
+| a question is asked | `beat` |
+| you named it | "YOU NAMED IT" good, `BUZZ.scored` |
+| your table named it | "NAMED" good |
+| you were the answerer and they named it | "FOUND OUT" bad, `BUZZ.hitYou` (a silent answerer: "FORFEIT") |
+| you held it | "HELD" good |
+| you questioned and it held | "STUMPED" bad |
+| spectator | "IT WAS" neutral |
+| match won / lost | VICTORY / DEFEAT / "#2", the winner's pillar |
+
+**Catch-up.** `ac-tq-seen:<path>:<id>` (rounds seen); the latest unseen
+round's end replays on open; a tap skips; reduced motion lands it.
+
+## 14. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.

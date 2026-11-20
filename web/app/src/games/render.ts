@@ -43,6 +43,7 @@ export function finalScore(g: GL): string {
   }
   if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
   if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
+  if (g.type === "twenty") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   if (g.type === "corpse") {
     const w = winnerOf(g);
     return w && w.votes ? "★ " + w.votes : "";
@@ -72,6 +73,10 @@ export function recordLine(g: GL): string {
   }
   if (g.type === "trust") {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
+    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
+  }
+  if (g.type === "twenty") {
+    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
   }
   if (g.type === "corpse") {
@@ -154,6 +159,14 @@ export function gameMetaText(g: GL): string {
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
     }
     return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
+  }
+  if (g.type === "twenty") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " rounds";
+    }
+    return "Round " + g.round + " of " + g.rounds_total + " · " + tickLen(g.round_seconds || 3600) + " a move · " + (g.mode === "table" ? "the table asks together" : "head to head");
   }
   if (g.type === "corpse") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);

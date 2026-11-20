@@ -318,6 +318,51 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .kind-liarsdice { --ga: 239, 68, 68; --gbg: #0f0607; }
 .kind-twotruths { --ga: 251, 146, 60; --gbg: #0c0805; }
 .kind-corpse { --ga: 202, 138, 4; --gbg: #0b0904; }
+.kind-twenty { --ga: 167, 139, 250; --gbg: #08060f; }
+/* Twenty Questions (twenty.ts): the answerer's and questioners' controls,
+   the budget, the Q/A log, the scores and the reveal, under the box. */
+.tq-panel { margin-top: 12px; display: grid; gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #ede9fe; }
+.tq-panel.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.tq-title { font-weight: 700; font-size: 15px; }
+.tq-help { font-size: 12.5px; color: #c4b5fd; }
+.tq-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.tq-input { width: 100%; box-sizing: border-box; height: 40px; border-radius: 9px; border: 1px solid rgba(148, 163, 184, .35); background: #04030a; color: #ede9fe; font: inherit; font-size: 15px; padding: 0 11px; }
+.tq-random { justify-self: start; }
+.tq-secret { font-size: 13px; color: #fde68a; font-weight: 700; }
+.tq-q { font-size: 18px; font-weight: 700; line-height: 1.35; }
+.tq-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+.tq-acts .tq-help { margin-right: auto; }
+.duel-btn.tq-yes { background: #166534; border-color: #4ade80; color: #fff; }
+.duel-btn.tq-no { background: #991b1b; border-color: #f87171; color: #fff; }
+.tq-budget { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px; padding: 9px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .2); }
+.tq-pip { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(251, 191, 36, .75); }
+.tq-pip.yes { background: #4ade80; box-shadow: none; }
+.tq-pip.no { background: #f87171; box-shadow: none; }
+.tq-log { margin-top: 10px; display: grid; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #ede9fe; }
+.tq-log-empty { text-align: center; color: #c4b5fd; font-size: 13px; }
+.tq-qa { display: grid; grid-template-columns: 22px auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 13.5px; }
+.tq-qa.flagged { opacity: .55; }
+.tq-qa.flagged .tq-qa-q { text-decoration: line-through; }
+.tq-qa.guess .tq-qa-q { font-style: italic; }
+.tq-qa-n { color: #a78bfa; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.tq-qa-by { font-weight: 700; }
+.tq-qa-a { font-weight: 800; font-size: 12px; white-space: nowrap; }
+.tq-qa-a.yes { color: #4ade80; }
+.tq-qa-a.no { color: #f87171; }
+.tq-scores { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #ede9fe; }
+.tq-scores.compact { margin: 6px 0 0; border: 0; border-radius: 0; padding: 6px 10px 10px; }
+.tq-srow { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; padding: 2px 4px; border-radius: 7px; }
+.tq-srow.answerer { background: rgba(var(--ga), .16); }
+.tq-srow.mine .tq-name { text-decoration: underline; text-decoration-color: rgba(var(--ga), .6); text-underline-offset: 3px; }
+.tq-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tq-st { font-size: 11.5px; color: #c4b5fd; margin-left: auto; }
+.tq-pts { width: 34px; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; flex: none; margin-left: auto; }
+.tq-st + .tq-pts { margin-left: 8px; }
+.tq-reveal { margin-top: 10px; display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #ede9fe; font-size: 13.5px; }
+.tq-reveal-secret { font-weight: 800; color: #fde68a; }
+.tq-reveal-how { color: #c4b5fd; }
+.tq-reveal-pts { font-size: 12.5px; color: #fde68a; }
+.tq-card-line { margin: 6px 10px 0; font-size: 13px; color: #ddd6fe; }
 /* Exquisite Corpse (corpse.ts): the fold and your segment, the turn strip,
    the revealed story and the writers, under the desk. */
 .ec-writer, .ec-story { margin-top: 12px; display: grid; gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #fef3c7; }
@@ -780,6 +825,8 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .lc-3d-host.tt-3d-host { height: min(46vh, 420px); }
 /* Exquisite Corpse: the desk from above. */
 .lc-3d-host.ec-3d-host { height: min(46vh, 420px); }
+/* Twenty Questions: the box and its ring of candles. */
+.lc-3d-host.tq-3d-host { height: min(44vh, 400px); }
 .c4-under .c4-wrap { margin-top: 8px; }
 /* 3D host layers (games.ts makeHost3d, arena3d.tsx ArenaFrame). */
 .arena3d-mount { position: absolute; inset: 0; }
@@ -859,6 +906,7 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
   .lc-3d-host.ld-3d-host { height: min(40vh, 320px); }
   .lc-3d-host.tt-3d-host { height: min(40vh, 320px); }
   .lc-3d-host.ec-3d-host { height: min(42vh, 340px); }
+  .lc-3d-host.tq-3d-host { height: min(38vh, 300px); }
   .lc-board-big.duel-board-under { display: none; }
 }
 /* One finger scrolls the page over a 3D board (and taps it); two
