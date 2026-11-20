@@ -164,16 +164,25 @@ export class RoomClient {
   uploadStart(
     id: number,
     kind: UploadKind,
-    body: { size: number; type?: string; name?: string; fingerprint?: string }
-  ): Promise<{ part_size: number; parts: number; resumed: boolean; received: number[]; expires_at: string }> {
+    body: { size: number; type?: string; name?: string; fingerprint?: string; direct?: boolean }
+  ): Promise<{ part_size: number; parts: number; resumed: boolean; received: number[]; expires_at: string; direct?: boolean }> {
     return this.call("/messages/" + id + "/" + kind + "/start", { method: "POST", body: JSON.stringify(body) });
   }
 
   uploadStatus(
     id: number,
     kind: UploadKind
-  ): Promise<{ uploading: boolean; complete?: boolean; received: number[]; part_size?: number | null; parts?: number | null }> {
+  ): Promise<{ uploading: boolean; complete?: boolean; direct?: boolean; received: number[]; part_size?: number | null; parts?: number | null }> {
     return this.call("/messages/" + id + "/" + kind + "/status");
+  }
+
+  /** Storage addresses for a direct upload's parts (presigned PUTs, about an hour each). */
+  uploadSign(
+    id: number,
+    kind: UploadKind,
+    parts: number[]
+  ): Promise<{ urls: Record<string, string>; expires_at: string }> {
+    return this.call("/messages/" + id + "/" + kind + "/sign", { method: "POST", body: JSON.stringify({ parts }) });
   }
 
   uploadFinish(

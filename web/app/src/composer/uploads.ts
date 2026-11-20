@@ -166,20 +166,18 @@ class PartError extends Error {
 }
 
 // One part, sent with XMLHttpRequest for its upload progress events
-// (fetch has none for request bodies). onLoaded gets the bytes sent so
-// far for this attempt.
+// (fetch has none for request bodies), to the site's /part route or, for
+// a direct upload, to the part's presigned storage address. onLoaded
+// gets the bytes sent so far for this attempt.
 function sendPart(
-  client: RoomClient,
-  id: number,
-  kind: UploadKind,
-  n: number,
+  url: string,
+  headers: Record<string, string>,
   blob: Blob,
   onLoaded: (bytes: number) => void,
   signal: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new UploadCancelled());
-    const { url, headers } = client.partRequest(id, kind, n);
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
     for (const k of Object.keys(headers)) xhr.setRequestHeader(k, headers[k]!);
@@ -207,7 +205,9 @@ function sendPart(
         const j = JSON.parse(xhr.responseText) as { error?: string };
         if (j && j.error) msg = j.error;
       } catch {
-        // not JSON
+        // not JSON: storage answers in XML
+        const code = /<Code>([^<]*)<\/Code>/.exec(xhr.responseText || "");
+        if (code) msg = code[1]!;
       }
       reject(new PartError(xhr.status, msg));
     };
@@ -270,7 +270,7 @@ async function uploadItem(
   signal: AbortSignal
 ): Promise<void> {
   const { kind, blob } = item;
-  let plan: { part_size: number; parts: number; received: number[] };
+  let plan: { part_size: number; parts: number; received: number[]; direct?: boolean };
   try {
     plan = await net(
       () =>
@@ -279,6 +279,9 @@ async function uploadItem(
           type: blob.type || item.type || undefined,
           name: item.name,
           fingerprint: fp || undefined,
+          // straight to storage when the site offers it: bigger parts,
+          // no trip through the Worker, no 943 GB ceiling
+          direct: true,
         }),
       signal,
       meter
@@ -291,6 +294,42 @@ async function uploadItem(
   const partBlob = (n: number) => blob.slice((n - 1) * ps, Math.min(n * ps, blob.size));
   const have = new Set(plan.received || []);
   for (const n of have) meter.add(partBlob(n).size);
+  const direct = !!plan.direct;
+
+  // A direct upload's parts go to presigned storage addresses, signed a
+  // batch at a time and re-signed when one is near its expiry (or storage
+  // turns it away as expired).
+  const signed = new Map<number, { url: string; exp: number }>();
+  const fresh = (n: number) => {
+    const c = signed.get(n);
+    return !!c && c.exp - Date.now() > 5 * 60 * 1000;
+  };
+  // one signing call at a time: parallel parts wait for the batch in flight
+  let signing: Promise<void> | null = null;
+  const target = async (n: number, ahead: number[]): Promise<{ url: string; headers: Record<string, string> }> => {
+    if (!direct) return client.partRequest(id, kind, n);
+    for (let round = 0; !fresh(n) && round < 4; round++) {
+      if (signing) {
+        await signing.catch(() => {});
+        continue;
+      }
+      const batch = [n, ...ahead.filter((x) => x !== n && !fresh(x))].slice(0, 25);
+      const p = (async () => {
+        const r = await net(() => client.uploadSign(id, kind, batch), signal, meter);
+        const exp = Date.parse(r.expires_at) || Date.now() + 3600 * 1000;
+        for (const k of Object.keys(r.urls)) signed.set(Number(k), { url: r.urls[k]!, exp });
+      })();
+      signing = p;
+      try {
+        await p;
+      } finally {
+        if (signing === p) signing = null;
+      }
+    }
+    const c = signed.get(n);
+    if (!c) throw new PartError(0, "No storage address for part " + n);
+    return { url: c.url, headers: {} };
+  };
 
   const sendAll = async (nums: number[]) => {
     let idx = 0;
@@ -314,7 +353,8 @@ async function uploadItem(
           }
           let sent = 0;
           try {
-            await sendPart(client, id, kind, n, part, (b) => {
+            const t = await target(n, nums.slice(idx));
+            await sendPart(t.url, t.headers, part, (b) => {
               meter.add(b - sent);
               sent = b;
             }, signal);
@@ -326,8 +366,16 @@ async function uploadItem(
               failure = e;
               return;
             }
-            const pe = e instanceof PartError ? e : new PartError(0, errText(e));
-            if (pe.status === 401 || pe.status === 403) {
+            if (denied(e)) {
+              // the site itself refused (signing): no access any more
+              failure = new Error("Upload was denied");
+              return;
+            }
+            const pe = e instanceof PartError ? e : e instanceof ApiError ? new PartError(e.status, e.message) : new PartError(0, errText(e));
+            // Storage turning a signed address away means it expired (or
+            // the clock drifted): sign it again and retry.
+            if (direct && pe.status === 403) signed.delete(n);
+            else if (pe.status === 401 || pe.status === 403) {
               failure = new Error("Upload was denied");
               return;
             }
@@ -336,7 +384,7 @@ async function uploadItem(
               attempt--;
               continue;
             }
-            if (!pe.retry || attempt >= 9) {
+            if ((!pe.retry && !(direct && pe.status === 403)) || attempt >= 9) {
               failure = new Error("Part " + n + " failed: " + pe.message);
               return;
             }
@@ -354,8 +402,9 @@ async function uploadItem(
       }
     };
     // Several parts at once keeps a fast connection full; fewer when the
-    // parts are big, so a phone isn't holding hundreds of MB in flight.
-    const width = Math.min(ps <= 16 * 1024 * 1024 ? 4 : 2, nums.length);
+    // parts are big. (A part streams from the file on disk, so width costs
+    // retries, not memory.)
+    const width = Math.min(ps <= 16 * 1024 * 1024 ? 4 : 3, nums.length);
     await Promise.all(Array.from({ length: width }, worker));
     if (failure) throw failure;
   };

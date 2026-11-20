@@ -2063,6 +2063,22 @@ async function waitUp() {
     check('a link finish attaches and auto-publishes', r.status === 200 && !!(r.json && r.json.file && r.json.file.name === 'notes.txt' && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
     r = await req('PUT', '/api/uploads/' + room2Name + '/' + 'B'.repeat(43) + '/part?n=1', { body: NOTE });
     check('a garbled link -> 404', r.status === 404, r.status);
+    // Phase 2, direct uploads. The signer must match AWS's published SigV4
+    // presigned-URL example (its documented, non-secret example keys).
+    r = await req('POST', '/api/test-hooks/sigv4', { owner: true, json: { method: 'GET', host: 'examplebucket.s3.amazonaws.com', path: '/test.txt', query: {}, accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', region: 'us-east-1', expires: 86400, date: '2013-05-24T00:00:00Z' } });
+    check('sigv4 presign matches the AWS example signature', !!(r.json && /X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404$/.test(r.json.url) && r.json.url.includes('X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request')), JSON.stringify(r.json).slice(0, 200));
+    // Without the R2 credential (as in dev), asking for direct falls back to
+    // parts through the site, and /sign says so.
+    const ddr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'direct probe', draft: true } });
+    r = await req('POST', R2 + '/messages/' + ddr.json.id + '/file/start', { token: TU, json: { size: 9 * MiB, name: 'd.bin', direct: true } });
+    check('direct asked without the credential -> parts through the site', r.status === 200 && !!r.json && r.json.direct === false && r.json.part_size === 8 * MiB, JSON.stringify(r.json));
+    r = await req('POST', R2 + '/messages/' + ddr.json.id + '/file/sign', { token: TU, json: { parts: [1] } });
+    check('sign on a through-the-site upload -> 409', r.status === 409, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages/' + ddr.json.id + '/file/status', { token: TU });
+    check('status says the route', !!(r.json && r.json.uploading === true && r.json.direct === false), JSON.stringify(r.json));
+    await req('POST', R2 + '/messages/' + ddr.json.id + '/file/abort', { token: TU });
+    r = await req('POST', R2 + '/messages/' + ddr.json.id + '/file/start', { token: TU, json: { size: 1e12 } });
+    check('past the through-the-site ceiling -> 413', r.status === 413 && /943 GB/.test(r.text), r.status + ' ' + r.text.slice(0, 160));
     // Digest edits need an identity, like every sibling MCP write.
     r = await mcp(R2, 'tools/call', { name: 'file_digest', arguments: { text: 'A digest filed for the identity check.' } }, { token: TP });
     const dg = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.digest;

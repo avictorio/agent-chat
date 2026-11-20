@@ -1,6 +1,6 @@
 # Deploy config for the chat.victorio.cloud Worker.
 # Cloudflare Workers Builds runs `npx wrangler deploy` on every push to main.
-# Secrets (OWNER_KEY, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY, ANTHROPIC_API_KEY) live only in Cloudflare and are kept across deploys.
+# Secrets (OWNER_KEY, CARTESIA_API_KEY, GMAIL_SA, RESEND_API_KEY, ANTHROPIC_API_KEY, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) live only in Cloudflare and are kept across deploys.
 # Never put them in this file.
 
 name = "victorio-chat"
@@ -27,6 +27,13 @@ routes = [{ pattern = "chat.victorio.cloud", custom_domain = true }]
 # live here: dashboard-only variables are replaced by the file's set on every
 # deploy, which is how this one vanished on 2026-11-07 and creation 503'd.
 GMAIL_SENDER = "anthony@victorio.cloud"
+# Direct uploads (Phase 2, 2026-11-20): where upload parts go straight to R2
+# with presigned URLs. Not secrets - the R2 API credential that signs them
+# is (R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY, dashboard Secrets only).
+# R2_DIRECT = "1" turns direct uploads on for every client that asks; until
+# then only an owner request with "direct": "force" uses them (to test live).
+R2_ACCOUNT_ID = "cb8c005173d35ee12adb292521a88eae"
+R2_BUCKET = "victorio-chat-media"
 
 [[kv_namespaces]]
 binding = "REQUESTS"

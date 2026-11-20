@@ -376,6 +376,25 @@ const UP_TARGET_PARTS = 2000;
 const UP_MAX = UP_MAX_PARTS * UP_PART_MAX;
 const UP_MAX_TEXT = Math.floor(UP_MAX / 1e9) + " GB";
 const UP_SESSION_MS = 7 * 86400000;
+// Phase 2: parts straight to R2. With an R2 API credential (the
+// R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY Worker secrets, plus the
+// R2_ACCOUNT_ID and R2_BUCKET vars) and the switch on (R2_DIRECT = "1"), a
+// client that asks for it gets presigned addresses and sends each part to
+// R2 itself. No request cap stands in the way, so parts run up to 512 MiB
+// (more only to stay within 10,000) and an upload up to R2's own multipart
+// ceiling (4.995 TiB; 4.99 TiB here). The Worker only signs, and reads
+// storage's own list of parts (S3 ListParts) for status and finish.
+const UP_DIRECT_PART_MAX = 512 * MIB;
+const UP_MAX_DIRECT = Math.floor(4.99 * 1024 * 1024 * 1024 * 1024);
+const UP_MAX_DIRECT_TEXT = (Math.floor(UP_MAX_DIRECT / 1e11) / 10) + " TB";
+const UP_SIGN_TTL = 3600;
+const UP_SIGN_MAX = 100;
+function uploadPlanDirect(size) {
+  let ps = Math.ceil(size / UP_TARGET_PARTS / MIB) * MIB;
+  ps = Math.max(UP_PART_MIN, Math.min(UP_DIRECT_PART_MAX, ps));
+  if (Math.ceil(size / ps) > UP_MAX_PARTS) ps = Math.ceil(size / UP_MAX_PARTS / MIB) * MIB;
+  return { part_size: ps, parts: Math.max(1, Math.ceil(size / ps)) };
+}
 // About 2,000 parts, inside 8-90 MiB: a 1 GB file goes in 8 MiB parts, a
 // 50 GB one in 24 MiB parts, anything past ~190 GB in 90 MiB parts.
 function uploadPlan(size) {
@@ -474,6 +493,8 @@ export class Room extends DurableObject {
     // its upload began (R2 keeps an unfinished upload 7 days from then).
     try { this.sql.exec("ALTER TABLE md ADD COLUMN name TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN began INTEGER"); } catch (e) {}
+    // "direct": the session's parts go straight to R2 (Phase 2)
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN mode TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
@@ -1007,7 +1028,7 @@ export class Room extends DurableObject {
     if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
     let plan = null;
     if (session) {
-      plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null);
+      plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);
       if (plan.status !== 200) return plan;
     }
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
@@ -1016,7 +1037,7 @@ export class Room extends DurableObject {
     this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
       await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
     const out = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
-    if (plan) { out.size = Math.floor(Number(session.size)); out.part_size = plan.part_size; out.parts = plan.parts; }
+    if (plan) { out.size = Math.floor(Number(session.size)); out.part_size = plan.part_size; out.parts = plan.parts; out.direct = !!plan.direct; }
     return out;
   }
 
@@ -1118,7 +1139,7 @@ export class Room extends DurableObject {
   }
 
   upSession(id, kind) {
-    return this.sql.exec("SELECT type, r2key, size, upload_id, parts, fp, part_size, name, began FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
+    return this.sql.exec("SELECT type, r2key, size, upload_id, parts, fp, part_size, name, began, mode FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
   }
 
   // The plan a session runs on, pinned at its start (the first video
@@ -1134,31 +1155,57 @@ export class Room extends DurableObject {
   // already thrown away.
   upExpired(row, msg) { return Date.now() - this.upBegan(row, msg) > UP_SESSION_MS - 3600000; }
 
-  upReceived(id, kind, row) {
+  // The parts in, as part number -> etag. A session whose parts go
+  // through the Worker keeps its own receipts (upp); a direct one asks
+  // storage itself (ListParts), and a part there of the wrong length
+  // counts as not in, so it is sent again. Throws when storage won't say.
+  async upReceived(id, kind, row) {
     const got = new Map();
+    if (row && row.mode === "direct") {
+      const plan = this.upPlan(row);
+      const listed = await r2ListParts(this.env, row.r2key, row.upload_id);
+      for (const [n, p] of listed) if (n <= plan.parts && p.size === partLength(row.size, plan.part_size, n)) got.set(n, p.etag);
+      return got;
+    }
     // the first video sessions kept their receipts as JSON on the md row
     if (row && row.parts) { try { for (const p of JSON.parse(row.parts)) got.set(p.partNumber, p.etag); } catch (e) {} }
     for (const p of this.sql.exec("SELECT n, etag FROM upp WHERE msg = ? AND kind = ?", id, kind).toArray()) got.set(p.n, p.etag);
     return got;
   }
 
-  async uploadStart(id, kind, who, owner, room, size, type, name, fp) {
+  // Whether a session may send its parts straight to R2: the client asked
+  // (direct), the credential is configured, and the switch is on - or the
+  // owner asked with "force", to try it live before the switch flips.
+  upDirectAllowed(direct, owner) {
+    if (!direct || !r2DirectConfigured(this.env)) return false;
+    return this.env.R2_DIRECT === "1" || (direct === "force" && !!owner);
+  }
+
+  async uploadStart(id, kind, who, owner, room, size, type, name, fp, direct) {
     if (UP_KINDS.indexOf(kind) < 0) return { status: 400, error: "kind must be one of: " + UP_KINDS.join(", ") };
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     size = Math.floor(Number(size));
     if (!Number.isFinite(size) || size < 1) return { status: 400, error: "\"size\" is required: the file's exact length in bytes" };
-    if (size > UP_MAX) return { status: 413, error: "Uploads can be up to " + UP_MAX_TEXT + " (" + UP_MAX_PARTS + " parts of " + (UP_PART_MAX / MIB) + " MiB)" };
+    const useDirect = this.upDirectAllowed(direct, owner);
+    if (size > (useDirect ? UP_MAX_DIRECT : UP_MAX)) {
+      if (useDirect) return { status: 413, error: "Uploads can be up to " + UP_MAX_DIRECT_TEXT };
+      const could = r2DirectConfigured(this.env) && this.env.R2_DIRECT === "1";
+      return { status: 413, error: "Uploads through the site can be up to " + UP_MAX_TEXT + (could ? "; start with \"direct\": true to send the parts straight to storage, up to " + UP_MAX_DIRECT_TEXT : "") };
+    }
     fp = fp ? String(fp).slice(0, 200) : null;
     await this.sweepDrafts();
     const prev = this.upSession(id, kind);
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has " + upNoun(kind) };
     if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp) && !this.upExpired(prev, a.msg)) {
       // The same file again (a retry after an interruption, or from
-      // another device): keep the parts already stored.
+      // another device): keep the parts already stored, on the route the
+      // session began with.
       const plan = this.upPlan(prev);
-      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: Array.from(this.upReceived(id, kind, prev).keys()).sort((x, y) => x - y), expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS };
+      let received = [];
+      try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); } catch (e) {}
+      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: prev.mode === "direct" };
     }
     if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch (e) {} }
@@ -1168,17 +1215,18 @@ export class Room extends DurableObject {
     let up;
     try { up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
     catch (e) { return { status: 503, error: STORE_MSG }; }
-    const plan = uploadPlan(size);
+    const plan = useDirect ? uploadPlanDirect(size) : uploadPlan(size);
     const now = Date.now();
     const fname = name ? cleanFileName(String(name).replace(/[\u0000-\u001f\u007f]/g, ""), "") : "";
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, name, began) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
-      id, kind, declared || "application/octet-stream", key, size, up.uploadId, fp, plan.part_size, kind === "file" ? (fname || "file") : (fname || null), now);
-    return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: false, received: [], expires_at: now + UP_SESSION_MS };
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, name, began, mode) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+      id, kind, declared || "application/octet-stream", key, size, up.uploadId, fp, plan.part_size, kind === "file" ? (fname || "file") : (fname || null), now, useDirect ? "direct" : null);
+    return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: false, received: [], expires_at: now + UP_SESSION_MS, direct: useDirect };
   }
 
-  // Where part n goes, once the checks pass: the session is live, n is in
-  // its plan, and len is exactly that part's length (R2 needs equal parts,
-  // and a part of the wrong length would only fail at finish).
+  // Where part n goes through the Worker, once the checks pass: the
+  // session is live, n is in its plan, and len is exactly that part's
+  // length (R2 needs equal parts, and a part of the wrong length would
+  // only fail at finish).
   uploadPartTarget(id, kind, who, owner, n, len) {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
@@ -1190,7 +1238,26 @@ export class Room extends DurableObject {
     if (!Number.isFinite(n) || n < 1 || n > plan.parts) return { status: 400, error: "Part number n must be between 1 and " + plan.parts + " for this upload" };
     const want = partLength(row.size, plan.part_size, n);
     if (len !== want) return { status: 400, error: "Part " + n + " must be exactly " + want + " bytes (it was " + len + "): every part is part_size bytes except the last, which is the remainder", expected: want };
+    // a direct session's parts can be bigger than one request to the site carries
+    if (want > UP_PART_MAX) return { status: 409, error: "This upload's parts go straight to storage: POST its /sign for their addresses" };
     return { status: 200, key: row.r2key, upload_id: row.upload_id, sniff: n === 1 && kind !== "file" };
+  }
+
+  // The checks behind /sign, for a direct session: the caller, the
+  // session and the part numbers. The Worker signs the addresses (it
+  // holds the credential); nothing here sees them.
+  uploadSignTarget(id, kind, who, owner, nums) {
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
+    const row = this.upSession(id, kind);
+    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message: POST its /" + kind + "/start first" };
+    if (row.mode !== "direct") return { status: 409, error: "This upload's parts go through the site: PUT each one to its /part?n=N" };
+    if (this.upExpired(row, a.msg)) return { status: 410, error: "This upload has expired: an upload must finish within 7 days of its start. Start it again." };
+    const plan = this.upPlan(row);
+    const list = Array.from(new Set((Array.isArray(nums) ? nums : []).map((x) => Math.floor(Number(x)))));
+    if (!list.length || list.length > UP_SIGN_MAX) return { status: 400, error: "Ask for 1 to " + UP_SIGN_MAX + " part numbers at a time, as {\"parts\": [1, 2, ...]}" };
+    for (const n of list) if (!Number.isFinite(n) || n < 1 || n > plan.parts) return { status: 400, error: "Part numbers run from 1 to " + plan.parts + " for this upload" };
+    return { status: 200, key: row.r2key, upload_id: row.upload_id, parts: list.map((n) => ({ n: n, bytes: partLength(row.size, plan.part_size, n) })) };
   }
 
   uploadPartDone(id, kind, uploadId, n, etag) {
@@ -1204,7 +1271,7 @@ export class Room extends DurableObject {
 
   // who given (the routes): only the sender or the owner may see a
   // message's upload progress; anyone else just sees no upload.
-  uploadStatus(id, kind, who, owner) {
+  async uploadStatus(id, kind, who, owner) {
     let msg = null;
     if (who !== undefined) {
       const a = this.upAuth(id, who, owner, kind);
@@ -1215,7 +1282,10 @@ export class Room extends DurableObject {
     if (!row) return { status: 200, uploading: false, received: [] };
     if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, received: [] };
     const plan = this.upPlan(row);
-    return { status: 200, uploading: true, size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: Array.from(this.upReceived(id, kind, row).keys()).sort((x, y) => x - y), expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
+    let received;
+    try { received = Array.from((await this.upReceived(id, kind, row)).keys()).sort((x, y) => x - y); }
+    catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && e.message) || e) + "); ask again" }; }
+    return { status: 200, uploading: true, direct: row.mode === "direct", size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
   }
 
   async uploadFinish(id, kind, who, owner, room, opts) {
@@ -1225,7 +1295,17 @@ export class Room extends DurableObject {
     if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const plan = this.upPlan(row);
-    const got = this.upReceived(id, kind, row);
+    let got;
+    try { got = await this.upReceived(id, kind, row); }
+    catch (e) {
+      const em = String((e && e.message) || e);
+      if (/NoSuchUpload/i.test(em)) {
+        this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+        this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
+        return { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+      }
+      return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
+    }
     const missing = [];
     for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
     if (missing.length) return { status: 409, error: missing.length + " of " + plan.parts + " parts have not arrived (first missing: " + missing.slice(0, 10).join(", ") + "). Send them, then finish again.", missing: missing.slice(0, 1000) };
@@ -1295,15 +1375,15 @@ export class Room extends DurableObject {
   // One of your drafts with an upload in flight for the same file (size
   // and fingerprint), of any kind unless kind narrows it: how a client
   // that lost its place - a reload, another device - picks it back up.
-  findResumableUpload(who, size, fp, owner, kind) {
+  async findResumableUpload(who, size, fp, owner, kind) {
     if (!fp || !size) return { status: 200, found: false };
     const rows = this.sql.exec("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
       if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
-      const st = this.uploadStatus(r.msg, r.kind);
-      if (!st.uploading) continue;
-      return { status: 200, found: true, id: r.msg, kind: r.kind, received: st.received, part_size: st.part_size, parts: st.parts };
+      const st = await this.uploadStatus(r.msg, r.kind);
+      if (st.status !== 200 || !st.uploading) continue;
+      return { status: 200, found: true, id: r.msg, kind: r.kind, received: st.received, part_size: st.part_size, parts: st.parts, direct: !!st.direct };
     }
     return { status: 200, found: false };
   }
@@ -7702,7 +7782,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.19.0";
+const MCP_CATALOG_VERSION = "1.20.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -7752,7 +7832,7 @@ function mcpCatalog() {
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
     mcpTool("speak_message", "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.", { id: id }, ["id"]),
     mcpTool("get_voice", "Your cloned-voice status in this room (whether a voice is saved for you).", {}),
-    mcpTool("begin_upload", "Start an upload of any file: creates a draft message and returns URLs for the bytes that need no other credential. kind image, audio or video is shown in place; kind file is any type at all (a PDF, a zip, a dataset...), offered as a download under its name. With size (the file's exact byte length - required for file, and for an image, clip or video past its single-shot cap of 5 MB / 5 MB / 25 MB): a resumable upload of up to " + UP_MAX_TEXT + " - PUT each part to upload.part.url with {n} replaced (n = 1..upload.parts; every part exactly upload.part_size bytes except the last), in any order and in parallel, re-sending any that fails; GET upload.status.url lists the parts received; POST upload.finish.url when all are in. The URLs work for 7 days. Without size (small image, audio or video): one PUT of the raw bytes to upload.url, single use, valid 15 minutes; a 413/415/503 leaves it usable, but after 5 attempts it answers 410. Then publish_message - unless publish_on_complete is set. You can hold at most 20 open upload links at once. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video", "file"] }, size: { type: "integer", description: "The file's exact length in bytes. Required for kind file; makes any kind resumable." }, name: { type: "string", description: "The file's name (shown, and the download name for a file)." }, type: { type: "string", description: "The file's media type, e.g. application/pdf (informational for a file; image, audio and video are checked from their bytes)." }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
+    mcpTool("begin_upload", "Start an upload of any file: creates a draft message and returns URLs for the bytes that need no other credential. kind image, audio or video is shown in place; kind file is any type at all (a PDF, a zip, a dataset...), offered as a download under its name. With size (the file's exact byte length - required for file, and for an image, clip or video past its single-shot cap of 5 MB / 5 MB / 25 MB): a resumable upload of up to " + UP_MAX_TEXT + " - PUT each part to upload.part.url with {n} replaced (n = 1..upload.parts; every part exactly upload.part_size bytes except the last), in any order and in parallel, re-sending any that fails; GET upload.status.url lists the parts received; POST upload.finish.url when all are in. The URLs work for 7 days. Add direct: true and, where the deployment supports it, the parts go straight to storage instead (up to " + UP_MAX_DIRECT_TEXT + ", parts up to 512 MiB): POST upload.sign.url with {\"parts\": [n, ...]} for their addresses and PUT each part there. Without size (small image, audio or video): one PUT of the raw bytes to upload.url, single use, valid 15 minutes; a 413/415/503 leaves it usable, but after 5 attempts it answers 410. Then publish_message - unless publish_on_complete is set. You can hold at most 20 open upload links at once. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video", "file"] }, size: { type: "integer", description: "The file's exact length in bytes. Required for kind file; makes any kind resumable." }, name: { type: "string", description: "The file's name (shown, and the download name for a file)." }, type: { type: "string", description: "The file's media type, e.g. application/pdf (informational for a file; image, audio and video are checked from their bytes)." }, direct: { type: "boolean", description: "Send the parts straight to storage when the deployment supports it (bigger files, no trip through the site)." }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
     mcpTool("attach_media", "Attach a tiny file (base64, a few KB at most) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Any real file goes through begin_upload instead.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
   ];
   // Annotations matter: some harnesses (Hermes among them) ask for approval
@@ -8084,6 +8164,81 @@ function b64urlDecode(text) {
   const pad = t.length % 4 === 0 ? "" : "=".repeat(4 - (t.length % 4));
   return Uint8Array.from(atob(t + pad), (c) => c.charCodeAt(0));
 }
+// ---- R2's S3 API, for parts sent straight to storage (Phase 2) ----
+// The binding can neither presign nor list an upload's parts, so these
+// speak S3 to <account>.r2.cloudflarestorage.com with SigV4 query
+// authentication (region "auto", payload unsigned), using the R2 API
+// credential. sigv4Presign is checked against AWS's published example
+// (the sigv4 test hook and the API suite).
+function r2DirectConfigured(env) {
+  return !!(env && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_ACCOUNT_ID && env.R2_BUCKET);
+}
+function hexBytes(buf) { return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join(""); }
+async function hmacBytes(key, data) {
+  const k = await crypto.subtle.importKey("raw", typeof key === "string" ? new TextEncoder().encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(data)));
+}
+// RFC 3986, as SigV4 wants it (encodeURIComponent leaves !'()* alone).
+function awsEncode(v) { return encodeURIComponent(v).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase()); }
+// o: { method, host, path (already encoded), query, accessKey, secretKey,
+// region, expires (seconds), date }. Answers the presigned URL.
+async function sigv4Presign(o) {
+  const amz = o.date.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const day = amz.slice(0, 8);
+  const scope = day + "/" + o.region + "/s3/aws4_request";
+  const q = Object.assign({}, o.query || {}, {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": o.accessKey + "/" + scope,
+    "X-Amz-Date": amz,
+    "X-Amz-Expires": String(o.expires),
+    "X-Amz-SignedHeaders": "host",
+  });
+  const qs = Object.keys(q).map((k) => [awsEncode(k), awsEncode(String(q[k]))]).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)).map((p) => p[0] + "=" + p[1]).join("&");
+  const canonical = o.method + "\n" + o.path + "\n" + qs + "\nhost:" + o.host + "\n\nhost\nUNSIGNED-PAYLOAD";
+  const toSign = "AWS4-HMAC-SHA256\n" + amz + "\n" + scope + "\n" + hexBytes(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+  let k = await hmacBytes("AWS4" + o.secretKey, day);
+  k = await hmacBytes(k, o.region);
+  k = await hmacBytes(k, "s3");
+  k = await hmacBytes(k, "aws4_request");
+  return "https://" + o.host + o.path + "?" + qs + "&X-Amz-Signature=" + hexBytes(await hmacBytes(k, toSign));
+}
+function r2Address(env, key) {
+  return { host: env.R2_ACCOUNT_ID + ".r2.cloudflarestorage.com", path: "/" + awsEncode(env.R2_BUCKET) + "/" + String(key).split("/").map(awsEncode).join("/") };
+}
+// The address part n of an upload goes to, good for ttl seconds.
+async function r2PresignPart(env, key, uploadId, n, ttl) {
+  const a = r2Address(env, key);
+  return sigv4Presign({ method: "PUT", host: a.host, path: a.path, query: { partNumber: String(n), uploadId: uploadId }, accessKey: env.R2_ACCESS_KEY_ID, secretKey: env.R2_SECRET_ACCESS_KEY, region: "auto", expires: ttl, date: new Date() });
+}
+// Every part storage holds for an upload (S3 ListParts, 1,000 a page):
+// part number -> { etag, size }. Storage's own record is what a direct
+// upload's status and finish go by.
+async function r2ListParts(env, key, uploadId) {
+  if (!r2DirectConfigured(env)) throw new Error("Direct uploads are not configured");
+  const a = r2Address(env, key);
+  const parts = new Map();
+  let marker = 0;
+  for (let page = 0; page < 20; page++) {
+    const query = { uploadId: uploadId, "max-parts": "1000" };
+    if (marker) query["part-number-marker"] = String(marker);
+    const url = await sigv4Presign({ method: "GET", host: a.host, path: a.path, query: query, accessKey: env.R2_ACCESS_KEY_ID, secretKey: env.R2_SECRET_ACCESS_KEY, region: "auto", expires: 300, date: new Date() });
+    const res = await fetch(url);
+    const text = await res.text();
+    if (!res.ok) throw new Error("ListParts " + res.status + " " + ((/<Code>([^<]*)<\/Code>/.exec(text) || [])[1] || ""));
+    for (const m of text.matchAll(/<Part>([\s\S]*?)<\/Part>/g)) {
+      const n = Number((/<PartNumber>(\d+)<\/PartNumber>/.exec(m[1]) || [])[1] || 0);
+      const etag = ((/<ETag>([^<]*)<\/ETag>/.exec(m[1]) || [])[1] || "").replace(/&quot;/g, "\"").replace(/^"|"$/g, "");
+      const size = Number((/<Size>(\d+)<\/Size>/.exec(m[1]) || [])[1] || -1);
+      if (n) parts.set(n, { etag: etag, size: size });
+    }
+    if (!/<IsTruncated>true<\/IsTruncated>/.test(text)) break;
+    const next = Number((/<NextPartNumberMarker>(\d+)<\/NextPartNumberMarker>/.exec(text) || [])[1] || 0);
+    if (!next || next <= marker) break;
+    marker = next;
+  }
+  return parts;
+}
+
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
 // from Content-Length). With sniff set (part 1 of an image, audio or
@@ -8163,17 +8318,34 @@ async function uploadStep(request, env, url, stub, room, id, kind, step, who, ow
     if (d.status !== 200) return json({ error: d.error }, d.status);
     return json({ room: room, id: id, kind: kind, part: n });
   }
+  if (step === "sign") {
+    // A direct session's part addresses: presigned PUTs straight to R2,
+    // up to UP_SIGN_MAX at a time, each good for UP_SIGN_TTL seconds.
+    if (request.method !== "POST" && request.method !== "GET") return json({ error: "Method not allowed" }, 405);
+    let nums = [];
+    if (request.method === "GET") nums = String(url.searchParams.get("n") || "").split(",").filter(Boolean);
+    else { const sb = await readBody(request); nums = sb && Array.isArray(sb.parts) ? sb.parts : []; }
+    const t = await stub.uploadSignTarget(id, kind, who, owner, nums);
+    if (t.status !== 200) return json({ error: t.error }, t.status);
+    if (!r2DirectConfigured(env)) return json({ error: "Direct uploads are not configured right now; send the parts through the site (PUT /part?n=N) if they fit, or try again later" }, 503);
+    const urls = {};
+    const bytes = {};
+    for (const p of t.parts) { urls[p.n] = await r2PresignPart(env, t.key, t.upload_id, p.n, UP_SIGN_TTL); bytes[p.n] = p.bytes; }
+    return json({ room: room, id: id, kind: kind, method: "PUT", urls: urls, bytes: bytes, expires_at: new Date(Date.now() + UP_SIGN_TTL * 1000).toISOString(), note: "PUT each part's raw bytes to its url - no other headers, no credential. Then status / finish as usual." });
+  }
   if (step === "status") {
     if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
     const r = await stub.uploadStatus(id, kind, who, owner);
-    return json({ room: room, id: id, kind: kind, uploading: r.uploading, complete: !!r.complete, size: r.size || null, type: r.type || null, name: r.name || null, part_size: r.part_size || null, parts: r.parts || null, received: r.received, expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null });
+    if (r.status && r.status !== 200) return json({ error: r.error }, r.status);
+    return json({ room: room, id: id, kind: kind, uploading: r.uploading, complete: !!r.complete, direct: !!r.direct, size: r.size || null, type: r.type || null, name: r.name || null, part_size: r.part_size || null, parts: r.parts || null, received: r.received, expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null });
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
   if (step === "start") {
-    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? String(body.fingerprint) : null);
+    const direct = body && (body.direct === "force" ? "force" : !!body.direct);
+    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? String(body.fingerprint) : null, direct);
     if (r.status !== 200) return json({ error: r.error }, r.status);
-    return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, expires_at: new Date(r.expires_at).toISOString() });
+    return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, direct: !!r.direct, expires_at: new Date(r.expires_at).toISOString() });
   }
   if (step === "finish") {
     const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
@@ -8198,13 +8370,15 @@ function sessionUpload(origin, room, kind, t) {
     size: t.size,
     part_size: t.part_size,
     parts: t.parts,
-    part: { method: "PUT", url: base + "/part?n={n}" },
+    part: t.direct ? null : { method: "PUT", url: base + "/part?n={n}" },
+    sign: t.direct ? { method: "POST", url: base + "/sign", body: { parts: [1, 2] } } : null,
     status: { method: "GET", url: base + "/status" },
     finish: { method: "POST", url: base + "/finish" },
     abort: { method: "POST", url: base + "/abort" },
     auth: "none - these URLs are the credential",
     expires_at: new Date(t.expires).toISOString(),
-    note: "PUT part n (1.." + t.parts + ") to part.url with {n} replaced: bytes [(n-1)*part_size, n*part_size) of the file, so every part is exactly part_size bytes except the last (the remainder). Parts may go in any order and in parallel; re-send any that fails. GET status lists the parts received; POST finish once all are in (409 with the missing part numbers otherwise). From a shell: dd if=FILE bs=" + t.part_size + " skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\". Then publish_message with message_id - unless publish_on_complete is set. No invite token or other credential: these URLs authorize this one upload until expires_at."
+    direct: !!t.direct,
+    note: (t.direct ? "Parts go straight to storage: POST sign.url with {\"parts\": [n, ...]} (up to " + UP_SIGN_MAX + " at a time) for each part's address, good for an hour, and PUT the part's raw bytes there with no other headers. " : "") + "PUT part n (1.." + t.parts + ") " + (t.direct ? "to its signed address" : "to part.url with {n} replaced") + ": bytes [(n-1)*part_size, n*part_size) of the file, so every part is exactly part_size bytes except the last (the remainder). Parts may go in any order and in parallel; re-send any that fails. GET status lists the parts received; POST finish once all are in (409 with the missing part numbers otherwise). From a shell: dd if=FILE bs=" + t.part_size + " skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\". Then publish_message with message_id - unless publish_on_complete is set. No invite token or other credential: these URLs authorize this one upload until expires_at."
   };
 }
 
@@ -8218,7 +8392,7 @@ function uploadSessionWanted(kind, a) {
   if (!Number.isFinite(size) || size < 1) return { error: "\"size\" must be the file's exact length in bytes" };
   const cap = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : kind === "video" ? VIDEO_MAX : 0;
   if (kind !== "file" && size <= cap) return null;
-  return { size: size, type: a.type ? String(a.type) : null, name: a.name ? String(a.name) : null };
+  return { size: size, type: a.type ? String(a.type) : null, name: a.name ? String(a.name) : null, direct: a.direct === true || a.direct === "true" };
 }
 
 // The upload object begin_upload and the REST upload-ticket route hand out
@@ -9410,6 +9584,13 @@ function docs(o) {
     "     may send {\"transcript\": ...} with finish.",
     "  5. Publish the draft (POST /messages/ID/publish) - or post it with \"publish_on_complete\":",
     "     true and it publishes itself the moment finish succeeds.",
+    "  Straight to storage: add \"direct\": true to start. Where this deployment can, the answer",
+    "  says \"direct\": true, parts run up to 512 MiB and an upload up to " + UP_MAX_DIRECT_TEXT + ". Then",
+    "  POST /messages/ID/KIND/sign {\"parts\": [1, 2, ...]} (up to " + UP_SIGN_MAX + " at a time) answers",
+    "  {\"urls\": {\"1\": \"https://...\"}}: PUT each part's raw bytes to its url with no other headers",
+    "  and no credential (a url works for an hour; sign again for more). status and finish work",
+    "  as above - storage's own list of the parts is what counts. Otherwise (\"direct\": false in",
+    "  the answer) the parts go through the site.",
     "  Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then",
     "  finish. Calling start again with the same size (and fingerprint) resumes rather than",
     "  restarting. Lost the message id? POST /api/rooms/ROOM/upload/resume {\"size\", \"fingerprint\"}",
@@ -9420,7 +9601,8 @@ function docs(o) {
     "  or, for a draft that already exists, POST /api/rooms/ROOM/messages/ID/upload-ticket",
     "  {\"kind\", \"size\", \"name\", \"type\"}. Both return the same steps as URLs that need NO other",
     "  credential - the URLs are the credential, for this one upload, for its 7 days:",
-    "  upload.part.url (PUT, {n} replaced), upload.status.url, upload.finish.url, upload.abort.url.",
+    "  upload.part.url (PUT, {n} replaced), upload.status.url, upload.finish.url, upload.abort.url;",
+    "  with \"direct\": true, upload.sign.url hands out the parts' storage addresses instead.",
     "  One way to cut and send part n from a shell:",
     "    dd if=FILE bs=PART_SIZE skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\"",
     "  Without \"size\", kind image, audio or video gets a single-shot link instead: one PUT of the",
@@ -10260,6 +10442,15 @@ async function routeRequest(request, env) {
       const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
       return json(await tstub.setTestLetterGrid(parseInt(tb && tb.id, 10), tb && tb.rows));
     }
+    if (path === "/api/test-hooks/sigv4") {
+      // Runs sigv4Presign on given inputs, so the suite can check it
+      // against AWS's published example. No credential of ours is used.
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      const sb = await readBody(request);
+      if (!sb) return json({ error: "Send the inputs as JSON" }, 400);
+      return json({ url: await sigv4Presign({ method: sb.method, host: sb.host, path: sb.path, query: sb.query, accessKey: sb.accessKey, secretKey: sb.secretKey, region: sb.region, expires: sb.expires, date: new Date(sb.date) }) });
+    }
     if (path === "/api/test-hooks/liarsdice") {
       if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
       if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -10276,7 +10467,7 @@ async function routeRequest(request, env) {
     // never echoed back in any response.
     // Resumable upload links: the upload engine's part / status / finish /
     // abort steps with the link as the credential, for one session.
-    const usm = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/(part|status|finish|abort)\/?$/);
+    const usm = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) {
       const uroom = decodeURIComponent(usm[1]).toLowerCase();
       if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -11337,7 +11528,7 @@ async function routeRequest(request, env) {
     // The upload engine (UP_KINDS): start / part / status / finish / abort
     // for any kind, with the sender's invite or the owner key. /video/...
     // was the first chunked flow (video only); it is this same route.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|finish|abort|status)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|finish|abort|status)\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -11419,7 +11610,7 @@ async function routeRequest(request, env) {
       const body = await readBody(request);
       const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(String(body.kind)) >= 0 ? String(body.kind) : null);
       const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner, kind);
-      return json({ room: room, found: !!r.found, id: r.id || null, kind: r.kind || null, received: r.received || [], part_size: r.part_size || null, parts: r.parts || null });
+      return json({ room: room, found: !!r.found, id: r.id || null, kind: r.kind || null, received: r.received || [], part_size: r.part_size || null, parts: r.parts || null, direct: !!r.direct });
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);

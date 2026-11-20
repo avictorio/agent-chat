@@ -435,13 +435,14 @@ async function setup(page, S, calls) {
       if (body.reaction) (r[body.reaction] = r[body.reaction] || []).push(body.from);
       msg.reactions = r; return J({ room: 'demo', id: msg.id, reactions: r });
     }
-    if ((am = p.match(/\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|status|finish|abort)$/))) {
+    if ((am = p.match(/\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|status|finish|abort)$/))) {
       const id = +am[1], kind = am[2], step = am[3], key = id + ':' + kind;
       S.ups = S.ups || {};
-      if (step === 'start') { const ps = 65536; S.ups[key] = { size: body.size, name: body.name, type: body.type, ps, parts: Math.max(1, Math.ceil(body.size / ps)), got: new Set() }; return J({ room: 'demo', id, kind, part_size: ps, parts: S.ups[key].parts, resumed: false, received: [], expires_at: new Date(Date.now() + 7 * D).toISOString() }); }
+      if (step === 'start') { const ps = 65536; S.ups[key] = { size: body.size, name: body.name, type: body.type, ps, parts: Math.max(1, Math.ceil(body.size / ps)), got: new Set() }; return J({ room: 'demo', id, kind, part_size: ps, parts: S.ups[key].parts, resumed: false, received: [], direct: !!(S.direct && body.direct), expires_at: new Date(Date.now() + 7 * D).toISOString() }); }
       const u0 = S.ups[key];
       if (step === 'status') return J({ room: 'demo', id, kind, uploading: !!u0 && !u0.done, complete: !!(u0 && u0.done), received: u0 ? [...u0.got] : [] });
       if (step === 'abort') { delete S.ups[key]; return J({ room: 'demo', id, kind, aborted: true }); }
+      if (step === 'sign') { S.signs = (S.signs || 0) + 1; const urls = {}; for (const n of body.parts || []) urls[n] = 'https://acct.r2.cloudflarestorage.com/victorio-chat-media/demo/' + id + '/' + kind + '?partNumber=' + n + '&uploadId=up1&X-Amz-Signature=sig' + S.signs; return J({ room: 'demo', id, kind, method: 'PUT', urls, expires_at: new Date(Date.now() + 3600e3).toISOString() }); }
       if (!u0) return J({ error: 'No upload in progress for that message' }, 409);
       if (step === 'part') {
         const n = +u.searchParams.get('n');
@@ -3255,6 +3256,38 @@ let FAILURES = 0;
     must(box && box.x >= 0 && box.x + box.width <= 390, 'file card fits the phone: ' + JSON.stringify(box));
     await shot(page, 'upload-file-dark-phone.png');
     return { w: Math.round(box.width) };
+  });
+  await run('upload-direct', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // Parts straight to storage: presigned addresses, no credential on the
+    // storage request, an expired address signed again and retried.
+    S.direct = true;
+    const r2 = [];
+    let refused = false;
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'PUT', 'access-control-allow-headers': '*', 'access-control-expose-headers': 'ETag' };
+    await page.route('https://acct.r2.cloudflarestorage.com/**', async (route) => {
+      const req = route.request();
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      const u = new URL(req.url());
+      const n = +u.searchParams.get('partNumber');
+      r2.push({ n, token: req.headers()['x-invite-token'] || null, len: (req.postDataBuffer() || []).length, sig: u.searchParams.get('X-Amz-Signature') });
+      if (n === 2 && !refused) { refused = true; return route.fulfill({ status: 403, headers: Object.assign({ 'content-type': 'application/xml' }, cors), body: '<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>' }); }
+      const seg = u.pathname.split('/');
+      const up = S.ups[seg[3] + ':' + seg[4]];
+      if (up) up.got.add(n);
+      return route.fulfill({ status: 200, headers: Object.assign({ etag: '"e' + n + '"' }, cors), body: '' });
+    });
+    await page.setInputFiles('#anyFile', { name: 'archive.tar', mimeType: 'application/x-tar', buffer: Buffer.alloc(200000, 9) });
+    await page.click('#send');
+    await page.locator('.file-card', { hasText: 'archive.tar' }).waitFor({ timeout: 20000 });
+    const viaSite = calls.filter((c) => /\/file\/part\?n=/.test(c)).length;
+    const startBody = calls.find((c) => /\/101\/file\/start /.test(c)) || '';
+    const part2 = r2.filter((x) => x.n === 2);
+    must(/"direct":true/.test(startBody), 'the client asks for direct: ' + startBody.slice(-120));
+    must(viaSite === 0, 'no part went through the site: ' + viaSite);
+    must(r2.length === 5 && r2.every((x) => x.token === null), 'four parts plus one retry, none carrying the invite: ' + JSON.stringify(r2));
+    must(part2.length === 2 && part2[0].sig !== part2[1].sig && (S.signs || 0) >= 2, 'the refused part was signed again: ' + JSON.stringify({ part2, signs: S.signs }));
+    must(calls.some((c) => /\/101\/file\/finish/.test(c)) && calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
+    return { r2: r2.length, signs: S.signs };
   });
   await run('upload-cancel', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     S.partDelay = 900;
