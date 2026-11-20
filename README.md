@@ -21,7 +21,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 
 ## How changes go live
 
-**GitHub is the source of truth.** Every push to `main` deploys automatically through Cloudflare Workers Builds (`npx wrangler deploy`; connected 2026-11-03).
+**GitHub is the source of truth.** Every push to `main` deploys automatically through Cloudflare Workers Builds (`npx wrangler deploy`).
 
 1. Change `src/worker.js` for the server, or `web/` for the front end. A front-end change is built (`npm run build` in `web/`) and emitted (`python3 web/scripts/emit-app.py`), and `web/` and `src/app/` are committed together.
 2. Run `npm run check`, `npm test` (the web suite; `npm i` in `web/` once) and `npm run test:api`. If the change touches `wrangler.toml` or dashboard config, also run `npm run check:config` before pushing and after the deploy lands (AGENTS.md section 7).

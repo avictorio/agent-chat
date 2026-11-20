@@ -7346,7 +7346,7 @@ export class Room extends DurableObject {
   // The room's attachments, newest first: one entry per media row on a
   // published message, joined with the message for sender, time and
   // caption text. Drafts never appear (their media is the sender's
-  // alone until publish) and neither do in-flight chunked uploads.
+  // alone until publish) and neither do uploads still in flight.
   // kind is a comma list of media kinds; from narrows to one sender.
   // The cursor is "msg:kind" of the last entry served - the pair is
   // unique (md's primary key), so paging never skips or repeats an
@@ -8041,8 +8041,9 @@ function sniffAudio(buf) {
 // rotate. WebCrypto's subtle API is async-only, but message
 // serialization is sync, so the HMAC is computed with the plain-JS
 // SHA-256 below (verified against RFC 4231 vectors and node:crypto).
-// Header auth and ?invite= keep working on the same routes for one
-// release; the signatures are what listings, frames and the web app use.
+// Header auth keeps working on the same routes (?invite= no longer
+// authenticates media reads); signatures are what listings, frames and
+// the web app use.
 const SHA256_K = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -10465,8 +10466,8 @@ async function routeRequest(request, env) {
     // begin_upload ticket. Deliberately NO access check: the ticket is the
     // credential (single-use, 15 minutes, hash-only at rest). The ticket is
     // never echoed back in any response.
-    // Resumable upload links: the upload engine's part / status / finish /
-    // abort steps with the link as the credential, for one session.
+    // Resumable upload links: the upload engine's part / sign / status /
+    // finish / abort steps with the link as the credential, for one session.
     const usm = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) {
       const uroom = decodeURIComponent(usm[1]).toLowerCase();
@@ -11525,7 +11526,7 @@ async function routeRequest(request, env) {
       return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
     }
 
-    // The upload engine (UP_KINDS): start / part / status / finish / abort
+    // The upload engine (UP_KINDS): start / part / sign / status / finish / abort
     // for any kind, with the sender's invite or the owner key. /video/...
     // was the first chunked flow (video only); it is this same route.
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|finish|abort|status)\/?$/);

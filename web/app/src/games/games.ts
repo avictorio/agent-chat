@@ -2564,16 +2564,14 @@ export function createGameStore(opts: {
     }
   }
 
-  /* ---- Light Cycles 3D board (R3F spike, 2026-11-12) ----
-     The arena's board can render as a 3D scene (./LcArena3D,
-     react-three-fiber) instead of the SVG. The scene module is a
-     dynamic import, so three.js ships in a lazy chunk that loads
-     only when a viewer flips the toggle; the preference persists
-     per device and defaults to 3D (a stored "0" is an explicit
-     opt-out and is respected). The React root lives on the
-     gameView object: renderGameView clears and rebuilds the wrap
-     on every state change, and re-appending the same host element
-     keeps the canvas (and the camera) alive across repaints. */
+  /* ---- The 3D arenas ----
+     Every arena is a 3D scene (react-three-fiber; the 2D views and
+     the 2D/3D toggles were retired 2026-11-20). Each scene module is
+     a dynamic import, so three.js ships in lazy chunks that load only
+     when an arena opens. The React root lives on the gameView object:
+     renderGameView clears and rebuilds the wrap on every state change,
+     and re-appending the same host element keeps the canvas (and the
+     camera) alive across repaints. */
   /* The 3D host (2026-11-12): a mount for the scene's React root plus
      a status layer over it - "Loading the 3D arena…" until the scene
      draws its first frame, or what went wrong with a Reload button.

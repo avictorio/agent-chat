@@ -9,9 +9,8 @@ import type {
   VoiceUploadResult,
 } from "./types";
 
-// A thin typed client over the room API. Same-origin only: the app is
-// served by the staging proxy Worker in development and by the chat
-// Worker after cutover, so /api paths are always relative.
+// A thin typed client over the room API. Same-origin only: the chat
+// Worker serves the app, so /api paths are always relative.
 
 // A failed API call: carries the HTTP status and the server's own error
 // text, so callers can drive the access states (401/403 → locked view)

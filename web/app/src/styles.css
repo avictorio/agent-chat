@@ -1135,8 +1135,8 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
   .lc-3d-host.sg-3d-host { height: min(44vh, 340px); }
   .lc-board-big.duel-board-under { display: none; }
 }
-/* One finger scrolls the page over a 3D board (and taps it); two
-   fingers turn and zoom the view. The camera controls set
+/* Outside Move mode one finger scrolls the page over a 3D board (and
+   taps it); the camera ignores touch. The camera controls set
    touch-action: none inline on the scene's container, which made a
    swipe on the board tip the camera and trap the page. */
 .arena3d-frame > div, .arena3d-frame canvas { touch-action: pan-y !important; }

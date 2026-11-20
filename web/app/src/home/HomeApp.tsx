@@ -102,8 +102,7 @@ export default function HomeApp() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // Boot: the service worker from the front door too, and the shell
-  // bridges (splash, app links, retained notification taps).
+  // Boot: the service worker from the front door too.
   useEffect(() => {
     registerServiceWorker();
   }, []);

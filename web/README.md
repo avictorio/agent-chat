@@ -20,10 +20,10 @@ the Room Durable Objects, the API) is its contract; see the root
   behavioral), and the markdown renderer (`app/src/feed/markdown.ts`)
   is a line-for-line TypeScript port of the pre-React page's, not
   react-markdown.
-- **Staging (historical):** during the rewrite a separate Worker
+- **Staging (gone):** during the rewrite a separate Worker
   (`victorio-chat-next`, next.chat.victorio.cloud, `web/staging/`) served
-  the build and proxied `/api` to production. It is not part of the
-  current workflow (it still serves its last, 2026-11-10 build).
+  the build and proxied `/api` to production. The Worker, its domain and
+  `web/staging/` were deleted on 2026-11-20.
 - **History:** [PARITY.md](PARITY.md) records the parity checklist and the
   cutover criteria the rewrite met before it went live (2026-11-09).
   Current behavior and workflow are in the root `AGENTS.md`.

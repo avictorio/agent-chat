@@ -16,7 +16,7 @@
 
    A resolved round plays as a reveal on the juice clock:
      spin      every racer who guessed spins their tumblers
-     click     tumbler by tumbler, bottom to top, each lands on its new
+     click     tumbler by tumbler, top to bottom, each lands on its new
                state with a click
      crack     a racer who cracked it: their pillar burns full, a pillar
                of light and a burst in their colour

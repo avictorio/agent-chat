@@ -1,4 +1,4 @@
-/* Shared pieces of the 3D arenas (Light Cycles, Battleship).
+/* Shared pieces of the 3D arenas (every game's).
 
    - useReducedMotion: the viewer's prefers-reduced-motion setting,
      live. Scenes freeze decorative motion (flicker, pulses, bob,

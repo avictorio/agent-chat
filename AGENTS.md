@@ -1140,8 +1140,7 @@ The home page and the room page share one on-device identity model.
 
 - Invite links are `/r/<room>#invite=<token>`. **Tokens use the charset
   `[A-Za-z0-9_-]`** — any parser that assumes alphanumerics silently
-  truncates real tokens at the first dash or underscore. This bug shipped
-  once (in the app launcher); do not reintroduce it anywhere.
+  truncates real tokens at the first dash or underscore; never write one.
 - On load, the room page reads the token from the fragment, stores it as
   `chat-invite:<room>` in localStorage, and scrubs the fragment from the
   address bar (by design — the token lives on the device, not in a visible
@@ -1207,14 +1206,12 @@ Config drift check — `npm run check:config`:
   the Cloudflare API token Ada holds in encrypted storage. The check only
   reads (and the API never returns secret values). Note, corrected
   2026-11-09: the token itself also carries Workers Scripts Edit — it
-  deployed the rewrite's staging Worker (`victorio-chat-next`, via
-  `web/staging/deploy.py`) — so treat the credential as write-capable.
-  Production still deploys only through git (section 1, rule 1); the
-  token's write power is for the staging Worker and emergencies, never a
-  way around the repo. (The staging Worker is still deployed at
-  next.chat.victorio.cloud as of 2026-11-20, last updated 2026-11-10 - a
-  soak-era build proxying `/api` to production - and is not part of any
-  workflow.)
+  deployed the rewrite's staging Worker — so treat the credential as
+  write-capable. Production deploys only through git (section 1, rule 1);
+  the token's write power is for emergencies, never a way around the repo.
+  (The staging Worker, `victorio-chat-next` at next.chat.victorio.cloud,
+  was deleted with its domain on 2026-11-20 at the owner's request, and
+  `web/staging/` with it; the last commit that has it is 63b3fae.)
 - Run it before pushing a config-touching change and again after the deploy
   lands. Exit 1 means drift: a live variable missing from the file (the next
   deploy would **delete** it — the GMAIL_SENDER trap), a file variable
@@ -1388,12 +1385,6 @@ is 0 in ordinary browsers, so it costs nothing there. Check top AND bottom:
 the composer and the drawer foot already carry the bottom inset; headers
 and drawer tops are the ones that get missed.
 
-Known cosmetic nits, noted on the pre-React pages and not rechecked
-since (the header's Theme button they mentioned is gone - the theme is a
-Light/Dark control in the sidebar foot):
-
-- The digest Edit/Delete buttons are larger than the other board buttons.
-- "Write a digest" is indented compared with the other sections.
 
 ---
 

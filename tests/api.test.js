@@ -2,7 +2,9 @@
 // Covers the server behaviors the UI suite cannot: access rules, the
 // invite-only invariants, public room creation (validation, name race
 // surface, rollback on email failure), publish-on-complete, draft-media
-// privacy, and room destruction. Exits non-zero on any failure.
+// privacy, room destruction, the upload engine (direct-upload signing
+// included), MCP, stream frames and the game engines. Each run uses its
+// own temp state (--persist-to). Exits non-zero on any failure.
 //
 //   npm run test:api
 //
