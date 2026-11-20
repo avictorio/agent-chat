@@ -1292,6 +1292,44 @@ async function waitUp() {
     check('a storyteller who runs out forfeits; the last round ends the game', ttR.forfeit === true && ttR.teller === T3 && rtt.json.game.status === 'finished' && rtt.json.game.winner === T1 && rtt.json.game.places[0] === T1 && rtt.json.game.players.find((p) => p.name === T1).score === 3, JSON.stringify(rtt.json.game).slice(0, 260));
     rtt = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Two Truths result', (rtt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Two Truths and a Lie #' + tt.id + ' is over - ' + T1 + ' wins with 3 points.')), JSON.stringify((rtt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 120)).slice(-2)));
+    // Exquisite Corpse (2026-11-20): each writer sees only the segment
+    // before theirs; the story is revealed at the end; favourite votes.
+    let rco = await req('POST', R2 + '/games', { token: TP, json: { game: 'corpse', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('exquisite corpse needs 3 to 6 -> 400', rco.status === 400 && /3 to 6/.test(rco.json.error), rco.status);
+    rco = await req('POST', R2 + '/games', { token: TP, json: { game: 'Exquisite Corpse', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rotations: 1, seed: 'The cat was late for the meeting.', variant: 'constraints' } });
+    const ec = rco.json.game || {};
+    const [W1, W2, W3] = ec.order || [];
+    check('exquisite corpse is created in a lobby (the spelled-out name works)', rco.status === 201 && ec.type === 'corpse' && ec.status === 'lobby' && ec.turns_total === 3 && ec.variant === 'constraints' && ec.turn_seconds === 86400 && ec.story === null && typeof ec.you.constraint === 'string', rco.status + ' ' + rco.text.slice(0, 200));
+    await req('POST', R2 + '/games/' + ec.id + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + ec.id + '/accept', { token: TRae, json: {} });
+    rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W1] });
+    check('the first writer sees only the seed line', rco.json.game.status === 'running' && rco.json.game.turn_of === W1 && rco.json.game.you.tail === 'The cat was late for the meeting.' && /only the segment before yours/i.test(rco.json.game.how_to_play || ''), rco.text.slice(0, 200));
+    rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W2] });
+    check('everyone else sees no text at all', !rco.text.includes('The cat was late') && rco.json.game.you.tail === undefined && rco.json.game.story === null, rco.text.slice(0, 200));
+    rco = await ldMove(ec.id, W2, 'Out of turn.');
+    check('writing out of turn -> 409', rco.status === 409, rco.status);
+    rco = await ldMove(ec.id, W1, 'One. Two. Three. Four.');
+    check('more than three sentences -> 400', rco.status === 400 && /1 to 3 sentences/.test(rco.json.error), rco.status + ' ' + rco.text.slice(0, 120));
+    rco = await ldMove(ec.id, W1, 'It had been a long day. The mice were unionising.');
+    check('a segment passes the turn', rco.status === 200 && rco.json.game.turn_of === W2 && rco.json.game.segments === 1, rco.status + ' ' + rco.text.slice(0, 160));
+    rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W2] });
+    const ecW2 = rco.json.game.you.tail;
+    rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W3] });
+    check('the next writer sees only the segment before theirs; the rest see nothing', ecW2 === 'It had been a long day. The mice were unionising.' && !rco.text.includes('unionising') && !rco.text.includes('The cat was late'), ecW2 + ' | ' + rco.text.slice(0, 160));
+    await ttExpire(ec.id);
+    rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W3] });
+    check('a turn that runs out is a silent beat - the story goes on', rco.json.game.turn_of === W3 && rco.json.game.players.find((p) => p.name === W2).skips === 1 && rco.json.game.you.tail === 'It had been a long day. The mice were unionising.', JSON.stringify(rco.json.game).slice(0, 200));
+    rco = await ldMove(ec.id, W3, 'Meanwhile, the moon filed a complaint.');
+    const ecRev = rco.json.game || {};
+    check('the last turn reveals the whole story, authors and constraint cards', ecRev.phase === 'vote' && ecRev.seed === 'The cat was late for the meeting.' && ecRev.story.length === 2 && ecRev.story[0].by === W1 && ecRev.story[1].by === W3 && Object.keys(ecRev.constraints || {}).length === 3, JSON.stringify(ecRev).slice(0, 260));
+    rco = await ldMove(ec.id, W1, '1');
+    check('you cannot vote for your own segment -> 400', rco.status === 400 && /own segment/.test(rco.json.error), rco.status + ' ' + rco.text.slice(0, 120));
+    await ldMove(ec.id, W1, '2');
+    await ldMove(ec.id, W2, 'vote 2');
+    rco = await ldMove(ec.id, W3, '1');
+    check('the honours go to the most-voted segment', rco.json.game.status === 'finished' && rco.json.game.winner === W3 && JSON.stringify(rco.json.game.honours) === '[2]' && rco.json.game.votes['2'] === 2 && rco.json.game.places[0] === W3, JSON.stringify(rco.json.game).slice(0, 260));
+    rco = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Exquisite Corpse result', (rco.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Exquisite Corpse #' + ec.id + ' is finished - 2 segments by 2 writers') && x.text.includes('The honours go to ' + W3 + ' for segment 2 (2 votes)')), JSON.stringify((rco.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

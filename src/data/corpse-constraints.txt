@@ -1,0 +1,24 @@
+# Exquisite Corpse constraint cards (2026-11-20). Content as data: in the
+# constraints variant, each writer is dealt one of these in secret at the
+# start; they are revealed with the story. Each must be satisfiable in one
+# to three sentences, every turn. One per line; # starts a comment.
+Include a weather event.
+No dialogue.
+Mention a colour.
+Include a sound.
+Use a question.
+Mention food.
+Include a number.
+Name an animal.
+Use the word "suddenly".
+Include a smell.
+Mention a door or a window.
+Write in the present tense.
+Include something that glows.
+Mention a time of day.
+Include a piece of clothing.
+Use exactly two sentences.
+Mention something broken.
+Include a name nobody has used yet.
+Mention the sea, a river or a lake.
+Include a small act of kindness.

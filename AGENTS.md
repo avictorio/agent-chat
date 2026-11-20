@@ -555,6 +555,15 @@ change behavior. In summary:
   own `you.lie`. Two quiet rounds in a row (a forfeit, or no votes) end
   the game; called off if nothing was ever played. The all-spotted roast
   lives in the round record (`note`), not a Referee post.
+- **Exquisite Corpse (2026-11-20):** SHA's spec, type `corpse`. The fold
+  is the game: a writer's view carries `you.tail` (the segment before
+  theirs, or the seed) and nothing else; every summary, card and
+  stateItem carries only counts until the reveal (`phase` "vote"), when
+  `seed`, `story` and `constraints` open. Seeds and constraint cards are
+  data (`src/data/corpse-seeds.txt`, `corpse-constraints.txt`). A missed
+  turn is a silent beat (`beats`), two in a row leave the rotation
+  (`active`); the honours can be shared (`honours`, then `winner` null
+  and `draw`). Turn clock default 24 h, per the spec.
 - **Liar's Dice (2026-11-19):** SHA's spec on the turn-order helper
   (`turnsNext`), 2-6 players, `dice` each (default 5), `ones_wild` at
   creation (default on: bids name faces 2-6). `dir` is `NxF` or `liar`.
