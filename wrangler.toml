@@ -34,6 +34,9 @@ GMAIL_SENDER = "anthony@victorio.cloud"
 # then only an owner request with "direct": "force" uses them (to test live).
 R2_ACCOUNT_ID = "cb8c005173d35ee12adb292521a88eae"
 R2_BUCKET = "victorio-chat-media"
+# On 2026-11-20, after a live owner-only test (signed parts, CORS, ListParts,
+# completion through the binding, a byte-exact download).
+R2_DIRECT = "1"
 
 [[kv_namespaces]]
 binding = "REQUESTS"

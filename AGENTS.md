@@ -100,6 +100,9 @@ off and otherwise `.js` modules under `src/` are not collected.
 | `RESEND_API_KEY` | **secret** | optional second email transport (not currently set) |
 | `ANTHROPIC_API_KEY` | **secret** | optional, back 2026-11-20 (the owner's call): Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
 | `RESEND_FROM` | plain text | optional Resend sender override (dashboard-set values would be wiped by deploys; set it in `wrangler.toml` if ever used) |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts (phase 2, 2026-11-20): an account-owned token named "chat site direct uploads (R2 victorio-chat-media objects)", scoped to that one bucket with object read and write only; the key id is the token's id and the secret the SHA-256 of its value (R2's S3 convention). Created and stored in one Cloudflare API call, so the value was never seen or written down. To rotate: roll or delete that token in the dashboard (API Tokens, account-owned) and set both secrets again |
+| `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
+| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them (how phase 2 was tried live before the switch). `wrangler.toml` [vars] |
 
 Retired 2026-11-12 with the in-room Claude bot (section 3): the plain
 variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
@@ -1006,7 +1009,7 @@ change behavior. In summary:
   away before the answer so the client sees the reason, not a dropped
   connection. Ceiling through the Worker: 10,000 x 90 MiB, about 943 GB
   (`UP_MAX`); 90 MiB keeps every part under the zone's 100 MB request cap
-  (section 2). An unfinished R2 multipart upload dies 7 days after its
+  (section 2). Phase 2 below lifts both limits for clients that ask. An unfinished R2 multipart upload dies 7 days after its
   start, so a session does too (`UP_SESSION_MS`). The old chunked video
   routes (`/video/start|part|finish|abort|status`, `/video/resume`) are
   this engine with kind video. A `file` is served only as a download
@@ -1021,6 +1024,24 @@ change behavior. In summary:
   reload (re-attach the same file to resume). A pick is routed by its
   bytes: a photo type the chat can't show (HEIC, SVG) attaches as a file.
   Images over 15 MB show as a card instead of an inline `<img>`.
+  **Phase 2, parts straight to R2 (2026-11-20):** a client that starts
+  with `"direct": true` gets a direct session (`md.mode = 'direct'`) when
+  the R2 credential and `R2_DIRECT` are set: `POST .../:kind/sign {parts}`
+  returns presigned PUT addresses on R2's S3 endpoint (SigV4, region
+  `auto`, an hour each, up to 100 a call; `sigv4Presign` is checked against
+  AWS's published example by a TEST_HOOKS route), the client sends each
+  part there with no credential, and status / finish / resume read
+  storage's own part list (S3 ListParts; a part of the wrong length counts
+  as missing) before the binding completes the upload - multipart uploads
+  started through the binding take parts sent through S3, proven live.
+  Parts run to 512 MiB (more only to stay within 10,000) and an upload to
+  4.99 TiB (`UP_MAX_DIRECT`, about 5.4 TB). The bucket's CORS rule lets
+  only `https://chat.victorio.cloud` PUT (any header; ETag exposed); a
+  preflight from any other origin is refused. The bucket keeps R2's
+  "Default Multipart Abort Rule" (7 days), which `UP_SESSION_MS` relies
+  on. The web uploader always asks for direct and falls back to the
+  Worker path when the answer says `direct: false`; it signs in coalesced
+  batches and re-signs when storage turns an address away (403).
   Video can also go up single-shot (≤25 MB) or via the whole-file stream
   endpoint (`PUT /messages/:id/video/stream`; the edge's 100 MB request
   cap is its real limit); reads stream through the Worker with Range
@@ -1404,6 +1425,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
 | A test suite that cannot fail | The UI suite printed findings and always exited 0; server behavior had no tests at all | Suites exit non-zero on failure (uncaught page errors; API checks). If a suite can't go red, it isn't a suite |
 | Native upload event missed | Upload listeners were registered after `startUpload`, so an early completion event left the promise unsettled and the composer wedged | Register listeners before starting native work, and back them with a read-only liveness poll |
 | Early answer to a streaming upload | A part refused before its body was read (wrong length, wrong member) came back as "Network connection lost" in wrangler dev, and a browser still sending would see a dropped connection instead of the reason (2026-11-20) | Read a refused request body away (`pipeTo(new WritableStream())`) before answering; the engine's part step and its links do |
+| Node's fetch ignoring the session proxy | A live probe's `fetch` failed with ENOTFOUND: Node's built-in fetch does not read HTTPS_PROXY (2026-11-20) | Run Node probes with `NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt` (see /root/.ccr/README.md) |
 | Upload control calls that give up on a blip | The first web engine retried parts but sent start/status/finish/publish once: going offline as the last part landed failed the whole upload (caught by an end-to-end probe, 2026-11-20) | Every call of a long upload rides out offline and transient errors, and a 409 after a retry means "already done, the answer was lost" - check status, don't fail |
 | Interactive element inside a link | The home room rows nested the Forget <button> inside the row's <a> (invalid HTML, flaky a11y) | Row = container div; link and button are siblings |
 
