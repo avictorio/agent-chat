@@ -4,3 +4,6 @@ node_modules/
 # Local Claude Code state stays out of git; project skills are shared.
 .claude/*
 !.claude/skills/
+# Project settings, committed: the privacy plugin is off while the Worker
+# split runs (REFACTOR.md phase 2); remove the setting when that is done.
+!.claude/settings.json
