@@ -176,10 +176,13 @@ export function MediaBlocks({ m }: { m: Message }) {
   const { token } = useSession();
   const { memberSet } = useMembers();
   const { openViewer } = useFeed();
-  const yts = ytLinks(m.text || "");
-  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
+  // Hooks before the early return: a message can gain media after its
+  // first render (an upload finishing), and a hook called only on some
+  // renders breaks React's hook order.
   const memberSetRef = useRef(memberSet);
   memberSetRef.current = memberSet;
+  const yts = ytLinks(m.text || "");
+  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
   return (
     <>
       {yts.map((yt) => (
