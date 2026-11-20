@@ -9,10 +9,6 @@ import type { Message, RoomClient, RoomState } from "@chat/shared";
 import { toast } from "../lib";
 import {
   sendBigVideo,
-  sendBigVideoChunkedNative,
-  sendBigVideoNative,
-  tryNativeVideoPick,
-  type NativePickedFile,
 } from "./uploads";
 
 // The composer, ported from the current app: name handling, the
@@ -230,14 +226,8 @@ export function Composer(p: ComposerProps) {
       // attachment stays armed, so a retry sends what was written.
       if (video && video.big) {
         const bigFile = video.file;
-        const bigNative = video.native || null;
-        const bigChunked = video.nativeChunked || null;
         try {
-          const live = bigChunked
-            ? await sendBigVideoChunkedNative(client, from, text, bigChunked, (label) => setVidProgress(label))
-            : bigNative
-              ? await sendBigVideoNative(client, from, text, bigNative, (label) => setVidProgress(label))
-              : await sendBigVideo(client, room, from, text, bigFile!, (label) => setVidProgress(label));
+          const live = await sendBigVideo(client, room, from, text, bigFile!, (label) => setVidProgress(label));
           clearSent(textEl, typed);
           grow();
           setVideo(null);
@@ -250,14 +240,7 @@ export function Composer(p: ComposerProps) {
           p.onPosted(live);
         } catch (uerr) {
           const msg = uerr instanceof Error ? uerr.message : String(uerr);
-          toast(
-            bigChunked
-              ? "Video upload failed: " + msg + " - re-attach the same file to resume"
-              : bigNative
-                ? "Video upload failed: " + msg
-                : "Video upload interrupted: " + msg + " - re-attach the same file to resume",
-            true
-          );
+          toast("Video upload interrupted: " + msg + " - re-attach the same file to resume", true);
         }
         return;
       }
@@ -408,20 +391,7 @@ export function Composer(p: ComposerProps) {
                   void onClipFile(f || null);
                 }}
               />
-              <button id="vidBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a video" title="Attach a video" onClick={() => {
-                if (
-                  !tryNativeVideoPick({
-                    onPicked: (v) => {
-                      if (v.kind === "inline") setVideo({ data: v.data, name: v.name });
-                      else if (v.kind === "stream") setVideo({ native: v.file, big: true, name: v.name });
-                      else setVideo({ nativeChunked: v.file, big: true, name: v.name });
-                    },
-                    toast,
-                    fallback: () => vidFileRef.current?.click(),
-                  })
-                )
-                  vidFileRef.current?.click();
-              }}>
+              <button id="vidBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a video" title="Attach a video" onClick={() => vidFileRef.current?.click()}>
                 <I d={["M15 10l6-3v10l-6-3"]} extra={<rect x="3" y="6" width="12" height="12" rx="2" />} />
               </button>
               <input

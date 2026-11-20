@@ -1,10 +1,9 @@
 import { useRef, useState } from "react";
 import { toast } from "../lib";
-import type { NativePickedFile } from "./uploads";
 
 // The composer's pending attachments: one clip, one image, one
-// page/doc, one video (inline data URL, a big File for the chunked
-// engine, or a native-shell pick). The file handlers enforce the
+// page/doc, one video (inline data URL, or a big File for the chunked
+// engine). The file handlers enforce the
 // current app's caps and compose its chip labels.
 
 export interface PendingClip {
@@ -27,8 +26,6 @@ export interface PendingVideo {
   data?: string;
   file?: File;
   big?: boolean;
-  native?: NativePickedFile;
-  nativeChunked?: NativePickedFile;
   name: string;
 }
 

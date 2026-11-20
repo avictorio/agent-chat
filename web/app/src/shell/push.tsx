@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RoomClient } from "@chat/shared";
-import { inShell, nativePlugins } from "./shell";
 
-// Phone notifications, ported from the current app: Web Push in the
-// browser (service worker + the room's subscription registry, with
-// the quiet re-register when the room has lost a subscription), and
-// the Capacitor push plugin inside the native shell (device-token
-// registry, same modes, same discipline). The bell cycles a small
-// menu: Every message / @Mentions only / Off. The chosen mode is
-// kept in localStorage under the same key on both paths.
+// Phone notifications: Web Push (service worker + the room's
+// subscription registry, with the quiet re-register when the room has
+// lost a subscription). The bell cycles a small menu: Every message /
+// @Mentions only / Off. The chosen mode is kept in localStorage. (The
+// Android shell's device-token path went with the app, 2026-11-20.)
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -26,7 +23,7 @@ function iosNeedsInstall(): boolean {
 }
 
 function pushSupported(): boolean {
-  return !inShell() && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
 function b64ToBytes(text: string): Uint8Array {
@@ -52,100 +49,15 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   stateRef.current = state;
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  const shellTokenRef = useRef<string | null>(null);
-  const shellWiredRef = useRef(false);
   const modeKey = "chat-push-mode:" + client.basePath();
 
   const paint = useCallback((s: PushState, m: PushMode) => {
     setState(s);
     setMode(m);
-    setVisible(inShell() || pushSupported() || iosNeedsInstall());
+    setVisible(pushSupported() || iosNeedsInstall());
   }, []);
 
-  const shellPlatform = (): string => {
-    try {
-      const w = window as any;
-      return w.Capacitor.getPlatform() === "ios" ? "ios" : "android";
-    } catch {
-      return "android";
-    }
-  };
-
-  const wireShellPush = useCallback(() => {
-    if (shellWiredRef.current || !inShell()) return;
-    shellWiredRef.current = true;
-    const P = nativePlugins() && nativePlugins().PushNotifications;
-    if (!P) return;
-    void P.addListener("registration", (t: any) => {
-      shellTokenRef.current = t.value;
-      try {
-        localStorage.setItem("ac:devtoken", t.value);
-      } catch {
-        // storage unavailable
-      }
-      let want: string | null = null;
-      try {
-        want = localStorage.getItem(modeKey);
-      } catch {
-        // same
-      }
-      if (want === "all" || want === "mentions") {
-        void client.pushDevice("register", { token: t.value, platform: shellPlatform(), mode: want }).catch(() => {});
-      }
-    });
-    void P.addListener("registrationError", () => {});
-    void P.addListener("pushNotificationActionPerformed", (a: any) => {
-      const url = a && a.notification && a.notification.data && a.notification.data.url;
-      if (url) location.assign(url);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
-
-  const paintShellPushState = useCallback(async () => {
-    wireShellPush();
-    let want: string | null = null;
-    try {
-      want = localStorage.getItem(modeKey);
-    } catch {
-      // storage unavailable
-    }
-    if (want !== "all" && want !== "mentions") {
-      paint("off", modeRef.current);
-      return;
-    }
-    const P = nativePlugins() && nativePlugins().PushNotifications;
-    try {
-      if (P) await P.register();
-    } catch {
-      // registration is best-effort here
-    }
-    let tok = shellTokenRef.current;
-    try {
-      tok = tok || localStorage.getItem("ac:devtoken");
-    } catch {
-      // same
-    }
-    if (tok) {
-      try {
-        const sd = await client.pushDevice("status", { token: tok });
-        if (sd.registered) {
-          paint("on", (sd.mode as PushMode) || "all");
-          return;
-        }
-        await client.pushDevice("register", { token: tok, platform: shellPlatform(), mode: want });
-      } catch {
-        // fall through to the optimistic state
-      }
-    }
-    paint("on", want as PushMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, paint, wireShellPush]);
-
   const paintPushState = useCallback(async () => {
-    if (inShell()) {
-      await paintShellPushState();
-      return;
-    }
     if (!pushSupported()) {
       paint(iosNeedsInstall() ? "install" : "off", modeRef.current);
       return;
@@ -194,60 +106,10 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     } catch {
       paint("off", modeRef.current);
     }
-  }, [client, modeKey, paint, paintShellPushState]);
-
-  const shellPushOn = useCallback(
-    async (m: PushMode) => {
-      const P = nativePlugins() && nativePlugins().PushNotifications;
-      const perm = await P.requestPermissions();
-      if (!perm || perm.receive !== "granted") {
-        toast("Notifications are blocked for the app - allow them in your phone's app settings.", true);
-        return;
-      }
-      try {
-        localStorage.setItem(modeKey, m);
-      } catch {
-        // storage unavailable
-      }
-      await P.register();
-      let tok = shellTokenRef.current;
-      try {
-        tok = tok || localStorage.getItem("ac:devtoken");
-      } catch {
-        // same
-      }
-      if (tok) await client.pushDevice("register", { token: tok, platform: shellPlatform(), mode: m });
-      paint("on", m);
-      toast(m === "mentions" ? "Mentions only - you'll be buzzed when someone @-mentions you." : "Notifications on for this device.");
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [client, modeKey, paint, toast]
-  );
-
-  const shellPushOff = useCallback(async () => {
-    try {
-      localStorage.removeItem(modeKey);
-    } catch {
-      // storage unavailable
-    }
-    let tok = shellTokenRef.current;
-    try {
-      tok = tok || localStorage.getItem("ac:devtoken");
-    } catch {
-      // same
-    }
-    if (tok) await client.pushDevice("unregister", { token: tok }).catch(() => {});
-    paint("off", modeRef.current);
-    toast("Notifications off for this device.");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, modeKey, paint, toast]);
+  }, [client, modeKey, paint]);
 
   const pushOn = useCallback(
     async (m: PushMode) => {
-      if (inShell()) {
-        await shellPushOn(m);
-        return;
-      }
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
         void paintPushState();
@@ -273,14 +135,10 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
       toast(m === "mentions" ? "Mentions only - you'll be buzzed when someone @-mentions you." : "Notifications on for this device.");
       void paintPushState();
     },
-    [client, modeKey, paintPushState, shellPushOn, toast]
+    [client, modeKey, paintPushState, toast]
   );
 
   const pushOff = useCallback(async () => {
-    if (inShell()) {
-      await shellPushOff();
-      return;
-    }
     try {
       localStorage.removeItem(modeKey);
     } catch {
@@ -293,12 +151,12 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     if (sub) await client.pushUnsubscribe(sub.endpoint).catch(() => {});
     toast("Notifications off for this room on this device.");
     void paintPushState();
-  }, [client, modeKey, paintPushState, shellPushOff, toast]);
+  }, [client, modeKey, paintPushState, toast]);
 
   // Boot: register the service worker and paint the initial state,
   // exactly where the current app does it.
   useEffect(() => {
-    if ("serviceWorker" in navigator && !inShell()) {
+    if ("serviceWorker" in navigator) {
       void navigator.serviceWorker.register("/sw.js").catch(() => {});
       // Visibility is painted from the support rule up front, like
       // the current app; the async pass below only refines the state.
@@ -312,14 +170,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
       document.addEventListener("visibilitychange", onVis);
       return () => document.removeEventListener("visibilitychange", onVis);
     }
-    if (iosNeedsInstall()) {
-      paint("install", "all");
-      return;
-    }
-    if (inShell()) {
-      wireShellPush();
-      void paintShellPushState();
-    }
+    if (iosNeedsInstall()) paint("install", "all");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

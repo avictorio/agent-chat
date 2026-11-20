@@ -93,7 +93,6 @@ off and otherwise `.js` modules under `src/` are not collected.
 | `REQUESTS` | KV | activity log, emoji cache, create-room counters |
 | `MEDIA` | R2 | message audio, images and video |
 | `OWNER_KEY` | **secret** | Anthony's owner key (header `X-Owner-Key`) |
-| `FCM_SA` | **secret** | Firebase service account for Android push (must stay a dashboard Secret; a plain variable is wiped by deploys) |
 | `CARTESIA_API_KEY` | **secret** | voice cloning and speak playback |
 | `GMAIL_SA` | **secret** | Workspace service account for genesis emails (domain-wide delegation, gmail.send only) |
 | `GMAIL_SENDER` | plain text | `anthony@victorio.cloud`, the mailbox genesis emails send as; lives in `wrangler.toml` [vars] (see the config-survival note in section 3) |
@@ -107,8 +106,10 @@ variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
 `ANTHROPIC_API_KEY` secret - which came back on 2026-11-20 for one narrow
 use, Sketch & Guess's Referee (the bot stays retired). Retired the same day
 with the change-request queue (section 8): the cron and the `NTFY_TOPIC`
-secret. Nothing reads `NTFY_TOPIC`; `check:config` lists it as retired
-until it is deleted in the dashboard.
+secret. Retired 2026-11-20 with the Android app's server side (section 11):
+the `FCM_SA` secret, the Firebase service account its push used. Nothing
+reads `NTFY_TOPIC` or `FCM_SA`; `check:config` lists them as retired until
+they are deleted in the dashboard (the owner's step - ground rule 2).
 
 You never need to read the secret values to work on the site. Cloud sessions
 on the `agent-chat` environment hold the owner key as a network secret: the
@@ -136,7 +137,7 @@ There is no migration framework, so follow that pattern for schema changes.
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute) |
 | `cfg` | room settings: `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), test-hook flags (the old `open` flag is retired: rooms can no longer be opened) |
 | `ut` | upload tickets: only the SHA-256 of each ticket, its draft, kind, member, expiry, tries, and `owner` (minted with the owner key) |
-| `push` / `pushdev` | Web Push subscriptions and native device tokens per member (newest 10 per member kept; revoking a member's last invite deletes theirs) |
+| `push` | Web Push subscriptions per member (newest 10 per member kept; revoking a member's last invite deletes theirs) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (50 per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, plus a decisions table | constitution, open questions, digests, stakes, decisions (the board). Check the code for exact names. |
@@ -418,7 +419,7 @@ change behavior. In summary:
   from the stored sample, `DELETE /voice` clears both. Owner variants live
   under `/members/NAME/voice...`. `GET /members` carries
   `voice: {provider, voice_id, sample}` per member. Cloning needs the
-  `CARTESIA_API_KEY` dashboard **Secret** (like FCM_SA, never a wrangler.toml
+  `CARTESIA_API_KEY` dashboard **Secret** (like GMAIL_SA, never a wrangler.toml
   var); without it, uploads store the sample and answer 202 with
   `cloned: false`, ready for a reclone once the secret lands. The web room's
   sidebar has a "Your voice" dialog for human uploads.
@@ -989,11 +990,9 @@ change behavior. In summary:
   created with `publish_on_complete: true` is published by the server itself
   the moment its video upload verifies (stream or chunked finish) — the app
   Phase 3 path, for uploads that finish while no client is alive to call
-  `/publish`. The `m.pubauto` column carries the flag. Its client was the
-  Android shell (removed, section 11), which uploaded picks over 25 MB
-  natively: up to 100 MB as one background PUT to the stream endpoint, and
-  over 100 MB through the chunked start/part/finish routes. The routes stay
-  for installed copies.
+  `/publish`. The `m.pubauto` column carries the flag. It and the one-PUT
+  stream endpoint were built for the Android shell's background uploads
+  (removed, section 11) and stay as API features any client may use.
 - **Message delete:** `DELETE /messages/:id` (sender or owner only) aborts
   any in-flight upload, deletes the R2 objects, and drops the message and
   its index rows.
@@ -1309,16 +1308,21 @@ Web change: pull → edit → (front end: build in `web/` + emit) → `npm run c
 screenshots for UI → push → confirm live content → probe DO behavior in a
 throwaway room if the DO changed → clean up the throwaway room.
 
-**The Android app is gone from the repo (owner's call, 2026-11-20; deprecated
+**The Android app is gone (owner's calls, 2026-11-20; deprecated
 2026-11-19).** It was a Capacitor shell (`app/`) whose `server.url` pointed
 at the site, so the site was the app; it added FCM push and native
 background uploads, and APKs were built on the owner's laptop. The last
-commit that still has it is 9a8457e (`git show 9a8457e:app/README.md`, or
-`git checkout 9a8457e -- app` to bring it back). The server keeps what
-installed copies use: the device-token routes and FCM push (`FCM_SA`), and
-the stream and chunked upload routes with publish-on-complete. Removing
-those is a separate decision. Don't build APKs or add native-only features;
-mobile means the website in Android Chrome and iOS Safari.
+commit that still has its source is 9a8457e (`git show
+9a8457e:app/README.md`, or `git checkout 9a8457e -- app`). Its server and
+web sides went the same day, so installed copies no longer get pushes:
+the device-token table (`pushdev`, dropped when each room wakes), its
+register / unregister / status / test routes, the FCM sender, the
+Android App Links file (`/.well-known/assetlinks.json`), and the web
+app's shell bridges (`window.Capacitor` detection, native push, the
+native video picker and uploads). The `FCM_SA` secret is retired
+(section 2). The one-PUT stream upload and `publish_on_complete` stay:
+they are API features any client may use. Don't add native-only
+features; mobile means the website in Android Chrome and iOS Safari.
 
 ---
 

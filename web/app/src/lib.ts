@@ -16,11 +16,6 @@ export function store(k: string, v?: string | null): string | null | void {
   return null;
 }
 
-// True inside the Capacitor shell (its bridge injects window.Capacitor).
-export function inShell(): boolean {
-  return typeof (window as unknown as { Capacitor?: unknown }).Capacitor !== "undefined";
-}
-
 export function isStandaloneApp(): boolean {
   return (
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||

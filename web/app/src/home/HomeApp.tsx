@@ -5,7 +5,7 @@ import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
 import { fetchBuild } from "@chat/shared";
 import { store } from "../lib";
-import { initShellCommon, registerServiceWorker } from "../shell/shell";
+import { registerServiceWorker } from "../shell/shell";
 import { usePullToRefresh } from "../shell/strips";
 import "./home.css";
 
@@ -106,7 +106,6 @@ export default function HomeApp() {
   // bridges (splash, app links, retained notification taps).
   useEffect(() => {
     registerServiceWorker();
-    initShellCommon({ pushTapsRoute: true });
   }, []);
 
   usePullToRefresh();

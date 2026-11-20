@@ -272,14 +272,6 @@ export class RoomClient {
     });
   }
 
-  pushDevice(action: string, body: Record<string, unknown>): Promise<{ registered?: boolean; mode?: string }> {
-    return this.call("/push/device/" + action, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-  }
-
   createGame(body: Record<string, unknown>): Promise<GameResponse> {
     return this.call<GameResponse>("/games", {
       method: "POST",

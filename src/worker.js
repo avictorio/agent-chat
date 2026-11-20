@@ -438,7 +438,8 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE m ADD COLUMN game_id INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch (e) {}
-    this.sql.exec("CREATE TABLE IF NOT EXISTS pushdev (member TEXT NOT NULL, platform TEXT NOT NULL, token TEXT PRIMARY KEY, ts INTEGER NOT NULL, mode TEXT DEFAULT 'all')");
+    // The Android app's device-token table, dropped with the app (2026-11-20).
+    this.sql.exec("DROP TABLE IF EXISTS pushdev");
     this.sql.exec("CREATE TABLE IF NOT EXISTS mv (name TEXT PRIMARY KEY, provider TEXT, voice_id TEXT, sample_key TEXT, sample_type TEXT, sample_ts INTEGER, ts INTEGER)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS gm (id INTEGER PRIMARY KEY, status TEXT NOT NULL, created INTEGER NOT NULL, created_by TEXT NOT NULL, card_msg INTEGER, state TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
@@ -1091,8 +1092,8 @@ export class Room extends DurableObject {
     return { status: 200, type: sniffed, bytes: row.size, published: published };
   }
 
-  // Streaming ingest: the Worker receives one whole-file PUT (the native
-  // background-uploader path) and assembles R2 multipart parts as bytes arrive.
+  // Streaming ingest: the Worker receives one whole-file PUT (for clients that
+  // can send a file in one request) and assembles R2 multipart parts as bytes arrive.
   // streamBegin reserves the upload, streamComplete indexes it after the Worker's
   // own size + signature verification, streamAbort discards it.
   async streamBegin(id, who, type, size, owner, room) {
@@ -1217,46 +1218,6 @@ export class Room extends DurableObject {
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   }
-  // Native device tokens (Phase 2 of the app plan): one row per token,
-  // member + mode semantics identical to web push. APNs rows can register
-  // now; their sender lands with the iOS leg.
-  deviceRegister(member, platform, token, mode) {
-    const who = String(member || "").toLowerCase();
-    this.sql.exec("INSERT OR REPLACE INTO pushdev (member, platform, token, ts, mode) VALUES (?, ?, ?, ?, ?)",
-      who, platform === "ios" ? "ios" : "android", String(token || ""), Date.now(), mode === "mentions" ? "mentions" : "all");
-    this.sql.exec("DELETE FROM pushdev WHERE member = ? AND token NOT IN (SELECT token FROM pushdev WHERE member = ? ORDER BY ts DESC LIMIT ?)", who, who, PUSH_MAX_PER_MEMBER);
-    return { status: 200 };
-  }
-  deviceUnregister(member, token, owner) {
-    if (owner) this.sql.exec("DELETE FROM pushdev WHERE token = ?", String(token || ""));
-    else this.sql.exec("DELETE FROM pushdev WHERE token = ? AND member = ?", String(token || ""), String(member || "").toLowerCase());
-    return { status: 200 };
-  }
-  deviceStatus(member, token) {
-    const rows = this.sql.exec("SELECT token, mode, platform FROM pushdev WHERE member = ?", String(member || "").toLowerCase()).toArray();
-    const mine = token ? rows.find((r) => r.token === token) : null;
-    return { devices: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null, platform: mine ? mine.platform : null };
-  }
-  // Owner diagnostic for the device registry: row summaries (token
-  // prefixes only) plus, on request, a live test send per row with the
-  // sender's verdict - the difference between "never registered",
-  // "secret missing" (skip), "send failed" (error) and "sent" (ok)
-  // is otherwise invisible, because fan-out fails silently by design.
-  async deviceTest(room, doSend) {
-    const rows = this.sql.exec("SELECT member, platform, token, ts, mode FROM pushdev ORDER BY ts").toArray();
-    const out = [];
-    for (const r of rows) {
-      const item = { member: r.member, platform: r.platform, mode: r.mode || "all", ts: r.ts, token: String(r.token).slice(0, 12) + "..." };
-      if (doSend && r.platform === "android") {
-        try { item.send = await sendFcmDebug(this.env, r.token, { title: "Ada - Agent Chat", body: "Test push - if this buzzed, the chain works.", url: "/r/" + room, tag: "room-" + room }); }
-        catch (e) { item.send = { stage: "exception", detail: String(e && e.message || e).slice(0, 160) }; }
-        // sendFcmDebug answers an object; its verdict says a token is dead
-        if (item.send && item.send.verdict === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
-      }
-      out.push(item);
-    }
-    return { devices: out };
-  }
   async notifyPush(msg, room) {
     const sender = String(msg.from || "").toLowerCase();
     const text = String(msg.text || "").trim();
@@ -1275,22 +1236,6 @@ export class Room extends DurableObject {
         const status = await sendWebPush(this.env, r, payload);
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
       } catch (e) {}
-    }
-    // Native devices (app Phase 2). This block must NOT sit behind the
-    // web flow's exits: it originally did, behind an early return for
-    // rooms with no browser subscriptions, which silently disabled
-    // app push in exactly the rooms that only have app users.
-    const drows = this.sql.exec("SELECT member, platform, token, mode FROM pushdev").toArray();
-    if (drows.length) {
-      const note = JSON.parse(payload);
-      const dtargets = drows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
-      for (const r of dtargets) {
-        if (r.platform !== "android") continue;
-        try {
-          const st = await sendFcm(this.env, r.token, note);
-          if (st === "gone") this.sql.exec("DELETE FROM pushdev WHERE token = ?", r.token);
-        } catch (e) {}
-      }
     }
   }
 
@@ -1365,7 +1310,6 @@ export class Room extends DurableObject {
   dropPush(name) {
     const member = String(name || "").toLowerCase();
     this.sql.exec("DELETE FROM push WHERE member = ?", member);
-    this.sql.exec("DELETE FROM pushdev WHERE member = ?", member);
   }
 
   // Revoke everyone: every invite, every push registration, every open
@@ -1377,7 +1321,6 @@ export class Room extends DurableObject {
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM cfg WHERE k = 'open'");
     this.sql.exec("DELETE FROM push");
-    this.sql.exec("DELETE FROM pushdev");
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
     if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) {} }
     return true;
@@ -6893,11 +6836,10 @@ export class Room extends DurableObject {
     return { status: 200, msg: msg };
   }
 
-  // Publish-on-completion (app Phase 3): a draft created with
-  // publish_on_complete is the sender's standing instruction to post the
-  // moment its media upload verifies - the native background uploader may
-  // finish while the app is frozen or dead, with no client left to call
-  // /publish. Runs through publishMessage so the announce path (stream,
+  // Publish-on-completion: a draft created with publish_on_complete is
+  // the sender's standing instruction to post the moment its media upload
+  // verifies - for an uploader that may finish with no client left to
+  // call /publish. Runs through publishMessage so the announce path (stream,
   // push) is identical to a manual publish. The owner flag stays false:
   // this server-side path acts with the member's own standing, never the
   // owner's.
@@ -8009,11 +7951,7 @@ function mentionsName(text, name) {
   return new RegExp("(^|[^A-Za-z0-9_])@" + esc + "(?![A-Za-z0-9_])", "i").test(t);
 }
 
-// ---- Native push: FCM HTTP v1, authorized by a service account kept as
-// the Worker secret FCM_SA (the whole JSON). Without the secret, sends
-// quietly skip: the registry still works and web push is unaffected. The
-// OAuth access token and the imported signing key are cached per isolate.
-let fcmCache = { email: "", token: "", exp: 0, key: null };
+// Service-account JWT helpers (the Gmail sender below signs with them).
 function pemToDer(pem) {
   const b64 = String(pem || "").replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
   const bin = atob(b64);
@@ -8047,30 +7985,10 @@ function parseServiceAccount(raw) {
   } catch (e) { return null; }
 }
 
-async function fcmAccessToken(env) {
-  const sa = parseServiceAccount(env.FCM_SA);
-  if (!sa || !sa.client_email || !sa.private_key || !sa.project_id) return null;
-  const now = Math.floor(Date.now() / 1000);
-  if (fcmCache.email === sa.client_email && fcmCache.token && fcmCache.exp > now + 60) return { sa: sa, token: fcmCache.token };
-  if (!fcmCache.key || fcmCache.email !== sa.client_email) {
-    fcmCache.key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-    fcmCache.email = sa.client_email;
-  }
-  const enc = new TextEncoder();
-  const head = b64urlEncode(enc.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
-  const claims = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 })));
-  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", fcmCache.key, enc.encode(head + "." + claims));
-  const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
-  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
-  if (!res.ok) return null;
-  const j = await res.json();
-  fcmCache.token = j.access_token; fcmCache.exp = now + (j.expires_in || 3600);
-  return { sa: sa, token: fcmCache.token };
-}
 // Gmail sending through a Google Workspace service account with domain-wide
 // delegation: the account impersonates env.GMAIL_SENDER (a real mailbox on the
-// domain) with only the gmail.send scope. Same JWT pattern as FCM above; the
-// service-account JSON is the GMAIL_SA secret. Mail then comes from the
+// domain) with only the gmail.send scope, signed with the JWT helpers above;
+// the service-account JSON is the GMAIL_SA secret. Mail then comes from the
 // domain itself, so no DNS changes are needed - Google already signs for it.
 const gmailCache = { email: null, sender: null, key: null, token: null, exp: 0 };
 
@@ -8146,64 +8064,6 @@ async function sendViaGmail(env, to, subject, text, html) {
   }
 }
 
-// Returns "ok", "gone" (dead token - prune it), "skip" (not configured), "error".
-async function sendFcmDebug(env, token, note) {
-  const sa = parseServiceAccount(env.FCM_SA);
-  if (!sa) return { stage: "parse", detail: "service account JSON did not parse" };
-  if (!sa.client_email || !sa.private_key || !sa.project_id) return { stage: "parse", detail: "key fields missing" };
-  let key = null;
-  try { key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
-  catch (e) { return { stage: "key", detail: String(e && e.message || e).slice(0, 160) }; }
-  const now = Math.floor(Date.now() / 1000);
-  const enc = new TextEncoder();
-  const head = b64urlEncode(enc.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
-  const claim = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 })));
-  let sig = null;
-  try { sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(head + "." + claim)); }
-  catch (e) { return { stage: "sign", detail: String(e && e.message || e).slice(0, 160) }; }
-  const assertion = head + "." + claim + "." + b64urlEncode(sig);
-  let tokRes = null;
-  try { tokRes = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(assertion) }); }
-  catch (e) { return { stage: "oauth", detail: String(e && e.message || e).slice(0, 160) }; }
-  if (!tokRes.ok) {
-    const errText = (await tokRes.text()).slice(0, 200);
-    // Echo the claims we actually sent (no signature, no key) and try
-    // once without the sub claim - some Google endpoints reject a
-    // service-account grant that carries one.
-    const claimObj = { iss: sa.client_email, sub: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 };
-    const claim2Obj = { iss: sa.client_email, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/firebase.messaging", iat: now, exp: now + 3600 };
-    const claim2 = b64urlEncode(enc.encode(JSON.stringify(claim2Obj)));
-    const sig2 = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, enc.encode(head + "." + claim2));
-    const assertion2 = head + "." + claim2 + "." + b64urlEncode(sig2);
-    let tokRes2 = null;
-    try { tokRes2 = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(assertion2) }); } catch (e) { }
-    return { stage: "oauth", status: tokRes.status, detail: errText, claims: claimObj, siglen: assertion.split(".")[2].length, nosub_status: tokRes2 ? tokRes2.status : 0, nosub_detail: tokRes2 ? (await tokRes2.text()).slice(0, 200) : "" };
-  }
-  const tokJson = await tokRes.json();
-  let res = null;
-  try {
-    res = await fetch("https://fcm.googleapis.com/v1/projects/" + sa.project_id + "/messages:send", { method: "POST", headers: { "Authorization": "Bearer " + tokJson.access_token, "Content-Type": "application/json" }, body: JSON.stringify({ message: { token: token, notification: { title: note.title, body: note.body }, data: { url: note.url || "" }, android: { priority: "high", notification: { tag: note.tag || "" } } } }) });
-  } catch (e) { return { stage: "fcm", detail: String(e && e.message || e).slice(0, 160) }; }
-  if (res.ok) return { stage: "fcm", status: res.status, verdict: "ok" };
-  return { stage: "fcm", status: res.status, verdict: res.status === 404 ? "gone" : "error", detail: (await res.text()).slice(0, 200) };
-}
-
-async function sendFcm(env, token, note) {
-  let auth = null;
-  try { auth = await fcmAccessToken(env); } catch (e) { return "error"; }
-  if (!auth) return "skip";
-  let res;
-  try {
-    res = await fetch("https://fcm.googleapis.com/v1/projects/" + auth.sa.project_id + "/messages:send", {
-      method: "POST",
-      headers: { "Authorization": "Bearer " + auth.token, "Content-Type": "application/json" },
-      body: JSON.stringify({ message: { token: token, notification: { title: note.title, body: note.body }, data: { url: note.url || "" }, android: { priority: "high", notification: { tag: note.tag || "" } } } })
-    });
-  } catch (e) { return "error"; }
-  if (res.ok) return "ok";
-  if (res.status === 404) return "gone";
-  return "error";
-}
 
 async function sendWebPush(env, sub, payloadText) {
   const aud = new URL(sub.endpoint).origin;
@@ -9246,7 +9106,7 @@ function docs(o) {
     "  Add \"publish_on_complete\": true to a draft and the server publishes it the moment",
     "  its video upload verifies (stream or chunked finish) - no /publish call needed.",
     "  Or send the whole file in ONE request: PUT /messages/ID/video/stream with the raw",
-    "  file as the body (any size up to 5 GB) - the path native background uploaders use.",
+    "  file as the body (any size up to 5 GB) - handy for a background uploader.",
     "",
     "HTML PAGES AND MARKDOWN DOCUMENTS",
     "  A message may carry one self-contained HTML page and/or one Markdown document, attached",
@@ -10156,15 +10016,6 @@ async function routeRequest(request, env) {
           { src: "/icons/icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ] });
     }
-    if (path === "/.well-known/assetlinks.json" && request.method === "GET") {
-      // Android App Links association for the native app: room links
-      // (chat.victorio.cloud/r/...) open the app when it is installed.
-      // The fingerprint below is the Android debug key the Legion builds
-      // sign with; add the Play app-signing fingerprint alongside it when
-      // Play distribution starts, or app links stop verifying for those
-      // builds (they degrade to the browser, never to an error).
-      return json([{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: "cloud.victorio.chat", sha256_cert_fingerprints: ["E4:38:DC:8A:9A:83:11:82:65:56:F7:8A:67:08:83:D0:D9:EA:CD:83:7F:97:C8:70:C5:7B:F9:76:CA:78:05:DC"] } }]);
-    }
     if (path === "/sw.js" && request.method === "GET") {
       return new Response(PUSH_SW, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Service-Worker-Allowed": "/", "Cache-Control": "no-cache" } });
     }
@@ -10820,43 +10671,6 @@ async function routeRequest(request, env) {
       return json({ room, subscribed: false });
     }
 
-    // Native device tokens for a room (app Phase 2), tied to the invite's
-    // member name, modes mirroring web push. POST-only JSON like the rest.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/push\/device\/(register|unregister|status)\/?$/);
-    if (m) {
-      const room = decodeURIComponent(m[1]).toLowerCase();
-      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
-      const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      const acc = await stub.access(invite, owner);
-      if (!acc.ok) return json({ error: acc.error }, acc.status);
-      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const body = await readBody(request);
-      const action = m[2];
-      const token = String((body && body.token) || "");
-      if (action === "status") return json(Object.assign({ room }, await stub.deviceStatus(acc.name || "", token)));
-      if (!token || token.length > 4096) return json({ error: "\"token\" is required" }, 400);
-      if (action === "register") {
-        const platform = body.platform === "ios" ? "ios" : "android";
-        const mode = body.mode === "mentions" ? "mentions" : "all";
-        await stub.deviceRegister(acc.name || "", platform, token, mode);
-        return json({ room, registered: true, mode: mode, platform: platform });
-      }
-      await stub.deviceUnregister(acc.name || "", token, owner);
-      return json({ room, registered: false });
-    }
-
-    // Owner-only device registry diagnostic (see deviceTest).
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/push\/device\/test\/?$/);
-    if (m) {
-      const room = decodeURIComponent(m[1]).toLowerCase();
-      if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
-      if (!owner) return json({ error: "The device test needs the owner key" }, 403);
-      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      const body = await readBody(request);
-      const stub = env.ROOM.get(env.ROOM.idFromName(room));
-      return json(Object.assign({ room }, await stub.deviceTest(room, !!(body && body.send))));
-    }
-
     // Speak a message in its sender's cloned voice. The first play synthesizes with
     // Cartesia and caches the MP3 as the message's "speak" media; later plays stream
     // the cache. Same access as the room: the header or a signed URL
@@ -11059,7 +10873,7 @@ async function routeRequest(request, env) {
     // limit: POST start, PUT each part (?n=1..), POST finish (or abort). Same access
     // as attaching. See the chunked upload methods in the Room class.
     // Whole-file streaming ingest: ONE PUT carrying the entire file (up to the
-    // cap) - the path a native background uploader uses. The Worker assembles
+    // cap), for a client that can send a file in one request. The Worker assembles
     // R2 multipart parts as the bytes arrive; nothing holds the whole file.
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/stream\/?$/);
     if (m) {

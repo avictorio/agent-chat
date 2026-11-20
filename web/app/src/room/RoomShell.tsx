@@ -39,7 +39,6 @@ import { NewGameDialog, type NewGameDialogHandle } from "../games/NewGameDialog"
 import { GameHelpDialog, type GameHelpHandle } from "../games/GameHelpDialog";
 import { createGameStore, type GameStore } from "../games/games";
 import { usePush } from "../shell/push";
-import { initShellCommon } from "../shell/shell";
 import { useReactions } from "../feed/reactions";
 import { daysAway } from "../dates";
 
@@ -261,9 +260,6 @@ export function RoomShell({ room }: { room: string }) {
     return games.subscribe(update);
   }, [games]);
   const push = usePush(client, toast);
-  useEffect(() => {
-    initShellCommon();
-  }, []);
   const rx = useReactions({
     client,
     who,

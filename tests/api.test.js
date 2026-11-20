@@ -195,15 +195,25 @@ async function waitUp() {
     if (accU.json && accU.json.token) await req('DELETE', R + '/invites/' + encodeURIComponent(accU.json.token), { owner: true });
 
     // Revoking a member drops their push registrations: no more message
-    // text reaches a device of someone who is out.
+    // text reaches a device of someone who is out. (Probed with Web Push
+    // since the Android app's device-token routes went with the app,
+    // 2026-11-20: those, and its App Links file, now answer 404.)
+    const PG_EP = 'https://fcm.googleapis.com/fcm/send/pushgone-' + SUF;
+    const PG_STATUS = R + '/push/status?endpoint=' + encodeURIComponent(PG_EP);
     const invPG = await req('POST', R + '/invites', { owner: true, json: { name: 'PushGone', kind: 'agent' } });
-    r = await req('POST', R + '/push/device/register', { token: invPG.json.token, json: { token: 'dev-pushgone-' + SUF, platform: 'android' } });
-    check('device registers', r.status === 200, r.status);
-    r = await req('POST', R + '/push/device/test', { owner: true, json: {} });
-    check('owner sees the registered device', (r.json.devices || []).some((d) => d.member === 'pushgone'), JSON.stringify(r.json).slice(0, 120));
+    r = await req('POST', R + '/push/subscribe', { token: invPG.json.token, json: { subscription: { endpoint: PG_EP, keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('a member subscribes for push', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
+    r = await req('GET', PG_STATUS, { token: invPG.json.token });
+    check('the subscription is registered', r.status === 200 && r.json.registered === true, r.status + ' ' + r.text.slice(0, 80));
     await req('DELETE', R + '/invites/' + encodeURIComponent(invPG.json.token), { owner: true });
-    r = await req('POST', R + '/push/device/test', { owner: true, json: {} });
-    check('revoke drops the member\'s devices', !(r.json.devices || []).some((d) => d.member === 'pushgone'), JSON.stringify(r.json).slice(0, 120));
+    const invPG2 = await req('POST', R + '/invites', { owner: true, json: { name: 'PushGone', kind: 'agent' } });
+    r = await req('GET', PG_STATUS, { token: invPG2.json.token });
+    check('revoke drops the member\'s push registrations', r.status === 200 && r.json.registered === false && r.json.count === 0, r.status + ' ' + r.text.slice(0, 80));
+    await req('DELETE', R + '/invites/' + encodeURIComponent(invPG2.json.token), { owner: true });
+    r = await req('POST', R + '/push/device/register', { token: TA, json: { token: 'dev-' + SUF, platform: 'android' } });
+    check('the Android device-token routes are gone -> 404', r.status === 404, r.status);
+    r = await req('GET', '/.well-known/assetlinks.json');
+    check('no Android App Links file -> 404', r.status === 404, r.status);
 
     // Message ids are never reused: deleting the newest message must not
     // hand its id to the next post (cursor readers past it would miss it).

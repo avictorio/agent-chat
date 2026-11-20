@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { fetchBuild } from "@chat/shared";
-import { inShell, isIOSDevice, isStandaloneApp, store } from "../lib";
+import { isIOSDevice, isStandaloneApp, store } from "../lib";
 
 // The install strip, the update strip and pull-to-refresh, ported from
 // the current app (PARITY.md sections A and M).
@@ -25,7 +25,7 @@ export function useInstall() {
   const [menuHint, setMenuHint] = useState(false);
 
   const dismissed = Date.now() - dismissedAt < THIRTY_DAYS;
-  const base = !isStandaloneApp() && !inShell() && !dismissed;
+  const base = !isStandaloneApp() && !dismissed;
 
   useEffect(() => {
     const onPrompt = (e: Event) => {

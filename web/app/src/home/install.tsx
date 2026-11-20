@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchBuild } from "@chat/shared";
-import { inShell, isStandaloneApp, store } from "../lib";
+import { isStandaloneApp, store } from "../lib";
 import { Icon as I } from "../ui/Icon";
 
 // The home page's install affordances and update strip: same
@@ -25,14 +25,6 @@ export function useHomeInstall() {
   const isStandalone =
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
     (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-  const inShellHome = (() => {
-    try {
-      const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
-      return !!(w.Capacitor && w.Capacitor.isNativePlatform && w.Capacitor.isNativePlatform());
-    } catch {
-      return false;
-    }
-  })();
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
 
   useEffect(() => {
@@ -57,7 +49,7 @@ export function useHomeInstall() {
     };
   }, []);
 
-  const base = !isStandalone && !inShellHome && !dismissed;
+  const base = !isStandalone && !dismissed;
   const runInstall = (goRooms: () => void) => {
     if (deferred) {
       const pr = deferred;
