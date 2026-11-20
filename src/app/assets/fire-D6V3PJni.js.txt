@@ -1,0 +1,173 @@
+import{i as e,n as t,s as n}from"./index-C8KpybwE.js";import{$ as r,At as i,et as a,j as o,p as s,pt as c,xt as l}from"./atmos-wCv5aDcf.js";var u=n(e(),1),d=t(),f={ship:0,water:1,wreck:2},p=`
+uniform float uTime;
+uniform vec3 uWind;
+attribute vec3 aBase;
+attribute vec2 aDir;
+attribute vec4 aP; // seed, phase, spread, scale
+attribute float aKind;
+attribute float aHeat;
+varying vec2 vUv;
+varying float vLife;
+varying float vSeed;
+varying float vHeat;
+float h(float s, float k) { return fract(sin(s * 91.7 + k * 47.3) * 43758.5453); }
+vec3 startAt(float seed, float across) {
+  float a = (h(seed, 2.0) - 0.5) * 2.0 * aP.z;
+  float b = (h(seed, 3.0) - 0.5) * across;
+  return aBase + vec3(aDir.x, 0.0, aDir.y) * a + vec3(-aDir.y, 0.0, aDir.x) * b;
+}
+vec3 billboard(vec3 p, vec2 q) {
+  vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+  vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+  return p + right * q.x + up * q.y;
+}`,m=`
+// sine-free hash: stays random at large inputs and on mediump GPUs
+float hash2(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+}`,h=`
+${p}
+void main() {
+  float seed = aP.x;
+  float sc = aP.w;
+  float life = fract(uTime / (0.85 + 0.75 * h(seed, 1.0)) + aP.y);
+  float water = aKind > 0.5 && aKind < 1.5 ? 1.0 : 0.0;
+  vec3 p = startAt(seed, 0.22 * sc);
+  p.y += life * 0.16 * sc;
+  p += uWind * life * 0.2 * sc;
+  float w = sc * (0.32 + 0.24 * h(seed, 5.0)) * mix(1.0, 1.4, water);
+  // a cooled fire keeps only a low lick of flame over the embers
+  float tall = w * mix(1.55, 1.05, water) * (0.7 + 0.55 * sin(min(life * 1.4, 1.0) * 3.14159 * 0.5 + life * 1.2)) * (0.22 + 0.78 * aHeat);
+  float up = position.y + 0.5; // 0 at the foot, 1 at the tip
+  vec3 wp = billboard(p, vec2(position.x * w, up * tall));
+  wp += uWind * up * up * tall * 0.4; // the tip leans downwind
+  vUv = uv;
+  vLife = life;
+  vSeed = seed;
+  vHeat = aHeat;
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+}`,g=`
+uniform float uTime;
+varying vec2 vUv;
+varying float vLife;
+varying float vSeed;
+varying float vHeat;
+${m}
+float fbm(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 3; i++) { s += a * vnoise(p); p = p * 2.03 + 1.7; a *= 0.5; }
+  return s;
+}
+void main() {
+  vec2 uv = vUv;
+  float t = uTime;
+  float y = uv.y;
+  // turbulence racing up the flame (the quad is tall, so it runs at a
+  // higher frequency up than across, or it stretches into blades)
+  float n = smoothstep(0.25, 0.75, fbm(vec2(uv.x * 4.0 + vSeed * 3.1, y * 4.6 - t * 3.3 + vSeed)));
+  float sway = vnoise(vec2(vSeed * 5.0, y * 1.5 - t * 1.4)) - 0.5;
+  float x = uv.x - 0.5 + sway * 0.16 * y;
+  // the silhouette: full at the foot, a rounded belly, a point at the
+  // top - and the turbulence nibbles its edge at every height, so no
+  // two moments share an outline (max |x| stays under 0.45: the quad's
+  // sides never cut it)
+  float wdt = 0.27 * pow(max(1.0 - y, 0.0), 0.55) * (0.6 + 0.75 * n);
+  float env = (1.0 - smoothstep(wdt * 0.45, wdt, abs(x))) * smoothstep(0.0, 0.1, y);
+  // heat: hottest low in the middle; higher up, where the turbulence
+  // thins it, the flame tears into licks and loose tips
+  float I = env * (1.05 - y * 0.5) * (0.55 + 0.8 * n) - y * 0.3;
+  I *= smoothstep(0.0, 0.12, vLife) * (1.0 - smoothstep(0.5, 1.0, vLife));
+  I *= 0.08 + 0.92 * vHeat; // embers glow; they do not blaze
+  I = clamp(I * 1.6, 0.0, 1.0);
+  // linear light, by intensity: dull red, orange, yellow (overlapping
+  // sheets add, so a fire's heart builds toward white on its own)
+  vec3 col = I < 0.4 ? mix(vec3(0.3, 0.02, 0.0), vec3(1.0, 0.22, 0.015) * 1.1, I / 0.4)
+                     : mix(vec3(1.0, 0.22, 0.015) * 1.1, vec3(1.0, 0.56, 0.16) * 1.5, (I - 0.4) / 0.6);
+  gl_FragColor = vec4(col, smoothstep(0.1, 0.4, I) * 0.55);
+}`,_=`
+${p}
+varying float vKind;
+void main() {
+  float seed = aP.x;
+  float sc = aP.w;
+  float life = fract(uTime / (3.6 + 1.6 * h(seed, 1.0)) + aP.y);
+  float wreck = aKind > 1.5 ? 1.0 : 0.0;
+  vec3 p = startAt(seed, 0.25 * sc);
+  float water = aKind > 0.5 && aKind < 1.5 ? 1.0 : 0.0;
+  float rise = sc * mix(mix(2.7, 3.5, wreck), 1.9, water);
+  p.y += 0.22 * sc + life * rise;
+  p += uWind * pow(life, 1.4) * 2.3 * sc;
+  p.x += sin(uTime * 0.9 + seed * 5.0) * 0.12 * life * sc;
+  p.z += cos(uTime * 0.7 + seed * 3.0) * 0.1 * life * sc;
+  float size = sc * mix(0.32, 1.45, pow(life, 0.7)) * (0.8 + 0.45 * h(seed, 5.0)) * mix(1.0, 1.2, wreck);
+  float ang = seed * 6.2831 + life * 1.3;
+  vec2 q = vec2(cos(ang) * position.x - sin(ang) * position.y, sin(ang) * position.x + cos(ang) * position.y) * size;
+  vec3 wp = billboard(p, q);
+  vUv = uv;
+  vLife = life;
+  vSeed = seed;
+  vHeat = aHeat;
+  vKind = aKind;
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+}`,v=`
+uniform float uTime;
+uniform float uSmoke;
+varying vec2 vUv;
+varying float vLife;
+varying float vSeed;
+varying float vKind;
+varying float vHeat;
+${m}
+void main() {
+  float n = vnoise(vUv * 3.0 + vSeed * 5.0 + vec2(0.0, -uTime * 0.18)) * 0.6 + vnoise(vUv * 6.5 - vSeed * 3.0) * 0.4;
+  float d = length(vUv - 0.5);
+  float puff = smoothstep(0.48, 0.16, d + (n - 0.5) * 0.4);
+  float l = vLife;
+  // linear light: near-black oil smoke, fire-lit at the root, greying
+  // and catching the dusk as it thins
+  vec3 lit = vec3(0.32, 0.1, 0.025);
+  vec3 dark = vec3(0.018, 0.016, 0.017);
+  vec3 top = vec3(0.075, 0.06, 0.07);
+  vec3 col = l < 0.16 ? mix(lit, dark, l / 0.16) : mix(dark, top, (l - 0.16) / 0.84);
+  // dense over the fire, thinning as it climbs; oil burning on the
+  // water (an unseen hull) smokes lighter so the board stays readable
+  float k = vKind > 1.5 ? 1.0 : vKind > 0.5 ? 0.6 : 0.92;
+  // a cooled fire smokes thin - the plume is what hides the board
+  float alpha = puff * smoothstep(0.0, 0.06, l) * (1.0 - smoothstep(0.35, 1.0, l)) * uSmoke * k * (0.25 + 0.75 * vHeat);
+  gl_FragColor = vec4(col, alpha);
+}`,y=`
+${p}
+void main() {
+  float seed = aP.x;
+  float sc = aP.w;
+  float life = fract(uTime / (1.3 + 0.9 * h(seed, 1.0)) + aP.y);
+  vec3 p = startAt(seed, 0.3 * sc);
+  p.y += 0.1 * sc + life * sc * (1.2 + 1.2 * h(seed, 4.0));
+  p += uWind * life * 1.2 * sc;
+  p.x += sin(uTime * 4.0 + seed * 11.0) * 0.12 * life * sc;
+  p.z += cos(uTime * 3.3 + seed * 7.0) * 0.12 * life * sc;
+  float size = 0.03 * sc * (1.0 - life) * (0.6 + 0.8 * h(seed, 6.0));
+  vec3 wp = billboard(p, position.xy * size);
+  vUv = uv;
+  vLife = life;
+  vSeed = seed;
+  vHeat = aHeat;
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+}`,b=`
+uniform float uTime;
+varying vec2 vUv;
+varying float vLife;
+varying float vSeed;
+varying float vHeat;
+void main() {
+  float d = length(vUv - 0.5);
+  float a = smoothstep(0.5, 0.0, d) * (0.6 + 0.4 * sin(uTime * 23.0 + vSeed * 40.0));
+  // embers still throw the odd spark, just fewer and dimmer
+  gl_FragColor = vec4(vec3(1.0, 0.6, 0.25) * 3.0, a * (1.0 - vLife) * (0.2 + 0.8 * vHeat));
+}`;function x(e,t){let n=2166136261^t;for(let t=0;t<e.length;t++)n=Math.imul(n^e.charCodeAt(t),16777619);return(n>>>0)/4294967296}function S(e,t,n){let i=new c(1,1),o=new a;o.index=i.index,o.setAttribute(`position`,i.attributes.position),o.setAttribute(`uv`,i.attributes.uv);let s=e.reduce((e,n)=>e+t(n),0),l=Math.max(1,s),u=new Float32Array(l*3),d=new Float32Array(l*2),p=new Float32Array(l*4),m=new Float32Array(l),h=new Float32Array(l),g=0;return e.forEach(e=>{let r=e.dir||[1,0],i=t(e),a=x(e.key,n);for(let t=0;t<i;t++,g++){u.set([e.x,e.y,e.z],g*3),d.set(r,g*2);let n=(a*7.31+t*.618034)%1;p.set([n*10,t/i+a*.13,e.spread??.2,e.scale],g*4),m[g]=f[e.kind||`ship`],h[g]=e.heat??1}}),o.setAttribute(`aBase`,new r(u,3)),o.setAttribute(`aDir`,new r(d,2)),o.setAttribute(`aP`,new r(p,4)),o.setAttribute(`aKind`,new r(m,1)),o.setAttribute(`aHeat`,new r(h,1)),o.instanceCount=s,o}var C=new i(.55,0,-.22);function w({fires:e,lite:t,still:n}){let r=s(),i=e.map(e=>e.key+`@`+e.x.toFixed(2)+`,`+e.y.toFixed(2)+`,`+e.z.toFixed(2)+(e.kind||``)+`#`+(e.heat??1).toFixed(2)).join(`|`),a=(0,u.useMemo)(()=>e,[i]),c=t?{flame:7,smoke:7,spark:6}:{flame:10,smoke:12,spark:10},f=e=>e.kind===`water`?Math.ceil(c.smoke/2):c.smoke,p=(0,u.useMemo)(()=>({flame:S(a,()=>c.flame,1),smoke:S(a,f,2),spark:S(a,()=>c.spark,3)}),[a,t]);(0,u.useEffect)(()=>()=>{p.flame.dispose(),p.smoke.dispose(),p.spark.dispose()},[p]);let m=(0,u.useMemo)(()=>{let e=()=>({uTime:{value:0},uWind:{value:C},uSmoke:{value:1}});return{flame:new l({vertexShader:h,fragmentShader:g,uniforms:e(),transparent:!0,depthWrite:!1,blending:2}),smoke:new l({vertexShader:_,fragmentShader:v,uniforms:e(),transparent:!0,depthWrite:!1}),spark:new l({vertexShader:y,fragmentShader:b,uniforms:e(),transparent:!0,depthWrite:!1,blending:2})}},[]);(0,u.useEffect)(()=>()=>{m.flame.dispose(),m.smoke.dispose(),m.spark.dispose()},[m]);let x=t?1:3,w=a.map((e,t)=>e.light?t:-1).filter(e=>e>=0).slice(0,x),T=(0,u.useRef)([]);return o(()=>{let e=n?3.7:r.t;m.flame.uniforms.uTime.value=e,m.smoke.uniforms.uTime.value=e,m.spark.uniforms.uTime.value=e;for(let t=0;t<x;t++){let r=T.current[t];if(!r)continue;let i=w[t],o=i===void 0?void 0:a[i];if(!o){r.intensity=0;continue}r.position.set(o.x,o.y+.55,o.z);let s=(i+1)*1.7,c=o.heat??1;r.intensity=(n?5.2:5.2+Math.sin(e*13.7+s)*1.6+Math.sin(e*31.3+s*2)*1)*(.25+.75*c)}}),(0,d.jsxs)(`group`,{children:[a.length?(0,d.jsxs)(d.Fragment,{children:[(0,d.jsx)(`mesh`,{geometry:p.smoke,material:m.smoke,frustumCulled:!1,renderOrder:3}),(0,d.jsx)(`mesh`,{geometry:p.flame,material:m.flame,frustumCulled:!1,renderOrder:4}),(0,d.jsx)(`mesh`,{geometry:p.spark,material:m.spark,frustumCulled:!1,renderOrder:5})]}):null,Array.from({length:x},(e,t)=>(0,d.jsx)(`pointLight`,{ref:e=>{T.current[t]=e},position:[0,-50,0],color:`#ff8a3c`,intensity:0,distance:4.5,decay:2},t))]})}export{w as t};

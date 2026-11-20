@@ -30,7 +30,8 @@ sound and buzz stay.
 8. Trust
 9. The auction
 10. Liar's Dice
-11. A new arena
+11. Two Truths and a Lie
+12. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -361,7 +362,43 @@ that ran out skips the lift: the die just shatters.
 **Catch-up.** `ac-ld-seen:<path>:<id>`; the latest unseen round replays
 on open; a tap skips; reduced motion lands it at once.
 
-## 11. A new arena
+## 11. Two Truths and a Lie: the campfire
+
+**World.** A clearing at night under stars (`TT_SKY`), a campfire in a
+ring of stones (`FireSystem` from `fire.tsx`, one fire, kind "ship") with
+a warm point light, the players on log seats round it in turn order (the
+viewer nearest the camera), each with a lantern in their colour. Three
+parchment cards hang over the fire, tipped toward the camera: face down
+("?") while the storyteller writes, the statements (wrapped, canvas
+textures) once they are up. The storyteller's lantern burns bright with
+a beam over a rival's seat - a ring on the ground under your own, so no
+beam crosses the fire. Plates: yours toward the camera, rivals' low over
+their seats so they never cover the cards.
+
+**Secrecy.** Votes are sealed: a voter's lantern lights when they have
+voted, never which card. Only the storyteller's view marks their lie.
+
+**Reveal.** Every vote flies from its seat to its card as an ember (all
+together), then the lie card turns orange, curls and burns away with a
+`Burst` while the truths glow and read TRUE; the points rise over the
+seats on dark pills (readable over a card or the sky).
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you send your statements / your vote | `lock` + `BUZZ.commit` |
+| the statements go up | `whoosh` |
+| a rival votes (sealed) | a soft `ping`, their lantern lights |
+| you spotted the lie | "SPOTTED IT" good, `BUZZ.scored` |
+| you were fooled | "FOOLED" bad, `BUZZ.hitYou` |
+| your lie fooled someone / nobody | "FOOLED n" good / "BUSTED" bad (with the round's roast) |
+| your writing clock ran out | "FORFEIT" bad, `buzzer` |
+| anyone else's round | "LIE #n" neutral |
+| match won / lost | VICTORY / DEFEAT / "#2", the winner's pillar |
+
+**Catch-up.** `ac-tt-seen:<path>:<id>`; the latest unseen round replays
+on open; a tap skips; reduced motion lands it at once.
+
+## 12. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.
