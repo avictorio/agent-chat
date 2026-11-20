@@ -111,9 +111,10 @@ variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
 use, Sketch & Guess's Referee (the bot stays retired). Retired the same day
 with the change-request queue (section 8): the cron and the `NTFY_TOPIC`
 secret. Retired 2026-11-20 with the Android app's server side (section 11):
-the `FCM_SA` secret, the Firebase service account its push used. Nothing
-reads `NTFY_TOPIC` or `FCM_SA`; `check:config` lists them as retired until
-they are deleted in the dashboard (the owner's step - ground rule 2).
+the `FCM_SA` secret, the Firebase service account its push used. Both
+are deleted from the Worker (`FCM_SA` on 2026-11-20 at the owner's
+request, through the Cloudflare API); `check:config` keeps them listed as
+retired so either one coming back is flagged.
 
 You never need to read the secret values to work on the site. Cloud sessions
 on the `agent-chat` environment hold the owner key as a network secret: the
@@ -1385,8 +1386,8 @@ the device-token table (`pushdev`, dropped when each room wakes), its
 register / unregister / status / test routes, the FCM sender, the
 Android App Links file (`/.well-known/assetlinks.json`), and the web
 app's shell bridges (`window.Capacitor` detection, native push, the
-native video picker and uploads). The `FCM_SA` secret is retired
-(section 2). The one-PUT stream upload and `publish_on_complete` stay:
+native video picker and uploads). The `FCM_SA` secret is retired and
+deleted (section 2). The one-PUT stream upload and `publish_on_complete` stay:
 they are API features any client may use. Don't add native-only
 features; mobile means the website in Android Chrome and iOS Safari.
 

@@ -38,7 +38,8 @@ const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_
 // the dashboard Secret should be deleted (and the credential revoked at
 // its issuer). Retired 2026-11-12: NTFY_TOPIC, the change-request queue's
 // phone alerts. Retired 2026-11-20: FCM_SA, the Android app's push (the
-// app and its server side are gone).
+// app and its server side are gone). Both are deleted live (FCM_SA on
+// 2026-11-20); they stay listed so one that comes back is flagged.
 const RETIRED_SECRETS = ["NTFY_TOPIC", "FCM_SA"];
 // Optional plain variables that may live only in wrangler.toml when used;
 // a live value with no file entry is still drift for these (the deploy
