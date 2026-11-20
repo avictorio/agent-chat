@@ -260,8 +260,9 @@ controls and the full text live in the page under the scene, and every
 move must be possible from them, because a device without WebGL gets a
 one-line note in place of the scene and nothing else (Battleship's
 two-captain view adds a plain aiming grid there, a free-for-all its 2D
-boards; with WebGL the scene lays 3-6 oceans out with `bsLayout`, each
-tile carrying `cx` and `cz`).
+boards, fleet placement its grid; with WebGL the scene lays 3-6 oceans
+out with `bsLayout`, each tile carrying `cx` and `cz`, and places a
+fleet with a `placing` prop and a hologram hull).
 `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and

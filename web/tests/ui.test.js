@@ -768,6 +768,42 @@ let FAILURES = 0;
     if (!/"dir":"Ada:C7"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
     return out;
   });
+  await run('no-webgl-battleship-setup', { state: { bsSetup: true }, init: noGl }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) button.bs-cell[aria-label="Place at A8"]', { timeout: 4000 });
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at A8"]');
+    out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
+    if (!/runs off the board/.test(out.note)) throw new Error('off-board placement should be refused: ' + out.note);
+    out.ships0 = await page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    if (out.ships0 !== 0) throw new Error('no hull should be down yet, got ' + out.ships0);
+    const count = async () => page.$$eval('#viewer .bs-cell.ship', els => els.length);
+    out.steps = [];
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at B2"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at H4"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at A9"]');
+    out.steps.push(await count());
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
+    await page.click('#viewer button.bs-cell[aria-label="Place at J1"]');
+    out.steps.push(await count());
+    await page.click('#viewer button.bs-cell[aria-label="Place at E5"]');
+    out.steps.push(await count());
+    out.ships = await count();
+    if (out.ships !== 17) throw new Error('the full fleet should be down, steps ' + JSON.stringify(out.steps));
+    await shot(page, 'no-webgl-bs-setup-placed.png');
+    await page.click('#viewer .duel-pad .duel-btn:nth-child(4)');
+    await page.waitForTimeout(400);
+    out.moveCall = calls.filter(c => c.includes('/games/8/moves')).pop() || '';
+    if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
+    return out;
+  });
   // A spectator has no aiming grid: without WebGL the two captains'
   // boards follow the note (with WebGL they are not built at all).
   for (const [label, o] of [['no-webgl-battleship-spectator', {}], ['no-webgl-battleship-spectator-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
@@ -860,40 +896,92 @@ let FAILURES = 0;
     if (!/^false/.test(off.btn) || off.ta !== 'pan-y') throw new Error('Done should hand touch back to the page: ' + JSON.stringify(off));
     return { before, on, off };
   });
+  /* Fleet placement in 3D (2026-11-20): your ocean in the scene, the
+     next hull a hologram, no grid. The keyboard moves the bow (from E5),
+     R rotates, Enter lays the hull, Backspace takes it back; a hull that
+     runs off the board is refused with the reason. The page keeps the
+     status line and the buttons. */
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 4000 });
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) button.bs-cell[aria-label="Place at A8"]', { timeout: 4000 });
-    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
-    await page.click('#viewer button.bs-cell[aria-label="Place at A8"]');
+    await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
+    out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
+    out.label = await page.$eval('#viewer .arena3d-frame', e => e.getAttribute('aria-label'));
+    if (out.grids !== 0) throw new Error('no placement grid with WebGL, got ' + out.grids);
+    if (!/place your fleet/.test(out.label) || !/R rotates/.test(out.label)) throw new Error('the frame explains placement: ' + out.label);
+    const say = () => page.$eval('#viewer .arena3d-frame .sr-only', e => e.textContent);
+    // the placement line (the turn banner carries a statusline too)
+    const status = () => page.$$eval('#viewer .duel-statusline', els => (els.map((e) => e.textContent).find((t) => /Next hull|Fleet complete/.test(t)) || ''));
+    const press = async (k, n = 1) => { for (let i = 0; i < n; i++) await page.keyboard.press(k); };
+    let cur = null;
+    const go = async (label) => {
+      const c = label.charCodeAt(0) - 65, r = parseInt(label.slice(1), 10) - 1;
+      if (!cur) { await press('ArrowRight'); await press('ArrowLeft'); cur = { c: 4, r: 4 }; }
+      await press(c > cur.c ? 'ArrowRight' : 'ArrowLeft', Math.abs(c - cur.c));
+      await press(r > cur.r ? 'ArrowDown' : 'ArrowUp', Math.abs(r - cur.r));
+      cur = { c, r };
+    };
+    await page.focus('#viewer .arena3d-frame');
+    await press('r');
+    await page.waitForTimeout(250);
+    out.rotated = await status();
+    if (!/5-ship, lying vertical/.test(out.rotated)) throw new Error('R turns the next hull vertical: ' + out.rotated);
+    await go('A8');
+    out.offSay = await say();
+    if (!/^A8: your 5-ship, vertical, runs off the board/.test(out.offSay)) throw new Error('aiming off the board says why: ' + out.offSay);
+    await press('Enter');
+    await page.waitForTimeout(250);
     out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
     if (!/runs off the board/.test(out.note)) throw new Error('off-board placement should be refused: ' + out.note);
-    out.ships0 = await page.$$eval('#viewer .bs-cell.ship', els => els.length);
-    if (out.ships0 !== 0) throw new Error('no hull should be down yet, got ' + out.ships0);
-    const count = async () => page.$$eval('#viewer .bs-cell.ship', els => els.length);
     out.steps = [];
-    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
-    await page.click('#viewer button.bs-cell[aria-label="Place at B2"]');
-    out.steps.push(await count());
-    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
-    await page.click('#viewer button.bs-cell[aria-label="Place at H4"]');
-    out.steps.push(await count());
-    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
-    await page.click('#viewer button.bs-cell[aria-label="Place at A9"]');
-    out.steps.push(await count());
-    await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
-    await page.click('#viewer button.bs-cell[aria-label="Place at J1"]');
-    out.steps.push(await count());
-    await page.click('#viewer button.bs-cell[aria-label="Place at E5"]');
-    out.steps.push(await count());
-    out.ships = await count();
-    if (out.ships !== 17) throw new Error('the full fleet should be down, steps ' + JSON.stringify(out.steps));
+    for (const [cell, turn] of [['B2', true], ['H4', true], ['A9', true], ['J1', true], ['E5', false]]) {
+      if (turn) { await press('r'); await page.waitForTimeout(200); }
+      await go(cell);
+      await press('Enter');
+      await page.waitForTimeout(250);
+      out.steps.push((await status()).replace(/\s+/g, ' ').slice(0, 40) + ' | ' + (await say()));  // the line and what the scene said
+    }
+    out.focusKept = await page.evaluate(() => !!document.activeElement && !!document.activeElement.closest('#viewer .arena3d-frame'));
+    if (!out.focusKept) throw new Error('the scene keeps focus across repaints');
+    if (!/Fleet complete/.test(out.steps[4])) throw new Error('the full fleet should be down, steps ' + JSON.stringify(out.steps));
+    await page.waitForTimeout(600);
     await shot(page, 'bs-setup-placed.png');
+    await press('Backspace');
+    await page.waitForTimeout(250);
+    out.undone = await status();
+    if (!/2-ship/.test(out.undone)) throw new Error('Backspace takes the last hull back: ' + out.undone);
+    await go('E5');
+    await press('Enter');
+    await page.waitForTimeout(250);
     await page.click('#viewer .duel-pad .duel-btn:nth-child(4)');
     await page.waitForTimeout(400);
     out.moveCall = calls.filter(c => c.includes('/games/8/moves')).pop() || '';
     if (!/"dir":"B2H,H4V,A9H,J1V,E5V"/.test(out.moveCall)) throw new Error('placement call wrong: ' + out.moveCall);
+    return out;
+  });
+  /* Phone: a tap aims the bow (the hologram shows where the hull lies),
+     the Place button lays it. */
+  await run('battleship-setup-mobile', { state: { bsSetup: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.tap('.game-card');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
+    await page.waitForTimeout(800);
+    out.tip = await page.$eval('#viewer .arena3d-tip', (e) => e.textContent).catch(() => null);
+    if (out.tip !== 'Tap a cell for the bow') throw new Error('the tip asks for a bow cell: ' + out.tip);
+    const box = await (await page.$('#viewer .lc-3d-host canvas')).boundingBox();
+    await page.touchscreen.tap(box.x + box.width * 0.35, box.y + box.height * 0.5);
+    await page.waitForTimeout(500);
+    out.place = await page.$eval('#viewer .arena3d-place', (e) => e.textContent).catch(() => null);
+    if (!out.place || !/^Place 5-ship at [A-J]\d+$/.test(out.place)) throw new Error('a tap offers a Place button, got ' + out.place);
+    await shot(page, 'bs-setup-mobile-aimed.png');
+    await page.tap('#viewer .arena3d-place');
+    await page.waitForTimeout(500);
+    out.status = await page.$$eval('#viewer .duel-statusline', els => (els.map((e) => e.textContent).find((t) => /Next hull|Fleet complete/.test(t)) || ''));
+    if (!/4-ship/.test(out.status)) throw new Error('after the 5-ship the 4-ship is next: ' + out.status);
+    if (calls.some((c) => /\/games\/8\/moves/.test(c))) throw new Error('placing a hull sends nothing until the fleet goes out');
     return out;
   });
   /* The Games tab (2026-11-19): Live · History · Standings tabs. Live

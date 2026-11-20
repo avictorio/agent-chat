@@ -552,19 +552,18 @@ change behavior. In summary:
 - **2D arena views retired (2026-11-20):** the owner's call. Every game's
   arena is its 3D scene with the DOM controls under it; the 2D/3D
   toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
-  `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored. One
-  exception left: fleet placement keeps its grid. Chat cards, history
-  rows and the Games tab keep their small 2D summaries (`boardSvg`,
-  `c4Board`, minis). A device without WebGL
+  `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored.
+  Chat cards, history rows and the Games tab keep their small 2D
+  summaries (`boardSvg`, `c4Board`, minis). A device without WebGL
   (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
   game plays from its controls, and a two-captain Battleship adds their
   waters as a plain aiming grid (the scene was its only way to fire);
   its spectators get both captains' boards (a free-for-all: every board,
-  yours and each rival's, the shot naming its target). TODO after wave 4
-  (the owner's call, 2026-11-20) - 3D'fy what is still flat: fleet
-  placement in 3D, and the flat panels under the
+  yours and each rival's, the shot naming its target; placing a fleet,
+  the placement grid). TODO after wave 4 (the owner's call, 2026-11-20)
+  - 3D'fy what is still flat: the flat panels under the
   scenes (Frontlines' round in numbers, Code Race's lanes, Trust's grid,
   Liar's Dice's seats and cup, the Duel scoreboard) folded into the
   scenes - keeping every control in the page and a text fallback for
@@ -590,6 +589,22 @@ change behavior. In summary:
   ›) - a pill each ran under the frame's tools - and cycling to a live
   rival makes them the target. The 2D boards are the no-WebGL fallback
   only (`no-webgl-battleship-ffa`).
+- **Fleet placement in 3D (2026-11-20, the second step):** the setup
+  phase mounts the same scene with a `placing` prop (games.ts keeps the
+  draft in `bsDrafts` and hands the scene `gameView.bsPlace`: the hulls
+  laid, the orientation, the next size and the place / rotate / undo
+  actions). The scene shows your ocean alone, framed like a phone's one
+  ocean; laid hulls are real ship models and the next one is a hologram
+  where it would lie (`GhostHull`: cyan when it fits, red when it runs
+  off the board or over a hull). A click lays it; touch aims with a tap
+  and lays with the Place button; the keyboard moves the bow, R rotates,
+  Enter lays, Backspace takes the last hull back. Rotate / Undo /
+  Random / Place this fleet stay in the page; the grid is the no-WebGL
+  fallback (`no-webgl-battleship-setup`). Every repaint empties the
+  arena's wrap and detaches the scene, so `renderBattleshipView` notes a
+  focused scene (`bsRefocus`) and `bsScene` hands focus back, and the
+  scene's blur check waits a tick before it drops the aim - otherwise
+  each hull laid by keyboard reset the aim to the centre.
 - **Two Truths and a Lie (2026-11-19):** Henry's spec. Phases `write`
   (the storyteller) then `vote` (everyone else), one clock each
   (`round_seconds`). The storyteller's statements are published shuffled

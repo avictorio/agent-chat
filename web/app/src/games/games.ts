@@ -1,3 +1,4 @@
+import type { Placing as BsPlacing } from "./BsArena3D";
 import type { RoomClient } from "@chat/shared";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -213,8 +214,19 @@ export function createGameStore(opts: {
     lgPanel?: LgPanel | null;
     // target: the rival in a free-for-all (the shot goes out "Name:Cell")
     bsFire?: ((label: string, target?: string) => void) | null;
+    // fleet placement in the scene: the draft and its actions
+    bsPlace?: {
+      placed: { start: string; dir: string; size: number }[];
+      orient: string;
+      next: number;
+      onPlace: (label: string) => void;
+      onRotate: () => void;
+      onUndo: () => void;
+    } | null;
   } | null = null;
   let gameViewTimer = 0;
+  // the scene element that had focus before a Battleship repaint
+  let bsRefocus: HTMLElement | null = null;
   let gameRenderKey = "";
 
   // Teach by playing: one dismissible hint line per arena, shown on
@@ -2198,6 +2210,10 @@ export function createGameStore(opts: {
     if (!force && key === gameRenderKey) return;
     gameRenderKey = key;
     const wrap = gameView.wrap;
+    // Emptying the wrap detaches the scene: remember a focused scene
+    // (keyboard aim or placement) so bsScene can hand focus back.
+    const act = document.activeElement;
+    bsRefocus = gameView.bs3d && act instanceof HTMLElement && gameView.bs3d.host.contains(act) ? act : null;
     wrap.textContent = "";
     wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
     const wb = winnerBanner(g);
@@ -2225,6 +2241,7 @@ export function createGameStore(opts: {
     const opp = players.filter((p: GL) => p.name !== myName)[0];
     const freshMove = bsIsNewMove(g);
     if (!(you.playing && me && opp && g.phase === "setup" && !you.fleet)) bsDrafts.delete(g.id);
+    if (gameView) gameView.bsPlace = null;
     if (!you.playing || !me || !opp) {
       const big = el("div", "lc-board-big");
       const board = battleshipBoard(g);
@@ -2274,7 +2291,10 @@ export function createGameStore(opts: {
       }
       wrap.appendChild(note);
     } else if (g.phase === "setup" && !you.fleet) {
-      dropBs3d();
+      // Fleet placement (in 3D since 2026-11-20): your ocean in the
+      // scene, the next hull a hologram where it would lie - a click (a
+      // tap, then Place) lays it. The buttons stay in the page; without
+      // WebGL the grid below is the way to place.
       const big = el("div", "lc-board-big");
       big.appendChild(battleshipBoard(g));
       wrap.appendChild(big);
@@ -2311,12 +2331,26 @@ export function createGameStore(opts: {
         note.textContent = "";
         renderBattleshipView(g, true);
       };
-      const boards = el("div", "bs-boards");
-      const side = el("div", "bs-side");
-      side.appendChild(el("div", "bs-title", "Your waters - place your fleet"));
-      side.appendChild(bsGrid(states, me.hex, tryPlace, ships, "Place at ", g));
-      boards.appendChild(side);
-      wrap.appendChild(boards);
+      const rotate = () => {
+        if (!draft) return;
+        draft.orient = draft.orient === "H" ? "V" : "H";
+        renderBattleshipView(g, true);
+      };
+      const undoLast = () => {
+        if (!draft || !draft.placed.length) return;
+        draft.placed.pop();
+        renderBattleshipView(g, true);
+      };
+      if (gameView) gameView.bsPlace = { placed: draft.placed.slice(), orient: draft.orient, next: nextSize, onPlace: tryPlace, onRotate: rotate, onUndo: undoLast };
+      bsScene(g, wrap);
+      if (!webglOk()) {
+        const boards = el("div", "bs-boards");
+        const side = el("div", "bs-side");
+        side.appendChild(el("div", "bs-title", "Your waters - place your fleet"));
+        side.appendChild(bsGrid(states, me.hex, tryPlace, ships, "Place at ", g));
+        boards.appendChild(side);
+        wrap.appendChild(boards);
+      }
       wrap.appendChild(
         el(
           "div",
@@ -2329,19 +2363,11 @@ export function createGameStore(opts: {
       const row = el("div", "duel-pad");
       const rot = el("button", "duel-btn", "Rotate hull");
       rot.type = "button";
-      rot.addEventListener("click", () => {
-        if (!draft) return;
-        draft.orient = draft.orient === "H" ? "V" : "H";
-        renderBattleshipView(g, true);
-      });
+      rot.addEventListener("click", rotate);
       row.appendChild(rot);
       const undo = el("button", "duel-btn quiet", "Undo last hull");
       undo.type = "button";
-      undo.addEventListener("click", () => {
-        if (!draft || !draft.placed.length) return;
-        draft.placed.pop();
-        renderBattleshipView(g, true);
-      });
+      undo.addEventListener("click", undoLast);
       row.appendChild(undo);
       const rnd = el("button", "duel-btn quiet", "Place randomly instead");
       rnd.type = "button";
@@ -2362,7 +2388,10 @@ export function createGameStore(opts: {
         row.appendChild(go);
       }
       wrap.appendChild(row);
-      if (!note.textContent) note.textContent = "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
+      if (!note.textContent)
+        note.textContent = webglOk()
+          ? "Click (or tap, then Place) a cell in your waters to lay the next hull's bow there - the hologram shows where it lies; R rotates, Backspace takes it back. Your fleet stays secret until the shooting starts."
+          : "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
       wrap.appendChild(note);
     } else if (players.length > 2) {
       // Free-for-all (2026-11-17; in 3D since 2026-11-20): your own
@@ -2646,7 +2675,7 @@ export function createGameStore(opts: {
      across repaints. The component receives the same per-viewer state
      as the 2D boards plus a fire callback wired to sendMove. */
   let bs3dComp: Promise<
-    ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string) => void; onReady?: () => void }>
+    ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string, target?: string) => void; onReady?: () => void; placing?: BsPlacing }>
   > | null = null;
   function loadBs3d() {
     // A failed import is not remembered: the next paint tries again.
@@ -2665,6 +2694,7 @@ export function createGameStore(opts: {
       const m = gv.bs3d;
       gv.bs3d = null;
       gv.bsFire = null;
+      gv.bsPlace = null;
       m.root.unmount();
     }
   }
@@ -2685,6 +2715,7 @@ export function createGameStore(opts: {
             onFire: (label: string, target?: string) => {
               if (gameView && gameView.bsFire) gameView.bsFire(label, target);
             },
+            placing: gv.bsPlace || undefined,
             onReady: () => ready3d(h),
           })
         );
@@ -2711,6 +2742,14 @@ export function createGameStore(opts: {
     if (!gameView) return;
     if (!gameView.bs3d) gameView.bs3d = makeHost3d("lc-board-big lc-3d-host bs-3d-host");
     wrap.appendChild(gameView.bs3d.host);
+    if (bsRefocus && bsRefocus.isConnected) {
+      try {
+        bsRefocus.focus({ preventScroll: true });
+      } catch {
+        // focus is a nicety
+      }
+    }
+    bsRefocus = null;
     if (under) wrap.appendChild(under);
     paintBs3d(g, gameView.bs3d);
   }

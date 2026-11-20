@@ -83,6 +83,28 @@ function cellLocal(label: string, w: number, h: number): { x: number; z: number 
   const { col, row } = labelXY(label);
   return { x: col - (w - 1) / 2, z: row - (h - 1) / 2 };
 }
+/* A hull's cells from its bow: lying H(orizontal) or V(ertical); null
+   when it runs off the board. */
+function shipCells(start: string, dir: string, size: number, w: number, h: number): string[] | null {
+  const { col, row } = labelXY(start);
+  const cells: string[] = [];
+  for (let i = 0; i < size; i++) {
+    const x = dir === "H" ? col + i : col;
+    const y = dir === "H" ? row : row + i;
+    if (x < 0 || y < 0 || x > w - 1 || y > h - 1) return null;
+    cells.push(String.fromCharCode(65 + x) + (y + 1));
+  }
+  return cells;
+}
+/* Fleet placement (2026-11-20): the hull being placed. */
+export type Placing = {
+  placed: { start: string; dir: string; size: number }[];
+  orient: string;
+  next: number;
+  onPlace: (label: string) => void;
+  onRotate: () => void;
+  onUndo: () => void;
+};
 /* The swell the ships ride (A's ocean motion, kept gentle so the board reads). */
 function hash01(s: string): number {
   let n = 0;
@@ -690,6 +712,37 @@ function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; s
   );
 }
 
+/* ---------- placement: the next hull as a hologram ---------- */
+
+/* Where the next hull would lie from a bow cell: a translucent hull and
+   its footprint, cyan when it fits and red when it runs off the board or
+   over a hull already down (drawn past the edge, so you see why). */
+function GhostHull({ tile, w, h, bow, size, orient, valid }: { tile: TileT; w: number; h: number; bow: string; size: number; orient: string; valid: boolean }) {
+  const { col, row } = labelXY(bow);
+  const vertical = orient === "V";
+  const x = tile.cx + col + (vertical ? 0 : (size - 1) / 2) - (w - 1) / 2;
+  const z = tile.cz + row + (vertical ? (size - 1) / 2 : 0) - (h - 1) / 2;
+  const c = valid ? "#5eead4" : "#f87171";
+  const len = size - 0.12;
+  const still = useContext(Still);
+  const hull = useRef<MeshStandardMaterial>(null);
+  useFrame(({ clock }) => {
+    if (hull.current) hull.current.opacity = still ? 0.42 : 0.34 + 0.1 * Math.sin(clock.elapsedTime * 4);
+  });
+  return (
+    <group position={[x, 0, z]} userData={NOMIR}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.075, 0]} renderOrder={6}>
+        <planeGeometry args={[vertical ? 0.94 : len + 0.06, vertical ? len + 0.06 : 0.94]} />
+        <meshBasicMaterial color={c} transparent opacity={0.24} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0.3, 0]} renderOrder={7}>
+        <boxGeometry args={[vertical ? 0.5 : len - 0.2, 0.36, vertical ? len - 0.2 : 0.5]} />
+        <meshStandardMaterial ref={hull} color={c} emissive={c} emissiveIntensity={0.9} transparent opacity={0.38} depthWrite={false} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
 /* ---------- one ocean tile: grid hologram, labels, ships, fires ---------- */
 
 type ShipT = { key: string; size: number; variant: number; sunk: boolean; cells: string[]; hits: string[] };
@@ -991,6 +1044,7 @@ function shotImpact(lm: GL, me: string, target: string, shipName: string, final:
 
 function Scene({
   g,
+  placing,
   tiles,
   allTiles,
   foeName,
@@ -1013,6 +1067,8 @@ function Scene({
   intro: boolean;
   ready: boolean;
   g: GL;
+  /* fleet placement: the next hull (0 once the fleet is down) */
+  placing?: { size: number; orient: string; occupied: Set<string> } | null;
   tiles: TileT[];
   // every ocean, shown or not (a phone shows one at a time)
   allTiles: TileT[];
@@ -1160,12 +1216,16 @@ function Scene({
   /* Where a pointer picks a cell: on desktop every ocean you may fire
      at now (a click fires there); on touch every rival ocean that is
      not a wreck (a tap aims there, the Fire button fires). */
-  const pickTiles = tiles.filter((t) => (aimMode ? !t.own && !t.wreck && !!onAim : t.canFire));
+  /* Placing a fleet, your own ocean is the one to pick a bow cell on. */
+  const pickTiles = placing
+    ? tiles.filter((t) => t.own && placing.size > 0)
+    : tiles.filter((t) => (aimMode ? !t.own && !t.wreck && !!onAim : t.canFire));
   const cellFromPoint = (tile: TileT, p: { x: number; z: number }): string | null => {
     const col = Math.round(p.x - tile.cx + (w - 1) / 2);
     const row = Math.round(p.z - tile.cz + (h - 1) / 2);
     if (col < 0 || col >= w || row < 0 || row >= h) return null;
     const label = String.fromCharCode(65 + col) + (row + 1);
+    if (placing) return label;
     if (tile.water.some((m) => m.label === label) || tile.ships.some((sh) => sh.cells.includes(label))) return null;
     return label;
   };
@@ -1176,7 +1236,12 @@ function Scene({
 
   const lmTile = lm ? tiles.filter((t) => t.name === shotTarget(lm, g))[0] : undefined;
   const hoverTile = hover ? pickTiles.filter((t) => t.name === hover.t)[0] : undefined;
-  const ringAt = !aimMode && hover && hoverTile ? { tile: hoverTile, label: hover.c } : aimTile && aim ? { tile: aimTile, label: aim } : null;
+  const ringAt = placing ? null : !aimMode && hover && hoverTile ? { tile: hoverTile, label: hover.c } : aimTile && aim ? { tile: aimTile, label: aim } : null;
+  /* the hull being placed, at the hovered cell (desktop) or the aimed one */
+  const ownTile = placing ? tiles.filter((t) => t.own)[0] : undefined;
+  const ghostAt = placing && placing.size > 0 && ownTile ? (!aimMode && hover ? hover.c : aim) : null;
+  const ghostCells = ghostAt && placing ? shipCells(ghostAt, placing.orient, placing.size, w, h) : null;
+  const ghostOk = !!(ghostCells && placing && ghostCells.every((c) => !placing.occupied.has(c)));
   const ringHot = !!(ringAt && ringAt.tile.canFire);
 
   return (
@@ -1406,6 +1471,9 @@ function Scene({
               );
             })()
           : null}
+        {ghostAt && ownTile && placing ? (
+          <GhostHull tile={ownTile} w={w} h={h} bow={ghostAt} size={placing.size} orient={placing.orient} valid={ghostOk} />
+        ) : null}
         {pending && aimTile
           ? (() => {
               const loc = cellLocal(pending, w, h);
@@ -1477,6 +1545,7 @@ export default function BsArena3D({
   aspect,
   onFire,
   onReady,
+  placing,
 }: {
   g: GL;
   me: string;
@@ -1485,6 +1554,8 @@ export default function BsArena3D({
      "Name:Cell"); undefined for two captains */
   onFire?: (label: string, target?: string) => void;
   onReady?: () => void;
+  /* fleet placement: your ocean alone, the next hull as a hologram */
+  placing?: Placing;
 }) {
   const still = useReducedMotion();
   const q = useQuality(still);
@@ -1494,7 +1565,20 @@ export default function BsArena3D({
   const aimMode = q.lite;
   const w = g.w || 10;
   const h = g.h || 10;
-  const tiles = useMemo(() => buildTiles(g, me), [g, me]);
+  /* Placing a fleet: your ocean alone, the hulls laid so far on it. */
+  const tiles = useMemo((): TileT[] => {
+    if (!placing) return buildTiles(g, me);
+    const meP = ((g.players || []) as GL[]).filter((p) => String(p.name).toLowerCase() === String(me).toLowerCase())[0] || { name: me, hex: "#22d3ee" };
+    const seen: Record<number, number> = {};
+    const ships: ShipT[] = placing.placed.map((p) => {
+      const cells = shipCells(p.start, p.dir, p.size, w, h) || [];
+      const v = seen[p.size] || 0;
+      seen[p.size] = v + 1;
+      return { key: cells.join("."), size: p.size, variant: v, sunk: false, cells, hits: [] };
+    });
+    return [{ name: meP.name, title: placing.next ? "Your waters · place your fleet" : "Your waters · fleet ready", hex: meP.hex, cx: 0, cz: 0, ships, water: [], canFire: false, own: true }];
+  }, [g, me, placing, w, h]);
+  const occupied = useMemo(() => new Set(tiles.flatMap((t) => (placing ? t.ships.flatMap((s) => s.cells) : []))), [tiles, placing]);
   const ffa = tiles.length > 2;
   const player = !!(g.you && g.you.playing);
   /* The oceans a captain can aim at (two captains: the one rival; a
@@ -1522,7 +1606,7 @@ export default function BsArena3D({
 
   /* The host's live size: a phone-width host shows one ocean. */
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.2 ? 390 : 700));
-  const single = hostW < SINGLE_BELOW;
+  const single = hostW < SINGLE_BELOW || !!placing;
   /* Which ocean a single view shows: the one you're aiming at on your
      turn, yours while you wait; a spectator sees the ocean the last
      shot landed in. A tap on the switch overrides that until the turn
@@ -1570,7 +1654,7 @@ export default function BsArena3D({
   // a single view's Fire button and tip belong to the ocean you aim at
   const foeShown = !single || !!(shownTile && foe && shownTile.name === foe.name);
 
-  const home = (a: number, width: number) => bsHome(w, h, a, width < SINGLE_BELOW, tiles.length);
+  const home = (a: number, width: number) => bsHome(w, h, a, width < SINGLE_BELOW || !!placing, tiles.length);
   const first = home(aspect ?? 1.44, hostW);
   const cd = Math.hypot(first.pos[1], first.pos[2]);
 
@@ -1612,7 +1696,33 @@ export default function BsArena3D({
     return where(t, label) + ", " + (tk.has(label) ? "already " + tk.get(label) : "open water") + (canFire ? "" : ", not your turn") + ".";
   };
   const tileNamed = (name?: string) => (name ? rivals.filter((t) => t.name === name)[0] : foe);
+  const orientWord = (o: string) => (o === "V" ? "vertical" : "horizontal");
+  /* Placement: what the next hull would do from a bow cell. */
+  const describePlace = (label: string) => {
+    if (!placing || !placing.next) return "Fleet complete - send it with Place this fleet.";
+    const cells = shipCells(label, placing.orient, placing.next, w, h);
+    const what = "your " + placing.next + "-ship, " + orientWord(placing.orient);
+    if (!cells) return label + ": " + what + ", runs off the board.";
+    if (cells.some((c) => occupied.has(c))) return label + ": " + what + ", overlaps a hull already down.";
+    return label + ": " + what + ", fits.";
+  };
+  const placeAt = (label: string) => {
+    if (!placing) return;
+    if (!placing.next) {
+      setSay("Fleet complete - send it with Place this fleet.");
+      return;
+    }
+    const cells = shipCells(label, placing.orient, placing.next, w, h);
+    const ok = !!(cells && cells.every((c) => !occupied.has(c)));
+    setSay(ok ? "Placed your " + placing.next + "-ship at " + label + ", " + orientWord(placing.orient) + "." : describePlace(label));
+    if (ok && aimMode) setAim(null);
+    placing.onPlace(label);
+  };
   const fire = (label: string, name?: string) => {
+    if (placing) {
+      placeAt(label);
+      return;
+    }
     const t = tileNamed(name);
     if (!canFire || !onFire || !t || !t.canFire) {
       setSay("Not your turn yet.");
@@ -1630,6 +1740,11 @@ export default function BsArena3D({
     onFire(label, ffa ? t.name : undefined);
   };
   const aimAt = (label: string, name?: string) => {
+    if (placing) {
+      setAim(label);
+      setSay(describePlace(label));
+      return;
+    }
     const t = tileNamed(name);
     if (!t) return;
     if (t !== foe) setTarget(t.name);
@@ -1642,8 +1757,41 @@ export default function BsArena3D({
      edge crosses to the previous or next rival. In a single-ocean
      view the aimed ocean comes up. */
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!foe) return;
     const k = e.key;
+    if (placing) {
+      if (k === "r" || k === "R") {
+        e.preventDefault();
+        setSay("The next hull lies " + orientWord(placing.orient === "H" ? "V" : "H") + ".");
+        placing.onRotate();
+        return;
+      }
+      if (k === "Backspace" || k === "Delete") {
+        e.preventDefault();
+        if (placing.placed.length) setSay("Took your " + placing.placed[placing.placed.length - 1]!.size + "-ship back.");
+        placing.onUndo();
+        return;
+      }
+      const cur = aim ? labelXY(aim) : { col: Math.floor((w - 1) / 2), row: Math.floor((h - 1) / 2) };
+      let col = cur.col;
+      let row = cur.row;
+      if (k === "ArrowLeft") col--;
+      else if (k === "ArrowRight") col++;
+      else if (k === "ArrowUp") row--;
+      else if (k === "ArrowDown") row++;
+      else if (k === "Enter" || k === " ") {
+        e.preventDefault();
+        const label = String.fromCharCode(65 + col) + (row + 1);
+        if (aim) placeAt(label);
+        else aimAt(label);
+        return;
+      } else return;
+      e.preventDefault();
+      col = Math.max(0, Math.min(w - 1, col));
+      row = Math.max(0, Math.min(h - 1, row));
+      aimAt(String.fromCharCode(65 + col) + (row + 1));
+      return;
+    }
+    if (!foe) return;
     const cur = aim ? labelXY(aim) : { col: Math.floor((w - 1) / 2), row: Math.floor((h - 1) / 2) };
     let col = cur.col;
     let row = cur.row;
@@ -1688,6 +1836,17 @@ export default function BsArena3D({
       setAim(null);
     }
   };
+  /* Leaving for the frame's own buttons (Fire, Place, the ocean switch)
+     keeps the aim; leaving the arena drops it. A repaint of the page
+     detaches the scene and hands focus straight back (games.ts
+     bsScene), so the check waits a tick: focus that came back is not
+     a leave. */
+  const blurOut = (frame: HTMLElement, to: Node | null) => {
+    if (to && frame.contains(to)) return;
+    setTimeout(() => {
+      if (!frame.contains(document.activeElement)) setAim(null);
+    }, 0);
+  };
   const names = tiles.map((t) => t.name);
   const spectatorLabel =
     "Battleship, 3D view of " + (names.length > 2 ? names.slice(0, -1).map((n) => n + "'s").join(", ") + " and " + names[names.length - 1] + "'s" : names.map((n) => n + "'s").join(" and ")) + " waters.";
@@ -1723,6 +1882,12 @@ export default function BsArena3D({
           ))}
         </div>
       ) : null}
+      {placing && aimMode && placing.next && aim ? (
+        <button type="button" className="arena3d-fire arena3d-place" onClick={() => placeAt(aim)}>
+          Place {placing.next}-ship at {aim}
+        </button>
+      ) : null}
+      {placing && aimMode && placing.next && !aim ? <div className="arena3d-tip">Tap a cell for the bow</div> : null}
       {aimMode && canFire && aim && !taken.has(aim) && foeShown ? (
         <button type="button" className="arena3d-fire" onClick={() => fire(aim)}>
           Fire at {where(foe, aim)}
@@ -1731,7 +1896,7 @@ export default function BsArena3D({
       {aimMode && canFire && !aim && !pending && (!single || !!(shownTile && shownTile.canFire)) ? (
         <div className="arena3d-tip">{ffa && !single ? "Tap a rival's cell to aim" : "Tap a cell to aim"}</div>
       ) : null}
-      {foe ? (
+      {foe || placing ? (
         <div className="sr-only" aria-live="polite">
           {say}
         </div>
@@ -1747,7 +1912,16 @@ export default function BsArena3D({
       overlay={overlay}
       tools={<SoundToggle />}
       frameProps={
-        foe
+        placing
+          ? {
+              tabIndex: 0,
+              role: "application",
+              "aria-label":
+                "Battleship, 3D view. Your waters - place your fleet: arrow keys move the next hull's bow, R rotates it, Enter places it, Backspace takes the last one back.",
+              onKeyDown: onKey,
+              onBlur: (e) => blurOut(e.currentTarget, e.relatedTarget as Node | null),
+            }
+          : foe
           ? {
               tabIndex: 0,
               role: "application",
@@ -1757,18 +1931,14 @@ export default function BsArena3D({
                 "'s waters: arrow keys aim, Enter fires." +
                 (ffa && rivals.length > 1 ? " Arrow past the left or right edge for the next rival." : ""),
               onKeyDown: onKey,
-              onBlur: (e) => {
-                // Leaving for the frame's own buttons (Fire, the ocean
-                // switch) keeps the aim; leaving the arena drops it.
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAim(null);
-              },
+              onBlur: (e) => blurOut(e.currentTarget, e.relatedTarget as Node | null),
             }
           : undefined
       }
     >
       <Canvas
-        role={foe ? undefined : "img"}
-        aria-label={foe ? undefined : spectatorLabel}
+        role={foe || placing ? undefined : "img"}
+        aria-label={foe || placing ? undefined : spectatorLabel}
         frameloop="demand"
         dpr={q.dpr}
         camera={{ position: first.pos, fov: first.fov, near: 0.1, far: 600 }}
@@ -1777,11 +1947,12 @@ export default function BsArena3D({
         <Still.Provider value={still}>
           <Scene
             g={g}
+            placing={placing ? { size: placing.next, orient: placing.orient, occupied } : null}
             tiles={shown}
             allTiles={tiles}
             foeName={foe ? foe.name : null}
-            onFire={foe ? fire : undefined}
-            onAim={foe ? aimAt : undefined}
+            onFire={foe || placing ? fire : undefined}
+            onAim={foe || placing ? aimAt : undefined}
             aimMode={aimMode}
             cd={cd}
             aim={aim}
