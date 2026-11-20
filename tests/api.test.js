@@ -1330,6 +1330,46 @@ async function waitUp() {
     check('the honours go to the most-voted segment', rco.json.game.status === 'finished' && rco.json.game.winner === W3 && JSON.stringify(rco.json.game.honours) === '[2]' && rco.json.game.votes['2'] === 2 && rco.json.game.places[0] === W3, JSON.stringify(rco.json.game).slice(0, 260));
     rco = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Exquisite Corpse result', (rco.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Exquisite Corpse #' + ec.id + ' is finished - 2 segments by 2 writers') && x.text.includes('The honours go to ' + W3 + ' for segment 2 (2 votes)')), JSON.stringify((rco.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
+    // Twenty Questions (2026-11-20): a rotating answerer, a hidden secret,
+    // a public Q/A log, exact guesses right on their own.
+    let rtq = await req('POST', R2 + '/games', { token: TP, json: { game: 'twenty', from: 'Poc', players: ['Poc'] } });
+    check('twenty questions needs 2 to 6 -> 400', rtq.status === 400 && /2 to 6/.test(rtq.json.error), rtq.status);
+    rtq = await req('POST', R2 + '/games', { token: TP, json: { game: 'Twenty Questions', from: 'Poc', players: ['Poc', 'Rex'] } });
+    const tq = rtq.json.game || {};
+    const [A1, A2] = tq.order || [];
+    check('twenty questions is created in a lobby (the spelled-out name works)', rtq.status === 201 && tq.type === 'twenty' && tq.status === 'lobby' && tq.rounds_total === 2 && tq.budget === 20 && tq.mode === 'duel', rtq.status + ' ' + rtq.text.slice(0, 200));
+    rtq = await req('POST', R2 + '/games/' + tq.id + '/accept', { token: TRex, json: {} });
+    rtq = await req('GET', R2 + '/games/' + tq.id, { token: ldTok[A1] });
+    check('the first answerer chooses a secret', rtq.json.game.status === 'running' && rtq.json.game.phase === 'secret' && rtq.json.game.answerer === A1 && rtq.json.game.you.answerer === true && rtq.json.game.you.legal_moves.includes('random'), rtq.text.slice(0, 200));
+    rtq = await ldMove(tq.id, A2, 'Is it alive?');
+    check('asking before the secret is chosen -> 409', rtq.status === 409, rtq.status);
+    rtq = await ldMove(tq.id, A1, 'a lighthouse');
+    check('a registered secret opens the questions', rtq.status === 200 && rtq.json.game.phase === 'ask' && rtq.json.game.you.secret === 'a lighthouse', rtq.status + ' ' + rtq.text.slice(0, 160));
+    rtq = await req('GET', R2 + '/games/' + tq.id, { token: ldTok[A2] });
+    check('the secret stays hidden from the questioners', !/lighthouse/i.test(rtq.text) && rtq.json.game.you.legal_moves.length === 2, rtq.text.slice(0, 160));
+    await ldMove(tq.id, A2, 'Is it alive?');
+    rtq = await ldMove(tq.id, A2, 'Is it big?');
+    check('one question at a time -> 409', rtq.status === 409 && /waiting/.test(rtq.json.error), rtq.status + ' ' + rtq.text.slice(0, 120));
+    rtq = await ldMove(tq.id, A1, 'maybe');
+    check('the answer is yes or no -> 400', rtq.status === 400 && /yes or no/.test(rtq.json.error), rtq.status + ' ' + rtq.text.slice(0, 120));
+    rtq = await ldMove(tq.id, A1, 'unanswerable');
+    check('an unanswerable question costs nothing', rtq.json.game.asked === 0 && rtq.json.game.phase === 'ask' && rtq.json.game.qa[0].flagged === true, JSON.stringify(rtq.json.game.qa));
+    await ldMove(tq.id, A2, 'Is it a building?');
+    rtq = await ldMove(tq.id, A1, 'yes - by the sea');
+    check('a yes with a note spends a question; the log is public', rtq.json.game.asked === 1 && rtq.json.game.remaining === 19 && rtq.json.game.qa[1].a === 'yes' && rtq.json.game.qa[1].note === 'by the sea', JSON.stringify(rtq.json.game.qa));
+    rtq = await ldMove(tq.id, A2, 'guess: The Lighthouse!');
+    let tqR = ((rtq.json.game || {}).rounds || [])[0] || {};
+    check('an exact guess is right on its own: the questions left score', rtq.json.resolved === true && tqR.how === 'guessed' && tqR.guessed_by === A2 && tqR.secret === 'a lighthouse' && tqR.points[A2] === 18 && rtq.json.game.round === 2 && rtq.json.game.answerer === A2 && rtq.json.game.phase === 'secret', JSON.stringify(tqR).slice(0, 200));
+    rtq = await ldMove(tq.id, A2, 'random');
+    check('random draws a secret', rtq.json.game.phase === 'ask' && typeof rtq.json.game.you.secret === 'string' && rtq.json.game.you.secret.length > 2, rtq.text.slice(0, 160));
+    for (let k = 0; k < 3; k++) {
+      await ttExpire(tq.id);
+      rtq = await req('GET', R2 + '/games/' + tq.id, { token: TP });
+    }
+    tqR = (rtq.json.game.rounds || [])[1] || {};
+    check('three clocks with no question hand the round to the answerer', tqR.how === 'idle' && tqR.points[A2] === 10 && rtq.json.game.status === 'finished' && rtq.json.game.winner === A2 && rtq.json.game.players.find((p) => p.name === A2).score === 28, JSON.stringify(rtq.json.game).slice(0, 240));
+    rtq = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Twenty Questions result', (rtq.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Twenty Questions #' + tq.id + ' is over - ' + A2 + ' wins with 28 points.') && x.text.includes('Quickest: "a lighthouse" named by ' + A2 + ' in 2.')), JSON.stringify((rtq.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

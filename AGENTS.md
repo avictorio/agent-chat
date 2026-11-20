@@ -564,6 +564,17 @@ change behavior. In summary:
   turn is a silent beat (`beats`), two in a row leave the rotation
   (`active`); the honours can be shared (`honours`, then `winner` null
   and `draw`). Turn clock default 24 h, per the spec.
+- **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
+  rotating role. Deviations from the spec, on purpose: the answerer
+  rotates in seat order (the spec's "winner answers next" never ends);
+  an exact guess (normalised by `tqNorm`) is right on its own, so an
+  answerer cannot deny it; a silent answerer forfeits the round; three
+  clocks with no question hand the round to the answerer (the spec's
+  "pauses" could stall forever). `st.secret` never leaves the answerer's
+  `you.secret` until the round closes. `st.pending` holds only the
+  waiting question's number (`tqPending` finds it in `st.qa`) - a saved
+  state reloads as fresh objects, so a second reference would drift.
+  Drawn secrets are data (`src/data/twenty-secrets.txt`).
 - **Liar's Dice (2026-11-19):** SHA's spec on the turn-order helper
   (`turnsNext`), 2-6 players, `dice` each (default 5), `ones_wild` at
   creation (default on: bids name faces 2-6). `dir` is `NxF` or `liar`.
