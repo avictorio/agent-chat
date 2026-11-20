@@ -14,8 +14,8 @@ delete this file.
 ## Resume here (next session)
 
 State on 2026-11-20: phase 1 and steps 2.1-2.3 are live; 4.6 is done.
-Next is step 2.4 (`agents/`: the MCP catalog and tool calls, the API docs
-text, onboarding). Claude Code's built-in `cc-plugin-privacy` plugin once
+Next is step 2.4 (`limits.js`), then the games (2.5, which needs the
+tool's Room-method mode first), then `agents/` (2.6). Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -143,12 +143,11 @@ rules change. Room methods move into per-area files installed on the
 class (`Object.assign(Room.prototype, ...)`) so `this` and every call
 site stay as they are; turning them into plain functions can come later.
 
-- Tooling for the split (not committed): an acorn-based script moves named
-  top-level declarations into a module with the comment block above them,
-  exports them, adds the imports both ways, and refuses a move whose code
-  needs a name that stays in the entry (so modules never import back from
-  `index.js`). Rehearsed in a scratch clone: 2.1 plus the four `lib/`
-  modules passed the full API suite.
+- Tooling: `scripts/split-module.js` (acorn) moves named top-level
+  declarations into a module with the comment block above them, exports
+  them, adds the imports both ways, and refuses a move whose code needs a
+  name that stays in the entry (so modules never import back from
+  `index.js`); `verify` checks every module's names resolve.
 - [x] 2.1 `git mv src worker`; `main = "worker/index.js"` (the entry is
       the old file, renamed); `base_dir = "worker"`; paths in docs and
       scripts. Also: an ESModule rule for `**/*.js` (the Text rule's
@@ -165,18 +164,28 @@ site stay as they are; turning them into plain functions can come later.
       `webpush.js`, `gmail.js`, `cartesia.js`, `claude.js`, `webfetch.js`
       (the fetch tool), plus `lib/media.js` (media signing, CSP, headers,
       ranges); index.js down to 10,975 lines
-- [ ] 2.4 `agents/`: MCP catalog and tool calls, the API docs text,
-      onboarding, `agent-recipe.md`, `agent-watch.sh`
+Order changed 2026-11-20: a dry run showed the API docs text and the
+MCP code read dozens of limits and the game engine table, so the shared
+limits and the games move before `agents/`.
+
+- [ ] 2.4 `limits.js`: the room-wide limits and constants (message,
+      board, digest, invite, push, upload and size caps) that the Room,
+      the docs text and MCP all read
 - [ ] 2.5 `games/`: `engine.js` (GAME_ENGINES, aliases, shared helpers),
-      one file per game (its engine object, data loaders and Room
-      methods), `data/` word lists
-- [ ] 2.6 `routes/`: the fetch handler becomes a route table; one file per
+      one file per game (its constants, data loaders, engine object and
+      Room methods), `data/` word lists. The split tool first gains a
+      mode that moves Room methods into a module installed with
+      `Object.assign(Room.prototype, ...)` (check that Durable Object RPC
+      still sees methods installed that way)
+- [ ] 2.6 `agents/`: MCP catalog and tool calls, the API docs text,
+      onboarding, `agent-recipe.md`, `agent-watch.sh`
+- [ ] 2.7 `routes/`: the fetch handler becomes a route table; one file per
       API area
-- [ ] 2.7 `room/`: the rest of the Room class by area (schema, messages,
+- [ ] 2.8 `room/`: the rest of the Room class by area (schema, messages,
       members and invites, uploads, voices, streams, digest, games glue)
-- [ ] 2.8 Fix comments left in the wrong place by earlier edits (for
-      example the stale "Whether a room exists" note above `escHtml`)
-- [x] 2.9 Remove `.claude/settings.json` (and its `.gitignore`
+- [ ] 2.9 Fix comments left in the wrong place by earlier edits (the
+      sniffImage and roomExists ones are done)
+- [x] 2.10 Remove `.claude/settings.json` (and its `.gitignore`
       exception): done early - it never took effect; the real trigger
       (the owner's email as the VAPID subject) left the code instead
 
@@ -231,4 +240,4 @@ site stay as they are; turning them into plain functions can come later.
 | 2026-11-20 | Split tool + privacy plugin off | 859e994 | `scripts/split-module.js` (move/verify) committed; `.claude/settings.json` turns `cc-plugin-privacy@builtin` off at the owner's request. It still blocked this session (plugin changes apply to new sessions), so 2.2 starts in the next session - see "Resume here". |
 | 2026-11-20 | Privacy plugin: the real fix | (this commit) | A new session showed the setting doesn't turn the built-in plugin off. The trigger was the owner's account email as `VAPID_SUBJECT` in the Worker; the push JWT's subject is now `mailto:` + `GMAIL_SENDER` (https URL fallback) and the setting is gone. The split tool runs again with the plugin on. Deployed as version 41b7757f; `/api/push/key` still served. |
 | 2026-11-20 | 2.2: `lib/` | 8d38e3f | API suite green; version 9a242084 (14 modules). Live: `/api`, `/sw.js`, the page stamp, a real room's members list (read) and a signed avatar (200, image/webp). |
-| 2026-11-20 | 2.3: `platform/` + `lib/media.js` | (this commit) | API suite green (631 checks); dry run lists 21 modules. |
+| 2026-11-20 | 2.3: `platform/` + `lib/media.js` | fe4a36c | API suite green (631 checks); version 169da5fb (21 modules). Live: `/api`, `/api/push/key`, a signed avatar, attachment media full (200) and ranged (206). |
