@@ -262,7 +262,13 @@ one-line note in place of the scene and nothing else (Battleship's
 two-captain view adds a plain aiming grid there, a free-for-all its 2D
 boards, fleet placement its grid; with WebGL the scene lays 3-6 oceans
 out with `bsLayout`, each tile carrying `cx` and `cz`, and places a
-fleet with a `placing` prop and a hologram hull).
+fleet with a `placing` prop and a hologram hull). Nothing under a scene
+repeats it: what a game needs to read goes into the scene - on a
+plate's sub-line (a seat's bid, a round's points), as counts beside the
+thing they count, a compact board in the frame (Code Race's guesses:
+sprites beside the pillars read at 60 px), or one line in the frame's
+caption (`.arena3d-caption`, top left, hidden during a replay)
+- and the flat panel shows only without WebGL.
 `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and

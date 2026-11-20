@@ -1302,7 +1302,9 @@ export function createGameStore(opts: {
       note.textContent = "Spectating - guesses stay hidden until the race ends; feedback shows each round.";
       wrap.appendChild(note);
     }
-    wrap.appendChild(crBoard(g, { me }));
+    // The vault's ledgers carry every racer's rounds (yours with your
+    // guesses); the lanes are for devices without WebGL.
+    if (!webglOk()) wrap.appendChild(crBoard(g, { me }));
     if (typing) {
       const f = wrap.querySelector(".cr-word") as HTMLInputElement | null;
       if (f) {

@@ -1142,6 +1142,26 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
 .arena3d-caption { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 190px); padding: 5px 11px; border-radius: 12px; background: rgba(4, 8, 14, .74); border: 1px solid rgba(var(--ga), .3); color: #dbeafe; font-size: 12px; font-weight: 600; line-height: 1.35; pointer-events: none; }
 .tr-caption .tr-cap-c { color: #2dd4bf; }
 .tr-caption .tr-cap-d { color: #f87171; }
+/* Code Race: your guesses in the frame (the lanes folded in) */
+.cr-ledger { padding: 6px 9px 7px; max-width: min(250px, calc(100% - 170px)); }
+.cr-ledger-h { font-size: 11px; font-weight: 700; letter-spacing: .02em; color: #c4b5fd; margin-bottom: 3px; }
+.cr-ledger-more { font-size: 10.5px; color: #a78bfa; opacity: .8; }
+.cr-lrow { display: flex; align-items: center; gap: 6px; min-height: 19px; }
+.cr-lrow.sealed { opacity: .55; }
+.cr-lrow.cracked { background: rgba(167, 139, 250, .18); border-radius: 6px; }
+.cr-ln { width: 22px; flex: none; font-size: 10.5px; color: #a5a1c4; font-weight: 700; }
+.cr-lpegs, .cr-ltiles { display: inline-flex; gap: 3px; }
+.cr-lpeg { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 8.5px; font-weight: 800; color: rgba(10, 5, 24, .85); background: transparent; box-shadow: inset 0 0 0 1.5px rgba(124, 108, 170, .55); }
+.cr-lpeg[style] { box-shadow: none; }
+.cr-lpips { display: inline-grid; gap: 2px; margin-left: 4px; }
+.cr-lpip { width: 7px; height: 7px; border-radius: 50%; background: #3b3552; }
+.cr-lpip.hit { background: #f8fafc; }
+.cr-lpip.near { background: transparent; box-shadow: inset 0 0 0 1.5px #f8fafc; }
+.cr-ltile { width: 16px; height: 16px; border-radius: 3px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 800; color: #f8fafc; background: #2b2440; }
+.cr-ltile.g { background: #16a34a; }
+.cr-ltile.y { background: #d97706; }
+.cr-ltile.open { background: rgba(76, 60, 120, .6); }
+.cr-lsealed { font-size: 10px; font-weight: 700; color: #e9d5ff; margin-left: 2px; }
 .arena3d-tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(4, 8, 14, .72); color: #a5d8ea; font-size: 12.5px; pointer-events: none; white-space: nowrap; }
 .lc-meta { color: var(--dim); font-size: 13px; margin: 8px 0 2px; }
 .lc-players { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }

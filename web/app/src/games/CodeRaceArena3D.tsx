@@ -130,6 +130,88 @@ function labelTex(name: string, sub: string, hex: string): CanvasTexture {
   return t;
 }
 
+/* ---------- the ledger: your rounds, in the frame ----------
+   (2026-11-20, the page's lanes folded into the arena) The rounds you
+   guessed, oldest at the top: each guess (pegs with their key letter,
+   or the word's tiles) and its feedback, your sealed guess last and
+   dimmed. A panel beside each pillar was tried first and read at 60 px
+   on a desktop, so it is a compact board in the frame's top-left (the
+   in-frame slot the other games use for their caption), hidden while a
+   round replays. A rival's latest feedback is on their tumblers and
+   their history in the History tab; the canvas label reads every
+   racer's rounds. Rows follow the settled rounds, so a replay never
+   spoils its round. */
+
+type LedgerRow = { n: number; guess: string | null; fb: any; cracked: boolean; sealed?: boolean };
+const LEDGER_MAX = 8; // rows on the board; earlier ones fold into a "+k earlier" line
+
+function ledgerRows(g: any, name: string, upto: number, sealedGuess: string | null): LedgerRow[] {
+  const rows: LedgerRow[] = [];
+  ((g.rounds || []) as any[]).slice(0, upto).forEach((r) => {
+    const x = (r.guesses || {})[name];
+    if (!x) return;
+    rows.push({ n: r.n, guess: x.guess || null, fb: x.fb, cracked: (r.solved || []).indexOf(name) >= 0 });
+  });
+  if (sealedGuess) rows.push({ n: g.round, guess: sealedGuess, fb: null, cracked: false, sealed: true });
+  return rows;
+}
+
+function LedgerBoard({ g, rows, pal }: { g: any; rows: LedgerRow[]; pal: Record<string, string> }) {
+  const len = g.length || 4;
+  const words = g.mode === "words";
+  const shown = rows.slice(-LEDGER_MAX);
+  const earlier = rows.length - shown.length;
+  return (
+    <div className="arena3d-caption cr-ledger" role="group" aria-label="Your guesses">
+      <div className="cr-ledger-h">Your guesses</div>
+      {earlier ? <div className="cr-ledger-more">+{earlier} earlier</div> : null}
+      {shown.map((r) => {
+        const fbs = String(r.fb || "");
+        return (
+          <div key={r.n + (r.sealed ? "s" : "")} className={"cr-lrow" + (r.sealed ? " sealed" : "") + (r.cracked ? " cracked" : "")}>
+            <span className="cr-ln">R{r.n}</span>
+            {words ? (
+              <span className="cr-ltiles">
+                {Array.from({ length: len }, (_, i) => {
+                  const f = r.fb == null ? "" : fbs[i] || ".";
+                  return (
+                    <span key={i} className={"cr-ltile " + (f === "G" ? "g" : f === "Y" ? "y" : r.fb == null ? "open" : "n")}>
+                      {r.guess ? String(r.guess[i] || "").toUpperCase() : ""}
+                    </span>
+                  );
+                })}
+              </span>
+            ) : (
+              <>
+                <span className="cr-lpegs">
+                  {Array.from({ length: len }, (_, i) => {
+                    const k = r.guess ? r.guess[i] : null;
+                    return (
+                      <span key={i} className="cr-lpeg" style={k && pal[k] ? { background: pal[k] } : undefined}>
+                        {k || ""}
+                      </span>
+                    );
+                  })}
+                </span>
+                {r.fb != null ? (
+                  <span className="cr-lpips" style={{ gridTemplateColumns: "repeat(" + Math.ceil(len / 2) + ", 7px)" }} aria-label={((r.fb && r.fb[0]) || 0) + " right place, " + ((r.fb && r.fb[1]) || 0) + " right colour"}>
+                    {Array.from({ length: len }, (_, i) => {
+                      const b = (r.fb && r.fb[0]) || 0;
+                      const w = (r.fb && r.fb[1]) || 0;
+                      return <span key={i} className={"cr-lpip" + (i < b ? " hit" : i < b + w ? " near" : "")} />;
+                    })}
+                  </span>
+                ) : null}
+              </>
+            )}
+            {r.sealed ? <span className="cr-lsealed">sealed</span> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ---------- the vault ---------- */
 
 function Vault({ g, open, still, pal }: { g: any; open: number; still: boolean; pal: Record<string, string> }) {
@@ -774,12 +856,38 @@ export default function CodeRaceArena3D({
   const openAt = last ? verdictAt + 0.2 : null;
   const doneAt = last ? verdictAt + 2.4 : verdictAt + 0.7;
   const winnerR = finished && g.winner ? racers.find((r) => r.name === g.winner) || null : null;
+  /* Each racer's ledger rows (settled rounds, plus your sealed guess). */
+  const ledgers = useMemo(() => {
+    const m: Record<string, LedgerRow[]> = {};
+    racers.forEach((r) => {
+      const sealedGuess = r.you && running && !playing && g.you && g.you.queued ? String(g.you.queued) : null;
+      m[r.name] = ledgerRows(g, r.name, shown, sealedGuess);
+    });
+    return m;
+  }, [racers, g, shown, running, playing]);
+  const myLedger = (racers.find((r) => r.you) && ledgers[racers.find((r) => r.you)!.name]) || [];
   const home = (a: number, width: number) => crHome(a, width, racers, len);
   const first = home(aspect || 1.6, hostW);
+  const fbWords = (fb: any) =>
+    g.mode === "words"
+      ? String(fb || "")
+          .split("")
+          .map((c) => (c === "G" ? "green" : c === "Y" ? "amber" : "grey"))
+          .join(" ")
+      : ((fb && fb[0]) || 0) + " right place, " + ((fb && fb[1]) || 0) + " right colour";
+  const ledgerSay = racers
+    .map((r) => {
+      const rows = (ledgers[r.name] || []).filter((x) => !x.sealed);
+      if (!rows.length) return "";
+      return (r.you ? "Your rounds: " : r.name + "'s rounds: ") + rows.map((x) => x.n + (x.guess ? " " + (g.mode === "words" ? x.guess.toUpperCase() : x.guess.split("").join(" ")) : "") + " - " + fbWords(x.fb)).join("; ");
+    })
+    .filter(Boolean)
+    .join(". ");
   const label =
     "Code Race arena, 3D view: " +
     racers.map((r) => r.name + (r.you ? " (you)" : "") + (r.solved ? ", cracked it in round " + r.solved : r.out ? ", out" : running ? (r.committed ? ", guessed" : ", thinking") : "")).join("; ") +
-    (fieldN ? ". On the pillars: round " + fieldN + "." : ".");
+    (fieldN ? ". On the pillars: round " + fieldN + "." : ".") +
+    (ledgerSay ? " " + ledgerSay + "." : "");
   const intro = firstVisit ? { title: "Code Race", sub: racers.map((r) => r.name).join(" · ") || "Crack the code", color: "#c084fc" } : null;
 
   // the vault opens over ~1.4 s once the race is over (at once when still)
@@ -802,6 +910,8 @@ export default function CodeRaceArena3D({
               <div className="duel-catchup" aria-hidden="true">
                 Round {playingRound.n} · tap to skip
               </div>
+            ) : myLedger.length ? (
+              <LedgerBoard g={g} rows={myLedger} pal={pal} />
             ) : null}
             <div className="sr-only" aria-live="polite">
               {say}

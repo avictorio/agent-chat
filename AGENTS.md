@@ -562,11 +562,11 @@ change behavior. In summary:
   waters as a plain aiming grid (the scene was its only way to fire);
   its spectators get both captains' boards (a free-for-all: every board,
   yours and each rival's, the shot naming its target; placing a fleet,
-  the placement grid; the panels folded into the scenes, below). TODO
-  after wave 4 (the owner's call, 2026-11-20) - 3D'fy what is still
-  flat: Code Race's lanes folded into the vault scene - keeping every
-  control in the page and a text fallback for devices without WebGL.
-  Chat cards and history thumbnails stay flat.
+  the placement grid; the panels folded into the scenes, below). The
+  3D'fy after wave 4 (the owner's call, 2026-11-20) is done: nothing
+  under a scene repeats it, every control stays in the page, and a
+  device without WebGL gets the flat views back. Chat cards and history
+  thumbnails stay flat.
   New games: 3D only, controls under the scene, nothing that only the
   scene can do (UI scenarios `no-webgl-*` pin this).
 - **Battleship free-for-all in 3D (2026-11-20, the first 3D'fy step):**
@@ -605,6 +605,17 @@ change behavior. In summary:
   round stay in the page). Duel: the duellists' plates carry the win
   pips (and a streak's flame from two wins in a row) and the record the
   rounds; the scoreboard shows in the lobby and without WebGL.
+  Code Race: your guesses are a compact board in the frame's top-left
+  (`LedgerBoard`, the caption slot; a row per round you guessed - pegs
+  with their key letter or the word's tiles, the feedback pips - your
+  sealed guess last and dimmed, the last 8 rows; hidden while a round
+  replays, and rows follow the settled rounds so a replay never spoils
+  its round). A canvas panel beside each pillar was tried first and read
+  at about 60 px on a desktop, too small to deduce from. A rival's
+  latest feedback is on their tumblers and their history in the History
+  tab; the canvas label reads every racer's rounds for screen readers.
+  The lanes are the fallback (the code-race scenarios that read them run
+  without WebGL).
 - **Fleet placement in 3D (2026-11-20, the second step):** the setup
   phase mounts the same scene with a `placing` prop (games.ts keeps the
   draft in `bsDrafts` and hands the scene `gameView.bsPlace`: the hulls

@@ -1403,11 +1403,12 @@ let FAILURES = 0;
     });
   }
   // Code Race (2026-11-19): the card shows each racer's latest feedback;
-  // the arena puts your lane first with your guesses, a rival's lane
+  // without WebGL (with it the lanes are the vault's ledgers, see
+  // coderace-3d) the arena puts your lane first with your guesses, a rival's lane
   // shows feedback only (pegs hidden); the palette fills the slots, Guess
   // sends them in order, and the round's guess shows sealed in your lane.
   for (const [label, o] of [['coderace-arena', {}], ['coderace-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { cr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
       out.cardRows = await page.$$eval('.game-card .cr-card-row', (r) => r.map((x) => x.querySelector('.cr-card-name').textContent));
@@ -1445,10 +1446,11 @@ let FAILURES = 0;
       return out;
     });
   }
-  // A finished race: the code is shown, the lanes run in place order with
-  // the winner's trophy, and every rival's guess is out in the open.
+  // A finished race: the code is shown, the lanes (the no-WebGL view) run
+  // in place order with the winner's trophy, and every rival's guess is
+  // out in the open.
   for (const [label, o] of [['coderace-done', {}], ['coderace-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true, crDone: true } }, o), async (page) => {
+    await run(label, Object.assign({ state: { cr: true, crDone: true }, init: noGl }, o), async (page) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card .cr-secret', { timeout: 6000 });
       await page.click('.game-card.kind-coderace');
@@ -1468,10 +1470,11 @@ let FAILURES = 0;
       return out;
     });
   }
-  // Words: rivals' rows are bare coloured tiles; you type the word; a word
-  // not in the list is refused with the server's reason; Enter sends.
+  // Words (the no-WebGL lanes): rivals' rows are bare coloured tiles; you
+  // type the word; a word not in the list is refused with the server's
+  // reason; Enter sends.
   for (const [label, o] of [['coderace-words', {}], ['coderace-words-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
-    await run(label, Object.assign({ state: { cr: true, crWords: true } }, o), async (page, S, calls) => {
+    await run(label, Object.assign({ state: { cr: true, crWords: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
       await page.click('.game-card.kind-coderace');
@@ -2235,8 +2238,10 @@ let FAILURES = 0;
     });
   }
   // Code Race in 3D (the default): the vault loads above the guess input,
-  // its label reads the race from the viewer's seat, a guess still goes
-  // out, and there is no 2D view to switch to.
+  // its label reads the race from the viewer's seat and every racer's
+  // rounds (yours with your guesses, a rival's feedback only); your
+  // guesses with their feedback are a board in the frame - the lanes are
+  // the no-WebGL view; a guess still goes out; no 2D view to switch to.
   for (const [label, o] of [['coderace-3d', {}], ['coderace-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -2246,6 +2251,7 @@ let FAILURES = 0;
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .cr-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|cr-input|cr-board/.test(c)));
+      out.ledger = await page.$$eval('#viewer .cr-ledger .cr-lrow', (rows) => rows.map((r) => r.querySelector('.cr-ln').textContent + ':' + [...r.querySelectorAll('.cr-lpeg')].map((p) => p.textContent).join('') + ':' + r.querySelectorAll('.cr-lpip.hit').length + '/' + r.querySelectorAll('.cr-lpip.near').length));
       await shot(page, label + '.png');
       for (const k of ['red', 'green', 'blue', 'yellow']) await page.click('#viewer .cr-color[aria-label="Add ' + k + '"]');
       await page.click('#viewer .cr-go');
@@ -2253,7 +2259,9 @@ let FAILURES = 0;
       out.moveCall = calls.filter((c) => c.includes('/games/14/moves')).pop() || '';
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
       if (!/Code Race arena, 3D view: Ada, guessed; Anthony \(you\), thinking; Henry, thinking\. On the pillars: round 2\./.test(out.label)) throw new Error('the scene reads the race from the viewer\'s seat: ' + out.label);
-      if (out.order.join(',') !== 'lc-board-big,cr-input,cr-board') throw new Error('the vault, then the input, then the lanes: ' + JSON.stringify(out.order));
+      if (!/Your rounds: 1 R G B Y - \d right place, \d right colour/.test(out.label) || !/Ada's rounds: 1 - \d right place/.test(out.label)) throw new Error('the ledgers read your guesses and a rival\'s feedback only: ' + out.label);
+      if (out.order.join(',') !== 'lc-board-big,cr-input') throw new Error('the vault (your guesses in its frame), then the input: ' + JSON.stringify(out.order));
+      if (out.ledger.join(',') !== 'R1:RGBY:1/2,R2:RRGO:2/0') throw new Error('the frame lists your guesses with their feedback: ' + JSON.stringify(out.ledger));
       if (!/"dir":"R G B Y"/.test(out.moveCall)) throw new Error('the 3D view still sends the guess: ' + out.moveCall);
       if (out.toggle) throw new Error('the 2D views are retired: no toggle');
       return out;
