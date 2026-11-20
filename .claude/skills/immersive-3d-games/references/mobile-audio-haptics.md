@@ -3,8 +3,9 @@
 Read this when a change must hold up on phones: render cost, frame rate,
 heat, vibration, sound, fullscreen, touch, wake lock, or detecting
 low-power states. Target the **website only**: mobile web means Android
-Chrome and iOS Safari. The Android Capacitor app is deprecated; ignore the
-research's native-plugin route (`@capacitor/haptics`, SystemBars, a native
+Chrome and iOS Safari. The Android Capacitor app was removed from the repo
+on 2026-11-20 (AGENTS.md section 11); ignore the research's native-plugin
+route (`@capacitor/haptics`, SystemBars, a native
 PowerSave plugin) and anything that needs an APK.
 
 ## Contents
@@ -34,7 +35,8 @@ Phones are bound by **fill rate and heat**, not triangles.
 - Design for the **sustained** clock after 15–30 minutes of play, not the
   peak ([abratabia](https://abratabia.com/mobile-browser-performance/battery-and-thermal.php),
   lower authority). A long spectator session heats more than a 2–3 minute
-  duel, so spectators default to the lowest ambient rate.
+  duel, so spectators should default to the lowest ambient rate (a target:
+`useQuality(still)` has no spectator input yet).
 - Desktop device emulation reproduces none of this; test on real phones.
 
 Community heuristics (blog-level, no device-measured budgets exist): draw
@@ -122,7 +124,7 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
 ## 5. Web Audio on phones
 
 - One shared `AudioContext`, created or resumed inside the first tap or
-  keydown (Chrome since 71, Safari, WebView all require it)
+  keydown (Chrome since 71 and Safari require it)
   ([Chrome](https://developer.chrome.com/blog/autoplay)). On iOS also play a
   one-sample silent buffer inside the gesture. Repo: `chime.ts` unlocks on
   the first pointer/key press; `sfx.ts` gets the context via
@@ -134,7 +136,7 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
   [MDN](https://developer.mozilla.org/docs/Web/API/AudioSession/type)). For
   game blips, respect the switch: leave the default (or set `'ambient'`
   explicitly where `'audioSession' in navigator`). Never `'playback'`.
-- A WKWebView/iOS `AudioContext` can stay silent after backgrounding: call
+- An iOS Safari `AudioContext` can stay silent after backgrounding: call
   `resume()` again on `visibilitychange` → visible and on the next tap
   ([WebKit 240646](https://bugs.webkit.org/show_bug.cgi?id=240646)). Suspend
   when hidden to save battery.
@@ -154,9 +156,9 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
 
 - **Touch:** spectating inside the scrolling room keeps the canvas
   `touch-action: pan-y` (repo default, `styles.css`) so one finger scrolls the
-  page; `TouchControls` leaves orbit to two fingers. A dedicated play mode
-  should switch to `touch-action: none`, keeping `overscroll-behavior: none`
-  on the body (already set) so pull-to-refresh never fires mid-game.
+  page; the arena frame's **Move** mode hands touch to the scene with
+  `touch-action: none` until Done, keeping `overscroll-behavior: none` on
+  the body (already set) so pull-to-refresh never fires mid-game.
 - **Wake lock:** `navigator.wakeLock.request('screen')` at match start,
   re-acquired on `visibilitychange`, released at match end, all in
   try/catch. iOS has it since 16.4, but in Home Screen web apps only from

@@ -9,20 +9,21 @@ repo root), and test it with `npm test` (the Playwright suite in
 the Room Durable Objects, the API) is its contract; see the root
 `AGENTS.md` for deploys.
 
-- **Parity spec and progress:** [PARITY.md](PARITY.md) — the checklist is
-  the project. Work is not done until its items are proven there.
 - **Stack** (aligned with the SHA panel on purpose): React 19,
   TypeScript, Vite, npm workspaces — `shared/` holds the API contract
   types and client, `app/` holds the web app. Typecheck runs in the
-  build, as in the panel.
+  build, as in the panel. The game arenas are three.js scenes through
+  React Three Fiber, drei and postprocessing (load the
+  `immersive-3d-games` skill before touching them).
 - **Deliberate divergences from the panel:** no Mantine (this app's
   design system is its own ported CSS — parity is visual as well as
-  behavioral), and the markdown renderer is the current one ported to
-  TypeScript, not react-markdown (revisit after parity, behind the
-  same tests).
-- **Staging:** a separate small Worker on its own hostname serves the
-  built app and proxies `/api` to the production Worker, so the staging
-  app is same-origin, uses real rooms and real invites, and the
-  production Worker is untouched.
-- **History:** PARITY.md records the parity checklist and the cutover
-  criteria the rewrite met before it went live.
+  behavioral), and the markdown renderer (`app/src/feed/markdown.ts`)
+  is a line-for-line TypeScript port of the pre-React page's, not
+  react-markdown.
+- **Staging (historical):** during the rewrite a separate Worker
+  (`victorio-chat-next`, next.chat.victorio.cloud, `web/staging/`) served
+  the build and proxied `/api` to production. It is not part of the
+  current workflow (it still serves its last, 2026-11-10 build).
+- **History:** [PARITY.md](PARITY.md) records the parity checklist and the
+  cutover criteria the rewrite met before it went live (2026-11-09).
+  Current behavior and workflow are in the root `AGENTS.md`.

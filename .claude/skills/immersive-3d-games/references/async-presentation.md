@@ -2,9 +2,9 @@
 
 Read this when you decide what a viewer sees on opening a match that moved
 while they were away, how waiting looks, how a simultaneous reveal is
-staged, how spectators are framed, or how a match ends. All three games are
-asynchronous and often agent-paced (a Light Cycles tick defaults to 120 s, a
-Duel round waits up to 180 s, an agent's wake-to-act cycle runs one to two
+staged, how spectators are framed, or how a match ends. Every game here is
+asynchronous and often agent-paced (a live Light Cycles tick defaults to
+120 s, a Duel round waits up to 180 s, most other turns allow an hour or a day, an agent's wake-to-act cycle runs one to two
 minutes), so players spend most of a match waiting. Feel lives in the
 **arrival**, the **replay of what was missed**, and the **reveal**.
 
@@ -41,7 +41,9 @@ minutes), so players spend most of a match waiting. Feel lives in the
 - **Rematch:** one tap, same game, players and settings
   (`rematchRow`/`sendRematch`). The games list carries a per-game-type room
   `record` of all-time wins and losses per player (`listGames` in
-  `src/worker.js`); a pairwise head-to-head is not there yet.
+  `src/worker.js`) and a ladder (an Elo rating per player per game over
+2-player matches); the Duel's state also carries `h2h`, shown as
+"Head-to-head in this room".
 
 ## 2. Replay what the viewer missed
 
@@ -60,10 +62,13 @@ out what your opponent just did" ([BGA](https://uk.boardgamearena.com/bug?id=141
 - **Client-side catch-up needs one addition:** a per-viewer "last seen
   event" marker in localStorage keyed by game id (try/catch). Everything
   else is in the logs above.
-- **Scale the replay to what was missed:** Battleship plays each missed shot
-  in full; Light Cycles fast-forwards missed ticks (~3–4×) with slow motion
-  only on crashes and near-misses (Frozen Synapse's kills-only replay); the
-  Duel plays only the last round's reveal, then the score line.
+- **Scale the replay to what was missed:** Light Cycles fast-forwards missed
+  ticks (~3–4×) with slow motion only on crashes and near-misses (Frozen
+  Synapse's kills-only replay); the Duel replays every missed round
+  (earlier ones quickly, the latest in full, plus the KO); the thirteen
+  newer arenas replay only the latest unseen round. Battleship animates
+  shots only while the view is open, never on mount (replaying each missed
+  shot is the target).
 - Cap the whole catch-up at a few seconds with a visible **Skip**.
 - Leave a **resting marker** (the last shot's cell glowing, the rival's last
   trail segment brighter), then land on a clear "your move".
@@ -97,8 +102,8 @@ out what your opponent just did" ([BGA](https://uk.boardgamearena.com/bug?id=141
   `thrown` booleans (a lock without its content); the absence rule; "waiting
   since 1 m" as calm elapsed time.
 - **Burn a visible fuse only in the last 10–25%** of a tick or round clock
-  (Hearthstone's ratio). The duel's existing draining clock bar should switch
-  to that treatment near its end.
+  (Hearthstone's ratio). Light Cycles burns a fuse ring in a tick's last
+  quarter; the Duel's clock lives in the turn banner at the top.
 - Keep the arena breathing while the player waits, and give them something
   to do: orbit, inspect the board, replay the last turn.
 - Light Cycles and the Duel already resolve the moment everyone has moved
@@ -161,12 +166,12 @@ while other fans find it pulls attention from the board.
 
 - Tapping a player follows them; return to the director after a few idle
   seconds.
-- Spectators see both sides: Battleship shows both grids (the repo's
-  spectator view does; phones show one ocean with a swap control).
+- Spectators see both sides: Battleship shows both grids (narrow hosts show
+  one ocean with a swap control; a free-for-all uses a ‹ name n/N › cycler).
 - **A text ticker** ("Cyan fires at C4: miss", "Round 3: paper covers rock,
   Cyan leads 2-1") in an `aria-live="polite"` region gives agents, chat and
-  screen readers the same narrative. `BsArena3D.tsx` already has an `sr-only`
-  live region; `ImpactLayer` is `aria-hidden`, so title cards are never the
+  screen readers the same narrative. Every arena has an `sr-only` live
+  region; `ImpactLayer` is `aria-hidden`, so title cards are never the
   only announcement.
 
 ## 6. Ceremonies, highlights and rematch

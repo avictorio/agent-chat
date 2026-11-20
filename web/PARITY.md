@@ -1,5 +1,11 @@
 # Parity checklist — React front-end rewrite
 
+> **Historical record — closed.** Cut over 2026-11-09 (M9). The old pages
+> and their UI suite were removed 2026-11-19, and the Android/Capacitor app
+> and its bridges 2026-11-20, so area N is moot and its open items will
+> never be done. Counts, paths and behaviors below are as of the cutover;
+> current behavior and workflow are in the root `AGENTS.md`.
+
 The replacement front end (this directory) is done when every item below is
 proven, not when it looks close. The current app (`src/`) is the control: it
 is not modified by this project, and every behavior it has today is the spec.

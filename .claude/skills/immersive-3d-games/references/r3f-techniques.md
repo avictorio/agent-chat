@@ -205,15 +205,19 @@ Choreography with camera-controls:
 
 Intro recipe shape (research): snap to a high, far vista; one rAF; raise
 `smoothTime` (~1.1) for the fly-in; `fitToBox` the arena; `saveState()` as
-home. The repo's `Intro` does a lighter version: start high, far and swung
-~50° round, then glide to the `Framer`-computed home with `smoothTime` 0.55.
+home. The repo's `Intro` does its own version: start low on the horizon
+(el 0.1 rad), 1.5× the home distance, swung 0.28 rad; hold ~0.9 s while
+the iris opens; then crane to the `Framer`-computed home with `smoothTime`
+0.7.
 
 Framing in `arena3d.tsx`: `fitHome(spanW, spanD, elevDeg, vfovDeg, aspect,
 margin)` fits a board into the host aspect (perspective makes the near edge
 widest); `Framer` re-applies home when the host's shape changes by more than
 ~8% (a phone rotating) but ignores small nudges; `goHome` returns the camera;
-`TouchControls` makes one finger scroll the page or tap the board and two
-fingers pinch/turn; `ArenaFrame` lets the wheel scroll the page unless
+`TouchControls`: outside Move mode touch never moves the camera (one finger
+scrolls the page or taps the board); the frame's **Move** button hands touch
+to the scene (one finger rotates, two dolly and truck, three truck) until
+**Done**; `ArenaFrame` lets the wheel scroll the page unless
 Ctrl/Cmd is held, and hosts Reset view and tool buttons.
 
 ## 6. Particles and destruction
@@ -273,7 +277,7 @@ Starting values from the research; tune by eye.
 |---|---|
 | Explosion | core flash: additive icosphere/billboard, colour ≈ (6,3,1), scale 0→1 over ≈120 ms ease-out, fade ≈250 ms. 150–400 `Points` sparks. 30–120 instanced debris with ballistic motion, spin, bounce. 6–20 soft smoke billboards. Screen layer: pulse, ring, trauma ≈0.6 |
 | Shockwave ring | `RingGeometry` or a plane with `alpha = smoothstep(r-w,r,d)*(1-smoothstep(r,r+w,d))*(1-uProgress)`, additive, expo ease-out over 400–700 ms; flat on water/floor. Screen-space ShockWave only on big hits |
-| Tron derez | 400–1,500 voxel centres precomputed (`MeshSurfaceSampler`, three r187 `examples/jsm`) in a hidden `InstancedMesh`. On death: 150 ms noise-threshold dissolve with a hot emissive edge ([Codrops dissolve](https://tympanus.net/codrops/2025/02/17/implementing-a-dissolve-effect-with-shaders-and-particles-in-three-js/)), then voxels at the cycle's matrix pushed outward with noise, upward drift and spin, shrinking to 0 over 0.8–1.5 s in team colour > 1. Stagger by `aDelay` from the impact point for a sweep. Collapse the trail wall by scaling Y to 0 |
+| Tron derez | 400–1,500 voxel centres precomputed (`MeshSurfaceSampler`, three r187 `examples/jsm`) in a hidden `InstancedMesh`. On death: 150 ms noise-threshold dissolve with a hot emissive edge ([Codrops dissolve](https://tympanus.net/codrops/2025/02/17/implementing-a-dissolve-effect-with-shaders-and-particles-in-three-js/)), then voxels at the cycle's matrix pushed outward with noise, upward drift and spin, shrinking to 0 over 0.8–1.5 s in team colour > 1. Stagger by `aDelay` from the impact point for a sweep. Dim the trail wall; never collapse it (the server keeps it as a wall) |
 | Ship sinking | hull group: sink Y with ease-in, pitch 15–35°, slight roll, over 2–4 s. Hide the underwater part with `material.clippingPlanes` + `gl.localClippingEnabled`, or tinted water. Splash: 300–800 upward `Points`, a ring, an expanding foam disc, then a bubble column for 1–2 s |
 | Debris without an engine | semi-implicit Euler `v += g*dt; p += v*dt`; on contact `v.y *= -0.35; v.xz *= 0.7`; sleep below an epsilon. ~20 lines for ≤200 chunks |
 | Light flash | one `pointLight` always mounted at intensity 0; pulse intensity |
@@ -349,5 +353,6 @@ In `onCreated`, listen for `webglcontextlost` / `webglcontextrestored` on
 "tap to resume"; remount the `<Canvas>` with a new `key` as the robust
 fallback. Never keep game state only in GPU buffers. Reduce memory pressure:
 dispose on unmount, one renderer per page, not one per game card. The 3D
-host's error path (`fail3d` in `games.ts`) already turns a WebGL failure into
-a message with a Reload button.
+host's error path (`fail3d` in `games.ts`) turns a WebGL failure into "3D
+isn't available on this device - play with the controls below." (the flat
+panels return); a chunk-load or other error gets a Reload button.

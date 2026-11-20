@@ -3,8 +3,11 @@ name: immersive-3d-games
 description: >-
   Design and build immersive, juicy 3D game arenas for the agent-chat website
   (React Three Fiber, three.js, drei, postprocessing in web/app/src/games/).
-  Use this skill for ANY work on the 3D arenas - Light Cycles, Battleship, the
-  rock-paper-scissors Duel, or a new game arena - and whenever a task touches
+  Use this skill for ANY work on the 3D arenas - any of the sixteen (Light
+  Cycles, Battleship, the rock-paper-scissors Duel, Frontlines, Code Race, Four
+  in a Row, Trust, Auction, Liar's Dice, Two Truths and a Lie, Exquisite
+  Corpse, Twenty Questions, Werewolf, Letter Grid, Trivia, Sketch & Guess) or a
+  new one - and whenever a task touches
   game feel or juice, camera shake, hit-stop or slow motion, haptics or phone
   vibration, game sound effects, particles and explosions, bloom or
   postprocessing, sky and atmosphere, making a game immersive, alive or
@@ -12,7 +15,8 @@ description: >-
   or spectators, win and loss staging, or R3F/three.js performance on phones.
   Trigger even when the request only says "polish the arena", "make the game
   feel better", "the duel is boring" or "add some effects", and before editing
-  any *Arena3D.tsx, arena3d.tsx, juice.tsx, sfx.ts or atmos.tsx.
+  any *Arena3D.tsx, arena3d.tsx, juice.tsx, sfx.ts, atmos.tsx, ocean.tsx,
+  ships.tsx, fire.tsx, cycles.tsx or lcmodel.ts.
 ---
 
 # Immersive 3D game arenas
@@ -63,9 +67,10 @@ usually enough. For a new arena, read the playbooks and skim the rest.
 
 ### Where feel lives in this app
 
-All three games are discrete-commit and asynchronous, often against agents:
-a Light Cycles tick defaults to 120 s, a Duel round waits up to 180 s, and
-an agent's wake-to-act cycle runs one to two minutes. Moment-to-moment
+Every game here is discrete-commit and asynchronous, often against agents:
+a live Light Cycles tick defaults to 120 s (an async one waits for every
+rider), a Duel round waits up to 180 s, most other turns and rounds allow
+an hour or a day, and an agent's wake-to-act cycle runs one to two minutes. Moment-to-moment
 steering never drives the feel. Players spend most of a match waiting, so
 feel lives in three places: **the arrival, the replay of what the viewer
 missed, and the reveal.** Input response matters least.
@@ -109,10 +114,10 @@ motion act on the juice clock; haptics are Android Chrome only.
 | Tier | Events | Trauma | Hit-stop | Slow motion | Haptic (ms) | Screen layer |
 |---|---|---|---|---|---|---|
 | Tick | hover, aim, UI tap | 0 | 0 | none | none (10–15 only if rare) | none |
-| Small | miss, own lock-in, RPS round won or lost | +0.15–0.25 | 0–60 ms | none | 20 | local flash at the cell |
-| Medium | hit, Light Cycles near-miss | +0.3–0.4 | 80–130 ms (≈ SFV light) | none | 30–40 | bloom pulse |
-| Large | ship sunk, rider derezzed | +0.6–0.8 | 200–270 ms (≈ SFV medium–heavy) | none unless decisive | `[40,60,40]` | pulse + ring + title card |
-| Decisive | last ship, last rider, match-winning throw | +0.8, once | 200–270 ms, then slow | 0.2–0.35× for 0.5–1 s | win `[60,80,120]` | one rate-limited flash, stinger |
+| Small | miss, own lock-in, RPS round won or lost | +0.15–0.25 | 0–60 ms | none | `commit` / `nearMiss` | local flash at the cell |
+| Medium | hit, Light Cycles near-miss | +0.3–0.4 | 80–130 ms (≈ SFV light) | none | `scored` (you hit) / `hitYou` (you were hit) | bloom pulse |
+| Large | ship sunk, rider derezzed | +0.6–0.8 | 200–270 ms (≈ SFV medium–heavy) | none unless decisive | `sankTheirs` / `lostOne` | pulse + ring + title card |
+| Decisive | last ship, last rider, match-winning throw | +0.8, once | 200–270 ms, then slow | 0.2–0.35× for 0.5–1 s | `wonMatch` / `lostMatch` | one rate-limited flash, stinger |
 
 - **Shake the 3D camera only,** never the HUD, the selected cell or the turn
   indicator. On a perspective camera over a grid, rotation swings far cells
@@ -135,10 +140,12 @@ is overridden here. Tune toward **noticeable but brief**:
 - Treat every viewer loss as at least the Large tier, whatever its tier for
   a spectator. A viewer's decisive loss gets the full Decisive tier.
 - Give it its own haptic so it never feels like a win. The vocabulary lives
-  in one place, `BUZZ` in `sfx.ts`: `lostOne` `[90, 50, 50]` for your ship
-  sunk or rider derezzed, `lostMatch` `[120, 80, 60]` (the win's contour
-  reversed, equal weight), `hitYou` `[30, 40, 30]` for "you were hit" or a
-  lost round. Use the names, never inline arrays. These are derived
+  in one place, `BUZZ` in `sfx.ts`: `commit` 18 (you locked in), `nearMiss`
+  15, `scored` 25 (you hit them / took the round), `hitYou` `[30, 40, 30]`
+  (you were hit / lost the round), `sankTheirs` `[40, 60, 40]`, `lostOne`
+  `[90, 50, 50]` (your ship sunk, your rider derezzed), `wonMatch`
+  `[60, 80, 120]`, `lostMatch` `[120, 80, 60]` (the win's contour reversed,
+  equal weight). Use the names, never inline arrays. These are derived
   starting values; tune them on a real Android phone.
 - Keep it short: no long losing animation, no lingering wreck-cam. After the
   hit, go straight to the result card and a prominent Rematch.
@@ -157,15 +164,17 @@ web page rather than a place.
 
 - 0–0.3 s: the cover lifts from the world's colour, never white, and only
   after shaders compiled (`FirstFrame` → `onReady`; `ImpactLayer`'s iris).
-- 0.3–2.5 s: ease-out flight from a high, wide vista to the play camera
-  (`Intro`); fog eases from thick to normal; the ambient bed swells
-  (`sfx("enter")`).
+- 0.3–2.5 s: the camera starts low on the horizon, holds while the iris
+  opens and the name card rises, then cranes up to home (`Intro`); fog
+  eases from thick to normal. (Target, not built: an ambient swell here;
+  today only Werewolf plays `sfx("enter")`, at nightfall.)
 - 1.0–2.5 s: emissive light lines power on outward from the focal point
   (ramp a uniform you own; do not rely on renderer exposure under the
   composer).
 - 2.5–4 s: the arena name card (DOM), then the HUD; input unlocks.
-- A tap skips; repeat entries in a session use a ~1 s version; reduced
-  motion cross-fades with the same light and sound reveal.
+- A tap skips; repeat entries in a session skip the intro (a ~1 s version
+  is a target); reduced motion cross-fades with the same light and sound
+  reveal.
 
 **Idle breathes; events answer.** Slow, large, low-contrast motion (swell,
 sky drift, emissive ±10–20% over 3–8 s) reads as breathing. Medium motion
@@ -189,7 +198,8 @@ on touch, 0 under reduced motion) is the ceiling for the breathing layer.
    through both wheels. Rim/Fresnel light instead of fill light.
 4. **Selective bloom.** Threshold ≈ 1 so nothing glows unless chosen:
    emissive or colour above 1 with `toneMapped={false}`. A low threshold
-   (Battleship once used 0.72) blooms pegs and specular nobody chose.
+   blooms pegs and specular nobody chose: Battleship still uses 0.72 with
+   smoothing 0.3; Light Cycles uses 1, the Duel 0.9, the rest 0.95.
 5. **One reserved accent** for danger or decisiveness: white or hot magenta,
    never a red strobe. Fog colour equals the horizon colour.
 6. **"Trippy" means hue drift, flowing particles and 1–2 Hz beat pulses,**
@@ -200,15 +210,15 @@ on touch, 0 under reduced motion) is the ceiling for the breathing layer.
 | File | Purpose and contract |
 |---|---|
 | `arena3d.tsx` | The Canvas frame. `useQuality(still)` → `{lite, dpr, ambientFps, msaa}` (lite = coarse pointer: dpr `[1,1.5]`, 24 fps, MSAA 0; else `[1,1.75]`, 30 fps, MSAA 2; 0 fps when still). `Ticker` paces ambient frames under `frameloop="demand"`. `FirstFrame` calls `onReady` once `compileAsync` has built every program and a frame is drawn: the ready signal that hides "Loading the 3D arena…". `fitHome`/`Framer`/`goHome` compute and re-apply the home framing per host aspect. `TouchControls` + Move mode: on touch screens the camera ignores touch by default (one finger scrolls the page or taps the board); a **Move** button on the frame hands touch to the scene (one finger turns, two pinch-zoom and pan, touch-action none, iOS page zoom held off) until **Done**. Do not bring back two-finger camera gestures outside Move mode: a first finger that drifts hands the gesture to the browser, so they only worked when both fingers landed at once (and iOS zoomed the page). `ArenaFrame`: wheel scrolls the page unless Ctrl/Cmd, Reset view, overlay and tool slots. `useReducedMotion`, `useCoarsePointer`. |
-| `juice.tsx` | The impact layer. A `Juice` store (`useJuiceStore(still)`, `JuiceProvider`, `useJuice`) with `hit(impact)` taking trauma, hit-stop ms, slow-motion s, post pulse, flash (≤ 3/s, WCAG 2.3.1), buzz, sound and a title card. `JuiceRig` advances the clock `juice.t` (clamped delta × scale: 0 in hit-stop, 0.25 in slow motion), shakes via `CameraControls.setFocalOffset` scaled by camera distance, and invalidates while anything runs. `ArenaPost`: Bloom (intensity pulsed) → ChromaticAberration (fringe pulsed) → Noise (not on lite) → Vignette → ToneMapping last. `ImpactLayer` (DOM): flash, title cards, the entry iris. `Intro`: the camera fly-in (first visit per game per page session, `useFirstVisit`; a tap or click skips it and snaps home before the scene handles the press). `SoundToggle`. Under `still`, motion channels drop and flashes soften; titles, sound and buzz stay. |
-| `sfx.ts` | Synthesized Web Audio SFX (`sfx(name, delay)`: boom, bigboom, splash, whistle, ping, derez, lock, charge, clash, shatter, win, lose, enter) through a master gain and compressor, plus `buzz(pattern)` (`navigator.vibrate` after sticky activation) and the `BUZZ` pattern vocabulary, both behind one toggle (`ac-sfx-muted`). |
-| `atmos.tsx` | `SkyDome` (one-draw shader sky from a `SkySpec`: gradient, horizon glow, stars, aurora, swirl nebula, striped synthwave sun), `HorizonGrid` (endless additive grid with an outward pulse), and transient `Burst` (instanced voxel derez), `Shockwave` (floor ring), `LightPillar`. All run on the juice clock, so they freeze in hit-stop and crawl in slow motion. |
+| `juice.tsx` | The impact layer. A `Juice` store (`useJuiceStore(still)`, `JuiceProvider`, `useJuice`) with `hit(impact)` taking trauma, hit-stop ms, slow-motion s, post pulse, flash (≤ 3/s, WCAG 2.3.1), buzz, sound and a title card. `JuiceRig` advances the clock `juice.t` (clamped delta × scale: 0 in hit-stop, 0.25 in slow motion), shakes via `CameraControls.setFocalOffset` scaled by camera distance, and invalidates while anything runs. `ArenaPost`: Bloom (intensity pulsed) → ChromaticAberration (fringe pulsed) → Noise (not on lite) → Vignette → ToneMapping last. `ImpactLayer` (DOM): flash, title cards, the entry iris, and `word(text, hex)` - one beat word (the Duel's count-in, Twenty Questions' YES/NO). `soundDelay`/`titleDelay` stage a sound or title after the impact. `Intro`: the camera fly-in (first visit per game per page session, `useFirstVisit`; a tap or click skips it and snaps home before the scene handles the press). `SoundToggle`. Under `still`, motion channels drop and flashes soften; titles, sound and buzz stay. |
+| `sfx.ts` | Synthesized Web Audio SFX (`sfx(name, delay)`: boom, bigboom, splash, whistle, ping, derez, lock, charge, clash, shatter, win, lose, enter, beat (count-in kick), shoot, snip, tear, wrap, smash (RPS matchups and table thumps), buzzer (time ran out / wrong), whoosh (sprint, level, reveal), zap (sparks)) through a master gain and compressor, plus `buzz(pattern)` (`navigator.vibrate` after sticky activation) and the `BUZZ` pattern vocabulary, both behind one toggle (`ac-sfx-muted`). |
+| `atmos.tsx` | `SkyDome` (one-draw shader sky from a `SkySpec`: gradient, horizon glow, stars, aurora, swirl nebula, striped synthwave sun, a soft `moon` disc with a halo - Battleship's setting sun), `HorizonGrid` (endless additive grid with an outward pulse), and transient `Burst` (instanced voxel derez), `Shockwave` (floor ring), `LightPillar`. All run on the juice clock, so they freeze in hit-stop and crawl in slow motion. |
 | `ocean.tsx` | Battleship's water: one sinh-spaced mesh from the boards to the horizon, five travelling waves (CPU twin `oceanHeight()` so ships ride the same swell), calm zones over the boards (12% swell: grid at y 0.06 stays above water at `OCEAN_Y`), Fresnel sky reflection, a desktop mirror pass (oblique-clipped; objects with `userData.noMirror` are hidden from it), sun or moon glitter (`OceanLook.moonDir`), crest foam, impact ripples (`OceanStore.ripple`) and oil slicks (`setSlicks`). Runs on the juice clock. |
 | `ships.tsx` | Battleship's fleet: lofted hulls (flare, sheer, transom, boot-top and anti-fouling paint), class silhouettes, canvas-drawn decks, merged parts (~8 draws a ship), night lights, radar, waterline foam, and a shared patched shader for damage (`uHitX` scorched holes with glowing rims, `uChar` charring). BsArena3D's `ShipModel` floats them and stages the deaths: big ships break in two (clipping planes), cruisers and destroyers capsize, submarines sink to the sail. |
-| `fire.tsx` | Battleship's fire (`FireSystem`): every fire on the board in three instanced GPU draws (flames additive, smoke alpha, sparks additive), animated entirely in shaders from the juice clock. Flames are anchored sheets whose shape comes from upward-scrolling fBm through a flame envelope, coloured **by intensity** (red edge, orange, yellow heart); smoke is near-black in linear light, dense over the fire and thinning as it climbs downwind. A `FireSpec` spreads along the hull (`dir`, `spread`) and has a `kind`: `ship` (tall, from the deck), `water` (low, wide, half the smoke), `wreck` (big, smoky). |
+| `fire.tsx` | Shader fire (`FireSystem`), Battleship's and the Two Truths campfire, Corpse candle and Werewolf bonfire (`heat` 0..1 cools a fire to embers): every fire on the board in three instanced GPU draws (flames additive, smoke alpha, sparks additive), animated entirely in shaders from the juice clock. Flames are anchored sheets whose shape comes from upward-scrolling fBm through a flame envelope, coloured **by intensity** (red edge, orange, yellow heart); smoke is near-black in linear light, dense over the fire and thinning as it climbs downwind. A `FireSpec` spreads along the hull (`dir`, `spread`) and has a `kind`: `ship` (tall, from the deck), `water` (low, wide, half the smoke), `wreck` (big, smoky). |
 | `cycles.tsx` | Light Cycles' pieces: `CycleModel` (an extruded glossy shell hooding wheel drums whose faces are rings of light, a prone rider; merged once into one geometry per material, ~6 draws a cycle; reflections from a shared PMREM `RoomEnvironment`, no download), `TrailSystem` (every trail in one draw: walls carry their arc length `aS`, and the shader hides everything past each rider's `uHead`, so trails grow with the sprint and rewind for replays; white-hot top edge, energy flowing to the bike, hot near the head, the winner's wave), `GridFloor` (cell-exact grid, data pulses, the Zones tint from a `DataTexture`), `EdgeWall`, `Ridges`. |
 | `lcmodel.ts` | Light Cycles as a timeline, no three.js: `riders(g, me)` rebuilds every rider's path (cells, an index offset `k0` that aligns paths to match ticks, how it went out - wall, trail, head-on, timed out - from the log's "is out at tick N"), `poseAt(rider, T)` for any float tick, `impactAt`, `nearMisses`, `territory`, the viewer's `options` (server `safe_moves`, or the same test client-side), and the per-viewer last-seen tick for the catch-up. |
-| `chime.ts` | Owns the page's single `AudioContext`, unlocked on the first pointer or key press (`audioContext()`), and the your-move chime. |
+| `chime.ts` | Owns the page's single `AudioContext`: `unlockChime()` runs on the first pointer or key press (`RoomShell`), and `audioContext()` returns null until then. Also the your-move chime. |
 
 Arenas: `LcArena3D.tsx` (Light Cycles: Tron: Legacy's Grid - the owner's
 reference is the film's light cycles: glossy black shells over wheels
@@ -259,15 +269,17 @@ guess cards on stands). Every arena is 3D only, by the owner's
 call (2026-11-20, the 2D views and the 2D/3D toggles are retired): the
 controls and the full text live in the page under the scene, and every
 move must be possible from them, because a device without WebGL gets a
-one-line note in place of the scene and nothing else (Battleship's
+one-line note in place of the scene, and the flat panels the scene replaced
+come back (Frontlines' field, Trust's grid, Liar's cup and table, Code
+Race's lanes, the Duel scoreboard; Battleship's
 two-captain view adds a plain aiming grid there, a free-for-all its 2D
 boards, fleet placement its grid; with WebGL the scene lays 3-6 oceans
 out with `bsLayout`, each tile carrying `cx` and `cz`, and places a
 fleet with a `placing` prop and a hologram hull). Nothing under a scene
 repeats it: what a game needs to read goes into the scene - on a
 plate's sub-line (a seat's bid, a round's points), as counts beside the
-thing they count, a compact board in the frame (Code Race's guesses:
-sprites beside the pillars read at 60 px), or one line in the frame's
+thing they count, a compact DOM board in the caption slot (Code Race's
+`LedgerBoard`: panels beside the pillars were tried and read at 60 px), or one line in the frame's
 caption (`.arena3d-caption`, top left, hidden during a replay)
 - and the flat panel shows only without WebGL.
 `games.ts` lazy-loads
@@ -376,8 +388,12 @@ Details: `references/mobile-audio-haptics.md`.
 - **Replay what the viewer missed,** compressed and in order, then hand over
   the turn. A per-viewer "last seen" marker (localStorage, keyed by game id)
   plus the server's logs (`shots`, `move_log`, `rounds`) is all it takes.
-  Battleship replays each missed shot; Light Cycles fast-forwards ticks and
-  slows only on crashes; the Duel replays the last reveal. Cap it at a few
+  Today: Light Cycles fast-forwards missed ticks and slows only on
+  crashes; the Duel replays every missed round (earlier ones quickly, the
+  latest in full, plus the KO); the thirteen newer arenas keep
+  `ac-<key>-seen:` and replay only the latest unseen round; Battleship
+  animates shots only while the view is open, never on mount (replaying
+  missed shots is a target). Cap it at a few
   seconds with Skip, leave a resting last-move marker, land on "your move".
   A missed loss of the viewer's own replays with the full viewer-loss beat.
 - **Honest presence:** lock pips from `awaiting`/`targets`, the duel's
@@ -401,9 +417,10 @@ Details: `references/async-presentation.md`.
 - **Battleship: dusk at sea, the board is the record.** A low sun, a
   peach-to-blue sky, light painted hulls lit from the player's side (the
   owner rejected dark night silhouettes), team-colour rim lights. Miss = small
-  splash and a peg; hit = flash, fire and smoke that keep burning; sink = the
-  hull surfaces, its lights flicker out, it pitches and goes under in 2–4 s,
-  neighbours auto-mark. The sink is where the animation budget pays off.
+  splash and a peg; hit = flash, fire and smoke that keep burning; sink =
+  big ships break in two, cruisers and destroyers capsize, submarines sink
+  to the sail - and the wreck stays. The sink is where the animation budget
+  pays off.
 - **Light Cycles: each tick plays as a sprint** (built 2026-11-13). The
   trails in growth order replay any tick (`lcmodel.ts`), so a resolved
   tick rides every cycle into its new cell together (~0.6 s), missed ticks
@@ -419,10 +436,13 @@ Details: `references/async-presentation.md`.
   chase camera rides behind a cycle. High three-quarter camera by default:
   the horizon cannot show without flattening the board, so the world (sky,
   ridgelines) lives in the entry flight, crash close-ups and the chase cam.
-- **RPS Duel: a spotlit duel scored like music.** Two pools of light, sealed
-  tokens on lock, the chant, the same-frame flip, a quantized timbre per
-  throw, round chips that stay as the pattern record. Best fit for the full
+- **RPS Duel: a duel scored like music.** A glass stage in a turning
+  nebula, a pedestal and an orb per duellist that rings when they throw, a
+  110 BPM count-in, the same-frame flip, matchup animations (snip, wrap,
+  smash), a hologram plaque holding the round record. Best fit for the full
   synesthetic treatment.
+- **The other thirteen arenas:** worlds and event tables in
+  `references/game-playbooks.md` sections 5-17.
 
 Full tables and starting `Juice.hit` values per event and seat:
 `references/game-playbooks.md`.
@@ -435,10 +455,15 @@ Full tables and starting `Juice.hit` values per event and seat:
    `useQuality`, `FirstFrame`, `Ticker`, `CameraControls` with `Framer` and
    `TouchControls`, the juice store with `JuiceRig` and `ArenaPost`, `Intro`,
    `SkyDome`, the board; `ArenaFrame` with `ImpactLayer` and `SoundToggle`.
-3. Lazy-load it from `games.ts` like the other arenas so the loading and
-   error states come for free.
-4. Add the live-region ticker, keyboard play and the reduced-motion path.
-5. Add a UI-suite scenario that opens it at desktop and phone sizes.
+3. Register it in `KIND3D` in `games.ts` (props `g, me, aspect, onReady,
+   registerCommit`; `registerCommit` is the page tap that fires `lock` +
+   `BUZZ.commit` in the scene) so it lazy-loads and the loading and error
+   states come for free.
+4. Give it a `useFirstVisit("<key>:" + id)` intro key and an
+   `ac-<key>-seen:` catch-up key.
+5. Add the live-region ticker, keyboard play and the reduced-motion path.
+6. Add UI-suite scenarios that open it at desktop and phone sizes, and a
+   `no-webgl-*` one.
 
 ## Verification workflow
 

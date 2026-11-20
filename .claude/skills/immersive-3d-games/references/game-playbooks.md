@@ -1,4 +1,4 @@
-# Per-game playbooks: Battleship, Light Cycles, RPS Duel
+# Per-game playbooks: every arena
 
 Read this before changing one specific arena or building a new one. Each
 playbook gives the look, arrival, idle, the event ladder mapped from the
@@ -10,7 +10,7 @@ contract before relying on a field. All values are derived starting points.
 
 What shipped (2026-11-13) and where to tune it: Battleship's `shotImpact()`
 (the shell falls 0.85 s; the impact fires on its frame from `ShotFx`, a
-sinking adds `SinkFx`), Light Cycles' `useLcMoments()` (derez on a crash),
+sinking adds `SinkFx`), Light Cycles' `crash()`/`finish()` in `Director`,
 and the Duel's `Reveal` (count-in → flip → matchup at contact → verdict →
 KO; `planFor()` holds the timings; forfeits and catch-up replays of missed
 rounds, remembered per game in localStorage, run through the same path). Buzz values
@@ -34,7 +34,10 @@ sound and buzz stay.
 12. Exquisite Corpse
 13. Twenty Questions
 14. Werewolf
-15. A new arena
+15. Letter Grid
+16. Trivia
+17. Sketch & Guess
+18. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -51,17 +54,17 @@ Decisive tier for everyone; the viewer's own decisive loss uses the "match
 lost" haptic `[120, 80, 60]` and the `lose` stinger, then goes straight to
 the result card and Rematch.
 
-## 2. Battleship: neon-noir naval warfare where the board is the record
+## 2. Battleship: dusk at sea, where the board is the record
 
 | Aspect | Recommendation |
 |---|---|
-| Look | dark navy sea and sky; hulls as dark silhouettes with emissive deck and waterline light lines (cyan one side, amber the other); a violet-to-magenta horizon band with a low striped moon behind fog; the grid as thin emissive lines on the water; bloom threshold ~1 (it was 0.72, which bloomed pegs and moon specular) |
-| Arrival | start above a mist layer, descend through fog to the waterline, the moon breaks through, searchlights sweep on, then the grid is painted onto the sea; vista landmarks: both fleets and the horizon |
-| Idle | sum-of-sines swell with hulls bobbing on the same CPU-side function; moon glint path; a searchlight sweep every 6–10 s; fog banks at two speeds; distant lightning as a soft sky brighten (never a white flash); embers rising from wrecks; ocean-wash bed with a bell every 20–40 s |
+| Look (shipped) | dusk: a low setting sun (`SkySpec.moon`), a peach-to-lavender-to-blue sky, light-painted non-metallic hulls lit from the player's side (the owner rejected the night version's dark silhouettes), team-colour rim lights, the grid as thin lines on calm water; bloom threshold still 0.72 with smoothing 0.3 (it blooms pegs and specular: ~1 is the rule elsewhere) |
+| Arrival | the shared `Intro`: low on the horizon, hold while the iris opens, crane up to home |
+| Idle | five travelling waves with hulls riding the same CPU-side swell (`oceanHeight`), sun glitter, crest foam, fires that keep burning on wrecks |
 | Shot | reticle tightens, the shell arcs with a falling `whistle` (300–600 ms) |
 | Miss | Small tier: band-passed `splash` + "bloop", a flat ring, a persistent peg |
 | Hit | Medium tier: core flash, sparks, fire and smoke that keep burning on the cell |
-| Sink | Large tier: the whole hull surfaces, its light lines flicker out one by one, it pitches 15–35° and goes under in 2–4 s through a clipping plane, with spray, a foam disc and bubbles; neighbouring cells auto-mark (GamePigeon); a "Destroyer sunk" ticker line |
+| Sink (shipped) | Large tier: big ships break in two (clipping planes), cruisers and destroyers capsize, submarines sink to the sail, and the wreck stays burning; a title card names the ship. Nothing auto-marks neighbouring cells |
 | Decisive | last ship: slow motion ~0.25×, a push-in, a ring/ShockWave, a stinger, then Reflect. When both fleets are down to one ship, shift the music layer and lighting instead of escalating every shot |
 | Async | replay each missed shot in full; open on "your damaged ships" (the current threat) |
 | Spectate | both grids; director: shell, then hit cell, then sink; readout: ships remaining |
@@ -70,20 +73,26 @@ The Hasbro adaptation was criticised for "not much animation"
 ([Pure Nintendo](https://purenintendo.com/?p=132307)): the sink is where the
 animation budget pays off.
 
-Starting impacts:
+Shipped impacts (`shotImpact` in `BsArena3D.tsx`; check it before tuning):
 
 | Event (seat) | trauma | stop | slow | buzz | sound | title |
 |---|---|---|---|---|---|---|
-| your miss | 0.15 | 0 | – | – | `splash` | – |
-| your hit | 0.35 | 100 | – | 35 | `boom` | – |
-| your ship hit (incoming) | 0.45 | 120 | – | `[30,40,30]` | `boom` | – |
-| you sank theirs | 0.7 | 230 | – | `[40,60,40]` | `bigboom` | "SUNK" good |
-| **your ship sunk** | 0.75 | 250 | – | `[90,50,50]` | `bigboom` | "SUNK" + ship name, bad |
-| last ship (you win) | 0.8 | 250 | 0.8 | `[60,80,120]` | `bigboom`, then `win` | "VICTORY" good |
-| **last ship (you lose)** | 0.8 | 250 | 0.8 | `[120,80,60]` | `bigboom`, then `lose` | "FLEET LOST" bad |
+| your miss | 0.06 | 0 | – | – | `splash` | – |
+| a miss near your fleet | 0.12 | 0 | – | `nearMiss` | `splash` | – |
+| your hit | 0.35 | 100 | – | `scored` | `boom` | – |
+| your ship hit (incoming) | 0.45 | 110 | – | `hitYou` (+ red flash) | `boom` | – |
+| you sank theirs | 0.6 | 200 | 1 if final | `sankTheirs` (`wonMatch` if final) | `bigboom` | "<ship> sunk" good |
+| **your ship sunk** | 0.85 | 240 | 0.8 | `lostOne` (`lostMatch` if final) | `bigboom` | "Your <ship> is down" bad |
+| free-for-all: your fleet gone | 0.85 | 260 | 1 | `lostMatch` | `bigboom` | "Your fleet is gone" bad |
+| free-for-all: a rival out | 0.55–0.7 | 200–220 | – | `sankTheirs` if you sank them | `bigboom` | "X is out" |
 
-Repo notes: on phones the arena shows one ocean with a swap control (the
-enemy's on your turn), a tap only aims and a **Fire at X** button fires
+The match end is a separate hit ~2.6 s later: "Victory" / "Fleet lost"
+with `win` / `lose`.
+
+Repo notes: when the host is narrower than 560 px (or during placement)
+the two-captain arena shows one ocean with a swap control (the enemy's on
+your turn); a free-for-all lays out 3-6 oceans (`bsLayout`) with a
+‹ name n/N › cycler; fleet placement shows a hologram hull. A tap only aims and a **Fire at X** button fires
 (`battleship-3d-phone-aim-fire` in `web/tests/ui.test.js`); the frame takes
 keyboard focus and arrow keys aim. The arena replays shots from `last_move`
 diffs during an open session but never on mount. Earlier code skipped the
@@ -94,12 +103,12 @@ peg, the title and the sound instead.
 
 | Aspect | Recommendation |
 |---|---|
-| Look | canonical Tron: Legacy: desaturated metallic-blue floor with a circuit-board pattern and the scrolling grid shader; trails as solid emissive ribbons; each cycle reads as one glowing line. For 2–4 riders pair each hue (cyan, orange, pink, lime from the server) with a trail pattern (solid, dashed, chevron, double) and a HUD label |
+| Look (shipped) | Tron: Legacy: a black mirror floor (`MeshReflectorMaterial`, desktop only) under a cell-exact `GridFloor`; glossy black cycles whose wheels are rings of light; trails as luminous glass walls with a white-hot top edge; each rider's hue from the server plus a DOM name tag (no per-rider trail patterns) |
 | Arrival | from near-black the grid draws outward from the vanishing point, then the walls, then the cycles fill from wireframe to solid, under a synth drone rising with the sweep |
 | Idle | data-flow shimmer along grid lines, slow pulses in distant circuit silhouettes, trails humming with a slight flicker, idling cycles; sub drone, slow arpeggio pad, electrical hum |
 | Tick | lock pips from `awaiting`; when the tick resolves, all riders sprint their new segments together over ~0.5–0.8 s on the juice clock, with floor streaks and a slight FOV kick instead of a teleport. Extend one trail segment per straight run, add one only on turns ([BlenderArtists](https://blenderartists.org/t/blender-tron-light-cycle-game/494631)) |
-| Near-miss | a head within one cell of a wall: proximity glow and a small whoosh (Medium tier at most; no buzz unless it is the viewer's rider) |
-| Crash | Large tier: an instant closer-camera slow-motion replay, then the derez (dissolve, voxel `Burst`, trail collapse, floor `Shockwave`, a `LightPillar` where the rider fell). A head-on draw gets its own staging; several deaths on one tick play in sequence |
+| Near-miss | a head skimming a wall: sparks with `zap` (Medium tier at most; no buzz unless it is the viewer's rider). `whoosh` belongs to the tick sprint |
+| Crash | Large tier: the crash races into what it hit with the camera closing in and slow motion at the impact, then the derez (voxel `Burst`, floor `Shockwave`, a `LightPillar` where the rider fell). The trail stays as a dim scar - the server keeps it as a wall; never collapse it. A head-on gets its own staging; several deaths on one tick play in sequence |
 | Decisive | last rider standing: 0.5–1 s slow motion; the winner's trail flares |
 | Camera | default high three-quarter or top-down (the arcade framing, [StrategyWiki](https://strategywiki.org/wiki/TRON)); an optional per-rider chase cam toggle ([Armagetron](https://armagetron.sourceforge.net/doc/commands.html)); a low angle only for crash replays |
 | Async | fast-forward missed ticks (~3–4×), slowing for crashes; open on where each rider goes next |
@@ -111,20 +120,24 @@ reviewers praised the "neon lights trailing out from behind"
 and panned scripted races with "little sense of speed"
 ([GameWatcher](https://www.gamewatcher.com/tron-evolution/review)).
 
-Starting impacts:
+Shipped impacts (`crash()`/`finish()` in `LcArena3D.tsx`; buzz never during a replay):
 
 | Event (seat) | trauma | stop | slow | buzz | sound | title |
 |---|---|---|---|---|---|---|
-| your lock-in | 0 | 0 | – | 20 (only if turns are rare) | `lock` | – |
-| another rider derezzed | 0.6 | 220 | – | – | `derez` | "DEREZZED" neutral |
-| **your rider derezzed** | 0.75 | 250 | – (0.8 if it decides the match) | `[90,50,50]` | `derez` (+`lose` if decisive) | "DEREZZED" bad |
-| last rider: you | 0.8 | 250 | 0.8 | `[60,80,120]` | `derez`, then `win` | "LAST RIDER" good |
+| your lock-in | 0 | 0 | – | – | `lock` | – |
+| another rider derezzed | 0.45 | 170 | 0.35 | – | `derez` | "<name> derezzed" neutral |
+| **your rider derezzed** | 0.9 | 230 | 1 | `lostOne` | `derez` + `lose` | "Derezzed" bad |
+| head-on | 0.9 (yours) / 0.6 | 240 | 1 / 0.6 | `lostOne` if yours | `derez` + `lose` / `clash` | "Head-on" (+ white flash) |
+| timed out | – | – | – | `lostOne` if yours | – | "Timed out · Three ticks without a move" |
+| you win | – | – | – | `wonMatch` | `win` (after 1.5 s if a crash just played) | "Victory · Last rider standing" good |
+| a rival wins | – | – | – | `lostMatch` if you just lost | `lose` | "<name> wins · Better luck next race" |
+| draw | – | – | – | – | – | "Draw · No rider survived" |
 
-## 4. RPS Duel: a spotlit duel scored like music
+## 4. RPS Duel: a duel scored like music
 
 | Aspect | Recommendation |
 |---|---|
-| Look | a dark stage with two pools of light, hands or avatars in player colours, holographic motes in the spotlight cones, a low-contrast silhouetted crowd, slowly pulsing banners; the round history built into the floor or banners as physical chips (the pattern record) |
+| Look (shipped) | a glass stage in a turning nebula (`DUEL_SKY` swirl); a pedestal and an orb per duellist in their colour that rings when they throw; plates carry the win pips and streak flame; a hologram plaque holds the round record (the pattern record) |
 | Arrival | overhead spotlights snap on one by one with a heavy "clunk", ending on the two pools; Present follows immediately |
 | Waiting | breathing bob, fists slowly priming; a sealed glowing token appears the moment `thrown` turns true and the arena lights flick toward that side; room tone and a heartbeat pulse |
 | Reveal | lock → chant (four beats, 100–120 BPM) → same-frame flip → 300–500 ms hold → clash → named verdict; each throw has its own quantized timbre (rock low drum, paper filtered swoosh, scissors bright stab) and a particle burst in the winner's colour; `charge` under the prime, `clash` on impact |
@@ -136,26 +149,27 @@ RPS is the best fit for the full synesthetic Rez / Tetris Effect treatment:
 short, discrete, already musical. Beat-locked pulses at 1–2 Hz keep it
 psychedelic without strobing.
 
-Starting impacts:
+Shipped impacts (`Reveal` in `DuelArena3D.tsx`; the contact sound is the
+matchup - snip, wrap, smash + shatter - and `clash` only on a tie):
 
 | Event (seat) | trauma | stop | slow | buzz | sound | title |
 |---|---|---|---|---|---|---|
-| your throw locked | 0 | 0 | – | 20 | `lock` | – |
-| rival locked | 0 | 0 | – | – | a soft cue (none in `sfx.ts` yet) | – |
-| round won (yours) | 0.2 | 60 | – | 20 | `clash` | "ROUND" good |
-| round lost (yours) | 0.3 | 80 | – | `[30,40,30]` | `clash` | "ROUND" bad |
-| tie | 0.15 | 60 | – | – | `clash` | "CLASH · AGAIN" neutral |
-| match won (yours) | 0.8 | 250 | 0.8 | `[60,80,120]` | `clash`, then `win` | "VICTORY" good |
-| **duel lost (yours)** | 0.8 | 250 | 0.8 | `[120,80,60]` | `clash`, then `lose` | "DEFEAT" bad |
+| your throw locked | 0 | 0 | – | `commit` | `lock` (+ pulse 0.2) | – |
+| rival locked | 0 | 0 | – | – | `lock` | – |
+| round won (yours) | 0.32 | 120 (220 at match point) | 0.9 at match point | `scored` | matchup | "Round n yours" good |
+| round lost (yours) | 0.5 (0.7) | 140 (220) | 0.9 at match point | `hitYou` (+ red flash) | matchup | "Round n to X" bad |
+| tie | 0.2 | 80 | – | – | `clash` | "Clash" neutral |
+| forfeit | – | – | – | – | `buzzer` | "Time!" then the round title |
+| match won (yours) | 0.5 | – | – | `wonMatch` | `bigboom` + `win` | "Victory" good |
+| **duel lost (yours)** | 1 | 200 | – | `lostMatch` (+ red flash) | `bigboom` + `lose` | "Defeated" bad |
 
-Repo notes: the duel's DOM HUD (AGENTS.md, Duel UX redesign; the 2D duel
-sides were retired with every 2D view on 2026-11-20) has win pips
-and a big score numeral in each player's colour, the last face-off with a named verdict, a YOUR THROW / LOCKED pill, a
-draining round-clock bar, large throw tiles whose microcopy teaches the cycle
-("crushes scissors / covers rock / cut paper"), an animated verdict banner
-and a round-chip strip. A 3D arena keeps every one of those meanings (in the
-scene or the DOM HUD) and must not let the HUD update before the 3D reveal
-lands. Elements that sit on the page background carry their own dark panel.
+Repo notes: with WebGL the scene carries the score (pips and streak flame
+on the plates, the rounds on the plaque); the DOM scoreboard shows only in
+the lobby or without WebGL. The round clock sits in the turn banner at the
+top; under the scene are the large throw tiles (microcopy teaches the cycle:
+"crushes scissors / covers rock / cut paper") and the animated verdict
+banner. The page must not update before the 3D reveal lands. Elements that
+sit on the page background carry their own dark panel.
 
 ## 5. Frontlines: troops over hills at dusk
 
@@ -619,7 +633,7 @@ round replays on open (a forfeit lands at once); a tap skips.
    `JuiceProvider` + `JuiceRig` + `ArenaPost`, `Intro`, `SkyDome`, then the
    board; `ArenaFrame` around it with `ImpactLayer` as overlay and
    `SoundToggle` in tools.
-4. Lazy-load it from `games.ts` like `LcArena3D`/`BsArena3D` (a dynamic
+4. Add it to `KIND3D` in `games.ts` (the generic loader the thirteen newer arenas use) (a dynamic
    import so three.js stays in its own chunk; the 3D host shows "Loading the
    3D arena…" until `onReady`, or an error with Reload).
 5. Add an `aria-live` ticker, keyboard play, and the reduced-motion path.

@@ -51,7 +51,9 @@ here, not a published number for these games. Tune on a real phone.
 The classic definition of game feel ("real-time control of virtual objects
 in a simulated space, with interactions emphasized by polish") excludes
 turn-based play ([Wikipedia: Game feel](https://en.wikipedia.org/wiki/Game_feel); [survey](https://arxiv.org/pdf/2011.09201)).
-All three games here are discrete-commit:
+Every game here is discrete-commit (the three oldest below; the round-based
+reveal games - Frontlines to Sketch & Guess - follow commit → sealed →
+the round's reveal):
 
 | Game | Core loop | Server pacing (AGENTS.md) |
 |---|---|---|
@@ -175,18 +177,19 @@ Platform guidance agrees ([Apple HIG](https://developer.apple.com/design/human-i
 - Always optional; the game must work without them. iOS web has none.
 
 Pattern vocabulary for `navigator.vibrate` (ms; arrays alternate
-vibrate/pause). Research values unless marked derived:
+vibrate/pause), as shipped in `BUZZ` (`sfx.ts`); use the names:
 
-| Meaning | Pattern |
-|---|---|
-| rare selection tick | 12 |
-| your commit / lock-in | 20 |
-| you hit them | 35 |
-| you were hit (derived) | `[30, 40, 30]` |
-| you sank or derezzed theirs | `[40, 60, 40]` |
-| your ship sunk / your rider derezzed (derived, owner: noticeable) | `[90, 50, 50]` |
-| match won | `[60, 80, 120]` (rising) |
-| match lost: your duel, last ship, last rider (derived, replaces the research's soft 30 ms) | `[120, 80, 60]` (the win's contour reversed, equal weight) |
+| `BUZZ` name | Meaning | Pattern |
+|---|---|---|
+| (none; research) | rare selection tick - unused | 12 |
+| `commit` | your commit / lock-in | 18 |
+| `nearMiss` | a shot splashed near your fleet | 15 |
+| `scored` | you hit them / took the round | 25 |
+| `hitYou` | you were hit / lost the round (derived) | `[30, 40, 30]` |
+| `sankTheirs` | you sank or derezzed theirs | `[40, 60, 40]` |
+| `lostOne` | your ship sunk / your rider derezzed (derived, owner: noticeable) | `[90, 50, 50]` |
+| `wonMatch` | match won | `[60, 80, 120]` (rising) |
+| `lostMatch` | match lost (derived, replaces the research's soft 30 ms) | `[120, 80, 60]` (the win's contour reversed, equal weight) |
 
 Light Cycles turns are frequent: never buzz per turn; buzz for crashes and
 match end. Buzz spectators only for decisive moments, if at all (derived:
@@ -197,7 +200,7 @@ haptics need a causal link to the viewer).
 | Game | Anticipation | Impact | Aftermath (permanence) |
 |---|---|---|---|
 | Battleship | reticle tightens; shell arc with a falling whistle, 300–600 ms | miss: splash. hit: flash, fire, hit-stop, shake | miss peg; scorch plus fire and smoke that keep burning; a sunk hull and its neighbours stay marked |
-| Light Cycles | lock pips per rider; the tick plays as motion; proximity glow near a wall | derez burst plus hit-stop | the dead rider's trail collapses or stays as a dim scar; the survivor's trail flares |
+| Light Cycles | lock pips per rider; the tick plays as motion; proximity glow near a wall | derez burst plus hit-stop | the dead rider's trail stays as a dim scar (the server keeps it as a wall; never collapse it); the survivor's trail flares |
 | RPS | four-beat chant, fist-pump squash per beat, quickening heartbeat | both throws flip on one frame and collide with squash/stretch and a flash | score pip and round chip fill and stay: the pattern record |
 
 Permanence matters most in Battleship: the board is the game's record, so a

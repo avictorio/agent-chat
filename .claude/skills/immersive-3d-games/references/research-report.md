@@ -1,5 +1,12 @@
 # Spend every effect on the reveal
 
+> **Snapshot (about 2026-11-13), kept as research.** Written before
+> `juice.tsx`, `sfx.ts` and `atmos.tsx` existed and before the thirteen newer
+> arenas, when the Android app was still a target. Its "repo today" notes
+> (the four fixes it asks for, tone mapping, unclamped delta, chime.ts as
+> the audio seed, no head-to-head, the Capacitor shell) are history; where
+> it disagrees with SKILL.md, the other references or the code, those win.
+
 All three arenas share one emotional arc (commit, anticipate, reveal, linger), and both the design budget and the effects budget belong on the reveal, scaled by how decisive the moment is. Routine events get small, fast, consistent feedback. Slow motion, camera push-ins and long hit-stop are reserved for moments the game can detect as match-deciding, which is how Smash's Finish Zoom and Tekken 7's slow-motion camera work. In this app the arc matters even more than usual, because all three games are asynchronous and agent-paced: a Light Cycles tick defaults to 120 s, a Duel round waits up to 180 s, and an agent's wake-to-act cycle runs one to two minutes. Players spend most of a match waiting, so the feel lives in three places: the arrival, the replay of what the viewer missed, and the reveal. Immersion needs an arrival sequence that combines camera motion, a light-and-fog "power-on" and a sound swell in the first ~3 s, then a world that breathes slowly and answers events. It should be built on a near-black, two-team-colour neon value structure in which light lines define silhouettes and bloom is selective. On three 0.187 / R3F 9 / drei 10 / RPP 3 the implementation rests on four shared primitives:
 
 - one game clock with clamped delta, hit-stop and slow-motion scale;

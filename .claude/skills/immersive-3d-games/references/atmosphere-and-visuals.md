@@ -39,19 +39,20 @@ load has none of them.
 | Time | Visual | Audio | In this repo |
 |---|---|---|---|
 | 0–0.3 s | the DOM cover fades from the scene's fog/background colour, never white | the tap that opened the arena has unlocked audio | `FirstFrame` (`arena3d.tsx`) runs `compileAsync` and reports ready only after shaders are built; `ImpactLayer`'s iris holds the world colour until then |
-| 0.3–2.5 s | ease-out flight from a high, wide vista to the play camera; fog eases from thick to normal | filter sweep / swell on the ambient bed (`sfx("enter")`) | `Intro` (`juice.tsx`) starts high, far and swung round, then `setLookAt(..., true)` with a short `smoothTime` |
+| 0.3–2.5 s | the camera starts low on the horizon, holds while the iris opens, then cranes up to the play camera; fog eases from thick to normal | target: a swell on the ambient bed (today only Werewolf plays `sfx("enter")`, at nightfall) | `Intro` (`juice.tsx`): low (el 0.1 rad), 1.5× the home distance, swung 0.28 rad, a ~0.9 s hold, then `setLookAt(..., true)` with `smoothTime` 0.7 |
 | 1.0–2.5 s | emissive light lines power on outward from the focal point | swell peaks as the camera settles | ramp a shared `uPower`-style uniform on grid/trim materials and light intensities |
 | 2.5–4 s | arena name card, then the HUD slides in and input unlocks | short sting | DOM title card via `ImpactLayer` (the iris already raises the world's name) |
-| any time | a tap skips to the end; repeat entries in a session use a ~1 s version; reduced motion gets a cross-fade with the same light and sound reveal | | `games.ts` decides "first open this page session" |
+| any time | a tap skips to the end; repeat entries in a session skip the intro (a ~1 s version is a target); reduced motion gets a cross-fade with the same light and sound reveal | | `useFirstVisit` (`juice.tsx`, sessionStorage `ac-intro:<key>:<id>`) decides "first open this page session" |
 
 Caveat: while the composer is mounted the renderer runs `NoToneMapping`, and
 no note verified that the `ToneMapping` effect honours
 `renderer.toneMappingExposure`. Ramp uniforms, lights and fog you own rather
 than exposure.
 
-Per-arena arrival ideas: Battleship descends through mist to the waterline,
-the moon breaks through, searchlights sweep on, then the grid is painted on
-the sea. Light Cycles draws the grid outward from the vanishing point, then
+Per-arena arrival ideas (all arenas share `Intro` today): Battleship could
+rise from the waterline as the sun breaks through the dusk haze, then the
+grid is painted on the sea (the night version with a moon and searchlights
+was rejected). Light Cycles draws the grid outward from the vanishing point, then
 the walls, then the cycles fill from wireframe to solid under a rising synth
 drone. The Duel snaps overhead spotlights on one by one with a heavy "clunk",
 ending on two pools of light, then goes straight into the Present beat.
@@ -119,7 +120,7 @@ The shared grammar:
 2. **One hue per side.** Cyan vs amber is complementary and survives the
    common red-green deficiencies. The repo's player colours come from the
    server (`players[].hex`: cyan `#22d3ee`, orange `#fb923c`, pink
-   `#f472b6`, lime `#a3e635`).
+   `#f472b6`, lime `#a3e635`, violet `#a78bfa`, yellow `#facc15`).
 3. **A second channel for identity.** Never colour alone: solid vs dashed
    trails, different hull light patterns, HUD labels.
 4. **Rim or Fresnel light instead of fill light** to separate silhouettes from
@@ -143,16 +144,15 @@ horizontally striped yellow-to-red sun on the horizon.
 
 `SkyDome` (`atmos.tsx`) takes a `SkySpec`: `top`, `mid`, `horizon`, `ground`,
 `glow`/`glowAmt`, `stars` (0..~0.12), `aurora` with `auroraA/B`, `swirl`
-(nebula), and an optional striped synthwave `sun {size, az, el, a, b}`. One
+(nebula), an optional striped synthwave `sun {size, az, el, a, b}` and an
+optional soft `moon {dir, size, color}` disc with a halo (Battleship's
+setting sun). One
 draw, no textures. `HorizonGrid` adds an endless additive grid that fades to
 the horizon with a slow outward pulse, leaving a `hole` over the board.
 
-Per-arena looks (full detail in `game-playbooks.md`): Battleship is
-neon-noir naval (dark navy, hulls as silhouettes with emissive deck and
-waterline lines, violet-to-magenta horizon band, low striped moon behind
-fog). Light Cycles is canonical Tron: Legacy (desaturated metallic-blue
-floor, circuit pattern, scrolling grid, trails as solid emissive ribbons).
-The Duel is a spotlit stage with two pools of light and a silhouetted crowd.
+Per-arena looks: see SKILL.md ("Arenas") and `game-playbooks.md`.
+Battleship is dusk at sea with light-painted hulls; Light Cycles is Tron:
+Legacy on a black mirror floor; the Duel is a glass stage in a nebula.
 
 ## 5. Glow, fog and lighting in practice
 
@@ -161,9 +161,10 @@ The Duel is a spotlit stage with two pools of light and a silhouetted crowd.
   above 1 with `toneMapped={false}`)
   ([RPP bloom docs](https://github.com/pmndrs/react-postprocessing/blob/master/docs/effects/bloom.mdx);
   [three.js forum](https://discourse.threejs.org/t/what-does-the-threshold-in-unrealbloompass-means-and-how-to-make-a-color-just-pass-that-threshold-a-bit-how-to-calculate-the-threshold-for-a-color/60984)).
-  `LcArena3D.tsx` used threshold 1; `BsArena3D.tsx` used 0.72 with smoothing
-  0.3, so any bright lit surface (pegs, moon specular) bloomed whether or not
-  anyone chose it. `ArenaPost` takes `threshold` per arena: prefer ~1.
+  Light Cycles uses threshold 1, the Duel 0.9 and most arenas 0.95;
+  Battleship still uses 0.72 with smoothing 0.3, so any bright lit surface
+  (pegs, specular) blooms whether or not anyone chose it. `ArenaPost` takes
+  `threshold` per arena: prefer ~1.
 - With `<ToneMapping>` last in the composer, HDR highlights compress; expect
   to retune emissive intensities after adding it. The atmos effects multiply
   team colours by ~1.8–2.6 so bloom catches them.
@@ -203,7 +204,8 @@ Practice that shapes the SFX layer:
   click stays immediate.
 - **Synthesize instead of downloading** (recipes; `sfx.ts` already has
   `boom`, `bigboom`, `splash`, `whistle`, `ping`, `derez`, `lock`, `charge`,
-  `clash`, `shatter`, `win`, `lose`, `enter`):
+  `clash`, `shatter`, `win`, `lose`, `enter`, `beat`, `shoot`, `snip`,
+  `tear`, `wrap`, `smash`, `buzzer`, `whoosh`, `zap`):
 
 | Sound | Recipe |
 |---|---|
