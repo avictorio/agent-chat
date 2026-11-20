@@ -10,8 +10,19 @@
 import { json, readBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
-import { AUDIO_MAX, IMAGE_MAX, UP_SIGN_MAX, UP_SIGN_TTL, VIDEO_MAX } from "../limits.js";
+import {
+  AUDIO_MAX,
+  IMAGE_MAX,
+  ROOM_RE,
+  STREAM_PART,
+  UP_KINDS,
+  UP_SIGN_MAX,
+  UP_SIGN_TTL,
+  VIDEO_MAX,
+  VIDEO_MAX_HARD,
+} from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
+import { sniffVideo } from "../lib/sniff.js";
 
 export async function streamUploadPart(up, n, body, len, sniff) {
   if (!sniff) return { part: await up.uploadPart(n, body) };
@@ -176,4 +187,162 @@ export function ticketUpload(origin, room, t) {
     max_bytes: t.max_bytes,
     note: "PUT the raw file bytes to url. No invite token or other credential: the URL itself authorizes this one upload, until expires_at. Then call publish_message with message_id."
   };
+}
+
+// Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
+// begin_upload ticket. Deliberately NO access check: the ticket is the
+// credential (single-use, 15 minutes, hash-only at rest). The ticket is
+// never echoed back in any response.
+// Resumable upload links: the upload engine's part / sign / status /
+// finish / abort steps with the link as the credential, for one session.
+export async function uploadLinkStepRoute(rc, usm) {
+  const { request, env, url } = rc;
+  const uroom = decodeURIComponent(usm[1]).toLowerCase();
+  if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
+  const st = await ustub.uploadSessionTicket(decodeURIComponent(usm[2]));
+  if (st.status !== 200) {
+    if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
+    return json({ error: st.error }, st.status);
+  }
+  return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
+}
+
+export async function uploadLinkRoute(rc, um) {
+  const { request, env } = rc;
+  const uroom = decodeURIComponent(um[1]).toLowerCase();
+  if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
+  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB on a single-shot upload; larger files go through the upload engine (begin_upload with size)" }, 413);
+  const ubuf = await request.arrayBuffer();
+  const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
+  const ur = await ustub.redeemUpload(decodeURIComponent(um[2]), ubuf, uroom);
+  if (ur.status !== 200) return json({ error: ur.error }, ur.status);
+  return json({ room: uroom, ok: true, type: ur.type, bytes: ur.bytes, published: ur.published });
+}
+
+// Whole-file streaming ingest: ONE PUT carrying the entire video (the edge
+// refuses request bodies over 100 MB, so in practice up to that; bigger
+// files use the upload engine), for a client that can send a file in one
+// request. The Worker assembles
+// R2 multipart parts as the bytes arrive; nothing holds the whole file.
+export async function videoStreamRoute(rc, m) {
+  const { request, env, url, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
+  const id = parseInt(m[2], 10);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const acc = await stub.access(invite, owner);
+  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!env.MEDIA) return json({ error: "The R2 binding (MEDIA) is not configured" }, 501);
+  if (!request.body) return json({ error: "Missing upload body" }, 400);
+  const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
+  const begun = await stub.streamBegin(id, acc.name || "", request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
+  if (begun.status !== 200) return json({ error: begun.error }, begun.status);
+  const key = begun.key, uploadId = begun.uploadId;
+  const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
+  const fail = async (status, error) => {
+    try { await up.abort(); } catch (e) {}
+    // streamAbort deletes the object too, but only while this upload
+    // still owns the message's row: the key is shared with any newer one
+    await stub.streamAbort(id, uploadId);
+    return json({ error: error }, status);
+  };
+  const parts = [];
+  let counted = 0, n = 0, bufs = [], buflen = 0;
+  const take = (amount) => {
+    const out = new Uint8Array(amount);
+    let off = 0;
+    while (off < amount) {
+      const head = bufs[0], need = amount - off;
+      if (head.byteLength <= need) { out.set(head, off); off += head.byteLength; bufs.shift(); }
+      else { out.set(head.subarray(0, need), off); bufs[0] = head.subarray(need); off += need; }
+    }
+    buflen -= amount;
+    return out;
+  };
+  const reader = request.body.getReader();
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const value = chunk.value;
+      if (value && value.byteLength) {
+        counted += value.byteLength;
+        if (counted > VIDEO_MAX_HARD) return await fail(413, "Videos can be up to 5 GB");
+        bufs.push(value); buflen += value.byteLength;
+        while (buflen >= STREAM_PART) { const p = await up.uploadPart(++n, take(STREAM_PART)); parts.push({ partNumber: n, etag: p.etag }); }
+      }
+    }
+    if (buflen > 0) { const p = await up.uploadPart(++n, take(buflen)); parts.push({ partNumber: n, etag: p.etag }); }
+    if (!parts.length) return await fail(400, "Empty upload");
+    await up.complete(parts);
+  } catch (e) {
+    return await fail(502, "Upload stream failed: " + String((e && e.message) || e));
+  }
+  let head = null, sniffed = null;
+  try { head = await env.MEDIA.head(key); } catch (e) {}
+  if (head && head.size === counted) {
+    try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}
+  }
+  if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
+  const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);
+  if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
+  return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
+}
+
+// The upload engine (UP_KINDS): start / part / sign / status / finish / abort
+// for any kind, with the sender's invite or the owner key. /video/...
+// was the first chunked flow (video only); it is this same route.
+export async function uploadRoute(rc, m) {
+  const { request, env, url, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  const id = parseInt(m[2], 10);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const acc = await stub.access(invite, owner);
+  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner);
+}
+
+// Mint an upload ticket for one of your drafts (phase C): the REST twin
+// of MCP begin_upload for a draft that already exists. The response is
+// the only place the raw ticket ever appears.
+export async function uploadTicketRoute(rc, m) {
+  const { request, env, url, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const id = parseInt(m[2], 10);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const acc = await stub.access(invite, owner);
+  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  const body = await readBody(request);
+  const kind = String((body && body.kind) || "");
+  if (UP_KINDS.indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio, video or file" }, 400);
+  const member = acc.name || String((body && body.from) || "");
+  const sess = uploadSessionWanted(kind, body || {});
+  if (sess && sess.error) return json({ error: sess.error }, 400);
+  const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
+  if (t.status !== 200) return json({ error: t.error }, t.status);
+  return json({ room: room, message_id: id, draft: true, upload: sess ? sessionUpload(url.origin, room, kind, t) : ticketUpload(url.origin, room, t) });
+}
+
+// Find one of your draft uploads that can resume: same file size + fingerprint
+// as an interrupted attempt, of any kind (or "kind" in the body). Returns the
+// draft message id, its kind and the parts received. /video/resume is the
+// first, video-only form.
+export async function uploadResumeRoute(rc, m) {
+  const { request, env, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const acc = await stub.access(invite, owner);
+  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  const body = await readBody(request);
+  const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(String(body.kind)) >= 0 ? String(body.kind) : null);
+  const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner, kind);
+  return json({ room: room, found: !!r.found, id: r.id || null, kind: r.kind || null, received: r.received || [], part_size: r.part_size || null, parts: r.parts || null, direct: !!r.direct });
 }

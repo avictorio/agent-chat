@@ -20,6 +20,16 @@
 //
 //   node scripts/split-module.js prop <OBJECT> <key> <target> --export NAME [--header "text"] [--dry]
 //
+// Move one route of routeRequest (picked by a unique piece of its source,
+// e.g. its path pattern) into a handler; routeRequest keeps the test and
+// delegates, so route order and fall-through are unchanged:
+//
+//   node scripts/split-module.js route <target> <handlerName> <match> [--header "text"] [--dry]
+//
+// Drop named imports a module no longer uses:
+//
+//   node scripts/split-module.js prune [--dry]
+//
 // Report names a module uses but neither declares nor imports (what a move
 // could get wrong that `node --check` cannot see):
 //
@@ -53,33 +63,53 @@ function patNames(p, out) {
   else if (p.type === "RestElement") patNames(p.argument, out);
   else if (p.type === "AssignmentPattern") patNames(p.left, out);
 }
-// Names a function or catch clause declares (block scopes fold into their
-// function: close enough for import lists, and it errs towards "local").
-function localDecls(fn) {
-  if (declCache.has(fn)) return declCache.get(fn);
+// The names a scope-creating node declares, with real block scoping (a
+// `const page` in one block does not hide an imported `page` elsewhere in
+// the function):
+//   function: params, its own name (expressions), and `var`s anywhere in
+//             its body outside nested functions
+//   block / switch / function body: let, const, class and function
+//             declarations directly inside
+//   for / for-in / for-of: let/const in the head
+//   catch: its parameter
+const SCOPES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "BlockStatement",
+  "StaticBlock", "SwitchStatement", "ForStatement", "ForInStatement", "ForOfStatement", "CatchClause"]);
+function lexicalIn(stmts, out) {
+  for (const s of stmts) {
+    if (s.type === "VariableDeclaration" && s.kind !== "var") s.declarations.forEach((d) => patNames(d.id, out));
+    else if ((s.type === "FunctionDeclaration" || s.type === "ClassDeclaration") && s.id) out.add(s.id.name);
+  }
+}
+function scopeDecls(node) {
+  if (declCache.has(node)) return declCache.get(node);
   const out = new Set();
-  if (fn.type === "CatchClause") { patNames(fn.param, out); declCache.set(fn, out); return out; }
-  fn.params.forEach((p) => patNames(p, out));
-  if (fn.type === "FunctionExpression" && fn.id) out.add(fn.id.name);
-  (function scan(n) {
-    if (!n || typeof n.type !== "string") return;
-    if (n !== fn.body && FN.has(n.type)) { if (n.type === "FunctionDeclaration") out.add(n.id.name); return; }
-    if (n.type === "VariableDeclaration") n.declarations.forEach((d) => patNames(d.id, out));
-    if (n.type === "ClassDeclaration" && n.id) out.add(n.id.name);
-    for (const k of Object.keys(n)) {
-      if (k === "loc") continue;
-      const v = n[k];
-      if (Array.isArray(v)) v.forEach((c) => c && typeof c.type === "string" && scan(c));
-      else if (v && typeof v.type === "string") scan(v);
-    }
-  })(fn.body);
-  declCache.set(fn, out);
+  if (FN.has(node.type)) {
+    node.params.forEach((p) => patNames(p, out));
+    if (node.type === "FunctionExpression" && node.id) out.add(node.id.name);
+    (function vars(n) {
+      if (!n || typeof n.type !== "string") return;
+      if (n !== node.body && FN.has(n.type)) return;
+      if (n.type === "VariableDeclaration" && n.kind === "var") n.declarations.forEach((d) => patNames(d.id, out));
+      for (const k of Object.keys(n)) {
+        if (k === "loc") continue;
+        const v = n[k];
+        if (Array.isArray(v)) v.forEach((c) => c && typeof c.type === "string" && vars(c));
+        else if (v && typeof v.type === "string") vars(v);
+      }
+    })(node.body);
+  } else if (node.type === "BlockStatement" || node.type === "StaticBlock") lexicalIn(node.body, out);
+  else if (node.type === "SwitchStatement") node.cases.forEach((c) => lexicalIn(c.consequent, out));
+  else if (node.type === "ForStatement") { if (node.init && node.init.type === "VariableDeclaration" && node.init.kind !== "var") node.init.declarations.forEach((d) => patNames(d.id, out)); }
+  else if (node.type === "ForInStatement" || node.type === "ForOfStatement") { if (node.left.type === "VariableDeclaration" && node.left.kind !== "var") node.left.declarations.forEach((d) => patNames(d.id, out)); }
+  else if (node.type === "CatchClause") patNames(node.param, out);
+  declCache.set(node, out);
   return out;
 }
+// Is `name` declared by a scope enclosing the node at the end of `anc`?
 function shadowed(name, anc) {
   for (let i = anc.length - 2; i >= 0; i--) {
     const a = anc[i];
-    if ((FN.has(a.type) || a.type === "CatchClause") && localDecls(a).has(name)) return true;
+    if (SCOPES.has(a.type) && scopeDecls(a).has(name)) return true;
   }
   return false;
 }
@@ -427,6 +457,119 @@ function propAssign(E, objName, key, target, targetRel, exportName, header, dry)
   finish(targetRel, out, entryOut, dry, "prop " + objName + "." + key + " (assigned) -> " + targetRel + " as " + exportName);
 }
 
+// ---- route -----------------------------------------------------------------
+// Move one route of routeRequest into a handler. A route is either the pair
+//   X = path.match(RE);  if (X) { BODY }      (X declared or assigned)
+// or a single
+//   if (TEST) { BODY }
+// picked by a piece of its source text (`match`). BODY moves verbatim into
+//   export async function NAME(rc, X) { const { request, env, ... } = rc; BODY }
+// and routeRequest keeps the test, delegating:
+//   if (X) { const r = await NAME(rc, X); if (r !== undefined) return r; }
+// so order and fall-through are unchanged. routeRequest gets
+// `const rc = { request, env, url, path, owner, invite, inviteHdr };` once.
+const ROUTE_CTX = ["request", "env", "url", "path", "owner", "invite", "inviteHdr"];
+function route(targetRel, name, match, header, dry) {
+  const target = checkTarget(targetRel);
+  if (!/^[A-Za-z_$][\w$]*$/.test(name || "")) throw new Error("a handler NAME is required");
+  let E = loadEntry();
+  if (E.exps.has(name) || E.decls.has(name)) throw new Error(name + " is already declared");
+  const fnOf = (ast) => ast.body.find((n) => n.type === "FunctionDeclaration" && n.id.name === "routeRequest");
+  let fn = fnOf(E.ast);
+  if (!fn) throw new Error("no routeRequest in the entry");
+  const blockOf = (f) => (f.body.body.length === 1 && f.body.body[0].type === "BlockStatement" ? f.body.body[0] : f.body);
+  // the context object, once
+  if (!/const rc = \{ request, env, url, path, owner, invite, inviteHdr \};/.test(E.src)) {
+    const blk = blockOf(fn);
+    const last = blk.body.find((s) => s.type === "VariableDeclaration" && s.declarations.some((d) => d.id.name === "inviteHdr"));
+    if (!last) throw new Error("routeRequest has no inviteHdr declaration to follow");
+    const el = E.lines.slice();
+    const ind = el[last.loc.start.line - 1].match(/^ */)[0];
+    el.splice(last.loc.end.line, 0, ind + "const rc = { request, env, url, path, owner, invite, inviteHdr };");
+    const text = el.join("\n");
+    E = Object.assign({}, E, { src: text, ast: parse(text), lines: text.split("\n") });
+    fn = fnOf(E.ast);
+  }
+  const stmts = blockOf(fn).body;
+  const srcOf = (n) => E.src.slice(n.start, n.end);
+  const hits = stmts.filter((s) => srcOf(s).includes(match) && (s.type === "IfStatement" || s.type === "VariableDeclaration" || s.type === "ExpressionStatement"));
+  if (hits.length !== 1) throw new Error("'" + match + "' picks " + hits.length + " statements in routeRequest; make it unique");
+  let first = hits[0];
+  let ifs;
+  let varName = null;
+  const assignTarget = (s) => {
+    if (s.type === "VariableDeclaration" && s.declarations.length === 1 && s.declarations[0].init) return s.declarations[0].id.name;
+    if (s.type === "ExpressionStatement" && s.expression.type === "AssignmentExpression" && s.expression.left.type === "Identifier") return s.expression.left.name;
+    return null;
+  };
+  // the if's test may be the match variable or use it (`X && method === "GET"`)
+  const testUses = (s, v) => !!v && refsOf(s.test, new Set([v])).size > 0;
+  if (first.type === "IfStatement") {
+    ifs = first;
+    const i = stmts.indexOf(first);
+    const prev = i > 0 ? stmts[i - 1] : null;
+    const pv = prev && assignTarget(prev);
+    if (pv && testUses(ifs, pv)) { first = prev; varName = pv; }
+  } else {
+    varName = assignTarget(first);
+    ifs = stmts[stmts.indexOf(first) + 1];
+    if (!varName || !ifs || ifs.type !== "IfStatement" || !testUses(ifs, varName)) throw new Error("expected an if testing " + varName + " right after the match");
+  }
+  if (ifs.alternate) throw new Error("the route's if has an else branch");
+  if (ifs.consequent.type !== "BlockStatement" || !ifs.consequent.body.length) throw new Error("the route's if needs a { ... } body");
+  if (ifs.consequent.loc.start.line === ifs.consequent.loc.end.line) throw new Error("single-line route: leave it in routeRequest");
+  const body = ifs.consequent.body;
+  // the body's own names: context names destructured, the match variable a
+  // parameter, routeRequest's other locals refused
+  const locals = new Set();
+  fn.params.forEach((p) => patNames(p, locals));
+  for (const s of stmts) if (s.type === "VariableDeclaration") s.declarations.forEach((d) => patNames(d.id, locals));
+  locals.add("rc");
+  // names the body declares itself are its own, not routeRequest's
+  const own = new Set();
+  for (const s of body) {
+    if (s.type === "VariableDeclaration") s.declarations.forEach((d) => patNames(d.id, own));
+    if ((s.type === "FunctionDeclaration" || s.type === "ClassDeclaration") && s.id) own.add(s.id.name);
+  }
+  if (own.has("rc")) throw new Error("the route declares its own rc");
+  const usedLocals = new Set();
+  for (const s of body) refsOf(s, locals).forEach((n) => { if (!own.has(n)) usedLocals.add(n); });
+  const ctxUsed = ROUTE_CTX.filter((n) => usedLocals.has(n));
+  const strayLocals = [...usedLocals].filter((n) => !ROUTE_CTX.includes(n) && n !== varName);
+  if (strayLocals.length) throw new Error("the route uses routeRequest locals besides the context: " + strayLocals.join(", "));
+  let bare = false;
+  for (const s of body) walk.full(s, (x) => { if (x.type === "ReturnStatement" && !x.argument) bare = true; });
+  if (bare) throw new Error("the route has a bare `return;` (it would read as fall-through)");
+  const need = new Set();
+  for (const s of body) refsOf(s, E.known).forEach((n) => need.add(n));
+  ROUTE_CTX.forEach((n) => need.delete(n));
+  if (varName) need.delete(varName);
+  // comments directly above the route move with it
+  const a0 = first.loc.start.line - 1;
+  const a = climbComments(E.lines, a0, blockOf(fn).loc.start.line);
+  const b = ifs.loc.end.line - 1;
+  const comments = E.lines.slice(a, a0).map((l) => l.replace(/^ */, ""));
+  const bodyStart = body[0].loc.start.line - 1;
+  const bodyEnd = body[body.length - 1].loc.end.line - 1;
+  const ind = E.lines[bodyStart].match(/^ */)[0].length;
+  const shift = ind - 2;
+  const bodyLines = E.lines.slice(bodyStart, bodyEnd + 1).map((l) => (l.slice(0, shift).trim() === "" ? l.slice(shift) : l));
+  const head = "export async function " + name + "(rc" + (varName ? ", " + varName : "") + ") {";
+  const destr = ctxUsed.length ? ["  const { " + ctxUsed.join(", ") + " } = rc;"] : [];
+  const block = (comments.length ? comments.join("\n") + "\n" : "") + [head].concat(destr, bodyLines, ["}"]).join("\n") + "\n";
+  const out = targetText(target, header, need, E.exps, E.imports, block);
+  // routeRequest: keep the match and the test, delegate
+  const rind = E.lines[a0].match(/^ */)[0];
+  const keep = [];
+  if (first !== ifs) keep.push(...E.lines.slice(first.loc.start.line - 1, first.loc.end.line));
+  const test = E.src.slice(ifs.test.start, ifs.test.end);
+  keep.push(rind + "if (" + test + ") { const r = await " + name + "(rc" + (varName ? ", " + varName : "") + "); if (r !== undefined) return r; }");
+  const el = E.lines.slice();
+  el.splice(a, b - a + 1, ...keep);
+  const entryOut = ensureImports(el.join("\n"), new Map([[relImport(ENTRY, target), new Set([name])]]));
+  finish(targetRel, out, entryOut, dry, "route " + name + " (" + (varName ? varName + " = " : "") + test.slice(0, 50) + ") -> " + targetRel);
+}
+
 // ---- verify ----------------------------------------------------------------
 // Globals of the Workers runtime and the language that modules may use bare.
 const GLOBALS = new Set(("undefined NaN Infinity globalThis Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp Error TypeError RangeError SyntaxError ReferenceError " +
@@ -472,6 +615,46 @@ function verify() {
   console.log("verify: every name in " + all.length + " module(s) resolves");
 }
 
+// ---- prune -----------------------------------------------------------------
+// Drop named imports a module no longer uses (moves leave them behind in
+// the entry when the last user of a name moves out).
+function prune(dry) {
+  let total = 0;
+  for (const f of listModules()) {
+    const text = fs.readFileSync(f, "utf8");
+    const ast = parse(text);
+    const imps = ast.body.filter((n) => n.type === "ImportDeclaration");
+    const names = new Set();
+    imps.forEach((d) => d.specifiers.forEach((s) => names.add(s.local.name)));
+    const used = new Set();
+    for (const n of ast.body) if (n.type !== "ImportDeclaration") refsOf(n, names).forEach((x) => used.add(x));
+    const edits = [];
+    for (const d of imps) {
+      if (!d.specifiers.length || d.specifiers.some((s) => s.type !== "ImportSpecifier")) {
+        // a default (text module) import: drop the whole line when unused
+        if (d.specifiers.length === 1 && d.specifiers[0].type === "ImportDefaultSpecifier" && !used.has(d.specifiers[0].local.name)) edits.push([d, null]);
+        continue;
+      }
+      const keep = d.specifiers.filter((s) => used.has(s.local.name)).map((s) => s.local.name);
+      if (keep.length === d.specifiers.length) continue;
+      edits.push([d, keep.length ? importLine(keep, d.source.value) : null]);
+    }
+    if (!edits.length) continue;
+    let out = text;
+    for (const [d, r] of edits.sort((x, y) => y[0].start - x[0].start)) {
+      let end = d.end;
+      if (r === null && out[end] === "\n") end++;
+      out = out.slice(0, d.start) + (r === null ? "" : r) + out.slice(end);
+    }
+    const dropped = edits.reduce((n, [d, r]) => n + d.specifiers.length - (r === null ? 0 : parse(r).body[0].specifiers.length), 0);
+    total += dropped;
+    console.log(path.relative(ROOT, f) + ": " + dropped + " unused import(s)");
+    parse(out);
+    if (!dry) fs.writeFileSync(f, out);
+  }
+  console.log("prune: " + total + " unused import(s)" + (dry ? " (dry run)" : " removed"));
+}
+
 // ---- cli -------------------------------------------------------------------
 const [cmd, ...args] = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
@@ -479,7 +662,9 @@ try {
   if (cmd === "move") move(args[0], args[1], opt("--header"), args.includes("--dry"));
   else if (cmd === "methods") methods(args[0], args[1], opt("--export"), opt("--header"), args.includes("--dry"));
   else if (cmd === "prop") prop(args[0], args[1], args[2], opt("--export"), opt("--header"), args.includes("--dry"));
+  else if (cmd === "route") route(args[0], args[1], args[2], opt("--header"), args.includes("--dry"));
   else if (cmd === "verify") verify();
+  else if (cmd === "prune") prune(args.includes("--dry"));
   else {
     console.error("usage: split-module.js move <target> <names> [--header text] [--dry]\n" +
       "       split-module.js methods <target> <names|prefix*> --export NAME [--header text] [--dry]\n" +

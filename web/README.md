@@ -8,7 +8,7 @@ in `tests/ui.test.js`, against a fake API). The build in `app/dist` is
 deployed as Workers Static Assets: Workers Builds builds it on every push
 to `main` and `wrangler deploy` uploads it with the Worker, so it is never
 committed. `app/public/_headers` gives the hashed `/assets/*` files a
-one-year immutable cache. The backend (`worker/index.js`,
+one-year immutable cache. The backend (`worker/`,
 the Room Durable Objects, the API) is its contract; see the root
 `AGENTS.md` for deploys.
 

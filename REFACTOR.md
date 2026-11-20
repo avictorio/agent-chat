@@ -13,9 +13,10 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.5 are live, 2.6 is committed; 4.6 is done.
-Next is 2.7: the fetch handler (`routeRequest`, ~1,300 lines) becomes a
-route table with one file per API area under `routes/`. Claude Code's built-in `cc-plugin-privacy` plugin once
+State on 2026-11-20: phase 1 and steps 2.1-2.6 are live, 2.7 is committed; 4.6 is done.
+Next is 2.8: the Room class (~2,500 lines in index.js) by area into
+`room/` with the split tool's `methods` mode (constructor, fetch and
+alarm stay in the class). Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -205,8 +206,21 @@ limits and the games move before `agents/`.
       MCP needed came along: `lib/reactions.js`, `uploads/plan.js` (part
       sizes and kind checks) and `routes/uploads.js` (the upload request
       helpers, ahead of 2.7). index.js 5,902 -> 4,449 lines
-- [ ] 2.7 `routes/`: the fetch handler becomes a route table; one file per
-      API area
+- [x] 2.7 `routes/`: the fetch handler becomes a route table; one file per
+      API area - 2.7a moved the helpers the routes call (`routes/pages.js`
+      page shell and icons, `room/state.js` room_state, `lib/errors.js`,
+      `room/voices.js`, `routes/rooms.js` genesis email and roomExists);
+      2.7b moved 48 routes into handlers with the tool's `route` mode
+      (body verbatim, the context destructured from `rc`, routeRequest
+      keeps each test and delegates, order and fall-through unchanged):
+      routeRequest ~1,400 -> 132 lines, 14 files under `routes/`.
+      index.js 4,449 -> 2,863 lines.
+      Found on the way: the tool's scope analysis folded block scopes into
+      the function, so a `const page` in one route block hid the imported
+      `page()` elsewhere and an import was dropped (caught by `verify` in
+      the rehearsal, never deployed). Scoping is now block-accurate; a
+      re-verify of everything already deployed found nothing. `prune`
+      drops imports a module no longer uses (150 in the entry)
 - [ ] 2.8 `room/`: the rest of the Room class by area (schema, messages,
       members and invites, uploads, voices, streams, digest, games glue)
 - [ ] 2.9 Fix comments left in the wrong place by earlier edits (the
