@@ -1,29 +1,34 @@
-// Refactor tool for the Worker split (REFACTOR.md phase 2).
+// Refactor tool for the Worker split (REFACTOR.md phase 2). Every command
+// edits worker/index.js (the entry) and one module under worker/; nothing
+// is ever imported back from the entry, so the modules form no cycle
+// through it. Needs the dev dependencies acorn and acorn-walk (npm i).
 //
-// Move named top-level declarations out of the Worker entry into a module:
+// Move top-level declarations into a module, each with the comment block
+// directly above it, exported:
 //
 //   node scripts/split-module.js move <target> <name,name,...> [--header "text"] [--dry]
 //
-//   e.g. node scripts/split-module.js move worker/lib/http.js json,html,CORS --header "HTTP helpers."
+// Move Room methods (names, or prefixes ending in *) into a module as an
+// object of methods, installed back with Object.assign(Room.prototype, NAME)
+// right after the class - `this`, call sites and Durable Object RPC are
+// unchanged. Methods using `super`, getters, setters and statics stay put:
 //
-// - Each declaration moves with the comment block directly above it and is
-//   exported from the target (appended to if it exists).
-// - The target imports what the moved code needs: names exported by other
-//   modules under worker/ (found by reading them), `cloudflare:workers`, or
-//   the text modules the entry imports (paths adjusted).
-// - A move whose code needs a name that stays in the entry is refused, so
-//   no module ever imports from worker/index.js (no cycles through it).
-// - The entry gains an import for every moved name it still uses.
+//   node scripts/split-module.js methods <target> <names> --export NAME [--header "text"] [--dry]
 //
-// Check that every module resolves its names:
+// Lift one entry of a top-level object literal (a game in GAME_ENGINES)
+// into a module as its own export; the object keeps the key, pointing at it:
+//
+//   node scripts/split-module.js prop <OBJECT> <key> <target> --export NAME [--header "text"] [--dry]
+//
+// Report names a module uses but neither declares nor imports (what a move
+// could get wrong that `node --check` cannot see):
 //
 //   node scripts/split-module.js verify
 //
-// reports identifiers a module uses but neither declares nor imports
-// (beyond the runtime's globals) - the mistake a move could make that
-// `node --check` cannot see.
-//
-// Needs the dev dependencies acorn and acorn-walk (npm i at the repo root).
+// The moved code's imports come from the modules that export them (found by
+// reading worker/), `cloudflare:workers`, or the entry's text-module imports
+// (paths adjusted). A move whose code needs a name that stays in the entry
+// is refused: move that name first, or with it.
 "use strict";
 
 const fs = require("fs");
@@ -37,7 +42,7 @@ const ENTRY = path.join(WORKER, "index.js");
 
 const parse = (s) => acorn.parse(s, { ecmaVersion: "latest", sourceType: "module", locations: true });
 
-// ---- scope helpers -------------------------------------------------------
+// ---- scopes ----------------------------------------------------------------
 const FN = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
 const declCache = new WeakMap();
 function patNames(p, out) {
@@ -48,14 +53,12 @@ function patNames(p, out) {
   else if (p.type === "RestElement") patNames(p.argument, out);
   else if (p.type === "AssignmentPattern") patNames(p.left, out);
 }
-// Names a function or catch clause declares (block scopes are folded into
-// their function: close enough for an import list, and it errs towards
-// treating a name as local).
+// Names a function or catch clause declares (block scopes fold into their
+// function: close enough for import lists, and it errs towards "local").
 function localDecls(fn) {
   if (declCache.has(fn)) return declCache.get(fn);
   const out = new Set();
   if (fn.type === "CatchClause") { patNames(fn.param, out); declCache.set(fn, out); return out; }
-  if (fn.type === "ClassExpression" || fn.type === "ClassDeclaration") { declCache.set(fn, out); return out; }
   fn.params.forEach((p) => patNames(p, out));
   if (fn.type === "FunctionExpression" && fn.id) out.add(fn.id.name);
   (function scan(n) {
@@ -80,7 +83,7 @@ function shadowed(name, anc) {
   }
   return false;
 }
-// Is this Identifier a reference (not a property name, label, or key)?
+// Is this Identifier a reference (not a property name, key or label)?
 function isRef(n, anc) {
   const p = anc[anc.length - 2];
   if (!p) return true;
@@ -101,7 +104,7 @@ function refsOf(node, wanted) {
   return out;
 }
 
-// ---- module index ----------------------------------------------------------
+// ---- modules ---------------------------------------------------------------
 function listModules() {
   const files = [];
   (function w(dir) {
@@ -114,18 +117,17 @@ function listModules() {
   return files.sort();
 }
 function topLevel(ast) {
-  const decls = new Map(); // name -> statement node
-  const imports = new Map(); // local -> {source, kind}
+  const decls = new Map(); // name -> statement
+  const imports = new Map(); // local -> { source, kind }
   const exported = new Set();
   for (const node of ast.body) {
     if (node.type === "ImportDeclaration") {
       for (const s of node.specifiers) imports.set(s.local.name, { source: node.source.value, kind: s.type });
       continue;
     }
-    const isExport = node.type === "ExportNamedDeclaration" || node.type === "ExportDefaultDeclaration";
-    const d = isExport ? node.declaration || node : node;
-    let names = [];
-    if (d && (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") && d.id) names = [d.id.name];
+    const d = node.type === "ExportNamedDeclaration" || node.type === "ExportDefaultDeclaration" ? node.declaration || node : node;
+    const names = [];
+    if (d && (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") && d.id) names.push(d.id.name);
     else if (d && d.type === "VariableDeclaration") d.declarations.forEach((v) => names.push(v.id.name));
     for (const n of names) { decls.set(n, node); if (node.type === "ExportNamedDeclaration") exported.add(n); }
     if (node.type === "ExportNamedDeclaration" && node.specifiers) node.specifiers.forEach((s) => exported.add(s.exported.name));
@@ -136,8 +138,7 @@ function exportIndex(except) {
   const idx = new Map();
   for (const f of listModules()) {
     if (f === except) continue;
-    const { exported } = topLevel(parse(fs.readFileSync(f, "utf8")));
-    for (const n of exported) {
+    for (const n of topLevel(parse(fs.readFileSync(f, "utf8"))).exported) {
       if (idx.has(n)) throw new Error(n + " is exported by both " + idx.get(n) + " and " + f);
       idx.set(n, f);
     }
@@ -155,21 +156,142 @@ function importLine(names, from) {
   if (one.length <= 100) return one;
   return "import {\n" + list.map((n) => "  " + n + ",\n").join("") + "} from \"" + from + "\";";
 }
-
-// ---- move -----------------------------------------------------------------
-function move(targetRel, namesArg, header, dry) {
+// Add imports to a module's text, merging with an existing named import from
+// the same source. named: Map(source -> Set(names)); defaults: Map(local ->
+// source) for text modules. New lines go after the last import, or after the
+// file's leading comment block.
+function ensureImports(text, named, defaults) {
+  const decls = parse(text).body.filter((n) => n.type === "ImportDeclaration");
+  const edits = [];
+  const fresh = [];
+  for (const [src, names] of named) {
+    const ex = decls.find((d) => d.source.value === src && d.specifiers.length && d.specifiers.every((s) => s.type === "ImportSpecifier"));
+    if (ex) {
+      const have = new Set(ex.specifiers.map((s) => s.local.name));
+      const all = new Set([...have, ...names]);
+      if (all.size !== have.size) edits.push([ex.start, ex.end, importLine(all, src)]);
+    } else fresh.push(importLine(names, src));
+  }
+  for (const [local, src] of defaults || []) {
+    if (!decls.some((d) => d.specifiers.some((s) => s.local.name === local))) fresh.push("import " + local + " from \"" + src + "\";");
+  }
+  let out = text;
+  for (const [a, b, r] of edits.sort((x, y) => y[0] - x[0])) out = out.slice(0, a) + r + out.slice(b);
+  if (!fresh.length) return out;
+  const lines = out.split("\n");
+  const imps = parse(out).body.filter((n) => n.type === "ImportDeclaration");
+  let at;
+  if (imps.length) at = imps[imps.length - 1].loc.end.line;
+  else {
+    at = 0;
+    while (at < lines.length && lines[at].startsWith("//")) at++;
+    if (at > 0) { lines.splice(at, 0, ""); at++; }
+  }
+  lines.splice(at, 0, ...fresh);
+  const next = lines[at + fresh.length];
+  if (!imps.length && next !== undefined && next.trim() !== "") lines.splice(at + fresh.length, 0, "");
+  return lines.join("\n");
+}
+// The imports `file` needs for `need`, by source; and the names nothing
+// outside the entry provides.
+function wantedImports(file, need, exps, entryImports) {
+  const named = new Map();
+  const defaults = new Map();
+  const stay = [];
+  const add = (k, n) => { if (!named.has(k)) named.set(k, new Set()); named.get(k).add(n); };
+  for (const r of need) {
+    if (exps.has(r)) { if (exps.get(r) !== file) add(relImport(file, exps.get(r)), r); }
+    else if (entryImports.has(r)) {
+      const im = entryImports.get(r);
+      if (im.source === "cloudflare:workers") add(im.source, r);
+      else if (im.source.startsWith(".") && im.kind === "ImportDefaultSpecifier") defaults.set(r, relImport(file, path.resolve(WORKER, im.source)));
+      else stay.push(r + " (imported from " + im.source + ")");
+    } else stay.push(r);
+  }
+  return { named, defaults, stay };
+}
+// The comment lines directly above line index `a` (0-based), not above `floor`.
+function climbComments(lines, a, floor) {
+  let inBlock = false;
+  while (a > floor) {
+    const t = lines[a - 1].trim();
+    if (inBlock) { a--; if (t.startsWith("/*")) inBlock = false; continue; }
+    if (t.startsWith("//")) { a--; continue; }
+    if (t.endsWith("*/")) { a--; if (!t.startsWith("/*")) inBlock = true; continue; }
+    break;
+  }
+  return a;
+}
+// Join line spans: neighbours in the source stay together, others get one
+// blank line between them. pieces: [{ sp: [a, b], text }]
+function joinPieces(pieces) {
+  let body = "";
+  pieces.forEach((p, i) => {
+    if (i > 0) body += p.sp[0] === pieces[i - 1].sp[1] + 1 ? "\n" : "\n\n";
+    body += p.text;
+  });
+  return body;
+}
+// Remove line spans from the entry, collapsing doubled blank lines.
+function cutSpans(lines, spans) {
+  const keep = lines.slice();
+  for (const sp of spans.slice().sort((x, y) => y[0] - x[0])) {
+    keep.splice(sp[0], sp[1] - sp[0] + 1);
+    while (sp[0] > 0 && sp[0] < keep.length && keep[sp[0] - 1].trim() === "" && keep[sp[0]].trim() === "") keep.splice(sp[0], 1);
+  }
+  return keep.join("\n");
+}
+// New or extended target text: header, imports, then the block.
+function targetText(target, header, need, exps, entryImports, block) {
+  const { named, defaults, stay } = wantedImports(target, need, exps, entryImports);
+  if (stay.length) throw new Error("the moved code needs names that stay in the entry - move them first, or with it:\n  " + stay.sort().join("\n  "));
+  const base = fs.existsSync(target) ? fs.readFileSync(target, "utf8").replace(/\s*$/, "\n") + "\n" : header ? "// " + header + "\n" : "";
+  return ensureImports(base + block, named, defaults);
+}
+// Drop entry imports of text modules nothing in the entry uses any more.
+function dropUnusedTextImports(text) {
+  const ast = parse(text);
+  const { imports } = topLevel(ast);
+  const unused = [];
+  for (const [local, im] of imports) {
+    if (im.kind !== "ImportDefaultSpecifier" || !im.source.startsWith(".")) continue;
+    if (!refsOf(ast, new Set([local])).size) unused.push(local);
+  }
+  if (!unused.length) return text;
+  return text.split("\n").filter((l) => !unused.some((u) => l.startsWith("import " + u + " from "))).join("\n");
+}
+function finish(targetRel, out, entryOut, dry, summary) {
+  parse(out);
+  parse(entryOut);
+  console.log(summary);
+  if (dry) return;
   const target = path.join(ROOT, targetRel);
-  if (!target.startsWith(WORKER + path.sep)) throw new Error("target must be under worker/");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, out);
+  fs.writeFileSync(ENTRY, entryOut);
+}
+function loadEntry() {
   const src = fs.readFileSync(ENTRY, "utf8");
   const ast = parse(src);
-  const { decls, imports } = topLevel(ast);
+  const tl = topLevel(ast);
   const exps = exportIndex(ENTRY);
-  const known = new Set([...decls.keys(), ...imports.keys(), ...exps.keys()]);
-  const names = namesArg.split(",").map((s) => s.trim()).filter(Boolean);
+  const known = new Set([...tl.decls.keys(), ...tl.imports.keys(), ...exps.keys()]);
+  return { src, ast, lines: src.split("\n"), decls: tl.decls, imports: tl.imports, exps, known };
+}
+function checkTarget(targetRel) {
+  const target = path.join(ROOT, targetRel);
+  if (!target.startsWith(WORKER + path.sep) || target === ENTRY) throw new Error("target must be a module under worker/ other than the entry");
+  return target;
+}
 
+// ---- move ------------------------------------------------------------------
+function move(targetRel, namesArg, header, dry) {
+  const target = checkTarget(targetRel);
+  const E = loadEntry();
+  const names = namesArg.split(",").map((s) => s.trim()).filter(Boolean);
   const stmts = [];
   for (const n of names) {
-    const st = decls.get(n);
+    const st = E.decls.get(n);
     if (!st) throw new Error("not a top-level declaration in the entry: " + n);
     if (st.type === "ExportDefaultDeclaration") throw new Error("refusing to move the default export");
     if (!stmts.includes(st)) stmts.push(st);
@@ -181,112 +303,128 @@ function move(targetRel, namesArg, header, dry) {
     else moved.add(d.id.name);
   }
   for (const n of moved) if (!names.includes(n)) throw new Error("the statement also declares " + n + ": list it too");
-
-  // line spans with the comment block directly above
-  const lines = src.split("\n");
-  const lineStart = [0];
-  for (let i = 0; i < lines.length; i++) lineStart.push(lineStart[i] + lines[i].length + 1);
-  const span = (st) => {
-    let a = st.loc.start.line - 1;
+  const pieces = stmts.map((st) => {
+    const a0 = st.loc.start.line - 1;
     const b = st.loc.end.line - 1;
-    if (src.slice(lineStart[a], st.start).trim() !== "") throw new Error("code before the statement on its line: " + lines[a]);
-    const after = src.slice(st.end, lineStart[b + 1] - 1);
-    if (after.trim() !== "" && !/^\s*\/\//.test(after)) throw new Error("code after the statement on its line: " + lines[b]);
-    let inBlock = false;
-    while (a > 0) {
-      const t = lines[a - 1].trim();
-      if (inBlock) { a--; if (t.startsWith("/*")) inBlock = false; continue; }
-      if (t.startsWith("//")) { a--; continue; }
-      if (t.endsWith("*/")) { a--; if (!t.startsWith("/*")) inBlock = true; continue; }
-      break;
-    }
-    return [a, b];
-  };
-  const spans = stmts.map((st) => ({ st, sp: span(st) })).sort((x, y) => x.sp[0] - y.sp[0]);
-
-  // what the moved code needs
+    if (E.lines[a0].slice(0, st.loc.start.column).trim() !== "") throw new Error("code before the statement on its line: " + E.lines[a0]);
+    const after = E.lines[b].slice(st.loc.end.column);
+    if (after.trim() !== "" && !/^\s*\/\//.test(after)) throw new Error("code after the statement on its line: " + E.lines[b]);
+    const a = climbComments(E.lines, a0, 0);
+    const tl = E.lines.slice(a, b + 1);
+    if (!tl[a0 - a].startsWith("export ")) tl[a0 - a] = "export " + tl[a0 - a];
+    return { st, sp: [a, b], text: tl.join("\n") };
+  }).sort((x, y) => x.sp[0] - y.sp[0]);
   const need = new Set();
-  for (const { st } of spans) for (const r of refsOf(st, known)) if (!moved.has(r)) need.add(r);
-  const fromFiles = new Map(); // file or specifier -> Set
-  const textImports = [];
-  const stay = [];
-  const add = (k, n) => { if (!fromFiles.has(k)) fromFiles.set(k, new Set()); fromFiles.get(k).add(n); };
-  for (const r of need) {
-    if (exps.has(r)) { if (exps.get(r) !== target) add(exps.get(r), r); }
-    else if (imports.has(r)) {
-      const im = imports.get(r);
-      if (im.source === "cloudflare:workers") add("cloudflare:workers", r);
-      else if (im.source.startsWith(".") && im.kind === "ImportDefaultSpecifier") textImports.push({ local: r, abs: path.resolve(WORKER, im.source) });
-      else stay.push(r + " (imported from " + im.source + ")");
-    } else stay.push(r);
-  }
-  if (stay.length) throw new Error("the moved code needs names that stay in the entry - move them too, or first:\n  " + stay.sort().join("\n  "));
-
-  // target text
-  const targetImports = [];
-  for (const t of textImports) targetImports.push("import " + t.local + " from \"" + relImport(target, t.abs) + "\";");
-  for (const [k, set] of fromFiles) targetImports.push(importLine(set, k === "cloudflare:workers" ? k : relImport(target, k)));
-  // Declarations that sat on consecutive lines stay together; others are
-  // separated by one blank line, as they would be in a hand-written file.
-  let body = "";
-  spans.forEach(({ st, sp }, i) => {
-    const tl = lines.slice(sp[0], sp[1] + 1);
-    const at = st.loc.start.line - 1 - sp[0];
-    if (!tl[at].startsWith("export ")) tl[at] = "export " + tl[at];
-    if (i > 0) body += sp[0] === spans[i - 1].sp[1] + 1 ? "\n" : "\n\n";
-    body += tl.join("\n");
-  });
-  let out;
-  if (fs.existsSync(target)) {
-    const ex = fs.readFileSync(target, "utf8");
-    const exLines = ex.split("\n");
-    let last = -1;
-    exLines.forEach((l, i) => { if (/^import |^} from /.test(l)) last = i; });
-    const addLines = targetImports.filter((l) => !ex.includes(l));
-    if (addLines.length) exLines.splice(last + 1, 0, ...addLines);
-    out = exLines.join("\n").replace(/\s*$/, "\n") + "\n" + body + "\n";
-  } else {
-    out = (header ? "// " + header + "\n\n" : "") + (targetImports.length ? targetImports.join("\n") + "\n\n" : "") + body + "\n";
-  }
-
-  // entry text: drop the spans, collapse doubled blank lines
-  const keep = lines.slice();
-  for (const { sp } of spans.slice().reverse()) {
-    keep.splice(sp[0], sp[1] - sp[0] + 1);
-    while (sp[0] > 0 && sp[0] < keep.length && keep[sp[0] - 1].trim() === "" && keep[sp[0]].trim() === "") keep.splice(sp[0], 1);
-  }
-  let entryOut = keep.join("\n");
+  for (const p of pieces) for (const r of refsOf(p.st, E.known)) if (!moved.has(r)) need.add(r);
+  const out = targetText(target, header, need, E.exps, E.imports, joinPieces(pieces) + "\n");
+  let entryOut = dropUnusedTextImports(cutSpans(E.lines, pieces.map((p) => p.sp)));
   const still = refsOf(parse(entryOut), moved);
-  // text imports the entry no longer uses
-  let el = entryOut.split("\n");
-  for (const t of textImports) {
-    const uses = (entryOut.match(new RegExp("\\b" + t.local + "\\b", "g")) || []).length;
-    if (uses === 1) el = el.filter((l) => !l.startsWith("import " + t.local + " from "));
+  if (still.size) entryOut = ensureImports(entryOut, new Map([[relImport(ENTRY, target), still]]));
+  finish(targetRel, out, entryOut, dry, "move " + moved.size + " name(s) -> " + targetRel + "; the entry imports back " + still.size);
+}
+
+// ---- methods ---------------------------------------------------------------
+function methods(targetRel, namesArg, exportName, header, dry) {
+  const target = checkTarget(targetRel);
+  if (!/^[A-Za-z_$][\w$]*$/.test(exportName || "")) throw new Error("--export NAME is required");
+  const E = loadEntry();
+  if (E.exps.has(exportName) || E.decls.has(exportName)) throw new Error(exportName + " is already declared");
+  const classStmt = E.ast.body.find((n) => { const d = n.declaration || n; return d.type === "ClassDeclaration" && d.id && d.id.name === "Room"; });
+  if (!classStmt) throw new Error("no class Room in the entry");
+  const cls = classStmt.declaration || classStmt;
+  const pats = namesArg.split(",").map((s) => s.trim()).filter(Boolean);
+  const matches = (n) => pats.some((p) => (p.endsWith("*") ? n.startsWith(p.slice(0, -1)) : n === p));
+  const members = cls.body.body;
+  const picked = members.filter((m) => m.type === "MethodDefinition" && !m.computed && matches(m.key.name || m.key.value));
+  for (const p of pats) if (!p.endsWith("*") && !picked.some((m) => (m.key.name || m.key.value) === p)) throw new Error("no Room method named " + p);
+  if (!picked.length) throw new Error("no Room methods match");
+  for (const m of picked) {
+    const nm = m.key.name || m.key.value;
+    if (m.kind !== "method" || m.static) throw new Error(nm + " is a " + (m.static ? "static " : "") + m.kind + ": only plain methods move");
+    let usesSuper = false;
+    walk.full(m.value, (x) => { if (x.type === "Super") usesSuper = true; });
+    if (usesSuper) throw new Error(nm + " uses super: it stays in the class");
   }
-  entryOut = el.join("\n");
-  if (still.size) {
-    const from = relImport(ENTRY, target);
-    const esc = from.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    const re = new RegExp("import \\{([^}]*)\\} from \"" + esc + "\";\\n?");
-    const mm = entryOut.match(re);
-    const merged = new Set(still);
-    if (mm) { mm[1].split(",").map((s) => s.trim()).filter(Boolean).forEach((n) => merged.add(n)); entryOut = entryOut.replace(re, ""); }
-    const bl = entryOut.split("\n");
-    let last = -1;
-    for (let i = 0; i < bl.length; i++) {
-      if (/^import |^} from /.test(bl[i])) last = i;
-      else if (last >= 0 && bl[i].trim() !== "" && !/^ {2}[\w$]+,$/.test(bl[i])) break;
-    }
-    bl.splice(last + 1, 0, importLine(merged, from));
-    entryOut = bl.join("\n");
-  }
-  parse(entryOut);
-  parse(out);
-  console.log("move " + moved.size + " name(s) -> " + targetRel + "; imports in the module: " + (targetImports.length || "none") + "; the entry imports back " + still.size);
-  if (dry) return;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, out);
-  fs.writeFileSync(ENTRY, entryOut);
+  const pieces = picked.map((m) => {
+    const a0 = m.loc.start.line - 1;
+    const b = m.loc.end.line - 1;
+    if (E.lines[a0].slice(0, m.loc.start.column).trim() !== "") throw new Error("code before the method on its line: " + E.lines[a0]);
+    if (E.lines[b].slice(m.loc.end.column).trim() !== "") throw new Error("code after the method on its line: " + E.lines[b]);
+    const i = members.indexOf(m);
+    const floor = i > 0 ? members[i - 1].loc.end.line : cls.body.loc.start.line;
+    const a = climbComments(E.lines, a0, floor);
+    const tl = E.lines.slice(a, b + 1);
+    tl[tl.length - 1] += ",";
+    return { m, sp: [a, b], text: tl.join("\n") };
+  }).sort((x, y) => x.sp[0] - y.sp[0]);
+  const need = new Set();
+  for (const p of pieces) for (const r of refsOf(p.m.value, E.known)) need.add(r);
+  const out = targetText(target, header, need, E.exps, E.imports, "export const " + exportName + " = {\n" + joinPieces(pieces) + "\n};\n");
+  let entryOut = cutSpans(E.lines, pieces.map((p) => p.sp));
+  // install right after the class (after earlier installs), then import
+  const cls2 = parse(entryOut).body.map((n) => n.declaration || n).find((d) => d.type === "ClassDeclaration" && d.id && d.id.name === "Room");
+  const el = entryOut.split("\n");
+  let at = cls2.loc.end.line;
+  while (at < el.length && /^Object\.assign\(Room\.prototype, /.test(el[at])) at++;
+  el.splice(at, 0, "Object.assign(Room.prototype, " + exportName + ");");
+  entryOut = ensureImports(el.join("\n"), new Map([[relImport(ENTRY, target), new Set([exportName])]]));
+  finish(targetRel, out, entryOut, dry, "methods: " + picked.length + " -> " + targetRel + " as " + exportName +
+    (dry ? " (" + picked.map((m) => m.key.name || m.key.value).join(", ") + ")" : ""));
+}
+
+// ---- prop ------------------------------------------------------------------
+function prop(objName, key, targetRel, exportName, header, dry) {
+  const target = checkTarget(targetRel);
+  if (!/^[A-Za-z_$][\w$]*$/.test(exportName || "")) throw new Error("--export NAME is required");
+  const E = loadEntry();
+  if (E.exps.has(exportName) || E.decls.has(exportName)) throw new Error(exportName + " is already declared");
+  const st = E.decls.get(objName);
+  const d = st && (st.declaration || st);
+  const decl = d && d.type === "VariableDeclaration" && d.declarations.find((v) => v.id.name === objName);
+  if (!decl || !decl.init || decl.init.type !== "ObjectExpression") throw new Error(objName + " is not a top-level object literal");
+  const props = decl.init.properties;
+  const p = props.find((q) => q.type === "Property" && !q.computed && (q.key.name || q.key.value) === key);
+  if (!p) return propAssign(E, objName, key, target, targetRel, exportName, header, dry);
+  const a0 = p.loc.start.line - 1;
+  const b = p.loc.end.line - 1;
+  if (E.lines[a0].slice(0, p.loc.start.column).trim() !== "") throw new Error("code before the property on its line");
+  const tail = E.lines[b].slice(p.loc.end.column).trim();
+  if (tail !== "" && tail !== ",") throw new Error("code after the property on its line");
+  const i = props.indexOf(p);
+  const a = climbComments(E.lines, a0, i > 0 ? props[i - 1].loc.end.line : decl.init.loc.start.line);
+  const indent = E.lines[a0].match(/^ */)[0];
+  const dedent = (l) => (l.startsWith(indent) ? l.slice(indent.length) : l);
+  const comments = E.lines.slice(a, a0).map(dedent);
+  const valueText = E.src.slice(p.value.start, p.value.end).split("\n").map((l, j) => (j === 0 ? l : dedent(l))).join("\n");
+  const block = (comments.length ? comments.join("\n") + "\n" : "") + "export const " + exportName + " = " + valueText + ";\n";
+  const out = targetText(target, header, refsOf(p.value, E.known), E.exps, E.imports, block);
+  const el = E.lines.slice();
+  el.splice(a, b - a + 1, indent + (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key)) + ": " + exportName + ",");
+  const entryOut = ensureImports(el.join("\n"), new Map([[relImport(ENTRY, target), new Set([exportName])]]));
+  finish(targetRel, out, entryOut, dry, "prop " + objName + "." + key + " -> " + targetRel + " as " + exportName);
+}
+// The other form: a top-level `OBJECT.key = { ... };` statement. Its value
+// moves; the statement stays, as `OBJECT.key = exportName;`, so the object's
+// key order (and everything that lists it) is unchanged.
+function propAssign(E, objName, key, target, targetRel, exportName, header, dry) {
+  const stmt = E.ast.body.find((n) => n.type === "ExpressionStatement" && n.expression.type === "AssignmentExpression" &&
+    n.expression.left.type === "MemberExpression" && !n.expression.left.computed &&
+    n.expression.left.object.type === "Identifier" && n.expression.left.object.name === objName &&
+    n.expression.left.property.name === key);
+  if (!stmt) throw new Error(objName + " has no property " + key + " (in the literal or as " + objName + "." + key + " = ...)");
+  const value = stmt.expression.right;
+  const a0 = stmt.loc.start.line - 1;
+  const b = stmt.loc.end.line - 1;
+  if (E.lines[a0].slice(0, stmt.loc.start.column).trim() !== "") throw new Error("code before the statement on its line");
+  if (E.lines[b].slice(stmt.loc.end.column).trim() !== "") throw new Error("code after the statement on its line");
+  const a = climbComments(E.lines, a0, 0);
+  const comments = E.lines.slice(a, a0);
+  const block = (comments.length ? comments.join("\n") + "\n" : "") + "export const " + exportName + " = " + E.src.slice(value.start, value.end) + ";\n";
+  const out = targetText(target, header, refsOf(value, E.known), E.exps, E.imports, block);
+  const el = E.lines.slice();
+  el.splice(a, b - a + 1, objName + "." + key + " = " + exportName + ";");
+  const entryOut = ensureImports(el.join("\n"), new Map([[relImport(ENTRY, target), new Set([exportName])]]));
+  finish(targetRel, out, entryOut, dry, "prop " + objName + "." + key + " (assigned) -> " + targetRel + " as " + exportName);
 }
 
 // ---- verify ----------------------------------------------------------------
@@ -300,41 +438,55 @@ const GLOBALS = new Set(("undefined NaN Infinity globalThis Object Array String 
   "arguments AggregateError EvalError URIError FinalizationRegistry DOMException CryptoKey SubtleCrypto").split(/\s+/));
 function verify() {
   let bad = 0;
-  for (const f of listModules()) {
+  const all = listModules();
+  for (const f of all) {
     const ast = parse(fs.readFileSync(f, "utf8"));
     const { decls, imports } = topLevel(ast);
     const free = new Map();
     walk.fullAncestor(ast, (n, st, anc) => {
-      if (n.type !== "Identifier") return;
-      if (!isRef(n, anc)) return;
+      if (n.type !== "Identifier" || !isRef(n, anc)) return;
       const nm = n.name;
-      if (decls.has(nm) || imports.has(nm) || GLOBALS.has(nm)) return;
-      // declarations themselves (params, local vars) are scoped names
-      if (shadowed(nm, anc)) return;
+      if (decls.has(nm) || imports.has(nm) || GLOBALS.has(nm) || shadowed(nm, anc)) return;
       const p = anc[anc.length - 2];
-      if (p && (p.type === "VariableDeclarator" && p.id === n)) return;
-      if (p && (FN.has(p.type) && (p.id === n || p.params.includes(n)))) return;
+      if (p && p.type === "VariableDeclarator" && p.id === n) return;
+      if (p && FN.has(p.type) && (p.id === n || p.params.includes(n))) return;
       if (p && (p.type === "ClassDeclaration" || p.type === "ClassExpression") && p.id === n) return;
       if (p && p.type === "CatchClause" && p.param === n) return;
       if (!free.has(nm)) free.set(nm, n.loc.start.line);
     });
+    // every named import must exist in its module
+    for (const node of ast.body) {
+      if (node.type !== "ImportDeclaration" || !node.source.value.startsWith(".")) continue;
+      const file = path.resolve(path.dirname(f), node.source.value);
+      if (!file.endsWith(".js")) continue;
+      if (!fs.existsSync(file)) { free.set("(missing module " + node.source.value + ")", node.loc.start.line); continue; }
+      const ex = topLevel(parse(fs.readFileSync(file, "utf8"))).exported;
+      for (const s of node.specifiers) if (s.type === "ImportSpecifier" && !ex.has(s.imported.name)) free.set(s.imported.name + " (not exported by " + node.source.value + ")", node.loc.start.line);
+    }
     if (free.size) {
       bad++;
-      console.log(path.relative(ROOT, f) + ": not declared or imported: " + [...free].map(([n, l]) => n + " (line " + l + ")").join(", "));
+      console.log(path.relative(ROOT, f) + ": " + [...free].map(([n, l]) => n + " (line " + l + ")").join(", "));
     }
   }
   if (bad) { console.log("verify: " + bad + " module(s) with unresolved names"); process.exit(1); }
-  console.log("verify: every name in " + listModules().length + " module(s) resolves");
+  console.log("verify: every name in " + all.length + " module(s) resolves");
 }
 
+// ---- cli -------------------------------------------------------------------
 const [cmd, ...args] = process.argv.slice(2);
+const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
 try {
-  if (cmd === "move") {
-    const hi = args.indexOf("--header");
-    const header = hi >= 0 ? args[hi + 1] : null;
-    move(args[0], args[1], header, args.includes("--dry"));
-  } else if (cmd === "verify") verify();
-  else { console.error("usage: split-module.js move <target> <names> [--header text] [--dry] | verify"); process.exit(2); }
+  if (cmd === "move") move(args[0], args[1], opt("--header"), args.includes("--dry"));
+  else if (cmd === "methods") methods(args[0], args[1], opt("--export"), opt("--header"), args.includes("--dry"));
+  else if (cmd === "prop") prop(args[0], args[1], args[2], opt("--export"), opt("--header"), args.includes("--dry"));
+  else if (cmd === "verify") verify();
+  else {
+    console.error("usage: split-module.js move <target> <names> [--header text] [--dry]\n" +
+      "       split-module.js methods <target> <names|prefix*> --export NAME [--header text] [--dry]\n" +
+      "       split-module.js prop <OBJECT> <key> <target> --export NAME [--header text] [--dry]\n" +
+      "       split-module.js verify");
+    process.exit(2);
+  }
 } catch (e) {
   console.error("split-module: " + e.message);
   process.exit(1);

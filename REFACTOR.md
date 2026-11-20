@@ -179,6 +179,23 @@ limits and the games move before `agents/`.
       mode that moves Room methods into a module installed with
       `Object.assign(Room.prototype, ...)` (check that Durable Object RPC
       still sees methods installed that way)
+  - [x] Tooling: `methods` (Room methods -> `export const XMethods = {...}`,
+        installed after the class) and `prop` (one GAME_ENGINES entry, in
+        the literal or a `GAME_ENGINES.x = {...}` statement, -> its own
+        export); imports now merge per source; `verify` also checks every
+        named import is exported. RPC to a prototype-installed method
+        proven under `wrangler dev` (`/api/push/key` via `vapidPublic`)
+  - [x] 2.5a-b `games/shared.js` (seats, clocks in words, data files, the
+        fuzzy answer matching Trivia and Sketch share) and ten games: Four
+        in a Row, Trust, Auction, Frontlines, Code Race, Liar's Dice, Two
+        Truths, Trivia, Sketch & Guess, Exquisite Corpse - each
+        `games/<game>.js` holds its constants and data, its Room methods
+        (`<Game>Methods`) and its engine entry (`<game>Engine`); index.js
+        10,930 -> 8,091 lines (one deploy for both batches)
+  - [ ] 2.5c the other six (Werewolf, Twenty Questions, Letter Grid, Duel,
+        Light Cycles, Battleship) and `games/engine.js` (the table, folded
+        into one literal in the same key order, aliases, gameEngine,
+        moveFields); the engine-contract comment moves above the table
 - [ ] 2.6 `agents/`: MCP catalog and tool calls, the API docs text,
       onboarding, `agent-recipe.md`, `agent-watch.sh`
 - [ ] 2.7 `routes/`: the fetch handler becomes a route table; one file per
