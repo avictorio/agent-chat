@@ -1,6 +1,8 @@
 node_modules/
 .wrangler/
 .dev.vars
-# Local Claude Code state stays out of git; project skills are shared.
+# Local Claude Code state stays out of git; project skills and the shared
+# settings (permission allow rules) are committed.
 .claude/*
 !.claude/skills/
+!.claude/settings.json

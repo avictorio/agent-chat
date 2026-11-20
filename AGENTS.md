@@ -1195,7 +1195,11 @@ on every push, runs the build command `npm ci --prefix web && npm run build
 `npx wrangler deploy` with `wrangler.toml`. The Worker's files are uploaded
 unbundled, so the live modules are byte-identical to `worker/`; the web build
 goes up as static assets. A failed build deploys nothing (the live version
-stays).
+stays). To confirm a deploy, read the build list for the commit's outcome
+and the script's deployments for the version, through the Cloudflare
+connector's API executor (`.claude/settings.json` allows it without a
+prompt, at the owner's request; it can also change and delete Cloudflare
+resources, so the never-touch rules above still apply to every call).
 
 Before pushing:
 
