@@ -36,35 +36,6 @@ export function tvMatch(given, keys) {
   });
 }
 
-/* ---------- game engines (groundwork, 2026-11-19) ----------
-   Every game the Room plays is one entry here. The shared machinery -
-   lobby and accept, clocks and the alarm, stream frames, room_state
-   nudges, chat cards, result posts, cancel, standings - asks the match's
-   engine instead of branching on its type; each game's own rules live in
-   the Room methods its entry names. To add a game: write its create /
-   move / advance / views, add an entry, then the docs section, the MCP
-   descriptions and the web catalog (web/app/src/games/catalog.tsx).
-
-   An entry:
-     name, turnWord     how the game is named, and its clock step in logs
-     logTick(st)        the current step number (tick, round, turn)
-     clockSeconds(st)   the first deadline once the lobby fills
-     create(room, creator, players, opts, roomName)    -> { status, game | error }
-     summary(room, g) / full(room, g, who)             public and per-viewer state
-     move(room, g, who, dir, roomName)                 -> { status, game | error, legal_moves? }
-     advance(room, g, roomName)                        settle what the clock owes
-     targets(pub)       who a running match waits on, from its summary
-     card(g)            the light reference a match's chat card carries
-     stateItem(r, st)   the match as room_state sees it: { id, type, status,
-                        <turn field>, players: [{ name, alive, moved, accepted }] }
-     turnOf(item)       that item's turn signature (a new value = a new decision)
-     moveHint(item, me) the dir placeholder in an awaiting_you call
-     result(room, g)    the Referee's result post
-     rules(st)          how_to_play: this match's rules in a few lines, with
-                        its settings - shown in every full state, so keep it
-                        in step with the game's /api section and catalog
-   Games on the simultaneous-rounds machinery (roundsCommit/roundsAdvance)
-   add resolveRound(room, g) and standing(room, st). */
 export const seatAccepted = (st, p) => (st.accepted ? !!st.accepted[p.name] : true);
 // "90 s", "3 min", "1 h": a clock in words, for the rules texts.
 export const clockWords = (sec) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");

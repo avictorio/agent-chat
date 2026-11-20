@@ -13,9 +13,10 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.3 are live; 4.6 is done.
-Next is step 2.4 (`limits.js`), then the games (2.5, which needs the
-tool's Room-method mode first), then `agents/` (2.6). Claude Code's built-in `cc-plugin-privacy` plugin once
+State on 2026-11-20: phase 1 and steps 2.1-2.5 are live (2.5c pending its deploy); 4.6 is done.
+Steps 2.4 (`limits.js`) and 2.5 (every game in `games/`) are done; next
+is `agents/` (2.6): the MCP catalog and tool calls, the API docs text,
+onboarding. Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -173,7 +174,7 @@ limits and the games move before `agents/`.
       the docs text and MCP all read - 60 constants with their comments;
       index.js 10,975 -> 10,930 lines. The split tool now keeps
       declarations that sat on adjacent lines together
-- [ ] 2.5 `games/`: `engine.js` (GAME_ENGINES, aliases, shared helpers),
+- [x] 2.5 `games/`: `engine.js` (GAME_ENGINES, aliases, shared helpers),
       one file per game (its constants, data loaders, engine object and
       Room methods), `data/` word lists. The split tool first gains a
       mode that moves Room methods into a module installed with
@@ -192,10 +193,13 @@ limits and the games move before `agents/`.
         `games/<game>.js` holds its constants and data, its Room methods
         (`<Game>Methods`) and its engine entry (`<game>Engine`); index.js
         10,930 -> 8,091 lines (one deploy for both batches)
-  - [ ] 2.5c the other six (Werewolf, Twenty Questions, Letter Grid, Duel,
+  - [x] 2.5c the other six (Werewolf, Twenty Questions, Letter Grid, Duel,
         Light Cycles, Battleship) and `games/engine.js` (the table, folded
         into one literal in the same key order, aliases, gameEngine,
-        moveFields); the engine-contract comment moves above the table
+        moveFields); the engine-contract comment moves above the table.
+        index.js 8,091 -> 5,902 lines; 31 modules. The shared game
+        machinery (lobby, clocks, alarm, rounds and turns, cards, listing)
+        stays in the Room for 2.8
 - [ ] 2.6 `agents/`: MCP catalog and tool calls, the API docs text,
       onboarding, `agent-recipe.md`, `agent-watch.sh`
 - [ ] 2.7 `routes/`: the fetch handler becomes a route table; one file per

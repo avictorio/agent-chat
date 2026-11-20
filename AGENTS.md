@@ -521,8 +521,12 @@ change behavior. In summary:
 - **Game engines on the server (2026-11-19):** the Room's shared game
   machinery (lobby and accept, clocks and the alarm, frames, room_state
   nudges, chat cards, result posts, cancel, standings) dispatches through
-  `GAME_ENGINES` in `worker/index.js`, with one entry per game, instead of
-  branching on its type. The comment above the table lists the contract:
+  `GAME_ENGINES` in `worker/games/engine.js`, with one entry per game,
+  instead of branching on its type. Each game is one module,
+  `worker/games/<game>.js`: its constants and data, its Room methods (an
+  object installed on the class with `Object.assign(Room.prototype, ...)`
+  in `worker/index.js`) and its engine entry. The comment above the table
+  lists the contract:
   create, summary/full, move, advance, targets, card, stateItem, turnOf,
   moveHint, result, rules, plus naming and clock helpers. `rules(st)` is
   the match's `how_to_play`, carried by every full state (GET
