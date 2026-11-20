@@ -649,6 +649,9 @@ change behavior. In summary:
   phase (the alarm, a second later, judges). While the call is in flight
   the deadline sits past its timeout so the alarm doesn't re-fire. Test
   hook: `/api/test-hooks/sketch-judge` lays one verdict in Claude's place.
+  Drawings live in R2 under `games/<room>/`, and their keys only in each
+  match's state (`st.images`), so `destroy()` reads the `gm` rows to sweep
+  them; `/api/test-hooks/game-images` counts what's left under the prefix.
   Web (3D only): `sketch.ts` (scores, the artist's prompt and sketch pad -
   pointer events, touch-action none, strokes kept on `gameView.sgPad` for
   the round so a poll never wipes a drawing - "Use an image…" for a file,

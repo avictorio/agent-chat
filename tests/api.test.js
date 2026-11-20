@@ -1975,9 +1975,13 @@ async function waitUp() {
     const ffaAbFinal = await pollGame(bsFfaAbandon, g => g.status === 'finished', 14, 15000);
     check('a fully silent ffa table ends with no winner', !!ffaAbFinal && ffaAbFinal.status === 'finished' && !ffaAbFinal.winner && (ffaAbFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(ffaAbFinal || null).slice(0, 240));
 
+    const gameImages = async () => ((await req('POST', '/api/test-hooks/game-images', { owner: true, json: { room: roomOf2 } })).json || {}).count;
+    const imgsBefore = await gameImages();
     await req('DELETE', R2 + '/invites', { owner: true });
     r = await req('DELETE', R2 + '?confirm=apitest-poc-' + SUF, { owner: true });
     check('room destroyed', r.json && r.json.deleted === true, JSON.stringify(r.json));
+    const imgsAfter = await gameImages();
+    check('deleting the room deletes its Sketch & Guess drawings', imgsBefore >= 2 && imgsAfter === 0, imgsBefore + ' -> ' + imgsAfter);
     r = await req('GET', R2 + '/members', { owner: true });
     check('destroyed room 404s', r.status === 404, r.status);
 

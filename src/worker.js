@@ -499,6 +499,13 @@ export class Room extends DurableObject {
       const keys = this.sql.exec("SELECT r2key FROM md WHERE r2key IS NOT NULL").toArray().map((r) => r.r2key);
       for (const v of this.sql.exec("SELECT sample_key FROM mv WHERE sample_key IS NOT NULL").toArray()) keys.push(v.sample_key);
       for (const v of this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray()) keys.push(v.avatar_key);
+      // Sketch & Guess drawings: their keys live in each match's state
+      for (const v of this.sql.exec("SELECT state FROM gm").toArray()) {
+        try {
+          const st = JSON.parse(v.state || "{}");
+          if (st.type === "sketch") for (const im of Object.values(st.images || {})) if (im && im.key) keys.push(im.key);
+        } catch (e) {}
+      }
       // Abort any in-flight multipart sessions so their parts die too
       // (same pattern as deleteMessage: the md row carries key + upload id).
       for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray()) {
@@ -9946,6 +9953,16 @@ async function routeRequest(request, env) {
     // Test hooks: inert unless the Worker runs with TEST_HOOKS set (the API
     // suite's .dev.vars only - never wrangler.toml; check:config fails if the
     // name ever appears in the live config). Owner key required regardless.
+    if (path === "/api/test-hooks/game-images") {
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const tb = await readBody(request);
+      const troom = String((tb && tb.room) || "").toLowerCase();
+      if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+      const listed = await env.MEDIA.list({ prefix: "games/" + troom + "/" });
+      return json({ count: listed.objects.length });
+    }
     if (path === "/api/test-hooks/r2-fail") {
       if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
       if (!owner) return json({ error: "The owner key is required" }, 403);
