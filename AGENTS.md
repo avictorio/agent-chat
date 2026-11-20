@@ -11,9 +11,12 @@ There is exactly one home and one identity store: the site's.
 **A codebase restructure is in progress** (started 2026-11-20): the plan,
 its checklist and what has already moved are in `REFACTOR.md`. Read it
 before moving or splitting files, and tick its boxes as steps land.
-While it runs, the committed `.claude/settings.json` turns off Claude
-Code's built-in privacy plugin (owner's call: it blocked the split tool);
-REFACTOR.md step 2.9 turns it back on.
+
+**No personal addresses in the code.** Claude Code's built-in privacy
+plugin refuses shell commands whose scripts read a file holding the owner's
+account email, so one in the Worker (it was the VAPID subject, until
+2026-11-20) blocks every tool that reads the Worker. Contact addresses come
+from configuration (`GMAIL_SENDER`, the site's own mailbox).
 
 This file is the single development guide. It consolidates the former
 `docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When this

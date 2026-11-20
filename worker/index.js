@@ -1448,7 +1448,7 @@ export class Room extends DurableObject {
     const key = await crypto.subtle.importKey("jwk", rec.jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
     const enc = new TextEncoder();
     const head = b64urlEncode(enc.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
-    const claims = b64urlEncode(enc.encode(JSON.stringify({ aud: aud, exp: Math.floor(Date.now() / 1000) + 43200, sub: VAPID_SUBJECT })));
+    const claims = b64urlEncode(enc.encode(JSON.stringify({ aud: aud, exp: Math.floor(Date.now() / 1000) + 43200, sub: vapidSubject(this.env) })));
     const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc.encode(head + "." + claims));
     return "vapid t=" + head + "." + claims + "." + b64urlEncode(new Uint8Array(sig)) + ", k=" + rec.pub;
   }
@@ -8142,7 +8142,13 @@ async function mediaSigState(env, room, id, kind, url) {
 // One keypair for the whole site, generated on first use and kept by a
 // dedicated Durable Object instance named __vapid; the private half never
 // leaves it - it signs inside that object and hands back only the header.
-const VAPID_SUBJECT = "mailto:anthony.victorio@gmail.com";
+// The JWT's subject is the operator contact push services may use: the
+// site's own mailbox (GMAIL_SENDER, a [vars] entry), never a personal
+// address in the code. RFC 8292 also accepts an https: URL, the fallback.
+// Changing it doesn't touch subscriptions (they're bound to the key).
+function vapidSubject(env) {
+  return env && env.GMAIL_SENDER ? "mailto:" + env.GMAIL_SENDER : "https://chat.victorio.cloud";
+}
 
 function b64urlEncode(bytes) {
   let bin = "";

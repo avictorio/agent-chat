@@ -14,18 +14,17 @@ delete this file.
 ## Resume here (next session)
 
 State on 2026-11-20: phase 1 and step 2.1 are live; 4.6 is done. Next is
-step 2.2. The built-in `cc-plugin-privacy` plugin blocked the split tool in
-the session that started this (it flags scripts that read the Worker code,
-which reads the sender address from config), so at the owner's request
-`.claude/settings.json` turns it off; that only applies in a new session.
+step 2.2. Claude Code's built-in `cc-plugin-privacy` plugin had blocked
+the split tool: the Worker held the owner's account email (as the VAPID
+subject), and the plugin refuses scripts that read a file holding it.
+Turning the plugin off in `.claude/settings.json` had no effect, so the
+address came out of the code instead (the subject is now the site's
+mailbox from `GMAIL_SENDER`) and the plugin stays on. Keep personal
+addresses out of the code.
 
 1. `npm i` at the repo root (the split tool's acorn), `npm i` in `web/`,
    `npm run build`. The UI suite in a cloud sandbox:
    `cd web && node -r ./tests/system-chromium.js tests/ui.test.js`.
-   First check the plugin really is off: run step 2.2's first move with
-   `--dry`. If the privacy plugin still refuses it, the setting did not
-   take for built-in plugins: do the small moves by hand with the file
-   tools (the plugin only watches shell commands) and tell the owner.
 2. Step 2.2, the four `lib/` modules:
    ```
    T="node scripts/split-module.js move"
@@ -44,8 +43,6 @@ which reads the sender address from config), so at the owner's request
 3. Gates (the API suite; the UI suite only if web/ changed), deploy, verify
    live, log it below, then 2.3 onward the same way. `verify` after every
    move is the safety net for imports `node --check` can't see.
-4. When phase 2 is done: remove `.claude/settings.json` and its
-   `.gitignore` exception, so the privacy plugin is back on.
 
 ## Ground rules for every step
 
@@ -179,8 +176,9 @@ site stay as they are; turning them into plain functions can come later.
       members and invites, uploads, voices, streams, digest, games glue)
 - [ ] 2.8 Fix comments left in the wrong place by earlier edits (for
       example the stale "Whether a room exists" note above `escHtml`)
-- [ ] 2.9 Remove `.claude/settings.json` (and its `.gitignore`
-      exception): the privacy plugin back on once the split is done
+- [x] 2.9 Remove `.claude/settings.json` (and its `.gitignore`
+      exception): done early - it never took effect; the real trigger
+      (the owner's email as the VAPID subject) left the code instead
 
 ## Phase 3: reorganize the web app
 
@@ -231,3 +229,4 @@ site stay as they are; turning them into plain functions can come later.
 | 2026-11-20 | 2.1: `src/` -> `worker/` | aaba45b (deployed with b5772fe) | API suite green; version 19001c48. Live: `/api` 200 and its docs name `worker/data/`; `/sw.js` (text module) 200; pages stamped with the unchanged build id. The split tool's first run on the real tree was then blocked by the cc-plugin-privacy guard (it flags scripts that read the Worker code, which reads the sender address from config); the owner chose to adjust the guard. |
 | 2026-11-20 | 4.6: strict UI suite | f4a5a69, b0aa1b8 | Report-only run: 146 scenarios clean once `/icons/*` was served; 7 deliberate error statuses; one real gap (the media shelf's video tile fetched `/messages/5/video` with no stub route). Strict run: 155/155. A copy without the icon route fails as it should. |
 | 2026-11-20 | Split tool + privacy plugin off | 859e994 | `scripts/split-module.js` (move/verify) committed; `.claude/settings.json` turns `cc-plugin-privacy@builtin` off at the owner's request. It still blocked this session (plugin changes apply to new sessions), so 2.2 starts in the next session - see "Resume here". |
+| 2026-11-20 | Privacy plugin: the real fix | (this commit) | A new session showed the setting doesn't turn the built-in plugin off. The trigger was the owner's account email as `VAPID_SUBJECT` in the Worker; the push JWT's subject is now `mailto:` + `GMAIL_SENDER` (https URL fallback) and the setting is gone. The split tool runs again with the plugin on. |
