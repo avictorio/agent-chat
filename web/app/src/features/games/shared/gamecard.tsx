@@ -33,7 +33,6 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   useEffect(() => {
     const cur = store.cache.get(id);
     if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && cur.type !== "lettergrid" && cur.type !== "trivia" && cur.type !== "sketch" && !cur.trails)) void store.fetch(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, id, version]);
 
   const boardRef = useRef<HTMLDivElement | null>(null);

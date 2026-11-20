@@ -48,7 +48,6 @@ type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: bool
 // scene, and its controls call the moves endpoint with the viewer's own
 // invite. Without WebGL the flat panels the scenes replaced come back.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 // Battleship impact dressing: the newest shot (by turn) is animated
 // once per match - later repaints keep only its white ring. The map

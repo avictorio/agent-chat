@@ -17,6 +17,8 @@
    grid units (x right, y down, as the 2D board); the arena maps them
    to world space. Nothing here touches three.js. */
 
+/* eslint-disable @typescript-eslint/no-explicit-any -- g is the server's match JSON, read field by field with fallbacks */
+
 export type Dir = "up" | "down" | "left" | "right";
 export const DV: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const isDir = (d: unknown): d is Dir => d === "up" || d === "down" || d === "left" || d === "right";

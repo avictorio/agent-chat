@@ -59,6 +59,8 @@ import {
   type SpriteMaterial,
 } from "three";
 
+// The server's match JSON and loose three.js handles, read field by field.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
 type GL = any;
 
 const GRID_C = "#22d3ee";

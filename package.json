@@ -5,6 +5,7 @@
   "scripts": {
     "build": "npm run build --prefix web",
     "check": "node scripts/check-worker.js && node scripts/check-inline.js",
+    "lint": "npm run lint --prefix web",
     "check:config": "node scripts/check-config.js",
     "test": "npm --prefix web test",
     "test:api": "node tests/api/api.test.js",

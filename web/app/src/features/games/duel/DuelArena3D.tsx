@@ -1254,7 +1254,6 @@ export default function DuelArena3D({
       juice.hit({ sound: "lock", buzz: BUZZ.commit, pulse: 0.2 });
     });
     return () => registerCommit(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerCommit, juice, rounds.length]);
   const queued: string | null = (g && g.you && g.you.queued) || null;
   useEffect(() => {

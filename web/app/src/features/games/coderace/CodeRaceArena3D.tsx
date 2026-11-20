@@ -819,7 +819,6 @@ export default function CodeRaceArena3D({
       m[r.name] = l.cracked ? Array(len).fill(g.mode === "words" ? "g" : "hit") : states(g, l.fb);
     });
     return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g, racers, fromN, len]);
   const toStates = useMemo(() => {
     const m: Record<string, TState[]> = {};

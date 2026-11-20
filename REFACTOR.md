@@ -310,12 +310,33 @@ limits and the games move before `agents/`.
 - [ ] 4.1 `web/shared` becomes top-level `contract/` (API and game-state
       types); the web app imports it; the Worker checks against it with
       JSDoc and `checkJs`
-- [ ] 4.2 ESLint with the React hooks rules, so the 97 existing
-      `eslint-disable` comments are enforced; fix or justify each
-- [ ] 4.3 Unit tests (`node:test`) for the game engines and `lcmodel`
-- [ ] 4.4 Pin `wrangler` as a dev dependency so deploys and local runs
-      use one known version
-- [ ] 4.5 Tests into `tests/api/`, `tests/ui/`, `tests/unit/`
+- [x] 4.2 Lint with the React hooks rules, so the existing
+      `eslint-disable` comments are enforced. ESLint's TypeScript parser
+      needs TypeScript's JS API, which TypeScript 7 (this build) no longer
+      has, so it is oxlint (the oxc project, like the bundler's parser):
+      `npm run lint`, `web/.oxlintrc.json` - rules-of-hooks and
+      no-explicit-any as errors, exhaustive-deps as a warning, unused
+      disable directives reported. First run: 4 dead disable comments
+      (removed), 6 unchecked `any`s (two disable comments with reasons:
+      lcmodel's match JSON, Battleship's loose `GL` alias), and one real
+      bug - `MediaBlocks` called `useRef` after an early return, so a
+      message that gained media after its first render (an upload
+      publishing) would throw React's hook-order error and, with no error
+      boundary, blank the room (fixed in its own commit)
+  - [ ] 4.2b The 39 exhaustive-deps warnings left: mostly the arenas'
+        `useMemo` over `players`/`rounds` built fresh each render (`|| []`),
+        so the memo recomputes every render; refs read in cleanups (Duel);
+        stable refs missing from deps (board, feed). Each changes when
+        something recomputes, so fix them arena by arena with the UI suite
+        and a look at the scene
+- [x] 4.3 Unit tests (`node:test`) for the game engines and `lcmodel`:
+      `npm run test:unit`, 22 tests (see AGENTS.md section 9)
+- [x] 4.4 Pin `wrangler` as a dev dependency so deploys and local runs
+      use one known version: 4.166.0, and the build command gains a root
+      `npm ci`
+- [x] 4.5 Tests into `tests/api/`, `tests/ui/`, `tests/unit/`: api and
+      unit at the root; the UI suite stays in `web/tests/` (it runs on the
+      web workspace's Playwright); `tests/fixtures/` is shared
 - [x] 4.6 (done early, while 2.2 waited on the guard) UI suite: stop swallowing console errors. Today every scenario
       logs a 404 for `/icons/icon-192.png` (the install strip's icon,
       which the live site serves but the test stubs don't), and the
