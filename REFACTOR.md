@@ -169,7 +169,7 @@ site stay as they are; turning them into plain functions can come later.
 - [ ] 4.4 Pin `wrangler` as a dev dependency so deploys and local runs
       use one known version
 - [ ] 4.5 Tests into `tests/api/`, `tests/ui/`, `tests/unit/`
-- [ ] 4.6 UI suite: stop swallowing console errors. Today every scenario
+- [x] 4.6 (done early, while 2.2 waited on the guard) UI suite: stop swallowing console errors. Today every scenario
       logs a 404 for `/icons/icon-192.png` (the install strip's icon,
       which the live site serves but the test stubs don't), and the
       harness ignores console errors everywhere except the home-page

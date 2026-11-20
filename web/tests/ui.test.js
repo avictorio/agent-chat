@@ -9,6 +9,13 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const DIST = __dirname + '/../app/dist';
 const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="next-dev"', 'content="uitestbuild1"');
+// Console errors a scenario fails on: everything except "Failed to load
+// resource" with an HTTP status, which only comes from a request the stub
+// answered on purpose (an unknown request is caught separately, as
+// S.unhandled). A scenario that expects another one passes allowConsole
+// (a RegExp).
+const RESOURCE_STATUS = /^console: Failed to load resource: the server responded with a status of \d+/;
+const badConsole = (errs, allow) => errs.filter((e) => e.startsWith('console:') && !RESOURCE_STATUS.test(e) && !(allow && allow.test(e)));
 // The app icon the install strip shows (the live Worker serves /icons/*):
 // a 1x1 PNG is enough for the stubs.
 const ICON_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -431,6 +438,9 @@ async function setup(page, S, calls) {
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
     if (/\/messages\/\d+\/doc$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Probe doc\n\nRendered **body** here.' });
     if (/\/messages\/\d+\/image$/.test(p)) return route.fulfill({ status: 200, contentType: 'image/png', body: require('fs').readFileSync(__dirname + '/../../tests/fixtures/photo.png') });
+    // Video and audio bodies: the media shelf's tiles fetch them; no fixture
+    // needed, an empty body of the right type is enough for the UI.
+    if ((am = p.match(/\/messages\/\d+\/(video|audio)$/))) return route.fulfill({ status: 200, contentType: am[1] === 'video' ? 'video/mp4' : 'audio/mp4', body: Buffer.alloc(0) });
     if ((am = p.match(/\/messages\/(\d+)\/reactions$/))) {
       const msg = S.msgs.find(x => x.id == am[1]); if (!msg) return J({ error: 'No message' }, 404);
       const r = msg.reactions || {}; Object.keys(r).forEach(k => { r[k] = r[k].filter(x => x.toLowerCase() !== body.from.toLowerCase()); if (!r[k].length) delete r[k]; });
@@ -533,9 +543,12 @@ let FAILURES = 0;
       const r = await fn(page, S, calls);
       const fatal = errs.filter(e => !e.startsWith('console:'));
       if (fatal.length) throw new Error('uncaught page errors: ' + JSON.stringify(fatal));
+      // A request the stub doesn't know means a missing route or a broken
+      // path; a console error means something logged a failure. Both fail.
       const stray = S.unhandled || [];
-      const cons = errs.filter(e => e.startsWith('console:'));
-      if (stray.length || cons.length) console.log('NOTE ' + name + ' ' + JSON.stringify({ unhandled: stray, console: cons }));
+      if (stray.length) throw new Error('requests the stub does not handle: ' + JSON.stringify(stray));
+      const cons = badConsole(errs, o.allowConsole);
+      if (cons.length) throw new Error('console errors: ' + JSON.stringify(cons));
       console.log('PASS ' + name + (r ? ' ' + JSON.stringify(r) : ''));
     } catch (e) {
       FAILURES++;
@@ -3477,7 +3490,7 @@ let FAILURES = 0;
       console.log('FAIL ' + name + ': harness error: ' + e.message);
     }
     await b.close();
-    const fatal = errs.filter((e) => !e.startsWith('console:'));
+    const fatal = errs.filter((e) => !e.startsWith('console:')).concat(badConsole(errs));
     if (fatal.length) {
       FAILURES++;
       console.log('FAIL ' + name + ': ' + JSON.stringify(fatal));
@@ -3488,7 +3501,7 @@ let FAILURES = 0;
     } else {
       console.log('PASS ' + name + ' ' + JSON.stringify(out));
     }
-    if (errs.length) console.log(name + ' ERRORS: ' + JSON.stringify(errs));
+
   }
   await runHome();
   console.log(FAILURES ? 'PARITY SUITE: ' + FAILURES + ' failing scenario(s)' : 'PARITY SUITE: all ported scenarios pass');

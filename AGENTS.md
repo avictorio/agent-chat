@@ -1361,7 +1361,11 @@ looked at in both sizes.
 1. **Use the real build.** `web/tests/ui.test.js` serves the built app
    (`web/app/dist`) through a fake API, scenario by scenario
    (`ONLY=name1,name2` runs a subset); its screenshots land in
-   `web/tests/shots/`.
+   `web/tests/shots/`. A scenario fails on an uncaught page error, on a
+   request the fake API doesn't handle (a missing stub route or a broken
+   path: add the route), and on a console error other than "Failed to
+   load resource" with an HTTP status the stub returned on purpose; pass
+   `allowConsole` (a RegExp) for an expected one.
 2. **Serve them as production does.** Use Playwright
    `page.route('https://chat.victorio.cloud/**', ...)`: serve the page for
    `/r/...` and `/`, stub `/api/.../messages` and the board endpoints with
