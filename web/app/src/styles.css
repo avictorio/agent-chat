@@ -319,6 +319,51 @@ nav.tabs { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .kind-twotruths { --ga: 251, 146, 60; --gbg: #0c0805; }
 .kind-corpse { --ga: 202, 138, 4; --gbg: #0b0904; }
 .kind-twenty { --ga: 167, 139, 250; --gbg: #08060f; }
+.kind-werewolf { --ga: 147, 197, 253; --gbg: #04070f; }
+/* Werewolf (werewolf.ts): your role, your move, the discussion panel,
+   the timeline and the villagers, under the village. */
+.ww-role { margin-top: 12px; display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); color: #e0f2fe; }
+.ww-role.wolf { border-color: rgba(239, 68, 68, .6); background: #120506; color: #fee2e2; }
+.ww-role.dead { opacity: .7; }
+.ww-role-icon { font-size: 30px; line-height: 1; }
+.ww-role-name { font-weight: 800; font-size: 16px; }
+.ww-role-blurb { font-size: 13px; opacity: .85; margin-top: 2px; }
+.ww-role-extra { font-size: 13px; margin-top: 5px; font-weight: 600; color: #fde68a; }
+.ww-action { margin-top: 10px; display: grid; gap: 9px; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); color: #e0f2fe; }
+.ww-action.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.ww-action-title { font-weight: 700; font-size: 15px; }
+.ww-action-help { font-size: 12.5px; color: #93c5fd; }
+.ww-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ww-target { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13.5px; font-weight: 700; padding: 7px 11px; border-radius: 999px; border: 1px solid rgba(148, 163, 184, .4); background: transparent; color: #e0f2fe; cursor: pointer; }
+.ww-target.on { border-color: rgba(var(--ga), 1); background: rgba(var(--ga), .2); box-shadow: 0 0 0 2px rgba(var(--ga), .45); }
+.ww-target:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-offset: 2px; }
+.ww-target-n { font-size: 12px; font-weight: 900; background: rgba(var(--ga), .9); color: #04070f; border-radius: 999px; padding: 0 6px; }
+.ww-target-pack { font-size: 11px; color: #fca5a5; font-weight: 600; }
+.ww-talk { margin-top: 10px; display: grid; gap: 10px; }
+.ww-talk-sec { padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #e0f2fe; display: grid; gap: 7px; }
+.ww-talk-sec.den { border-color: rgba(239, 68, 68, .45); background: #0e0405; color: #fee2e2; }
+.ww-talk-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #93c5fd; }
+.ww-talk-sec.den .ww-talk-title { color: #fca5a5; }
+.ww-talk-list { display: grid; gap: 4px; max-height: 260px; overflow-y: auto; }
+.ww-talk-empty { font-size: 13px; color: #93c5fd; opacity: .85; }
+.ww-line { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: 14px; }
+.ww-line-by { font-weight: 800; }
+.ww-line-text { overflow-wrap: anywhere; }
+.ww-line-when { font-size: 11px; opacity: .6; white-space: nowrap; }
+.ww-talk-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.ww-talk-input { width: 100%; box-sizing: border-box; height: 38px; border-radius: 9px; border: 1px solid rgba(148, 163, 184, .35); background: #02040a; color: inherit; font: inherit; font-size: 14.5px; padding: 0 11px; }
+.ww-events { margin-top: 10px; display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #e0f2fe; }
+.ww-ev { display: flex; gap: 8px; font-size: 13.5px; align-items: baseline; }
+.ww-ev.death .ww-ev-text, .ww-ev.eliminated .ww-ev-text { font-weight: 700; }
+.ww-players { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #e0f2fe; }
+.ww-players.compact { margin: 6px 0 0; border: 0; border-radius: 0; padding: 6px 10px 10px; }
+.ww-prow { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.ww-prow.dead .ww-pname { text-decoration: line-through; opacity: .6; }
+.ww-prow.won .ww-pname { color: #fde68a; }
+.ww-prow.mine .ww-pname { text-decoration-color: rgba(var(--ga), .6); }
+.ww-pname { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ww-prole, .ww-pst { margin-left: auto; font-size: 12px; white-space: nowrap; color: #93c5fd; }
+.ww-card-line { margin: 6px 10px 0; font-size: 13px; color: #bfdbfe; }
 /* Twenty Questions (twenty.ts): the answerer's and questioners' controls,
    the budget, the Q/A log, the scores and the reveal, under the box. */
 .tq-panel { margin-top: 12px; display: grid; gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #ede9fe; }
@@ -827,6 +872,8 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .lc-3d-host.ec-3d-host { height: min(46vh, 420px); }
 /* Twenty Questions: the box and its ring of candles. */
 .lc-3d-host.tq-3d-host { height: min(44vh, 400px); }
+/* Werewolf: the village square. */
+.lc-3d-host.ww-3d-host { height: min(46vh, 420px); }
 .c4-under .c4-wrap { margin-top: 8px; }
 /* 3D host layers (games.ts makeHost3d, arena3d.tsx ArenaFrame). */
 .arena3d-mount { position: absolute; inset: 0; }
@@ -907,6 +954,7 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
   .lc-3d-host.tt-3d-host { height: min(40vh, 320px); }
   .lc-3d-host.ec-3d-host { height: min(42vh, 340px); }
   .lc-3d-host.tq-3d-host { height: min(38vh, 300px); }
+  .lc-3d-host.ww-3d-host { height: min(40vh, 320px); }
   .lc-board-big.duel-board-under { display: none; }
 }
 /* One finger scrolls the page over a 3D board (and taps it); two

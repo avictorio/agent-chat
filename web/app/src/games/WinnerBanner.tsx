@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { finalScore, winnerOf, type GL } from "./render";
+import { finalScore, sideWin, winnerOf, type GL } from "./render";
 
 // The standard winner banner, React edition - the feed card's
 // footer and the Games tab rows render this; the imperative
@@ -17,6 +17,14 @@ export function WinnerBanner({ g, ceremony }: { g: GL; ceremony?: boolean }) {
     return (
       <div className="game-winner off">
         <span className="gw-text">Called off</span>
+      </div>
+    );
+  const team = sideWin(g);
+  if (team)
+    return (
+      <div className={"game-winner" + (ceremony ? " ceremony" : "")} style={ceremony ? ({ "--win-c": team.hex } as CSSProperties) : undefined}>
+        <span className="gw-trophy">{team.icon}</span>
+        <span className="gw-name">{team.text}</span>
       </div>
     );
   const w = winnerOf(g);

@@ -244,7 +244,11 @@ turn - dealt out face up across the desk at the reveal, favourite votes
 as gold stars), `TwentyArena3D.tsx` (Twenty Questions: a sealed box
 on a pedestal ringed by twenty candles - each answer snuffs one, leaving
 a green or red ember - whose lid flies off at the round's end to raise
-the secret). Wave 3 games (from Two Truths on) are 3D only, by the owner's
+the secret), `WerewolfArena3D.tsx` (Werewolf: a village square with a
+bonfire, moonlit by night and warm by day; a figure per player, the
+dead lying where they fell with their role card up; day votes as lines
+between figures; your own role, the pack's eyes and your night pick
+shown only in your own view). Wave 3 games (from Two Truths on) are 3D only, by the owner's
 call: no 2D view and no 2D/3D toggle - the controls and the full text
 live in the page under the scene, which also covers a failed WebGL.
 `games.ts` lazy-loads
@@ -431,7 +435,7 @@ Full tables and starting `Juice.hit` values per event and seat:
    `reducedMotion: 'reduce'` context for the still path. 3D is the default
    arena view; a stored `ac:lc3d`, `ac:bs3d`, `ac:duel3d`, `ac:fl3d` or
    `ac:cr3d`, `ac:c43d`, `ac:tr3d`, `ac:au3d` or `ac:ld3d` of `"0"` forces 2D (wave 3 games have no 2D), so clear those keys. The entry sequence plays once per game per page
-   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq>:<id>"] = "1"` to
+   session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq|ww>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
    `web/tests/ui.test.js` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).

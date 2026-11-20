@@ -12,6 +12,7 @@ import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRoun
 import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths";
 import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
+import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf";
 import {
   battleshipBoard,
   boardSvg,
@@ -202,6 +203,7 @@ export function createGameStore(opts: {
     ttDraft?: TtDraft | null;
     ecDraft?: { turn: number; text: string } | null;
     tqDraft?: { key: string; text: string } | null;
+    wwDraft?: { town: string; den: string } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -318,6 +320,24 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "werewolf") {
+      dur = (g.phase_seconds || 86400) * 1000;
+      const verb = wwVerb(you.role);
+      if (you.playing && you.alive === false) text = "You're out · " + (g.phase === "night" ? "night " + g.night : "day " + g.day) + " · watching";
+      else if (g.phase === "night") {
+        if (you.playing && verb && !you.act) {
+          mine = true;
+          text = "Night " + g.night + " · your move: " + verb;
+          sub = "The night ends when every role has acted, or at the clock.";
+        } else text = "Night " + g.night + " · the village sleeps";
+      } else {
+        const waiting = players.filter((p: GL) => p.alive && !p.voted && p.name !== me).map((p: GL) => p.name);
+        if (you.playing && you.vote == null) {
+          mine = true;
+          text = "Day " + g.day + " · talk it out, then vote";
+          sub = "Votes are public and can change until the day closes.";
+        } else text = (you.playing ? "Your vote is in · " : "Day " + g.day + " · ") + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
+      }
     } else if (g.type === "twenty") {
       dur = (g.round_seconds || 3600) * 1000;
       const left = (g.remaining != null ? g.remaining : 20) + " of 20 left";
@@ -514,6 +534,9 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "werewolf") {
+      body.game = "werewolf";
+      body.tick_seconds = g.phase_seconds;
     } else if (g.type === "twenty") {
       body.game = "twenty";
       body.rotations = g.rotations || 1;
@@ -660,6 +683,7 @@ export function createGameStore(opts: {
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
     if (g.type === "corpse") return (g.beats || []).length;
+    if (g.type === "werewolf") return (g.events || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
     return ticks.size;
   }
@@ -722,6 +746,8 @@ export function createGameStore(opts: {
       n = ecHistoryRows(g, row, histWho, list);
     } else if (g.type === "twenty") {
       n = tqHistoryRows(g, row, histWho, list);
+    } else if (g.type === "werewolf") {
+      n = wwHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1073,6 +1099,7 @@ export function createGameStore(opts: {
     twotruths: { key: "ac:tt3d", cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
     corpse: { key: "ac:ec3d", cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
     twenty: { key: "ac:tq3d", cls: "tq-3d-host", load: () => import("./TwentyArena3D"), comp: null },
+    werewolf: { key: "ac:ww3d", cls: "ww-3d-host", load: () => import("./WerewolfArena3D"), comp: null },
     liarsdice: { key: "ac:ld3d", cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
@@ -1809,6 +1836,62 @@ export function createGameStore(opts: {
     if (note.textContent) wrap.appendChild(note);
   }
 
+  /* Werewolf: the village (3D only), then your role, your night action
+     or day vote, the discussion panel (town square; the den for wolves),
+     the timeline and the villagers. */
+  function renderWerewolfView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    if (!gv.wwDraft) gv.wwDraft = { town: "", den: "" };
+    const key = [g.status, g.phase || "", g.night, g.day, (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.alive ? 1 : 0) + (p.voted ? 1 : 0) + (p.role || "")).join(","), JSON.stringify(g.votes || null), (g.talk || []).length, (g.den || []).length, (g.events || []).length, youSig(g), you.role || "", you.act || "", you.vote || "", (you.checks || []).length, JSON.stringify(you.pack_picks || null), gv.tab || "game"].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const h = host3d("werewolf");
+    wrap.appendChild(h.host);
+    paint3d("werewolf", g, h);
+    const send = (dir: string) => {
+      if (gameView !== gv) return;
+      if (gv.r3dCommit && !/^(say|den):/.test(dir)) gv.r3dCommit();
+      void sendMove(g.id, dir, note);
+    };
+    if (you.playing) wrap.appendChild(wwRoleCard(g));
+    const act = wwAction(g, me, send);
+    if (act) {
+      const hint = arenaHint("werewolf", "Lying is legal for everyone. Watch who pushes a vote, and who goes quiet.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(act);
+    }
+    wrap.appendChild(wwTalk(g, gv.wwDraft, send));
+    wrap.appendChild(wwEvents(g));
+    wrap.appendChild(wwPlayers(g, me));
+    if (g.status === "running" && !you.playing) note.textContent = "Spectating - you see what the village sees: no roles until the dead are counted.";
+    if (note.textContent) wrap.appendChild(note);
+  }
+
   function renderBattleshipView(g: GL, force?: boolean) {
     if (!gameView) return;
     const you = g.you || { playing: false };
@@ -2542,6 +2625,10 @@ export function createGameStore(opts: {
       renderTwentyView(g, force);
       return;
     }
+    if (g.type === "werewolf") {
+      renderWerewolfView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2722,7 +2809,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2780,6 +2867,9 @@ export function createGameStore(opts: {
           if (g.phase === "write" ? g.turn_of === me : !mine.committed) n++;
         } else if (g.type === "twenty") {
           if (g.phase === "ask" ? g.answerer !== me : g.answerer === me) n++;
+        } else if (g.type === "werewolf") {
+          const y = g.you || {};
+          if (mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act)) n++;
         } else if (g.type === "trust") {
           if (!mine.committed && !mine.out) n++;
         } else if (g.type === "auction") {

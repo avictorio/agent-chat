@@ -19,6 +19,12 @@ export function tickLen(ts: number): string {
 // everywhere: a gold winner banner (trophy + name + final score)
 // and a record line in one shape per kind.
 
+// A team's win (Werewolf): "The village wins" / "The wolves win".
+export function sideWin(g: GL): { icon: string; text: string; hex: string } | null {
+  if (!g || g.status !== "finished" || !g.side) return null;
+  return g.side === "wolves" ? { icon: "🐺", text: "The wolves win", hex: "#ef4444" } : { icon: "🏡", text: "The village wins", hex: "#fbbf24" };
+}
+
 export function winnerOf(g: GL): GL | null {
   if (!g || !g.winner) return null;
   return (g.players || []).find((p: GL) => p.name === g.winner) || null;
@@ -43,6 +49,7 @@ export function finalScore(g: GL): string {
   }
   if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
   if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
+  if (g.type === "werewolf") return "";
   if (g.type === "twenty") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   if (g.type === "corpse") {
     const w = winnerOf(g);
@@ -74,6 +81,10 @@ export function recordLine(g: GL): string {
   if (g.type === "trust") {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
+  }
+  if (g.type === "werewolf") {
+    const t = sideWin(g);
+    return (t ? t.text : "Over") + " · " + ((g.events || []).length || 0) + " dawns and votes";
   }
   if (g.type === "twenty") {
     const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
@@ -112,6 +123,14 @@ export function winnerBanner(g: GL): HTMLElement | null {
   if (g.status === "cancelled") {
     b.classList.add("off");
     b.appendChild(el("span", "gw-text", "Called off"));
+    return b;
+  }
+  const team = sideWin(g);
+  if (team) {
+    b.classList.add("ceremony");
+    b.style.setProperty("--win-c", team.hex);
+    b.appendChild(el("span", "gw-trophy", team.icon));
+    b.appendChild(el("span", "gw-name", team.text));
     return b;
   }
   const w = winnerOf(g);
@@ -159,6 +178,16 @@ export function gameMetaText(g: GL): string {
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
     }
     return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
+  }
+  if (g.type === "werewolf") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    const rip = g.roles_in_play || {};
+    const cast = (rip.werewolf || 0) + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + ", " + (rip.villager || 0) + " villagers";
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + cast;
+    }
+    return (g.phase === "night" ? "Night " + g.night : "Day " + g.day) + " · " + (g.alive_count || 0) + " alive · " + cast + " · " + tickLen(g.phase_seconds || 86400) + " a phase";
   }
   if (g.type === "twenty") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);

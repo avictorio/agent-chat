@@ -33,7 +33,8 @@ sound and buzz stay.
 11. Two Truths and a Lie
 12. Exquisite Corpse
 13. Twenty Questions
-14. A new arena
+14. Werewolf
+15. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -469,7 +470,45 @@ the ended round's log until the next round relights them.
 **Catch-up.** `ac-tq-seen:<path>:<id>` (rounds seen); the latest unseen
 round's end replays on open; a tap skips; reduced motion lands it.
 
-## 14. A new arena
+## 14. Werewolf: the village square
+
+**World.** A square of packed earth with a bonfire (`FireSystem`) in a
+ring of cottages - on the far side only, so none stands between the
+camera and the villagers. Night: `NIGHT_SKY`, a big moon, cold blue
+light, lit windows. Day: `DAY_SKY`, warm sun. Every player is a figure
+(a capsule and a head in their colour) in a circle round the fire, the
+viewer nearest the camera; the dead lie where they fell, grey, with the
+role card over them.
+
+**Secrecy in the scene.** The scene only draws what the viewer's own
+state carries: your role badge over your own figure, the pack's red
+eyes (a wolf's view), a ring under tonight's pick (a role holder's
+view). A spectator or villager sees none of it. By day the votes are
+public: a line from each voter to their pick in the voter's colour and
+a count on each plate.
+
+**Events.** Every dawn and every vote (`events`) plays: the sky shows
+the event's time, the victim falls (0.7 s) with a `Burst` - red for a
+night kill, gold for a vote - and their role card turns up; titles from
+the viewer's seat. The last event adds VICTORY / DEFEAT (or the side's
+name for a spectator) and pillars over the living winners.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you act or vote | `lock` + `BUZZ.commit` |
+| a public vote or a line of town talk | a soft `ping` |
+| you were killed / voted out | "YOU WERE TAKEN" / "VOTED OUT" bad, `BUZZ.lostOne` |
+| a death, seen by a wolf | "THE HUNT" good |
+| a death, seen by the village | "TAKEN" (bad for a player, neutral for a spectator) |
+| a guarded victim | "SURVIVED" (good for the village, bad for the wolves) |
+| a wolf voted out | "A WOLF!" good for the village, "THE PACK SHRINKS" bad for the wolves |
+| a tie, no votes, a quiet night | "NO ONE" / "DAWN" neutral |
+| the end | VICTORY / DEFEAT, or THE VILLAGE WINS / THE WOLVES WIN |
+
+**Catch-up.** `ac-ww-seen:<path>:<id>` (events seen); the latest unseen
+event replays on open; a tap skips; reduced motion lands it.
+
+## 15. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.
