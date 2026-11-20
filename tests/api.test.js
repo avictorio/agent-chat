@@ -1427,6 +1427,52 @@ async function waitUp() {
     check('a team win counts for everyone on the side', wwRec.find((x) => x.name === SE).w === 1 && wwRec.find((x) => x.name === VS[0]).w === 1 && wwRec.find((x) => x.name === WW).l === 1, JSON.stringify(wwRec));
     rww = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Werewolf result', (rww.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Werewolf #' + ww.id + ' is over - the village wins at day 1: the werewolf was ' + WW + '.')), JSON.stringify((rww.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
+    // Letter Grid (2026-11-20): a shared grid (laid by the test hook),
+    // words checked when sent, sealed until the round resolves, first
+    // claims, the duplicate rule, a same-round contest, and the tiebreaks
+    // down to the earlier final-round word.
+    let rlg = await req('POST', R2 + '/games', { token: TP, json: { game: 'lettergrid', from: 'Poc', players: ['Poc'] } });
+    check('letter grid needs 2 to 6 -> 400', rlg.status === 400 && /2 to 6/.test(rlg.json.error), rlg.status);
+    rlg = await req('POST', R2 + '/games', { token: TP, json: { game: 'Letter Grid', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rounds: 3, size: 4 } });
+    const lg = rlg.json.game || {};
+    check('letter grid is created in a lobby with a public grid', rlg.status === 201 && lg.type === 'lettergrid' && lg.status === 'lobby' && lg.size === 4 && lg.rounds_total === 3 && lg.min_len === 3 && (lg.grid || []).length === 4 && (lg.claims || []).length === 16 && lg.claims.every((x) => x === null) && lg.word_count > 20 && lg.top_words === null, rlg.status + ' ' + rlg.text.slice(0, 220));
+    for (const n of ['Rex', 'Rae']) await req('POST', R2 + '/games/' + lg.id + '/accept', { token: ldTok[n], json: {} });
+    rlg = await req('POST', '/api/test-hooks/lettergrid', { owner: true, json: { room: roomOf2, id: lg.id, rows: ['cats', 'orex', 'ding', 'elmp'] } });
+    check('the test hook lays a known grid', rlg.json.ok === true && rlg.json.word_count > 10, rlg.text.slice(0, 120));
+    const lgMove = (who, body) => req('POST', R2 + '/games/' + lg.id + '/moves', { token: ldTok[who], json: body });
+    rlg = await lgMove('Poc', { dir: 'qwzx' });
+    check('a word not in the dictionary is refused (send another)', rlg.status === 400 && /not in the dictionary/.test(rlg.json.error), rlg.status + ' ' + rlg.text.slice(0, 120));
+    rlg = await lgMove('Poc', { dir: 'dog' });
+    check('a word that cannot be traced is refused', rlg.status === 400 && /can't be traced/.test(rlg.json.error), rlg.status + ' ' + rlg.text.slice(0, 120));
+    rlg = await lgMove('Poc', { word: 'cat', path: ['A1', 'B1', 'D1'] });
+    check('a path that spells something else is refused', rlg.status === 400 && /D1 is S, not T/.test(rlg.json.error), rlg.status + ' ' + rlg.text.slice(0, 120));
+    rlg = await lgMove('Poc', { word: 'cats', path: ['A1', 'B1', 'C1'] });
+    check('a path of the wrong length is refused', rlg.status === 400 && /3 cells but CATS has 4/.test(rlg.json.error), rlg.status + ' ' + rlg.text.slice(0, 120));
+    rlg = await lgMove('Poc', { word: 'cats', path: [[0, 0], [0, 1], [0, 2], [0, 3]] });
+    check('a structured word and path (row, col pairs) seal the move', rlg.status === 200 && rlg.json.resolved === false && rlg.json.game.you.queued.word === 'cats', rlg.status + ' ' + rlg.text.slice(0, 160));
+    rlg = await req('GET', R2 + '/games/' + lg.id, { token: ldTok.Rex });
+    check('a sealed word stays hidden from the others', rlg.json.game.players.find((p) => p.name === 'Poc').committed === true && !/"word":"cats"/.test(rlg.text) && rlg.json.game.you.queued === null, rlg.text.slice(0, 160));
+    rlg = await lgMove('Rex', { dir: 'CATS' });
+    rlg = await lgMove('Rae', { dir: 'ring B2 B3 C3 D3' });
+    let lgR = ((rlg.json.game || {}).rounds || [])[0] || {};
+    check('round 1: a shared word scores letters only; a fresh word claims its cells', rlg.json.resolved === true && rlg.json.game.round === 2 && lgR.words.Poc.dup === true && lgR.points.Poc === 4 && lgR.points.Rex === 4 && lgR.words.Rae.bonus === 4 && lgR.points.Rae === 8 && rlg.json.game.claims[5] === 'Rae' && rlg.json.game.claims[11] === 'Rae' && rlg.json.game.claims[0] === null, JSON.stringify(lgR).slice(0, 260));
+    rlg = await lgMove('Poc', { dir: 'cats' });
+    check('your own words cannot repeat', rlg.status === 400 && /already/.test(rlg.json.error), rlg.status + ' ' + rlg.text.slice(0, 120));
+    rlg = await lgMove('Poc', { word: 'core' });
+    check('a word without a path gets one traced for it', rlg.status === 200 && JSON.stringify(rlg.json.game.you.queued.path) === '[[0,0],[1,0],[1,1],[1,2]]', rlg.text.slice(0, 200));
+    rlg = await lgMove('Rex', { dir: 'care: A1 B1 B2 C2' });
+    await ttExpire(lg.id);
+    rlg = await req('GET', R2 + '/games/' + lg.id, { token: TP });
+    lgR = (rlg.json.game.rounds || [])[1] || {};
+    check('round 2: a cell two words take first stays free; the clock resolves a missed word', lgR.missed.includes('Rae') && lgR.points.Poc === 5 && lgR.points.Rex === 5 && JSON.stringify(lgR.words.Poc.contested) === '[0,6]' && rlg.json.game.claims[0] === null && rlg.json.game.claims[6] === null && rlg.json.game.claims[4] === 'Poc' && rlg.json.game.claims[1] === 'Rex', JSON.stringify(lgR).slice(0, 260));
+    rlg = await lgMove('Rex', { word: 'rate' });
+    rlg = await lgMove('Poc', { dir: 'dine A3 B3 C3 C2' });
+    await ttExpire(lg.id);
+    rlg = await req('GET', R2 + '/games/' + lg.id, { token: TP });
+    const lgG = rlg.json.game || {};
+    check('a full tie goes to the earlier final-round word', lgG.status === 'finished' && lgG.winner === 'Rex' && JSON.stringify(lgG.places) === '["Rex","Poc","Rae"]' && lgG.players.find((p) => p.name === 'Rex').score === 14 && lgG.players.find((p) => p.name === 'Poc').score === 14 && lgG.players.find((p) => p.name === 'Poc').cells === 2 && Array.isArray(lgG.top_words) && lgG.top_words.length > 0, JSON.stringify(lgG).slice(0, 260));
+    rlg = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Letter Grid result', (rlg.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Letter Grid match #' + lg.id + ' is over after 3 rounds - Rex wins with 14 points.')), JSON.stringify((rlg.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

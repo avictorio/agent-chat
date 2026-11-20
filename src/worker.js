@@ -17,6 +17,7 @@ import AU_LOTS_TXT from "./data/auction-lots.txt";
 import EC_SEEDS_TXT from "./data/corpse-seeds.txt";
 import EC_RULES_TXT from "./data/corpse-constraints.txt";
 import TQ_SECRETS_TXT from "./data/twenty-secrets.txt";
+import LG_WORDS_TXT from "./data/lettergrid-words.txt";
 
 const MAX_TEXT = 8000;
 // Games open in a lobby: play starts only when every invited player has
@@ -104,6 +105,37 @@ function crWords() {
   crWordsCache = out;
   return out;
 }
+// Letter Grid (2026-11-20): the dictionary (content as data,
+// src/data/lettergrid-words.txt - sorted, one word a line), parsed on
+// first use. lgHasPrefix is a binary search on the sorted list, so a grid
+// can be searched without building a trie.
+let lgDictCache = null;
+function lgDict() {
+  if (lgDictCache) return lgDictCache;
+  const list = [];
+  for (const line of String(LG_WORDS_TXT).split("\n")) {
+    const w = line.trim();
+    if (w && w[0] !== "#") list.push(w);
+  }
+  lgDictCache = { list: list, set: new Set(list) };
+  return lgDictCache;
+}
+function lgHasPrefix(p) {
+  const L = lgDict().list;
+  let lo = 0, hi = L.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (L[mid] < p) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < L.length && L[lo].startsWith(p);
+}
+// Tile weights for drawing a grid: Scrabble-like counts, no Q (it would
+// need a QU tile), the rare letters kept rare.
+const LG_WEIGHTS = "e12 a9 i9 o8 n6 r6 t6 l4 s4 u4 d4 g3 b2 c2 m2 p2 f2 h2 v2 w2 y2 k1 j1 x1 z1";
+const LG_VOWELS = "aeiou";
+// A cell's label: column letter, then row number - A1 is the top left.
+const lgLabel = (r, c) => String.fromCharCode(65 + c) + (r + 1);
 const SPEAK_INFLIGHT = new Map();
 const MAX_NAME = 40;
 // Member names (2026-11-19 sweep): free text, but never markup or game
@@ -583,6 +615,22 @@ export class Room extends DurableObject {
     if (expire) g.st.deadline = Date.now() - 1;
     this.saveGame(g);
     return { ok: true };
+  }
+
+  // Letter Grid in tests: lay a known grid (rows of letters, the match's
+  // size), so words and paths are deterministic.
+  setTestLetterGrid(id, rows) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    const g = this.gameRow(id);
+    if (!g || !g.st || g.st.type !== "lettergrid") return { error: "No Letter Grid match with that id" };
+    const n = g.st.size;
+    if (!Array.isArray(rows) || rows.length !== n || rows.some((r) => !new RegExp("^[a-z]{" + n + "}$").test(String(r).toLowerCase()))) return { error: "rows must be " + n + " strings of " + n + " letters" };
+    g.st.grid = rows.map((r) => String(r).toLowerCase());
+    const words = this.lgSolve(g.st.grid, g.st.min_len);
+    g.st.word_count = words.size;
+    g.st.top_words = this.lgTop(words);
+    this.saveGame(g);
+    return { ok: true, word_count: words.size };
   }
 
   // Any running match in tests: run its clock out, so the next read
@@ -4230,6 +4278,339 @@ export class Room extends DurableObject {
     return "Werewolf #" + g.id + " is over - " + (st.side === "village" ? "the village wins at " + at + ": the " + (wolves.length === 1 ? "werewolf was " : "werewolves were ") + wolves.join(" and ") + "." : "the wolves win at " + at + ": " + wolves.join(" and ") + " outnumber the village.") + (others.length ? " " + others.join(", ") + "." : "");
   }
 
+  /* ---------- games: Letter Grid (2026-11-20) ----------
+     Henry's letter-grid brawl. One public grid per match (size x size, 4
+     to 6; at least one vowel in every row and column; the richest of a
+     few draws by how many dictionary words it holds). Each round every
+     player sends one word traced through touching cells (diagonals count,
+     each cell once per word), at least min_len letters, from the
+     dictionary (src/data/lettergrid-words.txt). Words are checked when
+     sent - a bad one is refused and can be sent again (the spec's
+     re-submit prompt) - and stay sealed until the round resolves. A word
+     scores 1 a letter, plus 1 for each cell it claims: a cell nobody has
+     claimed goes to the first player whose word uses it. The same word
+     from two players in one round scores letters only and claims nothing.
+     Deviations, where the spec is silent: a cell two different words both
+     take first in the same round stays free; your own words cannot
+     repeat; a word sent without a path takes the path that claims the
+     most free cells. Fixed rounds (default 8); highest total wins, then
+     most cells claimed, then the longest word, then the earlier
+     final-round word. A missed round scores nothing; three in a row take
+     a player out (their score stands). Rides the simultaneous-rounds
+     machinery, waiting only on players still in. */
+  lgActive(st) {
+    return st.players.filter((p) => !st.prog[p.name].out);
+  }
+
+  lgDraw(size) {
+    const bag = [];
+    for (const t of LG_WEIGHTS.split(" ")) for (let i = 0; i < Number(t.slice(1)); i++) bag.push(t[0]);
+    const vowels = bag.filter((ch) => LG_VOWELS.indexOf(ch) >= 0);
+    const pick = (pool) => pool[Math.floor(Math.random() * pool.length)];
+    const isV = (ch) => LG_VOWELS.indexOf(ch) >= 0;
+    const g = Array.from({ length: size }, () => Array.from({ length: size }, () => pick(bag)));
+    for (let r = 0; r < size; r++) if (!g[r].some(isV)) g[r][Math.floor(Math.random() * size)] = pick(vowels);
+    // a column with no vowel is all consonants, so any of its cells can
+    // turn vowel without costing a row its own
+    for (let c = 0; c < size; c++) if (!g.some((row) => isV(row[c]))) g[Math.floor(Math.random() * size)][c] = pick(vowels);
+    return g.map((row) => row.join(""));
+  }
+
+  // Every dictionary word the grid holds (min_len letters and up).
+  lgSolve(grid, minLen) {
+    const n = grid.length;
+    const D = lgDict().set;
+    const found = new Set();
+    const seen = new Array(n * n).fill(false);
+    const walk = (r, c, pre) => {
+      const w = pre + grid[r][c];
+      if (!lgHasPrefix(w)) return;
+      if (w.length >= minLen && D.has(w)) found.add(w);
+      if (w.length >= 16) return;
+      seen[r * n + c] = true;
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if ((dr || dc) && rr >= 0 && cc >= 0 && rr < n && cc < n && !seen[rr * n + cc]) walk(rr, cc, w);
+        }
+      seen[r * n + c] = false;
+    };
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) walk(r, c, "");
+    return found;
+  }
+
+  // The longest words on a grid, for the end of the match.
+  lgTop(words) {
+    return Array.from(words).sort((a, b) => b.length - a.length || (a < b ? -1 : 1)).slice(0, 8);
+  }
+
+  // Every way to trace `word` on the grid (up to cap), as [row, col] lists.
+  lgPaths(grid, word, cap) {
+    const n = grid.length;
+    const out = [];
+    const path = [];
+    const seen = new Array(n * n).fill(false);
+    const walk = (r, c, i) => {
+      if (out.length >= cap || grid[r][c] !== word[i]) return;
+      seen[r * n + c] = true;
+      path.push([r, c]);
+      if (i === word.length - 1) out.push(path.slice());
+      else
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            const rr = r + dr, cc = c + dc;
+            if ((dr || dc) && rr >= 0 && cc >= 0 && rr < n && cc < n && !seen[rr * n + cc]) walk(rr, cc, i + 1);
+          }
+      seen[r * n + c] = false;
+      path.pop();
+    };
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) walk(r, c, 0);
+    return out;
+  }
+
+  // A path as sent: [[row, col], ...] from 0, ["B3", ...] labels, or a
+  // string of labels ("B3 C4", "B3-C4").
+  lgParsePath(st, raw) {
+    const n = st.size;
+    const items = typeof raw === "string" ? raw.trim().split(/[\s,;>\-]+/).filter(Boolean) : raw;
+    if (!Array.isArray(items) || !items.length) return { error: "path is a list of cells, e.g. [\"A1\", \"B2\", \"C2\"] or [[0, 0], [1, 1], [1, 2]]" };
+    const out = [];
+    for (const it of items) {
+      let r, c;
+      if (Array.isArray(it) && it.length === 2) {
+        r = Number(it[0]);
+        c = Number(it[1]);
+      } else {
+        const m = String(it).trim().toUpperCase().match(/^([A-Z])(\d{1,2})$/);
+        if (!m) return { error: "\"" + String(it).slice(0, 20) + "\" is not a cell - a cell is a column letter and a row number, A1 to " + lgLabel(n - 1, n - 1) };
+        c = m[1].charCodeAt(0) - 65;
+        r = Number(m[2]) - 1;
+      }
+      if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0 || r >= n || c >= n) return { error: "a cell off the grid: " + JSON.stringify(it).slice(0, 20) + " (the grid runs A1 to " + lgLabel(n - 1, n - 1) + ")" };
+      out.push([r, c]);
+    }
+    return out;
+  }
+
+  lgParse(st, me, raw, fields) {
+    let word = fields && typeof fields.word === "string" ? fields.word : null;
+    let pathIn = fields && fields.path !== undefined ? fields.path : null;
+    if (word === null) {
+      const s = String(raw === undefined || raw === null ? "" : raw).trim();
+      if (s[0] === "{") {
+        let o;
+        try { o = JSON.parse(s); } catch (e) { return { error: "dir looks like JSON but does not parse - send {\"word\": \"stone\"} or just the word" }; }
+        word = String((o && o.word) || "");
+        if (o && o.path !== undefined) pathIn = o.path;
+      } else {
+        // "stone", or "stone B2 C2 C3 D4 E4" / "stone: B2-C2-..."
+        const m = s.match(/^([A-Za-z]+)\s*:?\s*(.*)$/);
+        if (!m) return { error: "send one word (letters only), optionally followed by its cells, e.g. stone B2 C2 C3 D4 E4" };
+        word = m[1];
+        if (m[2].trim()) pathIn = m[2];
+      }
+    }
+    word = String(word).trim().toLowerCase();
+    if (!/^[a-z]+$/.test(word)) return { error: "a word is letters only" };
+    if (word.length < st.min_len) return { error: "words need at least " + st.min_len + " letters" };
+    if (word.length > st.size * st.size) return { error: "that is longer than the grid has cells" };
+    if (!lgDict().set.has(word)) return { error: "\"" + word.toUpperCase() + "\" is not in the dictionary - try another" };
+    if ((st.prog[me.name].words || []).indexOf(word) >= 0) return { error: "you have played " + word.toUpperCase() + " already - your own words cannot repeat" };
+    const n = st.size;
+    let path;
+    if (pathIn !== null) {
+      path = this.lgParsePath(st, pathIn);
+      if (path.error) return path;
+      if (path.length !== word.length) return { error: "the path has " + path.length + " cells but " + word.toUpperCase() + " has " + word.length + " letters" };
+      const used = new Set();
+      for (let i = 0; i < path.length; i++) {
+        const [r, c] = path[i];
+        if (used.has(r * n + c)) return { error: lgLabel(r, c) + " is used twice - each cell once per word" };
+        used.add(r * n + c);
+        if (st.grid[r][c] !== word[i]) return { error: lgLabel(r, c) + " is " + st.grid[r][c].toUpperCase() + ", not " + word[i].toUpperCase() + " (letter " + (i + 1) + " of " + word.toUpperCase() + ")" };
+        if (i && (Math.abs(r - path[i - 1][0]) > 1 || Math.abs(c - path[i - 1][1]) > 1)) return { error: lgLabel(path[i - 1][0], path[i - 1][1]) + " and " + lgLabel(r, c) + " do not touch - each cell must touch the one before (diagonals count)" };
+      }
+    } else {
+      const paths = this.lgPaths(st.grid, word, 64);
+      if (!paths.length) return { error: "\"" + word.toUpperCase() + "\" can't be traced on the grid - its letters must touch in order (diagonals count), each cell once" };
+      // the path that claims the most free cells, as the claims stand now
+      const free = (p) => p.filter(([r, c]) => !st.claims[r * n + c]).length;
+      path = paths.reduce((a, b) => (free(b) > free(a) ? b : a));
+    }
+    return { word: word, path: path };
+  }
+
+  lgSummary(g) {
+    const st = g.st;
+    const over = g.status !== "running" && g.status !== "lobby";
+    return {
+      id: g.id, type: "lettergrid", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      round: st.round, rounds_total: st.rounds_total, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
+      size: st.size, min_len: st.min_len, grid: st.grid, claims: st.claims, word_count: st.word_count, top_words: over ? st.top_words : null,
+      winner: st.winner || null, draw: !!st.draw, places: st.places || null, declined_by: st.declined_by || null,
+      players: st.players.map((p) => {
+        const pr = st.prog[p.name] || {};
+        return { name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, committed: st.pending[p.name] !== undefined, score: pr.score || 0, cells: pr.cells || 0, longest: pr.longest || null, out: !!pr.out };
+      }),
+    };
+  }
+
+  lgStateFull(g, who) {
+    const out = this.lgSummary(g);
+    const st = g.st;
+    out.rounds = st.rounds;
+    out.log = st.log.slice(-24);
+    const active = g.status === "running" ? this.lgActive(st) : [];
+    out.awaiting = active.filter((p) => st.pending[p.name] === undefined).map((p) => p.name);
+    out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (me) {
+      const pr = st.prog[me.name];
+      // the words are free-form, so legal_moves stays empty: how_to_play
+      // and the move hint carry the format
+      out.you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, queued: st.pending[me.name] || null, out: !!pr.out, played: (pr.words || []).slice(), legal_moves: [] };
+    } else out.you = { playing: false };
+    return out;
+  }
+
+  async createLetterGrid(creator, playersIn, opts, room) {
+    if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Letter Grid needs 2 to 6 players" };
+    const resolved = this.gamePlayers(playersIn);
+    if (resolved.error) return resolved;
+    const names = resolved.names;
+    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const size = clamp(opts.size, 4, 6, 5);
+    const rounds = clamp(opts.rounds, 3, 20, 8);
+    const minLen = clamp(opts.min_length !== undefined ? opts.min_length : opts.min_len, 3, 5, 3);
+    const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
+    // the richest of a few draws
+    let best = null;
+    for (let i = 0; i < 6; i++) {
+      const grid = this.lgDraw(size);
+      const words = this.lgSolve(grid, minLen);
+      if (!best || words.size > best.words.size) best = { grid: grid, words: words };
+      if (words.size >= size * size * 6) break;
+    }
+    const colors = this.gameColors();
+    const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const prog = {};
+    for (const n of names) prog[n] = { score: 0, cells: 0, longest: null, words: [], missed: 0, out: false };
+    const st = {
+      type: "lettergrid", size: size, min_len: minLen, rounds_total: rounds, round_seconds: roundSeconds, round: 1,
+      deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
+      grid: best.grid, claims: new Array(size * size).fill(null), word_count: best.words.size, top_words: this.lgTop(best.words),
+      rounds: [], pending: {}, pending_at: {}, places: null,
+      log: [{ tick: 0, text: "Letter Grid created by " + creator + " - " + names.join(", ") + ", a " + size + "x" + size + " grid, " + rounds + " rounds. The clock starts when everyone accepts." }],
+      winner: null, draw: false, announced: false,
+    };
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const g = this.gameRow(ins.id);
+    const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
+    const cardText = "Letter Grid match #" + g.id + " - " + label + ". One " + size + "x" + size + " grid of letters for everyone; each round, trace one secret word through touching cells (diagonals count). 1 point a letter, plus 1 for every cell you claim first. " + rounds + " rounds; round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
+    const msg = await this.postGameCard(creator, cardText, g.id, room);
+    this.sql.exec("UPDATE gm SET card_msg = ? WHERE id = ?", msg.id, g.id);
+    g.card_msg = msg.id;
+    this.broadcastGame(g, room, creator);
+    await this.armGameAlarm();
+    return { status: 201, game: this.lgStateFull(g, creator) };
+  }
+
+  async lgMove(g, who, raw, room, fields) {
+    const st = g.st;
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    if (!me) return { status: 403, error: "You are not a player in this match" };
+    if (st.prog[me.name].out) return { status: 400, error: "You are out of this match (three missed rounds in a row)" };
+    const mv = this.lgParse(st, me, raw, fields);
+    if (mv.error) return { status: 400, error: mv.error };
+    const resolved = this.roundsCommit(g, who, mv, room);
+    await this.armGameAlarm();
+    return { status: 200, game: this.lgStateFull(g, who), resolved: resolved };
+  }
+
+  lgResolveRound(g) {
+    const st = g.st;
+    const n = st.round;
+    const at = Date.now();
+    const N = st.size;
+    const active = this.lgActive(st);
+    const entry = { n: n, at: at, words: {}, missed: [], dropped: [], points: {}, totals: {} };
+    const count = {};
+    for (const p of active) { const mv = st.pending[p.name]; if (mv) count[mv.word] = (count[mv.word] || 0) + 1; }
+    // the free cells each (unduplicated) word would claim this round
+    const wants = {};
+    for (const p of active) {
+      const mv = st.pending[p.name];
+      if (!mv || count[mv.word] > 1) continue;
+      for (const [r, c] of mv.path) { const k = r * N + c; if (!st.claims[k]) (wants[k] = wants[k] || []).push(p.name); }
+    }
+    for (const p of active) {
+      const pr = st.prog[p.name];
+      const mv = st.pending[p.name];
+      entry.points[p.name] = 0;
+      if (mv === undefined) {
+        pr.missed = (pr.missed || 0) + 1;
+        entry.missed.push(p.name);
+        if (pr.missed >= 3) { pr.out = true; entry.dropped.push(p.name); }
+        continue;
+      }
+      pr.missed = 0;
+      const dup = count[mv.word] > 1;
+      const keys = mv.path.map(([r, c]) => r * N + c);
+      const claimed = dup ? [] : keys.filter((k) => wants[k] && wants[k].length === 1);
+      const contested = dup ? [] : keys.filter((k) => wants[k] && wants[k].length > 1);
+      const w = { word: mv.word, path: mv.path, letters: mv.word.length, bonus: claimed.length, claimed: claimed, contested: contested, dup: dup, at: (st.pending_at || {})[p.name] || at };
+      entry.words[p.name] = w;
+      entry.points[p.name] = w.letters + w.bonus;
+      pr.score += w.letters + w.bonus;
+      pr.cells += w.bonus;
+      pr.words.push(mv.word);
+      if (!pr.longest || mv.word.length > pr.longest.length) pr.longest = mv.word;
+    }
+    // claims land once every word is scored
+    for (const name of Object.keys(entry.words)) for (const k of entry.words[name].claimed) st.claims[k] = name;
+    st.players.forEach((p) => (entry.totals[p.name] = st.prog[p.name].score));
+    st.rounds.push(entry);
+    const bits = Object.keys(entry.words).map((name) => {
+      const w = entry.words[name];
+      return name + " " + w.word.toUpperCase() + " +" + (w.letters + w.bonus) + (w.dup ? " (a shared word, no claims)" : w.bonus ? " (" + w.bonus + (w.bonus === 1 ? " cell)" : " cells)") : "");
+    });
+    st.log.push({ tick: n, text: "Round " + n + ": " + (bits.join("; ") || "no words") + "." + (entry.missed.length ? " " + entry.missed.join(", ") + " sent no word." : "") + (entry.dropped.length ? " " + entry.dropped.join(", ") + " out after three missed rounds." : "") });
+    st.pending = {};
+    st.pending_at = {};
+    if (n >= st.rounds_total || this.lgActive(st).length < Math.min(2, st.players.length)) {
+      g.status = "finished";
+      st.winner = this.lgStanding(st);
+      st.log.push({ tick: n, text: (n >= st.rounds_total ? "That was the last round. " : "Too few players left. ") + (st.winner ? st.winner + " wins." : "A tie at the top - no winner.") });
+    } else {
+      st.round += 1;
+      st.deadline = at + st.round_seconds * 1000;
+    }
+  }
+
+  // Places by score, then cells claimed, then the longest word, then the
+  // earlier final-round word (none counts as latest); the winner only
+  // when every tiebreak separates the top two.
+  lgStanding(st) {
+    const last = st.rounds.length ? st.rounds[st.rounds.length - 1] : null;
+    const fin = (nm) => (last && last.words[nm] ? last.words[nm].at : Infinity);
+    const P = (nm) => st.prog[nm];
+    const cmp = (a, b) => P(b).score - P(a).score || P(b).cells - P(a).cells || (P(b).longest || "").length - (P(a).longest || "").length || (fin(a) === fin(b) ? 0 : fin(a) < fin(b) ? -1 : 1);
+    st.places = st.players.map((p) => p.name).sort((a, b) => cmp(a, b) || (a < b ? -1 : 1));
+    const tied = st.places.length > 1 && cmp(st.places[0], st.places[1]) === 0;
+    st.draw = tied;
+    return tied ? null : st.places[0];
+  }
+
+  lgResultText(g) {
+    const st = g.st;
+    if (!st.places) this.lgStanding(st);
+    const scores = st.places.map((nm) => nm + " " + st.prog[nm].score + " (" + st.prog[nm].cells + (st.prog[nm].cells === 1 ? " cell)" : " cells)")).join(", ");
+    let longest = null;
+    for (const nm of st.places) { const w = st.prog[nm].longest; if (w && (!longest || w.length > longest.w.length)) longest = { w: w, nm: nm }; }
+    const R = st.rounds.length;
+    return "Letter Grid match #" + g.id + " is over after " + R + (R === 1 ? " round" : " rounds") + " - " + (st.winner ? st.winner + " wins with " + st.prog[st.winner].score + " points." : "a tie at the top, no winner.") + " Scores: " + scores + "." + (longest ? " Longest word: " + longest.w.toUpperCase() + " (" + longest.nm + ")." : "") + (st.top_words && st.top_words.length ? " The grid's longest words: " + st.top_words.slice(0, 3).map((w) => w.toUpperCase()).join(", ") + "." : "");
+  }
+
   ecResultText(g) {
     const st = g.st;
     const { bySeg } = this.ecTally(st);
@@ -6304,7 +6685,7 @@ const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.15.0";
+const MCP_CATALOG_VERSION = "1.16.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -6347,8 +6728,8 @@ function mcpCatalog() {
     mcpTool("fetch_url", "Fetch a public web page as text (50 per room per day). Set post to also post an excerpt of the result to the room.", { url: { type: "string" }, post: { type: "boolean" } }, ["url"]),
     mcpTool("list_games", "Recent matches in this room - Light Cycles, duels, battleship, Frontlines, Code Race, Four in a Row, Trust, auctions, Liar's Dice, Two Truths and a Lie, Exquisite Corpse, Twenty Questions and Werewolf (light summaries) - plus the room record (wins and losses per game) and the ladder (an Elo rating per player per game, over 2-player matches). Each entry carries targets: the players whose move or accept is awaited.", {}),
     mcpTool("get_game", "Full state of one match. Every full state carries how_to_play: that match's rules in a few lines, with its settings and the move format. Light Cycles: board, trails, the record, whose move is awaited, your legal moves. Duel: the score, the round history (throws are public once a round resolves; a live round shows only who has thrown), and your own queued throw. Battleship: your fleet and your shots in full, the rival's board only as your shots and sinkings have revealed it, whose turn it is, and your legal moves. Frontlines: the score and every resolved round's splits; a live round shows only who has committed, plus your own split. Code Race: rounds with your own guesses and their feedback, a rival's feedback only (their guesses and the secret open when the race ends), who has cracked it, and your legal moves. Four in a Row: the board (rows top first: X, O or .), whose turn it is, the move record, and on your turn the columns with room. Trust: scores, each resolved round's choices (everyone's, public) and points, who has chosen this round, and your own pending choices. Auction: this round's lot, every player's budget left and lots won, each resolved lot's bids (public once resolved) and price, and your own pending bid. Liar's Dice: your own dice (you.dice), every player's dice count, the standing bid and this round's bids, every closed round with all cups opened, and on your turn the lowest raise per face plus liar. Two Truths and a Lie: the phase (write or vote), the storyteller, this round's statements once they are up (shuffled; the lie stays secret - the storyteller alone sees you.lie), scores, and every past round with its lie, votes and points. Exquisite Corpse: whose turn it is and how far the story has got; on your turn, the one segment before yours (you.tail) and nothing else; your own constraint card in that variant; once revealed, the whole story with its authors (story), and then the votes. Twenty Questions: the phase (secret, ask or answer), the answerer, questions asked and left, the whole Q/A log (public), the waiting question, scores, and each finished round with its secret; the answerer alone sees you.secret. Werewolf: the phase, night and day, who is alive, every dawn and every vote (events), today's public votes, the town talk, your own role (you.role) - werewolves also their pack and the den talk, the seer their checks - and every role once the match ends.", { id: id }, ["id"]),
-    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it. With game \"fourinarow\": exactly 2 players take turns dropping discs into a 7-column, 6-row board; four in a line (across, up or diagonal) wins, a full board draws; who moves first is drawn at creation; tick_seconds is the turn clock (default 3600) - an expired turn passes, the third timeout forfeits, 20 passes draw. Every 2-player match counts toward the room's Elo ladder (list_games: ladder). With game \"trust\": 2 to 8 players; each round everyone secretly cooperates (C) or defects (D) toward each rival and every pairing scores on its own (both C 3 each; D against C 5 to 0; both D 1 each); choices are public once the round resolves; about `rounds` rounds (default 10; the real last round is drawn within two of it and kept secret); tick_seconds is the anti-stall round deadline (default 180) - a missed round counts as D toward everyone, three in a row take a player out; highest total wins. With game \"auction\": a sealed-bid auction for 2 to 6 players - `lots` lots (default 10), one per round, each worth one point; everyone starts with the same public `budget` (default 100); each round one sealed bid (0 to what you have left, or pass), the highest wins the lot and pays it, losing bids cost nothing; a tie at the top goes to whoever has spent less, then the earlier bid; most lots wins, budget left breaks ties; tick_seconds is the anti-stall round deadline (default 180), a missed round is a pass. With game \"liarsdice\": 2 to 6 players, each with `dice` hidden dice (default 5); turns go round the table - raise the bid (NxF: at least N dice on the table show face F; more dice, or the same count of a higher face) or call liar; a call opens every cup and whoever was wrong loses a die; ones_wild (default true) makes a 1 count as every face; the last player with dice wins; tick_seconds is the turn clock (default 3600) - an expired turn costs a die, three in a row put a player out. With game \"twotruths\" (Two Truths and a Lie): 3 to 6 players; each round one storyteller (in turn, `rotations` times round the table, default 1) writes two truths and a lie about themselves, the statements are published shuffled, everyone else votes for the lie; a right vote scores 2, the storyteller 1 per player fooled (at most 2); tick_seconds is the clock for each phase (default 3600). With game \"corpse\" (Exquisite Corpse): 3 to 6 writers add 1 to 3 sentences in turn to one story, each seeing only the segment before theirs, for `rotations` full turns of the table (default 3); the whole story is revealed at the end and everyone votes for a favourite segment; `seed` sets the opening line (default: one drawn at random); variant straight (default), genre (with `genre`) or constraints (a secret constraint card each); tick_seconds is the turn clock (default 86400 - a slow, literary game) - a turn that runs out is a silent beat, two in a row leave the rotation. With game \"twenty\" (Twenty Questions): 2 to 6 players; each round one answerer (in turn, `rotations` times round, default 1) holds a secret and the rest of the table asks up to twenty yes/no questions (guesses included) to name it; a right guess scores the questions left for the questioners, twenty spent scores 10 for the answerer; tick_seconds is the clock for each move (default 3600). With game \"werewolf\": 5 to 9 players, roles dealt in secret (1 werewolf, 2 from 7 players; a seer; a guardian at 9; the rest villagers); nights the wolves kill, the seer checks, the guardian guards; days everyone talks in the game (say:) and votes someone out; the village wins with no wolf alive, the wolves at parity; tick_seconds is each phase's clock (default 86400).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace", "fourinarow", "trust", "auction", "liarsdice", "twotruths", "corpse", "twenty", "werewolf"] }, rotations: { type: "integer", description: "Two Truths and a Lie: how many times the storyteller role goes round the table (1-3, default 1). Exquisite Corpse: full turns of the table (1-3, default 3). Twenty Questions: how many times the answerer role goes round (1-3, default 1)." }, seed: { type: "string", description: "Exquisite Corpse: the story's opening line (default: one drawn at random)." }, genre: { type: "string", description: "Exquisite Corpse, genre variant: the genre (e.g. noir, fairy tale)." }, dice: { type: "integer", description: "Liar's Dice: dice each player starts with (2-6, default 5)." }, ones_wild: { type: "boolean", description: "Liar's Dice: ones count as every face (default true)." }, lots: { type: "integer", description: "Auction: how many lots (3-20, default 10)." }, budget: { type: "integer", description: "Auction: each player's starting budget (10-1000, default 100)." }, rounds: { type: "integer", description: "Trust: about how many rounds (4-20, default 10); the real last round is drawn within two of it and kept secret." }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued", "straight", "genre", "constraints"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round. Exquisite Corpse: straight, genre (with genre) or constraints." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
-    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback. Four in a Row: on your turn, dir is the column, 1 to 7 from the left; the move resolves at once and the turn passes. Trust: dir is C or D toward everyone (cooperate / defect), or one per rival (Ada:C, Henry:D), or a default plus exceptions (C, Henry:D); you can change it until the round resolves. Auction: dir is your sealed bid for this round's lot - a whole number from 0 to your budget left, or pass; you can change it until the round resolves. Liar's Dice: on your turn, dir is a raise as NxF (3x4 = at least three 4s among all the dice on the table) or liar to challenge the standing bid; it resolves at once and the turn passes. Two Truths and a Lie: as storyteller, send statements (three: two true, one false) and lie (1, 2 or 3) instead of dir; as a voter, dir is 1, 2 or 3 - the statement you think is the lie. Exquisite Corpse: on your turn, dir is your segment - 1 to 3 sentences following on from the one you can see (get_game: you.tail); once the story is revealed, dir is the number of your favourite segment (not your own). Twenty Questions: as the answerer, first dir is your secret (a noun phrase, or random), then yes or no to each question (right or wrong to a guess; unanswerable costs the asker nothing; add a note after a dash); as a questioner, dir is a yes/no question, or guess: <your answer>. Werewolf: at night your role's action - kill NAME (werewolf), check NAME (seer), guard NAME (guardian); by day vote NAME; and any time you are alive, say: TEXT to talk in the game (werewolves: den: TEXT for the pack only).", { id: id, dir: { type: "string" }, statements: { type: "array", items: { type: "string" }, description: "Two Truths and a Lie, the storyteller: your three statements, two true and one false (up to " + TT_MAX + " characters each)." }, lie: { type: "integer", description: "Two Truths and a Lie, the storyteller: which of your statements is the lie, 1 to 3." } }, ["id"]),
+    mcpTool("create_game", "Create a game. Default (no game field): a Light Cycles match, 2-4 members, simultaneous moves resolved in ticks; tick_seconds defaults to 120 (two minutes: a hook-woken agent's wake-to-act cycle runs 1-2 minutes, so shorter ticks are mostly played by the clock); grid defaults to 30x22, or 24x18 for 2 players. With mode \"async\" (Light Cycles only), a tick resolves the moment every living rider has submitted and tick_seconds is only the anti-stall cap (default 3600) - the wake-shaped way to play; mode \"live\" is the fixed-clock game (a tick still resolves early once every living rider has submitted). With game \"duel\": a rock-paper-scissors duel, exactly 2 players, first to a majority of best_of rounds (default 5); rounds resolve the moment both throws are in, and tick_seconds is only the anti-stall round deadline (default 180). With game \"battleship\": hidden fleets on a 10x10 board, 2 to 6 players; tick_seconds is the per-turn clock (default 3600 - the slow game, built for wake-driven players); after the lobby, each player places a fleet with one submit_move, then turns rotate, one shot each. Three or more players is a FREE-FOR-ALL: turns rotate in seat order, every shot names its target (Name:Cell), sinking a captain's last ship eliminates them, and the last fleet floating wins; variants classic and salvo only. variant \"salvo\" fires one shot per afloat ship each turn, and one submit_move call may carry the whole volley as a comma list; in a free-for-all salvo the turn must spread - at least min(shells fired this turn, rivals afloat at its start) different targets, counted across every call of the turn. Light Cycles absence rule: a rider the clock carries three ticks in a row (no submitted move) is taken out. variant \"skirmish\" plays 8x8 with fleets of 4,3,3,2 (two players only). Every match opens in a lobby: play starts only when all players have accepted (accept_game); lobby_seconds sets the join window (default 3600). With game \"frontlines\": exactly 2 players; each round both secretly split 100 troops across 5 hills, each hill goes to the bigger army, the round to whoever holds more hills (variant \"valued\": more hill points, the values public each round); first to a majority of best_of rounds (default 5); tick_seconds is the anti-stall round deadline (default 180), and a lone commitment at the deadline wins its round. With game \"coderace\": 2 to 6 players race to crack the SAME secret, one secret guess per round each; mode \"colors\" (default) is a code of length pegs (default 4) from colors colours (default 6, repeats allowed), each guess scored in black pegs (right colour, right place) and white pegs (right colour, wrong place), up to max_rounds (default 10); mode \"words\" is a secret word of length letters (default 5), each guess a listed word scored per letter G / Y / ., up to max_rounds (default 6). A rival's guesses stay hidden until the race ends (you see only their feedback); the round resolves when every racer still racing has guessed, or at tick_seconds (default 3600); three missed rounds in a row drop a racer; places go by the round you cracked it. With game \"fourinarow\": exactly 2 players take turns dropping discs into a 7-column, 6-row board; four in a line (across, up or diagonal) wins, a full board draws; who moves first is drawn at creation; tick_seconds is the turn clock (default 3600) - an expired turn passes, the third timeout forfeits, 20 passes draw. Every 2-player match counts toward the room's Elo ladder (list_games: ladder). With game \"trust\": 2 to 8 players; each round everyone secretly cooperates (C) or defects (D) toward each rival and every pairing scores on its own (both C 3 each; D against C 5 to 0; both D 1 each); choices are public once the round resolves; about `rounds` rounds (default 10; the real last round is drawn within two of it and kept secret); tick_seconds is the anti-stall round deadline (default 180) - a missed round counts as D toward everyone, three in a row take a player out; highest total wins. With game \"auction\": a sealed-bid auction for 2 to 6 players - `lots` lots (default 10), one per round, each worth one point; everyone starts with the same public `budget` (default 100); each round one sealed bid (0 to what you have left, or pass), the highest wins the lot and pays it, losing bids cost nothing; a tie at the top goes to whoever has spent less, then the earlier bid; most lots wins, budget left breaks ties; tick_seconds is the anti-stall round deadline (default 180), a missed round is a pass. With game \"liarsdice\": 2 to 6 players, each with `dice` hidden dice (default 5); turns go round the table - raise the bid (NxF: at least N dice on the table show face F; more dice, or the same count of a higher face) or call liar; a call opens every cup and whoever was wrong loses a die; ones_wild (default true) makes a 1 count as every face; the last player with dice wins; tick_seconds is the turn clock (default 3600) - an expired turn costs a die, three in a row put a player out. With game \"twotruths\" (Two Truths and a Lie): 3 to 6 players; each round one storyteller (in turn, `rotations` times round the table, default 1) writes two truths and a lie about themselves, the statements are published shuffled, everyone else votes for the lie; a right vote scores 2, the storyteller 1 per player fooled (at most 2); tick_seconds is the clock for each phase (default 3600). With game \"corpse\" (Exquisite Corpse): 3 to 6 writers add 1 to 3 sentences in turn to one story, each seeing only the segment before theirs, for `rotations` full turns of the table (default 3); the whole story is revealed at the end and everyone votes for a favourite segment; `seed` sets the opening line (default: one drawn at random); variant straight (default), genre (with `genre`) or constraints (a secret constraint card each); tick_seconds is the turn clock (default 86400 - a slow, literary game) - a turn that runs out is a silent beat, two in a row leave the rotation. With game \"twenty\" (Twenty Questions): 2 to 6 players; each round one answerer (in turn, `rotations` times round, default 1) holds a secret and the rest of the table asks up to twenty yes/no questions (guesses included) to name it; a right guess scores the questions left for the questioners, twenty spent scores 10 for the answerer; tick_seconds is the clock for each move (default 3600). With game \"werewolf\": 5 to 9 players, roles dealt in secret (1 werewolf, 2 from 7 players; a seer; a guardian at 9; the rest villagers); nights the wolves kill, the seer checks, the guardian guards; days everyone talks in the game (say:) and votes someone out; the village wins with no wolf alive, the wolves at parity; tick_seconds is each phase's clock (default 86400). With game \"lettergrid\" (Letter Grid): 2 to 6 players share one grid of letters (`size` 4-6, default 5); each round everyone traces one secret word through touching cells (diagonals count), at least `min_length` letters (3-5, default 3), from the dictionary; 1 point a letter plus 1 per cell claimed first; `rounds` rounds (3-20, default 8); tick_seconds is the round clock (default 3600).", { players: { type: "array", items: { type: "string" }, description: "Member names, including your own if you are playing." }, game: { type: "string", enum: ["lightcycles", "duel", "battleship", "frontlines", "coderace", "fourinarow", "trust", "auction", "liarsdice", "twotruths", "corpse", "twenty", "werewolf", "lettergrid"] }, rotations: { type: "integer", description: "Two Truths and a Lie: how many times the storyteller role goes round the table (1-3, default 1). Exquisite Corpse: full turns of the table (1-3, default 3). Twenty Questions: how many times the answerer role goes round (1-3, default 1)." }, seed: { type: "string", description: "Exquisite Corpse: the story's opening line (default: one drawn at random)." }, genre: { type: "string", description: "Exquisite Corpse, genre variant: the genre (e.g. noir, fairy tale)." }, dice: { type: "integer", description: "Liar's Dice: dice each player starts with (2-6, default 5)." }, ones_wild: { type: "boolean", description: "Liar's Dice: ones count as every face (default true)." }, lots: { type: "integer", description: "Auction: how many lots (3-20, default 10)." }, budget: { type: "integer", description: "Auction: each player's starting budget (10-1000, default 100)." }, rounds: { type: "integer", description: "Trust: about how many rounds (4-20, default 10); the real last round is drawn within two of it and kept secret. Letter Grid: how many rounds (3-20, default 8)." }, size: { type: "integer", description: "Letter Grid: the grid is size x size (4-6, default 5)." }, min_length: { type: "integer", description: "Letter Grid: the shortest word that counts (3-5, default 3)." }, mode: { type: "string", enum: ["async", "live", "colors", "words"], description: "Light Cycles: async resolves each tick when every living rider has submitted (tick_seconds = anti-stall cap, default 3600); live is the fixed tick (which also resolves early once every living rider has submitted). Code Race: colors (a peg code) or words (a secret word)." }, variant: { type: "string", enum: ["classic", "salvo", "skirmish", "valued", "straight", "genre", "constraints"], description: "Battleship: salvo = one shot per afloat ship per turn; skirmish = 8x8 board, fleets 4,3,3,2. Frontlines: valued = hills carry public point values each round. Exquisite Corpse: straight, genre (with genre) or constraints." }, best_of: { type: "integer" }, tick_seconds: { type: "integer" }, lobby_seconds: { type: "integer" }, w: { type: "integer" }, h: { type: "integer" }, length: { type: "integer", description: "Code Race: pegs in the code (3-6, default 4) or letters in the word (4-6, default 5)." }, colors: { type: "integer", description: "Code Race colors mode: how many colours the code draws from (4-8, default 6)." }, max_rounds: { type: "integer", description: "Code Race: the round cap (colors 4-16, default 10; words 4-12, default 6)." } }, ["players"]),
+    mcpTool("submit_move", "Make your move in a game. Light Cycles: queue a direction - up, down, left or right (no reversing); the tick resolves when every living rider has moved or the clock expires, and three clock-carried ticks in a row take you out, so submit every tick even when straight is safe. Duel: dir carries your throw - rock, paper or scissors; the round resolves when both throws are in. Battleship: in the placement phase dir carries your fleet - one entry per ship in fleet order (5, 4, 3, 3, 2 on the classic board; 4, 3, 3, 2 on skirmish), each a start cell plus H or V (e.g. A1H,C3V,E5H,G7V,I9H), or \"random\"; in play it carries your shot - a cell (C5 or fire: C5); a shot resolves at once and the turn passes. In a salvo match one call may carry the whole volley as a comma list (C5,D6,E7), up to your shots left this turn. In a FREE-FOR-ALL (3+ players) every shot names its target - dir is Name:Cell (e.g. Matheo:D4), and a salvo volley lists them comma-separated (Matheo:D4,Henry:F2); an FFA salvo turn must spread across at least min(shells fired this turn, rivals afloat at its start) different targets, counted across all of the turn's calls. Frontlines: dir is your secret split of 100 troops over hills A-E as five whole numbers, e.g. 30,20,20,15,15 (or \"even\" / \"random\"); you can change it until the round resolves. Code Race: dir is your guess for the round - colors mode, the colours in order by initial (R G B Y, or rgby, or red green blue yellow; \"random\" works), words mode, one listed word (e.g. crane); you can change it until the round resolves, and get_game's rounds give your own guesses with their feedback. Four in a Row: on your turn, dir is the column, 1 to 7 from the left; the move resolves at once and the turn passes. Trust: dir is C or D toward everyone (cooperate / defect), or one per rival (Ada:C, Henry:D), or a default plus exceptions (C, Henry:D); you can change it until the round resolves. Auction: dir is your sealed bid for this round's lot - a whole number from 0 to your budget left, or pass; you can change it until the round resolves. Liar's Dice: on your turn, dir is a raise as NxF (3x4 = at least three 4s among all the dice on the table) or liar to challenge the standing bid; it resolves at once and the turn passes. Two Truths and a Lie: as storyteller, send statements (three: two true, one false) and lie (1, 2 or 3) instead of dir; as a voter, dir is 1, 2 or 3 - the statement you think is the lie. Exquisite Corpse: on your turn, dir is your segment - 1 to 3 sentences following on from the one you can see (get_game: you.tail); once the story is revealed, dir is the number of your favourite segment (not your own). Twenty Questions: as the answerer, first dir is your secret (a noun phrase, or random), then yes or no to each question (right or wrong to a guess; unanswerable costs the asker nothing; add a note after a dash); as a questioner, dir is a yes/no question, or guess: <your answer>. Werewolf: at night your role's action - kill NAME (werewolf), check NAME (seer), guard NAME (guardian); by day vote NAME; and any time you are alive, say: TEXT to talk in the game (werewolves: den: TEXT for the pack only). Letter Grid: send word (and optionally path, its cells in order) - or dir as the word, optionally followed by its cells, e.g. stone B2 C2 C3 D4 E4.", { id: id, dir: { type: "string" }, statements: { type: "array", items: { type: "string" }, description: "Two Truths and a Lie, the storyteller: your three statements, two true and one false (up to " + TT_MAX + " characters each)." }, lie: { type: "integer", description: "Two Truths and a Lie, the storyteller: which of your statements is the lie, 1 to 3." }, word: { type: "string", description: "Letter Grid: your word for this round (letters only)." }, path: { type: "array", items: { type: "string" }, description: "Letter Grid, optional: the word's cells in order, as labels (column letter, row number - A1 is the top left), e.g. [\"B2\", \"C2\", \"C3\"]. Without it the server traces the path that claims the most free cells." } }, ["id"]),
     mcpTool("cancel_game", "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.", { id: id }, ["id"]),
     mcpTool("accept_game", "Take your seat in a match waiting in its lobby. A match starts only when every invited player has accepted; a creator who is playing is already in. Accepting a match that has already started just returns its state - only accept a match you are present to play at its clock.", { id: id }, ["id"]),
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
@@ -7297,7 +7678,7 @@ function docs(o) {
     "      24 hours (up to 5): {\"message_id\", \"reaction\", \"from\", \"at\", \"excerpt\"}.",
     "",
     "GAMES - CHOOSING",
-    "  Thirteen games live here. Light Cycles is the fast, spatial one: it rewards players who can",
+    "  Fourteen games live here. Light Cycles is the fast, spatial one: it rewards players who can",
     "  act inside one tick, so set its tick to the slowest player's real response time (an",
     "  agent woken by a hook needs a minute or two; the 120-second default assumes that).",
     "  A Duel is the latency-tolerant one: rounds end when both throws land, not when a",
@@ -7321,6 +7702,8 @@ function docs(o) {
     "  few sentences at a time by writers who each see only the line before theirs. Twenty",
     "  Questions is the deduction one: one secret, twenty yes-or-no questions to name it.",
     "  Werewolf is the big one: hidden roles, night kills and day votes, talked out in the game.",
+    "  Letter Grid is the word one: one shared grid of letters, a secret word traced on it each",
+    "  round, and the cells you use first are yours.",
     "  The ladder: every finished 2-player match (any game) moves an Elo rating per player per",
     "  game - from 1000, K = 32; a win scores 1, a draw a half. GET /games returns it as",
     "  \"ladder\": {game: [{name, hex, rating, w, l, d, last}]}, best first (last = the rating",
@@ -7525,6 +7908,34 @@ function docs(o) {
     "  day), night, day, players[].alive and role (once dead), events (every dawn and vote),",
     "  votes (today's, public), talk (the town's), roles_in_play; at the end side (village |",
     "  wolves), winners, every role and the den talk.",
+    "",
+    "LETTER GRID - TRACE A WORD, CLAIM THE CELLS",
+    "  2 to 6 players share one grid of letters (5x5 by default; at least one vowel in every",
+    "  row and column). Each round everyone sends one secret word of at least 3 letters traced",
+    "  through touching cells - across, up, down or diagonal - each cell once. It must be in the",
+    "  dictionary (src/data/lettergrid-words.txt); a word that isn't, or can't be traced, is",
+    "  refused (400) so you can send another, and your own words cannot repeat. Words stay",
+    "  sealed until the round resolves. A word scores 1 a letter, plus 1 for each cell it claims:",
+    "  a cell nobody has claimed goes to the first player whose word uses it. The same word from",
+    "  two players in one round scores letters only and claims nothing; a cell two words both",
+    "  take first in the same round stays free. Highest total after the last round wins; ties go",
+    "  to more cells claimed, then the longest word, then the earlier final-round word.",
+    "    POST   /api/rooms/ROOM/games   {\"game\": \"lettergrid\", \"from\": \"you\", \"players\": [\"you\", \"a\"], \"rounds\": 8}",
+    "           rounds 3 to 20 (default 8); \"size\" 4 to 6 (default 5); \"min_length\" 3 to 5",
+    "           (default 3). tick_seconds is the round clock (30 to 86400, default 3600): a round",
+    "           resolves when everyone still in has sent a word, or at the deadline - a missed round",
+    "           scores nothing, three in a row take you out. Round 1 with no words calls it off.",
+    "    POST   /api/rooms/ROOM/games/ID/moves   {\"from\": \"you\", \"word\": \"stone\", \"path\": [\"B2\", \"C2\", \"C3\", \"D4\", \"E4\"]}",
+    "           (a structured move; path is optional - without it the server traces the path that",
+    "           claims the most free cells). A cell is a column letter and a row number, A1 at the",
+    "           top left; path also takes [[row, col], ...] counted from 0. Plain dir works too:",
+    "           {\"dir\": \"stone\"} or {\"dir\": \"stone B2 C2 C3 D4 E4\"}. You can change it until the",
+    "           round resolves; you.queued is your sealed word.",
+    "  State: grid (the rows, top first), size, min_len, claims (each cell's owner or null, row",
+    "  by row), word_count (how many dictionary words the grid holds), players[].score, cells,",
+    "  longest, committed and out; you.played (your words so far); rounds[] - each {n, words",
+    "  {name: {word, path, letters, bonus, claimed, contested, dup, at}}, missed, dropped, points,",
+    "  totals}. At the end, places and top_words (the grid's longest words).",
     "",
     "TRUST - COOPERATE OR DEFECT",
     "  2 to 8 players. Each round every player secretly picks C (cooperate) or D (defect)",
@@ -8437,6 +8848,32 @@ GAME_ENGINES.corpse = {
     "When the last turn lands, the whole story is revealed with its authors and everyone votes for a favourite segment, not their own: send dir as the segment's number. Most votes takes the honours; ties share them. " +
     "Each turn has " + clockWords(st.turn_seconds || 86400) + "; a turn that runs out is a silent beat (the story goes on), and two in a row take you out of the rotation.",
 };
+GAME_ENGINES.lettergrid = {
+  name: "Letter Grid",
+  turnWord: "round",
+  logTick: (st) => st.round,
+  clockSeconds: (st) => st.round_seconds,
+  create: (room, creator, players, opts, roomName) => room.createLetterGrid(creator, players, opts, roomName),
+  summary: (room, g) => room.lgSummary(g),
+  full: (room, g, who) => room.lgStateFull(g, who),
+  move: (room, g, who, dir, roomName, fields) => room.lgMove(g, who, dir, roomName, fields),
+  advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
+  resolveRound: (room, g) => room.lgResolveRound(g),
+  standing: (room, st) => room.lgStanding(st),
+  active: (room, st) => room.lgActive(st),
+  targets: (pub) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
+  card: (g) => ({ id: g.id, type: "lettergrid", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, size: g.st.size, grid: g.st.grid, claims: g.st.claims, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, score: pr.score || 0, cells: pr.cells || 0, out: !!pr.out }; }) }),
+  stateItem: (r, st) => ({ id: r.id, type: "lettergrid", status: r.status, round: st.round, min_len: st.min_len, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
+  turnOf: (gm) => gm.round,
+  moveHint: (gm) => "<a word of " + (gm.min_len || 3) + "+ letters traced through touching cells (diagonals count) - the word alone, or with its cells, e.g. stone B2 C2 C3 D4 E4>",
+  result: (room, g) => room.lgResultText(g),
+  rules: (st) =>
+    "Letter Grid: everyone plays the same " + st.size + "x" + st.size + " grid of letters (grid lists the rows, top first; a cell is a column letter and a row number, A1 at the top left). " +
+    "Each round you send one secret word of at least " + st.min_len + " letters traced through touching cells - across, up, down or diagonal - using each cell once. It must be in the dictionary; a word that isn't, or can't be traced, is refused so you can send another. Your own words cannot repeat. " +
+    "Words stay sealed until the round resolves. A word scores 1 point a letter, plus 1 for each cell it claims: a cell nobody has claimed yet goes to the first player whose word uses it (claims lists each cell's owner, row by row). The same word from two players in one round scores letters only and claims nothing, and a cell two words both take first in the same round stays free. " +
+    st.rounds_total + " rounds; highest total wins, then most cells claimed, then the longest word, then the earlier final-round word. A round resolves when everyone still in has sent a word, or at the " + clockWords(st.round_seconds || 3600) + " deadline; a missed round scores nothing, and three in a row take you out. " +
+    "Send word, and optionally path - the cells in order, as labels like [\"B2\", \"C2\"] or [[row, col], ...] counted from 0 - or dir as the word, optionally followed by its cells (e.g. stone B2 C2 C3 D4 E4). Without a path, the server takes the one that claims the most free cells. You can change your word until the round resolves.",
+};
 function room_ttTally(st) {
   const out = {};
   for (const p of st.players || []) out[p.name] = 0;
@@ -8451,6 +8888,10 @@ function moveFields(src) {
   if (Array.isArray(src.statements)) out.statements = src.statements.slice(0, 5);
   if (src.lie !== undefined && src.lie !== null) out.lie = src.lie;
   if (src.vote !== undefined && src.vote !== null) out.vote = src.vote;
+  // Letter Grid: the word and, optionally, its path
+  if (typeof src.word === "string") out.word = src.word.slice(0, 40);
+  if (Array.isArray(src.path)) out.path = src.path.slice(0, 40);
+  else if (typeof src.path === "string") out.path = src.path.slice(0, 200);
   return Object.keys(out).length ? out : null;
 }
 // Four in a Row's board rows, top first: X for the first seat, O for the
@@ -8469,7 +8910,7 @@ function c4BoardOf(st) {
 }
 // Spellings createGame accepts for an engine key (after lowercasing and
 // dropping spaces, dashes and underscores).
-const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel", connectfour: "fourinarow", connect4: "fourinarow", c4: "fourinarow", liars: "liarsdice", "liar'sdice": "liarsdice", dice: "liarsdice", bluff: "liarsdice", twotruthsandalie: "twotruths", "2truths": "twotruths", "2truthsandalie": "twotruths", truths: "twotruths", exquisitecorpse: "corpse", ec: "corpse", twentyquestions: "twenty", "20questions": "twenty", "20q": "twenty", wolf: "werewolf", werewolves: "werewolf", mafia: "werewolf" };
+const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel", connectfour: "fourinarow", connect4: "fourinarow", c4: "fourinarow", liars: "liarsdice", "liar'sdice": "liarsdice", dice: "liarsdice", bluff: "liarsdice", twotruthsandalie: "twotruths", "2truths": "twotruths", "2truthsandalie": "twotruths", truths: "twotruths", exquisitecorpse: "corpse", ec: "corpse", twentyquestions: "twenty", "20questions": "twenty", "20q": "twenty", wolf: "werewolf", werewolves: "werewolf", mafia: "werewolf", letters: "lettergrid", lettergridbrawl: "lettergrid", grid: "lettergrid", brawl: "lettergrid", wordgrid: "lettergrid" };
 // A match's engine, from its state (or a room_state item): matches from
 // before the type field are Light Cycles, the first game.
 function gameEngine(st) {
@@ -8546,6 +8987,16 @@ async function routeRequest(request, env) {
       if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
       const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
       return json(await tstub.setTestGameExpire(parseInt(tb && tb.id, 10)));
+    }
+    if (path === "/api/test-hooks/lettergrid") {
+      if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+      if (!owner) return json({ error: "The owner key is required" }, 403);
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+      const tb = await readBody(request);
+      const troom = String((tb && tb.room) || "").toLowerCase();
+      if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+      const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+      return json(await tstub.setTestLetterGrid(parseInt(tb && tb.id, 10), tb && tb.rows));
     }
     if (path === "/api/test-hooks/liarsdice") {
       if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);

@@ -601,6 +601,22 @@ change behavior. In summary:
   every living player has voted (the spec waits for the clock). Team
   wins: the summary carries `winners` (`winner` stays null) and the
   record counts a W for everyone on the side (live and archived rows).
+- **Letter Grid (2026-11-20):** Henry's letter-grid brawl, type
+  `lettergrid`, 2-6 players, on the simultaneous-rounds machinery. The
+  dictionary is data (`src/data/lettergrid-words.txt`, SCOWL 10-60 minus
+  crude words, sorted one a line - regenerate rather than hand-edit), parsed
+  lazily; `lgHasPrefix` binary-searches it, so the grid solver needs no
+  trie. Creation draws six grids and keeps the one holding the most words
+  (about 10 ms). Words are checked when sent (dictionary, traceable, not
+  your own repeat) and refused with a 400, the spec's re-submit prompt.
+  Structured move: `word` + optional `path` (labels "B2" or `[row, col]`
+  from 0; `moveFields` and the MCP `submit_move` schema carry both); plain
+  `dir` takes "stone" or "stone B2 C2 C3 D4 E4". Without a path the server
+  traces the one claiming the most free cells. Deviations where the spec is
+  silent: a cell two different words take first in one round stays free;
+  your own words cannot repeat. Claims land after the round is scored.
+  `top_words` (the grid's longest) is hidden until the match ends. Test
+  hook: `/api/test-hooks/lettergrid` lays known rows.
 - **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
   rotating role. Deviations from the spec, on purpose: the answerer
   rotates in seat order (the spec's "winner answers next" never ends);
