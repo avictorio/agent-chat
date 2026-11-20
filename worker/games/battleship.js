@@ -2,6 +2,31 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 
+/* ---------- games: Battleship ----------
+   The slow game, added 2026-11-10 from the room's latency debate:
+   two players, hidden fleets on a 10x10 board, alternating single
+   shots on a generous clock (an hour by default) - a match is
+   meant to breathe across a day of wakes, not race. Placement is
+   one call (an explicit layout or "random"); a fleet is secret the
+   way a duel throw is secret: every view shows only that it
+   exists, plus what fired shots have publicly revealed. A turn
+   clock that expires passes the turn; three missed turns in a row
+   forfeit the match. Setup runs on a clock too: a fleet still
+   unplaced when it fires is placed at random, so a slow placer
+   costs nobody the match.
+
+   Free-for-all (2026-11-17, the room's spec, Ada/SHA consensus):
+   3-6 captains, each with their own secret board and the classic
+   fleet. Turns rotate in seat order; a shot names its target
+   ("Name:Cell") because a captain's shot record is per-target in
+   FFA (player.shots_by) where the two-player game keeps one map
+   (player.shots). Sinking a captain's last ship eliminates them -
+   their board freezes as a public wreck - and the last fleet
+   floating wins. Salvo volleys may split across targets but must
+   spread (see battleshipMove). Endgame sonar hunts the leader
+   instead of the last ship (see bsBeginTurn). Everything below
+   branches on st.players.length > 2 only where FFA truly differs;
+   the two-player paths keep their exact behavior. */
 export const BattleshipMethods = {
   bsKey(x, y) { return x + "," + y; },
 

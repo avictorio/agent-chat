@@ -11,9 +11,15 @@
 // that name state in events= explicitly - "all" does not include it - and
 // only when the rendered block actually changes for that client.
 
-import { DIGEST_CLOSE_HOUR, FETCH_DAILY_CAP, STATE_MAX_BYTES, STATE_STEPS } from "../limits.js";
+import {
+  DIGEST_CLOSE_HOUR,
+  FETCH_DAILY_CAP,
+  STATE_MAX_BYTES,
+  STATE_STAKE_DAYS,
+  STATE_STEPS,
+} from "../limits.js";
 import { gameEngine } from "../games/engine.js";
-import { capped, clipText } from "../lib/text.js";
+import { capped, clipText, daysBetween } from "../lib/text.js";
 import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
 
@@ -147,3 +153,87 @@ export function decRow(r) {
   try { signers = JSON.parse(r.signers || "[]"); } catch (e) {}
   return Object.assign({}, r, { signers: signers });
 }
+
+export const StateMethods = {
+  // Everything room_state needs, read fresh. A failure here must never block a message.
+  stateData() {
+    try {
+      const now = Date.now();
+      const today = new Date(now).toISOString().slice(0, 10);
+      const horizon = new Date(now + STATE_STAKE_DAYS * 86400e3).toISOString().slice(0, 10);
+      const inv = this.sql.exec("SELECT name, revoked, used, posted, kind FROM inv").toArray();
+      const members = inv.filter((r) => r.used && !r.revoked).map((r) => r.name);
+      const decisions = [];
+      for (const d of this.decisions().decisions) {
+        const signed = d.signers.map((n) => n.toLowerCase());
+        const missing = members.filter((n) => signed.indexOf(n.toLowerCase()) < 0);
+        // A decision everyone active has signed drops out. Without a member set there is no "everyone".
+        if (members.length && !missing.length) continue;
+        decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing });
+      }
+      decisions.sort((a, b) => (b.missing.length - a.missing.length) || (a.signed_by.length - b.signed_by.length) || (a.id - b.id));
+      const digest = this.sql.exec("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray()[0] || null;
+      const digestsToday = this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", today).one().n;
+      const digestClose = nextDigestClose(now);
+      const digestsInWindow = this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
+      const recent = this.sql.exec("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray();
+      const fetched = this.sql.exec("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase());
+      return {
+        members: members,
+        humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => r.name.toLowerCase()),
+        constitution: this.sql.exec("SELECT MAX(v) AS v FROM con").one().v || null,
+        questions: this.sql.exec("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
+        decisions: decisions,
+        stakes: this.sql.exec("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray().map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
+        digest: digest,
+        digests_today: digestsToday,
+        // Only rooms with a member list have this; null means nobody is expected in this digest window.
+        awaiting_digest: inv.length ? (digestsInWindow ? null : expectedDigestAuthor(inv, digest)) : undefined,
+        digest_due_at: new Date(digestClose).toISOString().replace(".000Z", "Z"),
+        fetches_used: this.sql.exec("SELECT COUNT(*) AS n FROM tf WHERE ts > ?", now - 86400e3).one().n,
+        recent: recent,
+        fetched: fetched,
+        rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
+        games: this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
+          // each live match as room_state sees it (engine.stateItem):
+          // per player alive / moved / accepted, plus the engine's turn
+          try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch (e) { return null; }
+        }).filter(Boolean),
+      };
+    } catch (e) {
+      console.log("room_state failed: " + String((e && e.stack) || e));
+      return null;
+    }
+  },
+
+  roomState(who, room) {
+    return renderRoomState(this.stateData(), who, room);
+  },
+
+  // Push the state event to subscribed stream clients whose rendered block
+  // has changed since the last frame they were sent. Called wherever state
+  // can move: message posts, game broadcasts, reactions, member changes,
+  // board mutations, and the stream pinger (for changes time alone makes).
+  // A failure here must never block the action that triggered it.
+  emitState(room) {
+    try {
+      if (!this.clients || !this.clients.size) return;
+      let any = false;
+      for (const c of this.clients) if (c.stateSub) { any = true; break; }
+      if (!any) return;
+      const data = this.stateData();
+      if (!data) return;
+      const rn = room || this.roomName || "";
+      const rendered = new Map();
+      for (const c of this.clients) {
+        if (!c.stateSub) continue;
+        const k = String(c.name || "").toLowerCase();
+        if (!rendered.has(k)) { const s = renderRoomState(data, c.name, rn); rendered.set(k, { s: s, j: JSON.stringify(s) }); }
+        const e = rendered.get(k);
+        if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch (err) {} }
+      }
+    } catch (e) {
+      console.log("emitState failed: " + String((e && e.stack) || e));
+    }
+  },
+};

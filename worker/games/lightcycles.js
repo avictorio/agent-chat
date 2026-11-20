@@ -154,3 +154,97 @@ export const lightcyclesEngine = {
       : "Each tick lasts " + clockWords(st.tick_seconds || 120) + " (it resolves early once every living rider has moved); a rider who hasn't moved rides straight on. ") +
     "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
 };
+
+export const LightCyclesTickMethods = {
+  // One simultaneous resolution. Deaths: wall, any occupied cell (trails and
+  // current heads alike - heads become trail), or a shared target cell.
+  resolveTick(g) {
+    const st = g.st;
+    const resolvedAt = Date.now();
+    const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+    const rev = { up: "down", down: "up", left: "right", right: "left" };
+    const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
+    for (const p of st.players) if (p.alive) occ.add(p.x + "," + p.y);
+    const nexts = new Map();
+    const attribution = [];
+    for (const p of st.players) {
+      if (!p.alive) continue;
+      const want = st.pending[p.name];
+      p.dir = want && dirs[want] && want !== rev[p.dir] ? want : p.dir;
+      const v = dirs[p.dir];
+      nexts.set(p.name, [p.x + v[0], p.y + v[1]]);
+      // Instrumentation: whether this tick's direction was the player's own
+      // submitted move or the clock carrying them straight. Without it, a
+      // resolved tick cannot be told apart from a played one after the fact.
+      attribution.push({ name: p.name, dir: p.dir, submitted: !!want, at: want ? (st.pending_at || {})[p.name] || null : null });
+    }
+    const targets = new Map();
+    for (const cell of nexts.values()) { const k = cell[0] + "," + cell[1]; targets.set(k, (targets.get(k) || 0) + 1); }
+    const deaths = [];
+    for (const p of st.players) {
+      if (!p.alive) continue;
+      const cell = nexts.get(p.name);
+      const k = cell[0] + "," + cell[1];
+      if (cell[0] < 0 || cell[1] < 0 || cell[0] >= st.w || cell[1] >= st.h || occ.has(k) || targets.get(k) > 1) deaths.push(p);
+    }
+    for (const p of st.players) {
+      if (!p.alive || deaths.indexOf(p) >= 0) continue;
+      const cell = nexts.get(p.name);
+      p.x = cell[0];
+      p.y = cell[1];
+      st.trails.push([p.x, p.y, st.players.indexOf(p)]);
+    }
+    st.tick += 1;
+    st.pending = {};
+    st.pending_at = {};
+    if (!st.move_stats) st.move_stats = {};
+    if (!st.move_log) st.move_log = [];
+    for (const a of attribution) {
+      const s = st.move_stats[a.name] || (st.move_stats[a.name] = { submitted: 0, defaulted: 0 });
+      if (a.submitted) s.submitted++; else s.defaulted++;
+      // The latency record: when a played move actually arrived, and when
+      // the tick resolved. A night of matches is its own dataset - without
+      // these stamps the log had to be correlated against room posts by hand.
+      st.move_log.push({ tick: st.tick, name: a.name, dir: a.dir, submitted: a.submitted, at: a.at, resolved_at: resolvedAt });
+    }
+    st.log.push({ tick: st.tick, text: "Tick " + st.tick + ": " + attribution.map((a) => a.name + " " + a.dir + (a.submitted ? " (submitted)" : " (clock default)")).join("; ") + "." });
+    // Has anyone gone out before this tick? (Older matches carry no flag:
+    // a rider already down, or a credited keeper, says the same.)
+    const firstOutDecided = !!st.first_out_decided || !!st.record_keeper || st.players.some((p) => !p.alive);
+    const outs = deaths.slice();
+    for (const p of deaths) {
+      p.alive = false;
+      st.log.push({ tick: st.tick, text: p.name + " is out at tick " + st.tick + " - the trail holds at (" + p.x + ", " + p.y + ")." });
+    }
+    // Absence rule (2026-11-12): a rider the clock carries for three
+    // ticks in a row is taken out. Without it an async match with one
+    // absent rider burns the full stall cap on every tick - some 19
+    // hours on the 2-player grid - riding straight the whole way.
+    // It never decides a match the tick's own deaths already ended.
+    if (!st.absent_streak) st.absent_streak = {};
+    for (const a of attribution) st.absent_streak[a.name] = a.submitted ? 0 : (st.absent_streak[a.name] || 0) + 1;
+    if (st.players.filter((p) => p.alive).length > 1) {
+      for (const p of st.players) {
+        if (p.alive && (st.absent_streak[p.name] || 0) >= 3) {
+          p.alive = false;
+          outs.push(p);
+          st.log.push({ tick: st.tick, text: p.name + " is taken out - three ticks in a row without a submitted move." });
+        }
+      }
+    }
+    // The record keeper is the first rider out, crash or absence alike.
+    // The first tick with any out decides it for good: one rider out
+    // keeps the record, several out together leave it with nobody (a
+    // later crash used to be credited after a pile-up - sweep, 2026-11-19).
+    if (!firstOutDecided && outs.length) {
+      st.first_out_decided = true;
+      if (outs.length === 1) st.record_keeper = outs[0].name;
+    }
+    const alive = st.players.filter((p) => p.alive);
+    if (alive.length <= 1) {
+      g.status = "finished";
+      st.winner = alive.length ? alive[0].name : null;
+      st.log.push({ tick: st.tick, text: alive.length ? alive[0].name + " takes the grid." : "No survivors - the grid keeps itself." });
+    }
+  },
+};

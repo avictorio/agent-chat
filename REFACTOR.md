@@ -13,10 +13,9 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.6 are live, 2.7 is committed; 4.6 is done.
-Next is 2.8: the Room class (~2,500 lines in index.js) by area into
-`room/` with the split tool's `methods` mode (constructor, fetch and
-alarm stay in the class). Claude Code's built-in `cc-plugin-privacy` plugin once
+State on 2026-11-20: phase 1 and steps 2.1-2.8 are done (see the log for
+what is live); 4.6 is done. `worker/index.js` is the route table alone.
+Next is 2.9 (comments left in the wrong place), then phase 3. Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -221,8 +220,19 @@ limits and the games move before `agents/`.
       the rehearsal, never deployed). Scoping is now block-accurate; a
       re-verify of everything already deployed found nothing. `prune`
       drops imports a module no longer uses (150 in the entry)
-- [ ] 2.8 `room/`: the rest of the Room class by area (schema, messages,
-      members and invites, uploads, voices, streams, digest, games glue)
+- [x] 2.8 `room/`: the Room class by area with the tool's `methods` mode
+      (each area one object of methods, installed with
+      `Object.assign(Room.prototype, ...)`): `room/members.js`, `voices.js`,
+      `media.js`, `uploads.js`, `push.js`, `board.js`, `state.js`,
+      `messages.js`, `games.js` (the machinery every game shares) and
+      `test-hooks.js`; Light Cycles' tick resolver joined
+      `games/lightcycles.js`. 146 methods moved. The class core
+      (constructor, schema, lifecycle, access, fetch, the alarm, the
+      stream) is `room/Room.js`, which installs all 27 method objects at
+      its end (no name collides across them or with the class: checked,
+      so install order cannot matter); `index.js` re-exports the class
+      (a Durable Object class must be exported from the main module).
+      index.js 2,863 -> 198 lines; 61 modules
 - [ ] 2.9 Fix comments left in the wrong place by earlier edits (the
       sniffImage and roomExists ones are done)
 - [x] 2.10 Remove `.claude/settings.json` (and its `.gitignore`
@@ -284,3 +294,5 @@ limits and the games move before `agents/`.
 | 2026-11-20 | 2.5a-b: ten games | 0272cbf | API suite green (631); version ed7fb432. Live: a real room's games list (40 matches) and `/api`'s game sections. |
 | 2026-11-20 | 2.5c: six games + `games/engine.js` | ee51b92 | API suite green (631); version 933ccd4a. Live: real Light Cycles, Duel and Battleship matches' full states (rules included) through the moved engines. |
 | 2026-11-20 | 2.3: `platform/` + `lib/media.js` | fe4a36c | API suite green (631 checks); version 169da5fb (21 modules). Live: `/api`, `/api/push/key`, a signed avatar, attachment media full (200) and ranged (206). |
+| 2026-11-20 | 2.6: `agents/` | f5a6560 | API suite green (631); version 651e09e2. Live (re-checked with 2.7): `/api`, `/api.txt`, `/llms.txt`, a real room's `agent-recipe` and MCP `tools/list` (22 tools). |
+| 2026-11-20 | 2.7: `routes/` | 0c146fe | API suite green (631); version f909aee6. Live, read only: `/api`, `/api/build` and the page stamp (426bbdbc1870bc96), `/sw.js`, the manifest, an icon, `/emoji.json`, `/api/push/key`; on a real room its page, messages, members, welcome, games and a match's full state, the board (constitution, questions, digests, stakes, decisions), attachments, tools, invites, the agent recipe, MCP `tools/list`, a signed avatar, and an attachment full (200) and ranged (206). |
