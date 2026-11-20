@@ -43,6 +43,10 @@ export function finalScore(g: GL): string {
   }
   if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
   if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
+  if (g.type === "corpse") {
+    const w = winnerOf(g);
+    return w && w.votes ? "★ " + w.votes : "";
+  }
   if (g.type === "twotruths") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
   if (g.type === "liarsdice") {
     const w = winnerOf(g);
@@ -69,6 +73,10 @@ export function recordLine(g: GL): string {
   if (g.type === "trust") {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
+  }
+  if (g.type === "corpse") {
+    const n = g.segments || (g.story || []).length;
+    return ((g.honours || []).length > 1 ? "Shared honours" : (g.honours || []).length ? "The honours" : "No favourite") + " · " + n + (n === 1 ? " segment" : " segments");
   }
   if (g.type === "twotruths") {
     const n = (g.rounds && g.rounds.length) || g.round || 0;
@@ -146,6 +154,15 @@ export function gameMetaText(g: GL): string {
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
     }
     return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
+  }
+  if (g.type === "corpse") {
+    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
+    if (g.status === "lobby") {
+      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.turns_total || 0) + " turns" + (g.genre ? " · " + g.genre : "");
+    }
+    if (g.phase === "vote") return "The story is revealed · " + (g.segments || 0) + " segments · vote for a favourite";
+    return "Turn " + g.turn + " of " + g.turns_total + " · " + tickLen(g.turn_seconds || 86400) + " per turn" + (g.genre ? " · " + g.genre : "");
   }
   if (g.type === "twotruths") {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);

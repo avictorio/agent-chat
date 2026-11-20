@@ -10,6 +10,7 @@ import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft }
 import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction";
 import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice";
 import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths";
+import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import {
   battleshipBoard,
   boardSvg,
@@ -198,6 +199,7 @@ export function createGameStore(opts: {
     auDraft?: { round: number; v: number } | null;
     ldDraft?: { turn: number; qty: number; face: number } | null;
     ttDraft?: TtDraft | null;
+    ecDraft?: { turn: number; text: string } | null;
     bsFire?: ((label: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
@@ -314,6 +316,23 @@ export function createGameStore(opts: {
         text = "Your choices · round " + g.round;
         sub = "If the clock runs out, you defect on everyone this round.";
       } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
+    } else if (g.type === "corpse") {
+      dur = (g.turn_seconds || 86400) * 1000;
+      if (g.phase === "write") {
+        if (you.playing && you.writer) {
+          mine = true;
+          text = "Your turn to write · turn " + g.turn + " of " + g.turns_total;
+          sub = "You see only the segment before yours. If the clock runs out, your turn is a silent beat.";
+        } else text = (g.turn_of || "Someone") + " is writing · turn " + g.turn + " of " + g.turns_total;
+      } else {
+        const waiting = players.filter((p: GL) => !p.committed && p.name !== me).map((p: GL) => p.name);
+        if (you.playing && you.vote != null) text = "Your favourite is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "counting…");
+        else if (you.playing) {
+          mine = true;
+          text = "The story is revealed · pick a favourite";
+          sub = "Any segment but your own.";
+        } else text = "The story is revealed · voting";
+      }
     } else if (g.type === "twotruths") {
       dur = (g.round_seconds || 3600) * 1000;
       if (g.phase === "write") {
@@ -473,6 +492,12 @@ export function createGameStore(opts: {
     } else if (g.type === "fourinarow") {
       body.game = "fourinarow";
       body.tick_seconds = g.turn_seconds;
+    } else if (g.type === "corpse") {
+      body.game = "corpse";
+      body.rotations = g.rotations || 3;
+      body.variant = g.variant || "straight";
+      if (g.genre) body.genre = g.genre;
+      body.tick_seconds = g.turn_seconds;
     } else if (g.type === "twotruths") {
       body.game = "twotruths";
       body.rotations = g.rotations || 1;
@@ -608,6 +633,7 @@ export function createGameStore(opts: {
     if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths") return (g.rounds || []).length;
     if (g.type === "battleship") return (g.log || []).length;
     if (g.type === "fourinarow") return (g.moves || []).length;
+    if (g.type === "corpse") return (g.beats || []).length;
     const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
     return ticks.size;
   }
@@ -666,6 +692,8 @@ export function createGameStore(opts: {
       n = ldHistoryRows(g, row, histWho, list);
     } else if (g.type === "twotruths") {
       n = ttHistoryRows(g, row, histWho, list);
+    } else if (g.type === "corpse") {
+      n = ecHistoryRows(g, row, histWho, list);
     } else if (g.type === "duel") {
       (g.rounds || []).forEach((r: GL) => {
         n++;
@@ -1015,6 +1043,7 @@ export function createGameStore(opts: {
     auction: { key: "ac:au3d", cls: "au-3d-host", load: () => import("./AuctionArena3D"), comp: null },
     // wave 3 games are 3D only (no 2D view, no toggle - the owner's call)
     twotruths: { key: "ac:tt3d", cls: "tt-3d-host", load: () => import("./TwoTruthsArena3D"), comp: null },
+    corpse: { key: "ac:ec3d", cls: "ec-3d-host", load: () => import("./CorpseArena3D"), comp: null },
     liarsdice: { key: "ac:ld3d", cls: "ld-3d-host", load: () => import("./LiarsArena3D"), comp: null },
   };
   function pref3d(kind: string): boolean {
@@ -1621,6 +1650,76 @@ export function createGameStore(opts: {
     wrap.appendChild(ttReveal(g, ttLastRound(g)));
     if (g.status === "running" && !you.playing) note.textContent = "Spectating - the lie stays secret until the votes are in.";
     else if (g.status === "running" && g.phase === "write" && !you.teller) note.textContent = g.teller + " is writing. You'll get a nudge when the statements are up.";
+    if (note.textContent) wrap.appendChild(note);
+  }
+
+  /* Exquisite Corpse: the desk (3D only), then your turn (the fold and
+     your segment), the turn strip, the story once revealed (with the
+     favourite vote), and the writers. */
+  function renderCorpseView(g: GL, force?: boolean) {
+    if (!gameView) return;
+    const gv = gameView;
+    const me = opts.meName();
+    const you = g.you || { playing: false };
+    const writing = g.status === "running" && g.phase === "write" && you.playing && you.writer;
+    if (writing && (!gv.ecDraft || gv.ecDraft.turn !== g.turn)) gv.ecDraft = { turn: g.turn, text: "" };
+    const key = [g.status, g.phase || "", g.turn, g.turn_of || "", g.segments || 0, (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.committed ? 1 : 0) + (p.out ? 1 : 0) + (p.skips || 0) + "." + (p.segments || 0)).join(","), (you.tail || "").length, youSig(g), you.vote == null ? "" : you.vote, (g.story || []).length, (g.honours || []).join("-"), (g.beats || []).length, gv.tab || "game"].join("|");
+    if (!force && key === gameRenderKey) return;
+    gameRenderKey = key;
+    const wrap = gv.wrap;
+    wrap.textContent = "";
+    wrap.appendChild(el("div", "lc-meta", gameMetaText(g)));
+    const wb = winnerBanner(g);
+    if (wb) wrap.appendChild(wb);
+    const rr = resultRow(g);
+    if (rr) wrap.appendChild(rr);
+    const tb = turnBanner(g);
+    if (tb) wrap.appendChild(tb);
+    wrap.appendChild(arenaTabs(g));
+    if (gv.tab === "history") {
+      drop3d();
+      wrap.appendChild(historyList(g));
+      return;
+    }
+    const note = el("div", "lc-note", "");
+    if (g.status === "lobby") {
+      drop3d();
+      wrap.appendChild(lobbyPanel(g, note));
+      wrap.appendChild(note);
+      return;
+    }
+    const h = host3d("corpse");
+    wrap.appendChild(h.host);
+    paint3d("corpse", g, h);
+    if (writing && gv.ecDraft) {
+      const hint = arenaHint("corpse", "Carry on from the one segment you can see - contradictions are part of the fun. Nobody corrects anything.");
+      if (hint) wrap.appendChild(hint);
+      wrap.appendChild(
+        ecWriter(g, gv.ecDraft, (text) => {
+          if (gameView !== gv) return;
+          if (gv.r3dCommit) gv.r3dCommit();
+          void sendMove(g.id, text, note);
+        })
+      );
+    }
+    wrap.appendChild(ecStrip(g));
+    if (g.story) {
+      const canVote = g.status === "running" && g.phase === "vote" && you.playing;
+      wrap.appendChild(
+        ecStory(
+          g,
+          canVote
+            ? (n) => {
+                if (gameView !== gv) return;
+                if (gv.r3dCommit) gv.r3dCommit();
+                void sendMove(g.id, String(n), note);
+              }
+            : undefined
+        )
+      );
+    }
+    wrap.appendChild(ecWriters(g, me));
+    if (g.status === "running" && g.phase === "write" && !writing) note.textContent = (you.playing ? "The story stays folded until the last turn - " : "Spectating - the story stays folded until the last turn. ") + (you.playing ? "you'll get a nudge when it's yours." : "");
     if (note.textContent) wrap.appendChild(note);
   }
 
@@ -2349,6 +2448,10 @@ export function createGameStore(opts: {
       renderTwoTruthsView(g, force);
       return;
     }
+    if (g.type === "corpse") {
+      renderCorpseView(g, force);
+      return;
+    }
     const key =
       g.status +
       "|" +
@@ -2529,7 +2632,7 @@ export function createGameStore(opts: {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths") {
+      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse") {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)
@@ -2583,6 +2686,8 @@ export function createGameStore(opts: {
           if (g.turn_of === me) n++;
         } else if (g.type === "twotruths") {
           if (g.phase === "write" ? g.teller === me : g.teller !== me && !mine.committed) n++;
+        } else if (g.type === "corpse") {
+          if (g.phase === "write" ? g.turn_of === me : !mine.committed) n++;
         } else if (g.type === "trust") {
           if (!mine.committed && !mine.out) n++;
         } else if (g.type === "auction") {

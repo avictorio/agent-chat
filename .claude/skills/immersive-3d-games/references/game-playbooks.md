@@ -31,7 +31,8 @@ sound and buzz stay.
 9. The auction
 10. Liar's Dice
 11. Two Truths and a Lie
-12. A new arena
+12. Exquisite Corpse
+13. A new arena
 
 ## 1. Reading an event from the viewer's seat
 
@@ -398,7 +399,40 @@ seats on dark pills (readable over a card or the sky).
 **Catch-up.** `ac-tt-seen:<path>:<id>`; the latest unseen round replays
 on open; a tap skips; reduced motion lands it at once.
 
-## 12. A new arena
+## 12. Exquisite Corpse: the writing desk
+
+**World.** A dark study, a wide desk with a green baize top lit by one
+candle (`FireSystem`, a tiny "ship" fire on a wax candle, plus a warm
+point light). An inkwell and quill per writer along the near edge, in
+rotation order: lit and pulsing for the writer now, dark for one out of
+the rotation, steady once they have voted. The desk is sized for the
+whole story from the start (seed + every turn), so the camera never
+re-frames at the reveal.
+
+**The fold.** Before the reveal the story is a pile of folded pages in
+the middle - one per written segment, its edge in the author's ink,
+faces down. On your turn the top page (your tail) rises off the pile,
+enlarged and tipped toward the camera, so the one segment you may read
+is legible; nobody else ever sees a face.
+
+**Reveal (the deal).** The pile deals out across the desk page by page
+(0.22 s apart), each flipping face up in flight: the seed, then every
+segment with "n · Author" in the author's ink. At the end the favourite
+votes drop on as gold stars, the honours page gets a gold border and the
+winner's pillar. The catch-up key `ac-ec-seen:<path>:<id>` holds flags,
+"r" (the deal seen) and "f" (the honours seen); a first open shows the
+story as it stands.
+
+| Event (viewer's seat) | Impact |
+|---|---|
+| you add your segment / vote | `lock` + `BUZZ.commit` |
+| a rival's segment lands, a sealed vote | a soft `ping` |
+| the story is revealed | "THE STORY" neutral, `whoosh` + `win` |
+| your segment takes the honours | "THE HONOURS" (or "SHARED HONOURS") good, `BUZZ.wonMatch` |
+| someone else's does | "★ NAME" neutral, `BUZZ.scored` |
+| nobody voted | "THE END" neutral |
+
+## 13. A new arena
 
 1. Pick the world: palette (`SkySpec`), team hues from `players[].hex`, a
    second identity channel, the arrival vista and its three ingredients.
