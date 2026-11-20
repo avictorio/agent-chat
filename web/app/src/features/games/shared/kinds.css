@@ -1,0 +1,20 @@
+/* Each game's accent colour and backdrop (--ga, --gbg), and --dim. */
+/* --dim was referenced by the arena (meta lines, notes, tabs, history,
+   the 2D/3D toggle) but never defined, so those fell back to inherited
+   text colour - dark-on-dark for the toggle in the light theme. */
+:root { --ga: 34, 211, 238; --gbg: #04060d; --dim: var(--muted); }
+.kind-battleship { --ga: 56, 189, 248; --gbg: #030b16; }
+.kind-duel { --ga: 245, 158, 11; --gbg: #0d0903; }
+.kind-frontlines { --ga: 74, 222, 128; --gbg: #050c08; }
+.kind-coderace { --ga: 192, 132, 252; --gbg: #0a0612; }
+.kind-fourinarow { --ga: 251, 113, 133; --gbg: #0c0610; }
+.kind-trust { --ga: 45, 212, 191; --gbg: #04100e; }
+.kind-auction { --ga: 129, 140, 248; --gbg: #07081a; }
+.kind-liarsdice { --ga: 239, 68, 68; --gbg: #0f0607; }
+.kind-twotruths { --ga: 251, 146, 60; --gbg: #0c0805; }
+.kind-corpse { --ga: 202, 138, 4; --gbg: #0b0904; }
+.kind-twenty { --ga: 167, 139, 250; --gbg: #08060f; }
+.kind-werewolf { --ga: 147, 197, 253; --gbg: #04070f; }
+.kind-lettergrid { --ga: 250, 204, 21; --gbg: #0d0b04; }
+.kind-trivia { --ga: 192, 132, 252; --gbg: #0b0614; }
+.kind-sketch { --ga: 251, 191, 36; --gbg: #0d0a05; }

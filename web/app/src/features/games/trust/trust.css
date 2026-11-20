@@ -1,0 +1,41 @@
+/* Trust (2026-11-19): the scoreboard, the choices, the round's grid. C and
+   D carry a mark and a word beside the colour. */
+.tr-scores { display: grid; gap: 4px; margin-top: 10px; background: var(--gbg); border: 1px solid rgba(var(--ga), .3); border-radius: 12px; padding: 10px 12px; color: #dff7f2; }
+.tr-scores.compact { margin: 0; border: 0; border-radius: 0; padding: 8px 10px 4px; }
+.tr-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.tr-row.mine .tr-name { text-decoration: underline; text-decoration-color: rgba(var(--ga), .6); text-underline-offset: 3px; }
+.tr-row.out { opacity: .55; }
+.tr-rank { width: 14px; color: #6ea79d; font-size: 12px; text-align: right; flex: none; }
+.tr-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tr-coop { flex: 1; min-width: 30px; max-width: 120px; height: 6px; border-radius: 3px; background: rgba(148, 163, 184, .18); overflow: hidden; margin-left: auto; }
+.tr-coop-fill { display: block; height: 100%; background: rgb(var(--ga)); }
+.tr-coop-n { font-size: 11.5px; color: #8fc9bf; width: 52px; flex: none; }
+.tr-st { font-size: 11.5px; color: #8fc9bf; flex: none; }
+.tr-scores.compact .tr-st { margin-left: auto; }
+.tr-score { font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; flex: none; }
+.tr-plan { margin-top: 12px; display: grid; gap: 8px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #dff7f2; }
+.tr-plan.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.tr-plan-title { font-weight: 700; font-size: 15px; }
+.tr-choice { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.tr-choice-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-pick { height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, .35); background: #06120f; color: #cde9e3; font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.tr-pick.c.on { background: rgba(34, 197, 94, .22); border-color: #22c55e; color: #dcfce7; }
+.tr-pick.d.on { background: rgba(239, 68, 68, .22); border-color: #ef4444; color: #fee2e2; }
+.tr-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tr-acts .duel-btn.sm { font-size: 13px; padding: 7px 11px; }
+.tr-go { margin-left: auto; }
+.tr-grid-wrap { overflow-x: auto; margin-top: 4px; }
+.tr-grid { border-collapse: separate; border-spacing: 4px; margin: 0 auto; color: #dff7f2; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; padding: 6px; font-size: 13px; }
+.tr-grid th { font-weight: 700; padding: 2px 6px; white-space: nowrap; }
+.tr-corner, .tr-pts-h { color: #6ea79d; font-weight: 600; }
+.tr-from { text-align: right; }
+.tr-cell { width: 34px; height: 30px; text-align: center; border-radius: 7px; font-weight: 800; font-size: 15px; }
+.tr-cell.c { background: rgba(34, 197, 94, .25); color: #86efac; }
+.tr-cell.d { background: rgba(239, 68, 68, .25); color: #fca5a5; }
+.tr-cell.missed { outline: 1px dashed rgba(252, 165, 165, .7); outline-offset: -3px; }
+.tr-self { background: repeating-linear-gradient(45deg, rgba(148, 163, 184, .08) 0 4px, transparent 4px 8px); border-radius: 7px; }
+.tr-pts { font-weight: 800; color: rgb(var(--ga)); padding-left: 6px; }
+.tr-grid tr.mine th.tr-from { text-decoration: underline; text-underline-offset: 3px; }
+.tr-grid-empty { text-align: center; color: var(--dim); font-size: 13px; padding: 10px; }
+.tr-card { color: #dff7f2; }
+.tr-card-cap { text-align: center; font-size: 12px; color: #8fc9bf; padding: 0 10px 8px; }

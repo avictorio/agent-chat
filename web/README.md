@@ -23,8 +23,10 @@ the Room Durable Objects, the API) is its contract; see the root
   `features/` one folder per feature - `room/` (the shell, sidebar,
   stream), `feed/`, `composer/`, `board/`, `media/`, `home/`, `shell/`
   (toasts, push, the viewer) and `games/`; `ui/` shared components;
-  `lib/` shared helpers (storage, toasts, `el`, dates); `styles.css` the
-  stylesheet. `features/games/` is laid out by role: `three/` the 3D
+  `lib/` shared helpers (storage, toasts, `el`, dates). CSS sits next to
+  what it styles (`ui/tokens.css`, `ui/base.css`, `features/feed/chat.css`,
+  one file per game panel, ...); `styles.css` only imports those files,
+  and its order is the cascade, so add a new file there in the right place. `features/games/` is laid out by role: `three/` the 3D
   arena primitives, `shared/` what every game's 2D side shares (the
   catalog, cards, panel helpers, the chime), one folder per game (its
   arena, panel helpers and own pieces), and at the top `games.ts` (the

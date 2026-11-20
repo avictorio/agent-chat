@@ -1,0 +1,23 @@
+/* Phones and narrow windows: the sidebar becomes a drawer. */
+/* Phones and narrow windows: the sidebar becomes a drawer. */
+@media (max-width: 760px) {
+  .topbar {
+    display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; border-bottom: 1px solid var(--line);
+    background: var(--panel); min-height: 52px;
+  }
+  .topbar .title { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .title span { color: var(--muted); font-weight: 400; }
+  .side {
+    position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; width: min(300px, 86vw);
+    padding-top: env(safe-area-inset-top);
+    transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: 0 0 30px rgba(0, 0, 0, 0.25);
+  }
+  body.nav-open .side { transform: none; }
+  body.nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 30; }
+  .composer-inner { flex-wrap: wrap; }
+  #name { width: 100%; }
+  .hint { display: none; }
+  .page-inner { padding: 20px 16px 48px; }
+  .msgs-inner { padding: 0 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .side { transition: none; } }

@@ -1,0 +1,65 @@
+/* Day separators and the jump button, the composer, media and file cards, upload progress, YouTube cards. */
+.day-sep { display: flex; align-items: center; gap: 12px; margin: 18px 10px 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.day-sep::before, .day-sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.chat-empty { text-align: center; color: var(--muted); padding: 64px 16px; }
+.jump-wrap { position: sticky; bottom: 8px; display: flex; justify-content: center; pointer-events: none; }
+.jump { pointer-events: auto; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15); border-radius: 999px; }
+.msg-body audio { display: block; width: 100%; max-width: 340px; height: 38px; margin-top: 6px; }
+#rec.recording { color: #e5484d; border-color: #e5484d; }
+#voiceRec.recording { color: #e5484d; border-color: #e5484d; }
+.voice-script { background: var(--hover); border-radius: 8px; padding: 10px 12px; line-height: 1.55; }
+#voicePreview { width: 100%; margin: 6px 0; }
+#rec.recording svg { animation: recpulse 1.2s ease-in-out infinite; }
+@keyframes recpulse { 50% { opacity: .35; } }
+.clip-chip { align-items: center; gap: 8px; }
+.composer { border-top: 1px solid var(--line); background: var(--panel); padding: 12px 16px calc(10px + env(safe-area-inset-bottom)); }
+.composer-inner { max-width: 880px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+#name { width: 150px; flex: none; }
+#name[readonly] { color: var(--muted); }
+.compose-box {
+  flex: 1; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--bg); padding: 6px 8px 6px 12px; min-width: 0;
+}
+.compose-tools { display: flex; align-items: center; gap: 6px; }
+.tools-spacer { flex: 1; }
+.attach-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 2px 0 4px; }
+.img-thumb { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: none; }
+.msg-img { display: block; max-width: min(440px, 100%); max-height: 440px; border-radius: 10px; margin-top: 6px; cursor: zoom-in; }
+.viewer-img { display: block; max-width: 100%; max-height: calc(100dvh - 76px); object-fit: contain; margin: 12px auto; }
+.msg-video { display: block; width: 100%; max-width: 440px; max-height: 440px; border-radius: 10px; margin-top: 6px; background: #000; }
+.art-card, .doc-card { margin-top: 6px; max-width: 640px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; }
+.art-head, .doc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.art-kind { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 10.5px; color: var(--accent); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; white-space: nowrap; }
+.art-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.art-size { color: var(--muted); white-space: nowrap; }
+.art-head .sp, .doc-head .sp { flex: 1; }
+.art-go { color: var(--muted); font-size: 17px; line-height: 1; padding: 0 2px; }
+.art-frame { display: block; width: 100%; height: 380px; border: 0; background: #fff; pointer-events: none; }
+/* a general file: a download card (nothing is ever opened in the page) */
+.file-card { display: flex; align-items: center; gap: 10px; margin-top: 6px; max-width: 440px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); text-decoration: none; }
+.file-card:hover { background: var(--hover); }
+.file-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file-ico { flex: none; width: 38px; height: 46px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; clip-path: polygon(0 0, 70% 0, 100% 22%, 100% 100%, 0 100%); }
+.file-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.file-dl { flex: none; color: var(--accent); display: flex; }
+.file-dl .i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.big-img-card { max-width: 440px; }
+.big-img-card .art-head { border-bottom: 0; }
+.viewer-file { max-width: 420px; margin: 40px auto; padding: 22px; text-align: center; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.viewer-file-name { font-weight: 600; font-size: 15px; word-break: break-word; }
+.viewer-file-meta { color: var(--muted); font-size: 13px; }
+/* a resumable upload in progress, above the message box */
+.upl { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.upl-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.upl-name { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upl-bar { height: 6px; border-radius: 999px; background: var(--hover); overflow: hidden; }
+.upl-bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .25s linear; }
+.upl-meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.upl-meta.wait { color: var(--warn); }
+.warn-chip { color: var(--warn); }
+.yt-card { margin-top: 6px; max-width: 440px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); cursor: pointer; }
+.yt-card .art-kind { color: #e5484d; }
+.yt-thumbwrap { position: relative; background: #000; aspect-ratio: 16 / 9; }
+.yt-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.yt-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 62px; height: 42px; border-radius: 10px; background: rgba(205, 25, 25, .93); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 16px; pointer-events: none; }
+.yt-frame { background: #000; }

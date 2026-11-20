@@ -1,0 +1,136 @@
+/* Chat: messages, reactions and their pickers, speak and push controls, mentions, message heads. */
+/* Chat */
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.msgs { flex: 1; overflow-y: auto; padding: 12px 0 4px; }
+.msgs-inner { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+.msg { display: flex; gap: 12px; padding: 6px 10px; border-radius: 10px; }
+.msg:hover { background: var(--hover); }
+.msg { position: relative; }
+.icon-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 9px; flex: none; }
+.icon-btn svg { width: 18px; height: 18px; }
+#mic.on { color: #fff; background: var(--danger); border-color: var(--danger); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px var(--danger-soft); } }
+.msg-actions { display: flex; justify-content: flex-end; gap: 2px; margin: 0 -4px 0 auto; }
+.msg-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; min-height: 26px; }
+.rx-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.rx-row:empty { display: none; }
+.rx-chip {
+  display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 13px; line-height: 1.4; padding: 1px 8px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+}
+.rx-chip .e { font-size: 15px; }
+.rx-chip:hover { border-color: var(--muted); }
+.rx-chip.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.react-btn { width: 26px; height: 26px; padding: 0; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; opacity: 0; }
+.react-btn svg { width: 16px; height: 16px; }
+.react-btn:hover { color: var(--ink); background: var(--hover); }
+.msg:hover .react-btn, .react-btn:focus-visible { opacity: 1; }
+@media (hover: none) { .react-btn { display: none; } .msgs .msg { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; } }
+.msg.rx-target { background: var(--hover); }
+.rx-bar {
+  position: fixed; z-index: 70; display: flex; align-items: center; gap: 2px; padding: 5px 6px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); animation: rxpop 0.14s ease-out;
+}
+.rx-bar button.rx { font-size: 26px; line-height: 1; width: 42px; height: 42px; padding: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; transition: transform 0.12s ease; }
+.rx-bar button.rx:hover, .rx-bar button.rx:focus-visible { transform: scale(1.28) translateY(-4px); outline: none; }
+.rx-bar button.rx.on { background: var(--accent-soft); }
+.rx-bar .rx-plus { font-size: 0; color: var(--muted); background: var(--hover); width: 34px; height: 34px; margin: 0 2px; display: grid; place-items: center; }
+.rx-bar .rx-plus svg { width: 18px; height: 18px; }
+.rx-bar .rx-plus:hover, .rx-bar .rx-plus:focus-visible { color: var(--ink); transform: none; }
+.rx-who {
+  position: fixed; z-index: 71; min-width: 148px; max-width: min(280px, calc(100vw - 16px)); padding: 10px 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); animation: rxpop 0.14s ease-out;
+}
+/* the who-reacted popover sits over the chip it belongs to, its pointer
+   on the chip (feed/EmojiPicker.tsx placeOver) */
+.rx-who[data-side] { transform-origin: var(--caret, 50%) 100%; }
+.rx-who[data-side="below"] { transform-origin: var(--caret, 50%) 0; }
+.rx-who[data-side]::after { content: ""; position: absolute; left: var(--caret, 50%); width: 10px; height: 10px; background: var(--panel); border: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+.rx-who[data-side="above"]::after { bottom: -6px; border-top: 0; border-left: 0; }
+.rx-who[data-side="below"]::after { top: -6px; border-bottom: 0; border-right: 0; }
+.rx-chip.rx-held { box-shadow: 0 0 0 2px var(--accent); }
+.rx-who-head { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.rx-who-head .e { font-size: 19px; }
+.rx-who-name { font-size: 14px; padding: 2px 0; }
+.rx-who-name.me { color: var(--accent); font-weight: 600; }
+.rx-picker {
+  position: fixed; z-index: 71; width: min(352px, calc(100vw - 16px)); height: min(380px, calc(100vh - 32px)); display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.25); animation: rxpop 0.14s ease-out; overflow: hidden;
+}
+.rx-search { margin: 10px 10px 6px; }
+.rx-tabs { display: flex; gap: 2px; padding: 0 8px 6px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.rx-tab { font-size: 18px; width: 32px; height: 30px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; flex: none; padding: 0; }
+.rx-tab:hover { background: var(--hover); }
+.rx-grid { flex: 1; overflow-y: auto; padding: 2px 8px 10px; position: relative; }
+.rx-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding: 10px 4px 4px; position: sticky; top: 0; background: var(--panel); }
+.rx-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); }
+.rx-cell { font-size: 24px; line-height: 1; height: 38px; border: 0; background: transparent; border-radius: 8px; cursor: pointer; padding: 0; }
+.rx-cell:hover, .rx-cell:focus-visible { background: var(--hover); outline: none; }
+.rx-cell.on { background: var(--accent-soft); }
+.rx-none { color: var(--muted); padding: 24px 8px; text-align: center; font-size: 14px; }
+.rx-bar .rx-copy { font: inherit; font-size: 13px; color: var(--muted); background: transparent; border: 0; border-left: 1px solid var(--line); padding: 0 10px 0 12px; height: 30px; cursor: pointer; }
+.rx-bar .rx-copy:hover { color: var(--ink); }
+/* Narrow phones: the bar is ~365px (409 with a non-quick reaction of
+   yours), so on a 360px screen Copy and + were clipped. Smaller targets
+   (still 36px) keep the whole bar on screen. */
+.rx-bar { max-width: calc(100vw - 12px); }
+@media (max-width: 420px) {
+  .rx-bar button.rx { width: 36px; height: 36px; font-size: 22px; }
+  .rx-bar .rx-plus { width: 32px; height: 32px; }
+  .rx-bar .rx-copy { padding: 0 8px 0 9px; }
+}
+@keyframes rxpop { from { transform: scale(0.85) translateY(6px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rx-bar, .rx-who { animation: none; } .rx-bar button.rx { transition: none; } }
+.speak {
+  height: 24px; min-width: 34px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; cursor: pointer;
+}
+.speak svg { width: 15px; height: 15px; }
+.speak:hover { color: var(--ink); border-color: var(--muted); }
+.speak.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.pushBtn.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+.pushMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); padding: 4px; min-width: 172px; }
+.pushMenu button { display: flex; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; border-radius: 7px; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.pushMenu button:hover { background: var(--hover); }
+.pushMenu button.cur { color: var(--accent); font-weight: 700; }
+.pushMenu button.cur::after { content: "\2713"; margin-left: auto; }
+.mention { color: var(--accent); font-weight: 600; }
+.textWrap { position: relative; }
+.hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.hlInner { padding: 4px 0 2px; font: inherit; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink); }
+.hlInner .mn { color: var(--accent); font-weight: 600; }
+#text { position: relative; color: transparent; caret-color: var(--ink); }
+#text::placeholder { color: var(--muted); opacity: 1; }
+#text::selection { background: var(--accent-soft); }
+.mentionMenu { position: fixed; z-index: 90; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); padding: 4px; min-width: 190px; max-width: 260px; }
+.mentionMenu button { display: flex; align-items: baseline; gap: 7px; width: 100%; text-align: left; background: none; border: none; padding: 7px 10px; border-radius: 7px; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.mentionMenu button.cur { background: var(--accent-soft); }
+.mentionMenu .mmKind { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { #mic.on { animation: none; } }
+.msg.cont { padding-top: 1px; padding-bottom: 1px; }
+.gutter { width: 36px; flex: none; }
+.gutter time { display: block; visibility: hidden; font-size: 11px; color: var(--muted); text-align: right; line-height: 22px; }
+.msg.cont:hover .gutter time { visibility: visible; }
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  font-size: 14px; color: #fff; flex: none; user-select: none;
+}
+.msg-body { min-width: 0; flex: 1; }
+.msg-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.who { font-weight: 700; font-size: 14px; }
+.when { color: var(--muted); font-size: 12px; }
+.tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.tag.k-human { background: var(--warn-soft); color: var(--warn); }
+.tag.k-agent { background: rgba(70, 110, 190, 0.14); color: hsl(218 50% var(--l)); }
+.title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.invite-result input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.invite-result .row { display: flex; gap: 8px; margin-top: 8px; }
+.invite-result .row input { flex: 1; min-width: 0; }
+.member-link { display: flex; gap: 8px; margin-top: 8px; }
+.member-link input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+.text { overflow-wrap: anywhere; }
+/* Human messages: warm tint and an accent bar, so people stand out from agents. */
+.msg.human { background: var(--human-bg); box-shadow: inset 3px 0 0 var(--warn); border-radius: 0 10px 10px 0; }
+.msg.human:hover { background: var(--human-hover); }
+.msg.human + .msg.human.cont { border-top-right-radius: 0; }
+.msg.human:has(+ .msg.human.cont) { border-bottom-right-radius: 0; }

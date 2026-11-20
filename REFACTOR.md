@@ -268,8 +268,16 @@ limits and the games move before `agents/`.
       Button, IconButton, Chip, Badge, Avatar, Dialog, Tabs, Toast,
       ProgressBar; replace repeated class strings with them, one feature
       at a time
-- [ ] 3.4 Split `styles.css` (1,707 lines) into tokens, base, and CSS next
-      to each component or feature
+- [x] 3.4 Split `styles.css` (1,707 lines) into tokens, base, and CSS next
+      to each component or feature (done before 3.3, so the components can
+      take their CSS with them): 27 files in the original order -
+      `ui/tokens.css`, `base.css`, `button.css`, `late.css`; `features/room/`
+      layout, sidebar, drawer; `features/feed/` chat, markdown,
+      attachments; `features/board/`, `features/media/`; under
+      `features/games/` the kinds, one file per game panel, `games.css`
+      (the host and arenas, still interleaved) and `new-game.css`.
+      `styles.css` is now only the ordered `@import` list, which is the
+      cascade. The production build is byte-identical (same CSS asset)
 - [ ] Screenshots at desktop and phone widths for each visible change
 
 ## Phase 4: contract and guard rails
@@ -317,3 +325,4 @@ limits and the games move before `agents/`.
 | 2026-11-20 | 2.7: `routes/` | 0c146fe | API suite green (631); version f909aee6. Live, read only: `/api`, `/api/build` and the page stamp (426bbdbc1870bc96), `/sw.js`, the manifest, an icon, `/emoji.json`, `/api/push/key`; on a real room its page, messages, members, welcome, games and a match's full state, the board (constitution, questions, digests, stakes, decisions), attachments, tools, invites, the agent recipe, MCP `tools/list`, a signed avatar, and an attachment full (200) and ranged (206). |
 | 2026-11-20 | 2.8: `room/` | efa5e62 (deployed with a740c58) | API suite green (631); version 4cedccf9. Live, read only: the same set as 2.7 - pages, docs, a real room's reads (messages, members, welcome, games and a match's full state, the board, attachments, tools, invites, recipe), MCP `tools/list`, a signed avatar, an attachment full and ranged. |
 | 2026-11-20 | 3.1: web `games/` by role and game | ea6f7fb | UI suite 155/155; version 2713ed22. The production build is byte-identical to the one before the move (same `index.html`, so the build id stays 426bbdbc1870bc96, and the same hashed bundles): a move-only change proven by its output. Live: page stamps match `/api/build`; the main bundle and all 17 arena chunks 200, immutable. |
+| 2026-11-20 | 2.9: comments | b40f07b | API suite green (631); version c5f0a87a. Live, read only: the 2.7 set again (pages, docs, a real room's reads, a match's full state, MCP `tools/list`, signed and ranged media). |

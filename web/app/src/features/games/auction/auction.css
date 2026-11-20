@@ -1,0 +1,41 @@
+/* The auction (2026-11-19): the lot under the hammer, the bid box, the
+   bidders' budgets and the last lot's opened bids. */
+.au-lot { margin-top: 10px; text-align: center; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); color: #e0e7ff; }
+.au-lot-n { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #a5b4fc; }
+.au-lot-name { font-size: 19px; font-weight: 800; margin-top: 4px; line-height: 1.25; }
+.au-card .au-lot { margin: 6px 8px 0; padding: 8px; }
+.au-card .au-lot-name { font-size: 15px; }
+.au-players { display: grid; gap: 5px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #e0e7ff; }
+.au-players.compact { margin: 6px 0 0; border: 0; border-radius: 0; padding: 6px 10px 10px; }
+.au-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
+.au-row.mine .au-name { text-decoration: underline; text-decoration-color: rgba(var(--ga), .6); text-underline-offset: 3px; }
+.au-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.au-budget { flex: 1; min-width: 40px; height: 8px; border-radius: 4px; background: rgba(148, 163, 184, .18); overflow: hidden; margin-left: auto; }
+.au-budget-fill { display: block; height: 100%; opacity: .8; }
+.au-left { width: 34px; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; flex: none; }
+.au-won { width: 40px; text-align: right; font-size: 12.5px; flex: none; }
+.au-st { font-size: 11.5px; color: #a5b4fc; width: 70px; text-align: right; flex: none; }
+.au-bid { margin-top: 12px; display: grid; gap: 9px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px; color: #e0e7ff; }
+.au-bid.your-move { box-shadow: 0 0 0 1px rgba(var(--ga), .35), 0 0 18px rgba(var(--ga), .15); }
+.au-bid-title { font-weight: 700; font-size: 15px; }
+.au-bid-row { display: grid; grid-template-columns: 44px minmax(0, 120px) 44px auto; gap: 8px; align-items: center; }
+.au-num { height: 40px; width: 100%; min-width: 0; border-radius: 9px; border: 1px solid rgba(148, 163, 184, .35); background: #04050f; color: #e0e7ff; font: inherit; font-size: 18px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.au-num::-webkit-outer-spin-button, .au-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.au-of { color: #a5b4fc; font-size: 13px; }
+.au-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.au-acts .duel-btn.sm { font-size: 13px; padding: 7px 11px; }
+.au-go { margin-left: auto; }
+.au-result { margin-top: 10px; display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); color: #e0e7ff; }
+.au-result-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13.5px; margin-bottom: 2px; }
+.au-result-lot { color: #c7d2fe; }
+.au-result-v { font-weight: 800; }
+.au-result-empty { text-align: center; color: #a5b4fc; font-size: 13px; }
+.au-bidrow { display: grid; grid-template-columns: minmax(0, 90px) 1fr 48px; gap: 8px; align-items: center; font-size: 13px; }
+.au-bidrow.won .au-bidn { font-weight: 800; }
+.au-bidname { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.au-bidbar { height: 10px; border-radius: 5px; background: rgba(148, 163, 184, .14); overflow: hidden; }
+.au-bidfill { display: block; height: 100%; opacity: .75; }
+.au-bidrow.won .au-bidfill { opacity: 1; }
+.au-bidn { text-align: right; font-variant-numeric: tabular-nums; }
+.au-tie { font-size: 12px; color: #a5b4fc; }
+.au-hist-lot { font-style: italic; }

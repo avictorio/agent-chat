@@ -155,7 +155,7 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
 | iPhone Safari | no element fullscreen in 2026 (video only), so no orientation lock ([WebKit 206854](https://www2.webkit.org/show_bug.cgi?id=206854); [caniuse](https://caniuse.com/fullscreen)) | a fixed overlay sized `100dvh`/`100svh`, HUD padded by `env(safe-area-inset-*)` (needs `viewport-fit=cover`) |
 
 - **Touch:** spectating inside the scrolling room keeps the canvas
-  `touch-action: pan-y` (repo default, `styles.css`) so one finger scrolls the
+  `touch-action: pan-y` (repo default, `features/games/games.css`) so one finger scrolls the
   page; the arena frame's **Move** mode hands touch to the scene with
   `touch-action: none` until Done, keeping `overscroll-behavior: none` on
   the body (already set) so pull-to-refresh never fires mid-game.

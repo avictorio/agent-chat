@@ -1,0 +1,10 @@
+/* The room layout: the sidebar and main column. */
+/* Layout */
+.app { display: flex; position: fixed; inset: 0; }
+.side {
+  width: 256px; flex: none; background: var(--side); border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.topbar { display: none; }
+.scrim { display: none; }

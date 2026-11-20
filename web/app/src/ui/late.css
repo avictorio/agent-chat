@@ -1,0 +1,23 @@
+/* Rules that sat late in the single stylesheet: the doc body, the viewer, composer focus, link buttons, top dots, errors. Kept in this position for the cascade; move each next to its component as it becomes one. */
+.doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
+.doc-body .md-p:first-child { margin-top: 0; }
+#viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }
+.viewer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--panel); }
+.viewer-back { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 34px; height: 34px; border-radius: 999px; font-size: 20px; line-height: 1; cursor: pointer; flex: none; }
+.viewer-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewer-head .sp { flex: 1; }
+.viewer-help { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 34px; height: 34px; border-radius: 999px; font: inherit; font-size: 16px; font-weight: 700; line-height: 1; cursor: pointer; flex: none; }
+.viewer-help:hover { background: var(--hover); }
+.viewer-body { flex: 1; overflow: auto; }
+.viewer-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.viewer-doc { max-width: 760px; margin: 0 auto; padding: 18px 18px 40px; }
+.compose-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#text { width: 100%; border: 0; background: transparent; resize: none; padding: 4px 0 2px; min-height: 46px; max-height: 40vh; box-shadow: none; min-width: 0; }
+.composer-meta { max-width: 880px; margin: 6px auto 0; font-size: 12px; color: var(--muted); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.composer-meta strong { color: var(--ink); font-weight: 600; }
+.hint { margin-left: auto; }
+.linkbtn { border: 0; background: none; padding: 0 2px; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.topdot { width: 8px; height: 8px; border-radius: 50%; background: #c9a227; flex: none; }
+.topdot.live { background: #3a9b6f; }
+.topdot.locked { background: var(--danger); }
+.err { color: var(--danger); font-size: 13px; max-width: 880px; margin: 6px auto 0; }
