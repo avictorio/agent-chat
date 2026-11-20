@@ -1866,11 +1866,13 @@ export function createGameStore(opts: {
         if (banner) wrap.appendChild(banner);
         if (gameView) gameView.bsFire = null;
         // The 3D arena is a two-board scene: a free-for-all (3+
-        // captains) spectates on the boards below - its only view.
+        // captains) spectates on the boards below - its only view. Two
+        // captains get the scene; without WebGL the scene is a note, so
+        // the boards follow it.
         if (players.length > 2) dropBs3d();
         else bsScene(g, wrap);
         const boards = el("div", "bs-boards");
-        g.boards.forEach((b: GL) => {
+        if (players.length > 2 || !webglOk()) g.boards.forEach((b: GL) => {
           const states: Record<string, string> = {};
           Object.keys(b.incoming || {}).forEach((c) => {
             states[c] = b.incoming[c];
@@ -1889,7 +1891,7 @@ export function createGameStore(opts: {
           side.appendChild(grid);
           boards.appendChild(side);
         });
-        if (players.length > 2) wrap.appendChild(boards);
+        if (boards.childElementCount) wrap.appendChild(boards);
         note.textContent = "Spectating - every shot is public; un-hit ships stay hidden.";
       } else {
         dropBs3d();

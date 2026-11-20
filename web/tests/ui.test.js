@@ -685,6 +685,24 @@ let FAILURES = 0;
       return out;
     });
   }
+  // A spectator has no aiming grid: without WebGL the two captains'
+  // boards follow the note (with WebGL they are not built at all).
+  for (const [label, o] of [['no-webgl-battleship-spectator', {}], ['no-webgl-battleship-spectator-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { bs: true }, init: noGl }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+      await page.click('.game-card');
+      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+      out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
+      out.grids = await page.$$eval('#viewer .bs-boards .bs-grid', (g) => g.length);
+      out.fire = await page.$$eval('#viewer .bs-boards button.bs-cell', (b) => b.length);
+      await shot(page, label + '.png');
+      if (!/3D isn't available on this device/.test(out.status)) throw new Error('the note: ' + out.status);
+      if (out.grids !== 2) throw new Error('both captains\' waters follow the note: ' + out.grids);
+      if (out.fire !== 0) throw new Error('a spectator cannot fire: ' + out.fire);
+      return out;
+    });
+  }
   await run('no-webgl-fourinarow', { state: { c4: true }, init: noGl }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 6000 });

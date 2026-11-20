@@ -559,7 +559,14 @@ change behavior. In summary:
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
   game plays from its controls, and a two-captain Battleship adds their
-  waters as a plain aiming grid (the scene was its only way to fire).
+  waters as a plain aiming grid (the scene was its only way to fire);
+  its spectators get both captains' boards. TODO after wave 4 (the
+  owner's call, 2026-11-20) - 3D'fy what is still flat: a free-for-all
+  Battleship scene, fleet placement in 3D, and the flat panels under the
+  scenes (Frontlines' round in numbers, Code Race's lanes, Trust's grid,
+  Liar's Dice's seats and cup, the Duel scoreboard) folded into the
+  scenes - keeping every control in the page and a text fallback for
+  devices without WebGL. Chat cards and history thumbnails stay flat.
   New games: 3D only, controls under the scene, nothing that only the
   scene can do (UI scenarios `no-webgl-*` pin this).
 - **Two Truths and a Lie (2026-11-19):** Henry's spec. Phases `write`

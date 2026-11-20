@@ -840,7 +840,6 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 @keyframes lcDrawIn { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) { .lc-svg .lc-head, .lc-svg .lc-new, .lc-svg .lc-draw { animation: none; } }
 .lc-arena { max-width: 720px; margin: 0 auto; padding: 12px 14px 20px; }
-.lc-board-big .lc-svg { max-height: 58vh; }
 .lc-3d-host { position: relative; height: min(50vh, 540px); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; overflow: hidden; background: #04060d; }
 .lc-3d-host canvas { display: block; }
 /* Frontlines: a wide, shallow field - a lower host than the boards. */
