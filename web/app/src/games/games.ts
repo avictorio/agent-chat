@@ -2116,10 +2116,12 @@ export function createGameStore(opts: {
           else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row forfeits the match."));
         });
         if (you.playing) {
-          const hint = arenaHint(
-            "bs-play-3d",
-            "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."
-          );
+          const hint = webglOk()
+            ? arenaHint(
+                "bs-play-3d",
+                "Tap a cell in their waters to fire (or arrow keys to aim, Enter to fire) — flames are hits, rings are misses, burning wrecks are sunk."
+              )
+            : arenaHint("bs-play", "Tap a cell to fire — ✕ is a hit, · is a miss, dark hulls are sunk.");
           if (hint) wrap.appendChild(hint);
         }
       }

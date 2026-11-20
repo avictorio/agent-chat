@@ -923,6 +923,7 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .lc-3d-host.no-3d, .lc-3d-host.no-3d[class] { height: auto; min-height: 0; }
 .lc-3d-host.no-3d .arena3d-mount { display: none; }
 .lc-3d-host.no-3d .arena3d-status { position: static; padding: 12px 14px; color: #c7d8e4; }
+.bs-aim { width: fit-content; max-width: 100%; margin: 4px auto 0; }
 .bs-strips3d { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; margin: 8px 2px 0; }
 .bs-strip3d { display: flex; align-items: center; gap: 8px; }
 .bs-strip3d-label { color: var(--dim); font-size: 12.5px; }
