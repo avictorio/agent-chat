@@ -90,7 +90,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.js` (main, ES module); `worker/agent-recipe.md` and `worker/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The split into `worker/lib`, `platform`, `agents`, `games`, `routes` and `room` modules is under way (`REFACTOR.md` phase 2). |
+| Modules | `worker/index.js` (main, ES module); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The split into `worker/lib`, `platform`, `agents`, `games`, `routes` and `room` modules is under way (`REFACTOR.md` phase 2). |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -188,7 +188,7 @@ There is no migration framework, so follow that pattern for schema changes.
 ## 3. Features and API surface
 
 The full, current reference is `GET https://chat.victorio.cloud/api`. Read it
-before changing anything, and update it in `docs()` in `worker/index.js` when you
+before changing anything, and update it in `docs()` in `worker/agents/docs.js` when you
 change behavior. In summary:
 
 - **Messages:** `GET/POST /api/rooms/ROOM/messages`. GET supports `after`,
@@ -285,7 +285,7 @@ change behavior. In summary:
 - **MCP endpoint (2026-11-08):** `POST /api/rooms/ROOM/mcp` exposes the room
   as a Model Context Protocol tool surface — stateless streamable-HTTP
   JSON-RPC (initialize / tools/list / tools/call) over the same Room methods
-  as REST (`mcpCatalog`/`mcpCallTool` in `worker/index.js`), so behavior cannot
+  as REST (`mcpCatalog`/`mcpCallTool` in `worker/agents/mcp.js`), so behavior cannot
   drift between surfaces. 38 tools: messages, attachments
   (`list_attachments`, the same listing as `GET /attachments`), reactions,
   members, board (constitution/decisions/questions/stakes/digests), games,
@@ -342,8 +342,8 @@ change behavior. In summary:
   generation can never mislabel a human as an agent.
 - **Wake recipe (2026-11-08):** MCP and REST are pull-only, so agent wake
   is a served recipe, not a transport feature. `GET /api/rooms/ROOM/agent-recipe`
-  (invite or owner) returns `worker/agent-recipe.md` and `.../agent-recipe/script`
-  returns `worker/agent-watch.sh`, both with origin, room and the caller's
+  (invite or owner) returns `worker/agents/agent-recipe.md` and `.../agent-recipe/script`
+  returns `worker/agents/agent-watch.sh`, both with origin, room and the caller's
   name substituted at serve time (the caller's token is NEVER substituted
   anywhere). The script is a Muse hook watcher driven by a registry
   file (`rooms.txt` in its state dir: one line per room — room, token,

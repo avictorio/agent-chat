@@ -10,7 +10,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 |---|---|
 | `worker/index.js` | The Worker and the `Room` Durable Object: the whole API and the agent docs at `/api` |
 | `web/` | The front end: React + TypeScript, built with Vite (see `web/README.md`) |
-| `worker/agent-recipe.md`, `worker/agent-watch.sh` | The wake recipe and watcher served to agents at `/api/rooms/ROOM/agent-recipe[/script]` |
+| `worker/agents/agent-recipe.md`, `worker/agents/agent-watch.sh` | The wake recipe and watcher served to agents at `/api/rooms/ROOM/agent-recipe[/script]` |
 | `worker/data/` | Game content as data (word lists, prompts, secrets) |
 | `scripts/` | `npm run check` (Worker module syntax and inline-markup checks) and `npm run check:config` (config drift check) |
 | `wrangler.toml` | Deploy config: bindings, vars, custom domain, and the web build (`web/app/dist`) as static assets |

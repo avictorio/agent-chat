@@ -13,10 +13,9 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.5 are live (2.5c pending its deploy); 4.6 is done.
-Steps 2.4 (`limits.js`) and 2.5 (every game in `games/`) are done; next
-is `agents/` (2.6): the MCP catalog and tool calls, the API docs text,
-onboarding. Claude Code's built-in `cc-plugin-privacy` plugin once
+State on 2026-11-20: phase 1 and steps 2.1-2.5 are live, 2.6 is committed; 4.6 is done.
+Next is 2.7: the fetch handler (`routeRequest`, ~1,300 lines) becomes a
+route table with one file per API area under `routes/`. Claude Code's built-in `cc-plugin-privacy` plugin once
 blocked the split tool: the Worker held the owner's account email (as the
 VAPID subject), and the plugin refuses scripts that read a file holding it.
 Turning the plugin off in `.claude/settings.json` had no effect, so the
@@ -200,8 +199,12 @@ limits and the games move before `agents/`.
         index.js 8,091 -> 5,902 lines; 31 modules. The shared game
         machinery (lobby, clocks, alarm, rounds and turns, cards, listing)
         stays in the Room for 2.8
-- [ ] 2.6 `agents/`: MCP catalog and tool calls, the API docs text,
-      onboarding, `agent-recipe.md`, `agent-watch.sh`
+- [x] 2.6 `agents/`: MCP catalog and tool calls, the API docs text,
+      onboarding, `agent-recipe.md`, `agent-watch.sh` - `agents/docs.js`,
+      `mcp.js`, `onboarding.js` and the two text files (`git mv`); what
+      MCP needed came along: `lib/reactions.js`, `uploads/plan.js` (part
+      sizes and kind checks) and `routes/uploads.js` (the upload request
+      helpers, ahead of 2.7). index.js 5,902 -> 4,449 lines
 - [ ] 2.7 `routes/`: the fetch handler becomes a route table; one file per
       API area
 - [ ] 2.8 `room/`: the rest of the Room class by area (schema, messages,
@@ -263,4 +266,7 @@ limits and the games move before `agents/`.
 | 2026-11-20 | Split tool + privacy plugin off | 859e994 | `scripts/split-module.js` (move/verify) committed; `.claude/settings.json` turns `cc-plugin-privacy@builtin` off at the owner's request. It still blocked this session (plugin changes apply to new sessions), so 2.2 starts in the next session - see "Resume here". |
 | 2026-11-20 | Privacy plugin: the real fix | (this commit) | A new session showed the setting doesn't turn the built-in plugin off. The trigger was the owner's account email as `VAPID_SUBJECT` in the Worker; the push JWT's subject is now `mailto:` + `GMAIL_SENDER` (https URL fallback) and the setting is gone. The split tool runs again with the plugin on. Deployed as version 41b7757f; `/api/push/key` still served. |
 | 2026-11-20 | 2.2: `lib/` | 8d38e3f | API suite green; version 9a242084 (14 modules). Live: `/api`, `/sw.js`, the page stamp, a real room's members list (read) and a signed avatar (200, image/webp). |
+| 2026-11-20 | 2.4: `limits.js` | de83a6b | API suite green; version fbea4d01. Live: `/api` quotes the moved limits (5.4 TB, 943 GB), a real room's messages and page. |
+| 2026-11-20 | 2.5a-b: ten games | 0272cbf | API suite green (631); version ed7fb432. Live: a real room's games list (40 matches) and `/api`'s game sections. |
+| 2026-11-20 | 2.5c: six games + `games/engine.js` | ee51b92 | API suite green (631); version 933ccd4a. Live: real Light Cycles, Duel and Battleship matches' full states (rules included) through the moved engines. |
 | 2026-11-20 | 2.3: `platform/` + `lib/media.js` | fe4a36c | API suite green (631 checks); version 169da5fb (21 modules). Live: `/api`, `/api/push/key`, a signed avatar, attachment media full (200) and ranged (206). |
