@@ -58,7 +58,7 @@ calls < 200 mobile / < 500 desktop; triangles < 500K / < 2M; 60 fps budget <
 
 ## 2. The repo's quality profile
 
-`useQuality(still)` in `web/app/src/games/three/arena3d.tsx` returns
+`useQuality(still)` in `web/app/src/features/games/three/arena3d.tsx` returns
 `{ lite, dpr, ambientFps, msaa }`: lite = `(pointer: coarse)`; dpr `[1, 1.5]`
 lite / `[1, 1.75]` otherwise; ambient 24 / 30 fps, 0 when `still` (reduced
 motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
@@ -163,7 +163,7 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
   re-acquired on `visibilitychange`, released at match end, all in
   try/catch. iOS has it since 16.4, but in Home Screen web apps only from
   18.4 ([Safari 18.4](https://developer.apple.com/documentation/safari-release-notes/safari-18_4-release-notes)).
-  The repo already uses it during uploads (`composer/uploads.ts`).
+  The repo already uses it during uploads (`web/app/src/features/composer/uploads.ts`).
 - **Safe areas:** AGENTS.md section 10 applies: fixed or full-height UI pads
   with `env(safe-area-inset-*)`, top and bottom. The app shell is
   `position: fixed; inset: 0`; never go back to `height: 100dvh` for the

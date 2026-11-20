@@ -1,0 +1,280 @@
+import { useEffect, useRef, useState } from "react";
+import type { MemberKind, Message } from "@chat/shared";
+import { md } from "./markdown";
+import { canSpeak } from "../room/speak";
+import { RxChips } from "./reactions";
+import { MediaBlocks } from "./media";
+import { same } from "../../lib/index";
+import { useFeed, useMembers, useSession } from "../room/ctx";
+
+// The message feed, ported from the current app's msgNode/renderAll:
+// day separators, 5-minute same-sender grouping with gutter timestamps,
+// colored names, kind tags, the You tag, and the footer with the listen
+// button. Media, YouTube and game cards join in M5/M6; reaction chips
+// in M4 (the rx-row ships empty until then, as the frame did in M2).
+
+const HUES = [212, 152, 24, 276, 340, 44, 188, 112, 0, 248, 300, 168];
+export function hue(s: string): number {
+  let h = 2166136261;
+  const str = String(s || "").toLowerCase();
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return HUES[(h >>> 0) % HUES.length]!;
+}
+export function nameColor(n: string): string {
+  return "hsl(" + hue(n) + " 55% var(--l))";
+}
+export function initials(n: string): string {
+  const parts = String(n || "?")
+    .trim()
+    .split(/[\s._-]+/)
+    .filter(Boolean);
+  const s =
+    parts.length > 1
+      ? parts[0]!.charAt(0) + parts[1]!.charAt(0)
+      : String(n || "?").slice(0, 2);
+  return s.toUpperCase();
+}
+export function clock(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+const DAY = 86400000;
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+export function dayLabel(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = Math.round((startOfDay(now) - startOfDay(d)) / DAY);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  const o: Intl.DateTimeFormatOptions = { weekday: "long", month: "long", day: "numeric" };
+  if (d.getFullYear() !== now.getFullYear()) o.year = "numeric";
+  return d.toLocaleDateString([], o);
+}
+
+export function senderKind(m: Message, kindOf: (name: string) => MemberKind | null): MemberKind | null {
+  return kindOf(m.from) || (m.kind === "human" || m.kind === "agent" ? m.kind : null);
+}
+
+export interface AvatarProps {
+  avatars: Record<string, string>;
+  invite: string;
+  onAvatar: (name: string) => void;
+  xl?: boolean;
+}
+
+export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
+  // the URL that failed, not a flag: a fresh URL (the roster refreshing a
+  // remembered, expired one) gets its own try
+  const [deadSrc, setDeadSrc] = useState<string | null>(null);
+  const open = () => ctx.onAvatar(name);
+  const key = (e: { key: string; preventDefault(): void }) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  };
+  const src = ctx.avatars[String(name || "").toLowerCase()];
+  if (src && src !== deadSrc) {
+    return (
+      <div className={"avatar img" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
+        {/* avatar URLs arrive signed from the server (phase E) */}
+        <img src={src} alt="" decoding="async" onError={() => setDeadSrc(src)} />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={"avatar" + (ctx.xl ? " xl" : "")}
+      data-name={name}
+      tabIndex={0}
+      role="button"
+      aria-label={"View " + name + "'s picture"}
+      style={{ background: "hsl(" + hue(name) + " 42% 44%)" }}
+      onClick={open}
+      onKeyDown={key}
+    >
+      {initials(name)}
+    </div>
+  );
+}
+
+export function KindTag({ kind }: { kind: string }) {
+  return <span className={"tag k-" + kind}>{kind === "human" ? "Human" : "Agent"}</span>;
+}
+
+function MdText({ text }: { text: string }) {
+  const { memberSet, membersVersion } = useMembers();
+  const ref = useRef<HTMLDivElement | null>(null);
+  const version = membersVersion;
+  const memberSetRef = useRef(memberSet);
+  memberSetRef.current = memberSet;
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.textContent = "";
+    node.appendChild(md(text, memberSetRef.current));
+  }, [text, version]);
+  return <div className="text" ref={ref}></div>;
+}
+
+const SPEAK_PATHS = (
+  <>
+    <path d="M4 9v6h4l5 4V5L8 9z" />
+    <path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11" />
+  </>
+);
+const STOP_PATHS = <rect x="7" y="7" width="10" height="10" rx="1.5" />;
+
+export function MsgRow({ m, prev }: { m: Message; prev: Message | null }) {
+  const session = useSession();
+  const members = useMembers();
+  const feed = useFeed();
+  const newDay = !prev || dayLabel(prev.ts) !== dayLabel(m.ts);
+  const cont = !newDay && !!prev && same(prev.from, m.from) && m.ts - prev.ts < 5 * 60000;
+  const kind = senderKind(m, members.kindOf);
+  const mine = !!session.meName && same(m.from, session.meName);
+  const speaking = feed.speakingId === m.id;
+  const showSpeak = canSpeak || !!members.voiceOf(m.from);
+  return (
+    <>
+      {newDay && (
+        <div className="day-sep" role="separator">
+          {dayLabel(m.ts)}
+        </div>
+      )}
+      <div
+        className={
+          "msg" +
+          (cont ? " cont" : "") +
+          (kind === "human" ? " human" : "") +
+          (feed.rxTargetId === m.id ? " rx-target" : "")
+        }
+        data-id={m.id}
+      >
+        <div className="gutter">
+          {cont ? (
+            <time title={new Date(m.ts).toLocaleString()}>{clock(m.ts)}</time>
+          ) : (
+            <Avatar name={m.from} ctx={{ avatars: members.avatars, invite: session.token, onAvatar: feed.onAvatar }} />
+          )}
+        </div>
+        <div className="msg-body">
+          {!cont && (
+            <div className="msg-head">
+              <span className="who" style={{ color: nameColor(m.from) }}>
+                {m.from}
+              </span>
+              {kind ? <KindTag kind={kind} /> : null}
+              {mine && <span className="tag">You</span>}
+              <time className="when" title={new Date(m.ts).toLocaleString()}>
+                {clock(m.ts)}
+              </time>
+            </div>
+          )}
+          <MdText text={m.text || ""} />
+          <MediaBlocks m={m} />
+          <div className="msg-foot">
+            <div className="rx-row">
+              <RxChips m={m} me={session.meName} api={feed.rx} />
+            </div>
+            <div className="msg-actions">
+              <button
+                type="button"
+                className="react-btn"
+                aria-label="Add a reaction"
+                title="React"
+                onClick={(e) => {
+                  const row = e.currentTarget.closest(".msg") as HTMLElement | null;
+                  if (row) feed.rx.openBar(m, row);
+                }}
+              >
+                <svg className="i" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="8.2" />
+                  <path d="M9.2 10.2h.01M14.8 10.2h.01M8.8 13.6c.8 1.1 1.9 1.7 3.2 1.7s2.4-.6 3.2-1.7" />
+                  <path d="M19.5 15.5v5M17 18h5" />
+                </svg>
+              </button>
+              {showSpeak && (
+                <button
+                  type="button"
+                  className={"speak" + (speaking ? " on" : "")}
+                  data-id={m.id}
+                  aria-label={speaking ? "Stop reading aloud" : "Read this message aloud"}
+                  title={speaking ? "Stop" : "Listen"}
+                  onClick={() => feed.speaker.speak(m)}
+                >
+                  <svg className="i" viewBox="0 0 24 24">
+                    {speaking ? STOP_PATHS : SPEAK_PATHS}
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function atBottom(list: HTMLElement): boolean {
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+
+// The scrollable feed: rows plus the jump-to-latest pill. Scroll
+// pinning for the initial settle lives in RoomShell (it owns the
+// stream); this component owns the list element and its handlers.
+export function ChatFeed({
+  messages,
+  jumpVisible,
+  setJumpVisible,
+  onSettleKill,
+  listRef,
+  holdProps,
+}: {
+  messages: Message[];
+  jumpVisible: boolean;
+  setJumpVisible: (v: boolean) => void;
+  onSettleKill: () => void;
+  listRef: React.RefObject<HTMLDivElement | null>;
+  holdProps: Record<string, (e: never) => void>;
+}) {
+  return (
+    <div
+      className="msgs"
+      id="list"
+      ref={listRef}
+      {...(holdProps as React.HTMLAttributes<HTMLDivElement>)}
+      onScroll={(e) => {
+        if (atBottom(e.currentTarget)) setJumpVisible(false);
+      }}
+      onWheel={onSettleKill}
+      onTouchMove={onSettleKill}
+    >
+      <div className="msgs-inner" id="msgs">
+        {messages.length === 0 ? (
+          <div className="chat-empty">No messages yet. Start the conversation below.</div>
+        ) : (
+          messages.map((m, i) => (
+            <MsgRow key={m.id} m={m} prev={i > 0 ? messages[i - 1]! : null} />
+          ))
+        )}
+      </div>
+      <div className="jump-wrap">
+        <button
+          type="button"
+          className="btn sm jump"
+          id="jump"
+          hidden={!jumpVisible}
+          onClick={(e) => {
+            const list = e.currentTarget.closest(".msgs") as HTMLElement | null;
+            if (list) list.scrollTop = list.scrollHeight;
+            setJumpVisible(false);
+          }}
+        >
+          New messages ↓
+        </button>
+      </div>
+    </div>
+  );
+}

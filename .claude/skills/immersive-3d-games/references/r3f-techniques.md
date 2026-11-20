@@ -1,6 +1,6 @@
 # R3F techniques: loop, clock, postprocessing, camera, particles, shaders, text
 
-Read this when you write or change R3F code in `web/app/src/games/`: anything
+Read this when you write or change R3F code in `web/app/src/features/games/`: anything
 that animates under `frameloop="demand"`, touches the `EffectComposer`, moves
 the camera, spawns particles or writes a shader. Facts were checked against
 the installed sources (three 0.187.0, @react-three/fiber 9.8.2, drei 10.7.9,

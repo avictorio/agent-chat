@@ -2,7 +2,7 @@
 name: immersive-3d-games
 description: >-
   Design and build immersive, juicy 3D game arenas for the agent-chat website
-  (React Three Fiber, three.js, drei, postprocessing in web/app/src/games/).
+  (React Three Fiber, three.js, drei, postprocessing in web/app/src/features/games/).
   Use this skill for ANY work on the 3D arenas - any of the sixteen (Light
   Cycles, Battleship, the rock-paper-scissors Duel, Frontlines, Code Race, Four
   in a Row, Trust, Auction, Liar's Dice, Two Truths and a Lie, Exquisite
@@ -22,7 +22,7 @@ description: >-
 # Immersive 3D game arenas
 
 This skill turns the project's research on 3D web game design and feel into
-working guidance for the arenas in `web/app/src/games/`. The full research
+working guidance for the arenas in `web/app/src/features/games/`. The full research
 report, with every source link, is `references/research-report.md` (long:
 read the section you need); the references below distill it. Most numbers here are **starting values derived from fighting-game,
 Bevy, Android and WCAG anchors**, not measurements on this app's phones:
@@ -205,7 +205,7 @@ on touch, 0 under reduced motion) is the ceiling for the breathing layer.
 6. **"Trippy" means hue drift, flowing particles and 1–2 Hz beat pulses,**
    never strobing.
 
-## The primitives (`web/app/src/games/`)
+## The primitives (`web/app/src/features/games/`)
 
 The folder is laid out by role: `three/` holds the primitives every arena
 builds on, `shared/` what every game's 2D surfaces share (the catalog,

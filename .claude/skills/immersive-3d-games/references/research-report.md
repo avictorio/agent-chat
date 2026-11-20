@@ -152,7 +152,7 @@ The lesson is that **arrival needs three ingredients at once**: the camera trave
 
 | Time | Visual | Audio | Implementation note |
 |---|---|---|---|
-| 0–0.3 s | The DOM overlay fades out from the scene's fog or background colour, never white | The tap that started entry unlocks the AudioContext | The repo's `FirstFrame` already runs `compileAsync` and lifts the loading layer only once shaders are built (`web/app/src/games/three/arena3d.tsx`). Start the sequence from its `onReady` |
+| 0–0.3 s | The DOM overlay fades out from the scene's fog or background colour, never white | The tap that started entry unlocks the AudioContext | The repo's `FirstFrame` already runs `compileAsync` and lifts the loading layer only once shaders are built (`web/app/src/features/games/three/arena3d.tsx`). Start the sequence from its `onReady` |
 | 0.3–2.5 s | Ease-out fly-in from a high, wide vista to the play camera. Fog density eases from thick to normal | Filter sweep or swell on the ambient bed | `CameraControls.setLookAt(..., true)` with a raised `smoothTime` (recipe below) |
 | 1.0–2.5 s | Emissive light lines power on outward from the focal point, Tron-style | The swell peaks as the camera settles | Ramp a shared `uPower` uniform on grid and trim materials, plus light intensities |
 | 2.5–4 s | Arena name card, then the HUD slides in and input unlocks | A short sting | HTML or CSS overlay, not 3D text |
@@ -214,7 +214,7 @@ Glow must be selective. The RPP docs say a `luminanceThreshold` of 1 means nothi
 
 Chrome has applied its autoplay policy to Web Audio since Chrome 71. A context created before a user gesture starts "suspended" and must be resumed in a tap handler ([Chrome: Autoplay policy](https://developer.chrome.com/blog/autoplay); [Chrome: Web Audio and games](https://developer.chrome.com/blog/web-audio-autoplay)). So the "Play" or "Watch" tap that starts the arrival should also create and resume the shared context, and on iOS play a one-sample silent buffer ([Cinevva tutorial](https://app.cinevva.com/tutorials/web-audio-api-games), lower authority).
 
-The repo's `web/app/src/games/shared/chime.ts` is the seed to grow from. It already has:
+The repo's `web/app/src/features/games/shared/chime.ts` is the seed to grow from. It already has:
 
 - one module-level `AudioContext` unlocked on the first pointer or key press;
 - a procedural two-note chime (659.25 Hz and 880 Hz, peak gain 0.12, about 0.5 s);

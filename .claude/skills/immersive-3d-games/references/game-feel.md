@@ -103,7 +103,7 @@ stay), then "meaning (game over screen)" and slow motion
   within a second. Shake the 3D camera only; the HUD, the selected cell and
   the turn indicator never shake. A cell should never visually move more
   than a fraction of its own width.
-- Repo: `JuiceRig` in `web/app/src/games/three/juice.tsx` implements trauma²,
+- Repo: `JuiceRig` in `web/app/src/features/games/three/juice.tsx` implements trauma²,
   linear decay, value noise, applied through `CameraControls.setFocalOffset`
   with amplitude scaled by camera distance (so it reads the same on every
   board). Its constants live in that file; adjust there, not per arena.

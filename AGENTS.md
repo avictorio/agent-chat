@@ -509,7 +509,7 @@ change behavior. In summary:
   fully self-contained; anything less strict would let a posted page
   reach the room API with the viewer's invite.
 - **Game catalog and picker (2026-11-19):** everything the web app says
-  about a game lives in one entry in `web/app/src/games/shared/catalog.tsx`:
+  about a game lives in one entry in `web/app/src/features/games/shared/catalog.tsx`:
   name, icon, accent, gallery pitch and facts (players, length, pace),
   How to play, setup options and the create-call body. The New game
   dialog is a gallery of those entries, then the chosen game's setup
@@ -898,7 +898,7 @@ change behavior. In summary:
   render as if still live). A finished or cancelled match offers its
   players a **Rematch** in the viewer: same game, players and
   settings, one tap, and the viewer steps into the new match
-  (`sendRematch` in `web/app/src/games/games.ts`; settings come from the
+  (`sendRematch` in `web/app/src/features/games/games.ts`; settings come from the
   state itself, so there is no server surface to keep in sync). The
   duel's Referee result post counts forfeited rounds, matching Light
   Cycles' moves-submitted record. Under the hood: player resolution
@@ -1049,7 +1049,7 @@ change behavior. In summary:
   (`application/octet-stream`, `Content-Disposition: attachment` with its
   name, nosniff, the locked-down CSP; Range works) and listed as
   `file: {type, bytes, name, url}` - never rendered on this origin. The
-  web composer (composer/uploads.ts) sends small media inline as before
+  web composer (features/composer/uploads.ts) sends small media inline as before
   and everything else through the engine with XMLHttpRequest for byte
   progress (percent, size, speed, time left), per-part retries with
   backoff, a pause while offline that picks up on reconnect, a Cancel that
@@ -1484,7 +1484,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
   `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
   Light mode uses `color-scheme: only light`.
 - **Browser storage:** wrap all `localStorage` access in `try/catch`.
-- **3D game arenas:** before changing the arenas in `web/app/src/games/`
+- **3D game arenas:** before changing the arenas in `web/app/src/features/games/`
   (all sixteen `*Arena3D.tsx`, and `arena3d.tsx`, `juice.tsx`, `sfx.ts`,
   `atmos.tsx`, `ocean.tsx`, `ships.tsx`, `fire.tsx`, `cycles.tsx`,
   `lcmodel.ts`), load
