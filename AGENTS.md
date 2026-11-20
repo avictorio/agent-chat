@@ -48,8 +48,7 @@ Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
 project). Never delete the `__vapid` Durable Object; Web Push lives there.
 Leave the KV `REQUESTS` content alone too: it holds the create-room
-and voice-clone counters, the emoji cache, the activity log and, as
-history, the retired queue's records.
+and voice-clone counters, the emoji cache and the activity log.
 
 **Front-end rewrite COMPLETE (cutover 2026-11-09):** the React +
 TypeScript app under `web/` is the live front end (see `web/README.md`
@@ -82,7 +81,7 @@ off and otherwise `.js` modules under `src/` are not collected.
 | Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters, and the retired queue's `req:` records |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters |
 | R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings (see section 3) |
 | Cron trigger | none since 2026-11-12: `wrangler.toml` carries `crons = []` (the queue's `*/3 * * * *` ntfy alerts were retired) |
 | Compatibility date | `2025-04-01` |
@@ -156,8 +155,6 @@ There is no migration framework, so follow that pattern for schema changes.
 
 ### KV keys (`REQUESTS` namespace)
 
-- `req:<ISO time>:<random>`: the retired change-request queue's records, as
-  JSON (section 8). History only; nothing reads or writes them.
 - `log:<ISO time>:<random>`: activity log lines (room deletions, push
   errors), kept for 7 days. Lines from before 2026-11-12 also record bot
   replies.
@@ -1282,10 +1279,10 @@ requests any more: the Worker's cron handler is gone, `wrangler.toml` carries
 keeps it listed as retired, section 2). Work comes to builders
 directly from Anthony.
 
-The old `req:<ISO time>:<random>` records stay in the `REQUESTS` KV
-namespace as history (20 records, all `done`, at retirement). Don't write
-new ones. Any session or scheduled task that still wakes up to check the
-queue should be stopped.
+Its 20 old `req:<ISO time>:<random>` records (all `done`) were deleted
+from the `REQUESTS` KV namespace on 2026-11-20, at the owner's request.
+Any session or scheduled task that still wakes up to check the queue
+should be stopped.
 
 ---
 
@@ -1495,7 +1492,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
 Site            https://chat.victorio.cloud        Docs  https://chat.victorio.cloud/api
 Account         cb8c005173d35ee12adb292521a88eae    Zone  74b2143e89e0f35d799c7877cc619677
 Worker          victorio-chat                       DO    Room / ROOM (29093ff8f2ff4c99849420d5bb02ac6a)
-KV              REQUESTS ead7ef78e44247a6944c442514c2023e  (log:*, create:*, clone:*, emoji cache; retired req:*)
+KV              REQUESTS ead7ef78e44247a6944c442514c2023e  (log:*, create:*, clone:*, emoji cache)
 R2 media        MEDIA (victorio-chat-media)         Cron  none (crons = [] since 2026-11-12)
 Repo            github.com/avictorio/agent-chat   (push to main = deploy)
 Live code       GET  /accounts/{acct}/workers/scripts/victorio-chat/content/v2   (raw multipart, for comparison only)
