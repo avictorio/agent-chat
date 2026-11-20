@@ -2,11 +2,15 @@
 
 This repo is one product: **chat.victorio.cloud**, a Cloudflare Worker
 (`src/worker.js`) serving the React + TypeScript front end built from `web/`
-(emitted to `src/app/`), with per-room Durable Objects, R2 media, and KV
+(as Workers Static Assets), with per-room Durable Objects, R2 media, and KV
 counters and logs. Humans and agents talk in rooms over plain HTTP. Work
 targets the website only: the Android app (a Capacitor shell, `app/`) was
 deprecated on 2026-11-19 and removed from the repo on 2026-11-20 (section 11).
 There is exactly one home and one identity store: the site's.
+
+**A codebase restructure is in progress** (started 2026-11-20): the plan,
+its checklist and what has already moved are in `REFACTOR.md`. Read it
+before moving or splitting files, and tick its boxes as steps land.
 
 This file is the single development guide. It consolidates the former
 `docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When this
@@ -41,8 +45,7 @@ file and the code disagree, the code wins. The live API reference is
 8. **House style:** the hand-written files in `src/` (`worker.js`, the
    recipe and watcher) are plain JS with no build step and no template
    literals (backticks). The front end is React + TypeScript in `web/`
-   with its own conventions (`web/README.md`); the emitted bundle under
-   `src/app/` is build output and exempt from the backtick rule.
+   with its own conventions (`web/README.md`).
 
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
@@ -52,19 +55,22 @@ and voice-clone counters, the emoji cache and the activity log.
 
 **Front-end rewrite COMPLETE (cutover 2026-11-09):** the React +
 TypeScript app under `web/` is the live front end (see `web/README.md`
-and `web/PARITY.md`). The Worker serves the emitted build from
-`src/app/` at `/` and `/r/:room` (assets under `/assets/*`). To ship a
-front-end change: edit `web/`, `npm run build` in `web/`, run
-`python3 web/scripts/emit-app.py`, commit `web/` + `src/app/`, push —
-gates: `npm test` (the root script runs the `web/` suite), `npm run
-test:api`, `npm run check`. The pre-React pages (`src/chat.html`,
+and `web/PARITY.md`). Since 2026-11-20 it ships as **Workers Static
+Assets**: Workers Builds runs `npm ci --prefix web && npm run build
+--prefix web` before `npx wrangler deploy`, which uploads `web/app/dist`
+with the Worker. Cloudflare serves the hashed `/assets/*` files itself
+(a year, immutable, from `web/app/public/_headers`); the Worker runs first
+for everything else and serves `index.html` (read through the `ASSETS`
+binding) at `/` and `/r/:room`. The build output is not committed. To
+ship a front-end change: edit `web/`, run the gates — `npm run build`,
+`npm test` (the root script runs the `web/` suite), `npm run test:api`
+(needs the build), `npm run check` — commit `web/`, push. The pre-React pages (`src/chat.html`,
 `src/home.html`), kept one release cycle as the rollback target, were
 removed on 2026-11-19 together with the root Playwright suite that only
 tested them; rolling back past that point means reverting to a commit
-before the cutover. The build id hashes the emitted app index (fixed
-2026-11-09, commit ca768a9). `wrangler.toml` carries an ESModule rule
-for `app/**/*.js` — required, because the Text rules have fallthrough
-off and otherwise `.js` modules under `src/` are not collected.
+before the cutover. The build id hashes the built `index.html` (first
+fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
+2026-11-20), so it moves exactly when the client changes.
 
 ---
 
@@ -78,7 +84,8 @@ off and otherwise `.js` modules under `src/` are not collected.
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `src/worker.js` (main, ES module); `src/app/` (the emitted front end: `index.html` and `assets-map.js`, assets as `.txt` text modules); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
+| Modules | `src/worker.js` (main, ES module); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
+| Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters |
@@ -1172,24 +1179,26 @@ its first line. Then compare SHA-256 hashes with `src/`.
 
 ## 7. Deploying the web app
 
-**Push to `main`.** Cloudflare Workers Builds is connected to the repo and
-runs `npx wrangler deploy` with `wrangler.toml` on every push. The files are
-uploaded unbundled, so the live modules are byte-identical to `src/`.
+**Push to `main`.** Cloudflare Workers Builds is connected to the repo and,
+on every push, runs the build command `npm ci --prefix web && npm run build
+--prefix web` (set on the build trigger; Node 24 in the build image) and then
+`npx wrangler deploy` with `wrangler.toml`. The Worker's files are uploaded
+unbundled, so the live modules are byte-identical to `src/`; the web build
+goes up as static assets. A failed build deploys nothing (the live version
+stays).
 
 Before pushing:
 
-1. `npm run check` (worker syntax, and the emitted page shell's inline
+1. `npm run build` (the web app, into `web/app/dist`; `npm i` in `web/`
+   once), `npm run check` (worker syntax, and the page shell's inline
    script and markup), `npm test` (the `web/` Playwright suite against a
-   fake API; `npm i` in `web/` once) and `npm run test:api` (the server,
-   against a local `wrangler dev`). A front-end change is built and
-   emitted first: `npm run build` in `web/`, then
-   `python3 web/scripts/emit-app.py`, and both `web/` and `src/app/` are
-   committed.
+   fake API) and `npm run test:api` (the server, against a local
+   `wrangler dev` that serves the build as static assets).
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
 3. Keep the hand-written files in `src/` free of template literals (no
-   backtick-delimited strings; house style; the emitted `src/app/` bundle
-   is exempt) and everything free of secrets.
+   backtick-delimited strings; house style) and everything free of
+   secrets.
 4. Note the current live version id for rollback
    (`GET .../workers/scripts/victorio-chat/deployments`).
 5. If the change touches `wrangler.toml` or any dashboard-side configuration,
@@ -1452,8 +1461,9 @@ features; mobile means the website in Android Chrome and iOS Safari.
 
 - **Code style:** the Worker and the other hand-written `src/` files are
   plain JS with no build step and no template literals. The front end is
-  React + TypeScript in `web/`, built by Vite and emitted to `src/app/`:
-  no external scripts or CDNs, everything is served from the Worker.
+  React + TypeScript in `web/`, built by Vite and served as Workers
+  Static Assets: no external scripts or CDNs, everything is served from
+  the site's own origin.
 - **Colors:** use CSS custom properties on `:root`, with dark values under
   `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
   Light mode uses `color-scheme: only light`.

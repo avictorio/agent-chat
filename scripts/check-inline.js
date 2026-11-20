@@ -1,5 +1,5 @@
-// Static checks the UI suite can't make, on the served page shell
-// (src/app/index.html, emitted from web/ by web/scripts/emit-app.py):
+// Static checks the UI suite can't make, on the page shell's source
+// (web/app/index.html; the build copies its inline scripts as they are):
 //  1. Every inline <script> parses (node --check).
 //  2. No literal \uXXXX escapes in the static markup - they render as raw
 //     text there (the Your voice dialog shipped them to users on
@@ -11,7 +11,7 @@ const { execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 let bad = 0;
-for (const f of ['src/app/index.html']) {
+for (const f of ['web/app/index.html']) {
   const src = fs.readFileSync(f, 'utf8');
   const scripts = [...src.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
   scripts.forEach((code, i) => {

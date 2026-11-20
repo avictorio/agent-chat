@@ -134,7 +134,7 @@ export function UpdateStrip() {
   useEffect(() => {
     const meta = document.querySelector('meta[name="build"]');
     const myBuild = meta?.getAttribute("content") || "";
-    if (!myBuild || myBuild === "__BUILD_ID__") return;
+    if (!myBuild || myBuild === "next-dev") return; // unstamped (vite dev)
     let live = true;
     const check = async () => {
       const build = await fetchBuild();

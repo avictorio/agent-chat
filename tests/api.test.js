@@ -6,6 +6,8 @@
 // included), MCP, stream frames and the game engines. Each run uses its
 // own temp state (--persist-to). Exits non-zero on any failure.
 //
+//   npm run build     (once, and after web/ changes: the page shell and
+//                      its assets come from web/app/dist)
 //   npm run test:api
 //
 // Uses port 8798 and a throwaway .dev.vars (backed up and restored).
@@ -67,6 +69,12 @@ async function waitUp() {
 }
 
 (async () => {
+  // wrangler serves the web build as static assets: without it there is no
+  // page shell to stamp (and wrangler dev refuses a missing directory).
+  if (!fs.existsSync(path.join(ROOT, 'web', 'app', 'dist', 'index.html'))) {
+    console.error('test:api needs the web build: run `npm run build` first');
+    process.exit(2);
+  }
   const hadVars = fs.existsSync(DEV_VARS);
   const backup = hadVars ? fs.readFileSync(DEV_VARS) : null;
   fs.writeFileSync(DEV_VARS, 'OWNER_KEY=' + OWNER + '\nRESEND_API_KEY=re_fake_for_tests\nTEST_HOOKS=1\n');
@@ -2141,7 +2149,7 @@ async function waitUp() {
     check('destroyed room 404s', r.status === 404, r.status);
 
     // Build id: /api/build reports it, and both served pages carry the
-    // same id stamped over the placeholder (no literal left behind).
+    // same id stamped over the build's "next-dev" placeholder.
     r = await req('GET', '/api/build');
     const bid = r.json && r.json.build;
     check('build id shape', /^[0-9a-f]{16}$/.test(bid || ''), JSON.stringify(r.json));
@@ -2150,7 +2158,16 @@ async function waitUp() {
     const metaOf = (t) => { const mm = t.match(/<meta name="build" content="([^"]*)">/); return mm && mm[1]; };
     check('home page stamped with the build id', metaOf(homeTxt) === bid, metaOf(homeTxt));
     check('room page stamped with the build id', metaOf(roomTxt) === bid, metaOf(roomTxt));
-    check('no unstamped placeholder served', !homeTxt.includes('__BUILD_ID__') && !roomTxt.includes('__BUILD_ID__'));
+    check('no unstamped placeholder served', !homeTxt.includes('next-dev') && !roomTxt.includes('next-dev'));
+    // Static assets: the hashed bundle files come straight from the
+    // build, with the one-year immutable cache the _headers file sets.
+    const assetPath = (homeTxt.match(/\/assets\/index-[\w-]+\.js/) || [])[0];
+    const ar = assetPath ? await fetch(BASE + assetPath) : null;
+    check('the page names its bundle', !!assetPath, homeTxt.slice(0, 200));
+    check('bundle served from static assets', !!ar && ar.status === 200 && /javascript/.test(ar.headers.get('content-type') || ''), ar && ar.status + ' ' + ar.headers.get('content-type'));
+    check('bundle cached for a year, immutable', !!ar && /max-age=31536000/.test(ar.headers.get('cache-control') || '') && /immutable/.test(ar.headers.get('cache-control') || ''), ar && ar.headers.get('cache-control'));
+    const miss = await fetch(BASE + '/assets/no-such-file-' + SUF + '.js');
+    check('an unknown asset is a 404', miss.status === 404, miss.status);
 
     // Clean up room one.
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });

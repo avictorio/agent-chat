@@ -187,7 +187,9 @@ is not modified by this project, and every behavior it has today is the spec.
       scenarios.
 - [x] M9 Cutover: domain serves the new build; old pages stay one revert
       away for one release cycle, then are removed
-      — 2026-11-09: DONE. The build is emitted into src/app/ as text
+      — 2026-11-09: DONE. (Since 2026-11-20 the build ships as Workers
+      Static Assets instead; the emit step below is history.) The build
+      is emitted into src/app/ as text
       modules (web/scripts/emit-app.py) and the Worker serves it at /
       and /r/:room with /assets/* from the emitted map; old pages stay
       imported, so the build id never moved (a5e6053f9e98b6f8 before,

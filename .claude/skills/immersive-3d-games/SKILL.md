@@ -468,8 +468,8 @@ Full tables and starting `Juice.hit` values per event and seat:
 ## Verification workflow
 
 1. **Build:** `cd web && npm run build` (typechecks `shared` and `app`, then
-   Vite). Then, from the repo root, `python3 web/scripts/emit-app.py` to emit
-   `web/app/dist` into `src/app/`; commit `web/` and `src/app/` together.
+   Vite). The build in `web/app/dist` is deployed as Workers Static Assets
+   (Workers Builds rebuilds it on every push to `main`); commit `web/` only.
 2. **Test:** `cd web && npm test` runs the web UI suite (Playwright against
    the built app through a fake API; it exits non-zero on failure and writes
    screenshots to `web/tests/shots/`). The repo gates in AGENTS.md also apply:
