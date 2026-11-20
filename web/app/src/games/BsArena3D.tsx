@@ -3,7 +3,9 @@
    two glowing-grid ocean tiles on dark reflective water, procedural
    steel warships with real silhouettes, bombs that visibly drop, and
    damage that persists: hit cells burn, sunk ships stay on the board
-   as charred, listing, burning wreckage.
+   as charred, listing, burning wreckage. A free-for-all (2026-11-20)
+   lays its 3-6 oceans out in rows (bsLayout); the shot's target is the
+   ocean picked.
 
    The scene is a pure function of the same per-viewer game state the
    2D arena consumes (you.fleet / you.shots / you.sunk_ships for a
@@ -698,11 +700,40 @@ type TileT = {
      turn, "<name>'s waters" otherwise. */
   title: string;
   hex: string;
+  /* The ocean's centre: a two-captain match lays its two side by side
+     (cz 0); a free-for-all lays 3-6 in rows (see bsLayout). */
   cx: number;
+  cz: number;
   ships: ShipT[];
   water: { label: string; result: string }[];
   canFire: boolean;
+  /* A free-for-all captain whose last ship sank: a wreck chart, never a
+     target. */
+  wreck?: boolean;
+  /* The viewer's own ocean (a captain's), never fired at. */
+  own?: boolean;
 };
+
+/* Where each ocean sits (2026-11-20, the free-for-all scene): two side
+   by side as always; three or four in a 2x2 (three: two in front, one
+   centred behind), five or six in rows of three; the first ocean - a
+   captain's own waters - front left, the gaps wide enough for each
+   tile's row numbers and its title. */
+const FFA_GAP_X = 4;
+const FFA_GAP_Z = 4;
+function bsLayout(n: number, w: number, h: number): { at: { cx: number; cz: number }[]; spanW: number; spanD: number } {
+  if (n <= 2) return { at: [{ cx: -(w / 2 + 2), cz: 0 }, { cx: w / 2 + 2, cz: 0 }].slice(0, Math.max(1, n)), spanW: 2 * w + 4, spanD: h };
+  const cols = n <= 4 ? 2 : 3;
+  const rows = Math.ceil(n / cols);
+  const at: { cx: number; cz: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols);
+    const inRow = Math.min(cols, n - r * cols);
+    const k = i - r * cols;
+    at.push({ cx: (k - (inRow - 1) / 2) * (w + FFA_GAP_X), cz: ((rows - 1) / 2 - r) * (h + FFA_GAP_Z) });
+  }
+  return { at, spanW: cols * w + (cols - 1) * FFA_GAP_X, spanD: rows * h + (rows - 1) * FFA_GAP_Z };
+}
 
 /* Coordinate labels and titles draw over everything (no depth test):
    a ship near the edge used to hide its row's number. */
@@ -725,21 +756,22 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
   /* The enemy ocean's frame brightens (and, motion allowing, breathes)
      while it is your turn to fire there - the scene's turn cue. */
   const still = useContext(Still);
+  // a wreck chart's frame goes ash grey: nobody fires there any more
   const frameMat = useMemo(
-    () => new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(tile.hex), emissiveIntensity: 1.5, toneMapped: false }),
-    [tile.hex]
+    () => new MeshStandardMaterial({ color: "#0b0e12", emissive: new Color(tile.wreck ? "#6b7280" : tile.hex), emissiveIntensity: 1.5, toneMapped: false }),
+    [tile.hex, tile.wreck]
   );
   useEffect(() => () => frameMat.dispose(), [frameMat]);
   useFrame(({ clock }) => {
-    frameMat.emissiveIntensity = tile.canFire ? (still ? 3.2 : 2.6 + 0.9 * Math.sin(clock.elapsedTime * 3)) : 1.5;
+    frameMat.emissiveIntensity = tile.canFire ? (still ? 3.2 : 2.6 + 0.9 * Math.sin(clock.elapsedTime * 3)) : tile.wreck ? 0.7 : 1.5;
   });
   return (
-    <group>
+    <group position={[0, 0, tile.cz]}>
       <lineSegments>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[lines, 3]} />
         </bufferGeometry>
-        <lineBasicMaterial color={GRID_C} transparent opacity={0.34} />
+        <lineBasicMaterial color={tile.wreck ? "#94a3b8" : GRID_C} transparent opacity={tile.wreck ? 0.2 : 0.34} />
       </lineSegments>
       {/* border frame in the captain's colour */}
       {[
@@ -764,16 +796,16 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
       {Array.from({ length: h }, (_, j) => (
         <Label key={"N" + j} text={String(j + 1)} color="#9fd8ef" position={[tile.cx - w / 2 - 0.62, 0.12, j - (h - 1) / 2]} height={0.52} />
       ))}
-      <Label text={tile.title} color={tile.hex} position={[tile.cx, 0.12, -h / 2 - 1.5]} height={0.9} wide />
+      <Label text={tile.title} color={tile.wreck ? "#94a3b8" : tile.hex} position={[tile.cx, 0.12, -h / 2 - 1.5]} height={0.9} wide />
     </group>
   );
 }
 
-/* ---------- derive the two tiles from the per-viewer state ---------- */
+/* ---------- derive the oceans from the per-viewer state ---------- */
 
 function buildTiles(g: GL, me: string): TileT[] {
   const w = g.w || 10;
-  const cxOf = (i: number) => (i === 0 ? -(w / 2 + 2) : w / 2 + 2);
+  const h = g.h || 10;
   const mkShips = (list: GL[], sunkOf: (s: GL) => boolean): ShipT[] => {
     const seenSize: Record<number, number> = {};
     return (list || []).map((s: GL) => {
@@ -782,61 +814,81 @@ function buildTiles(g: GL, me: string): TileT[] {
       return { key: s.cells.join("."), size: s.size, variant: v, sunk: sunkOf(s), cells: s.cells, hits: s.hits || [] };
     });
   };
+  // open water that took fire: every shot except those inside a sunk hull
+  const waterOf = (shots: Record<string, string>, hulls: GL[]): { label: string; result: string }[] => {
+    const inHull = new Set<string>();
+    (hulls || []).forEach((s: GL) => s.cells.forEach((c: string) => inHull.add(c)));
+    return Object.keys(shots || {})
+      .filter((c) => !inHull.has(c))
+      .map((c) => ({ label: c, result: String(shots[c]) }));
+  };
+  const place = (list: Omit<TileT, "cx" | "cz">[]): TileT[] => {
+    const lay = bsLayout(list.length, w, h);
+    return list.map((t, i) => {
+      const at = lay.at[i] || lay.at[0] || { cx: 0, cz: 0 };
+      return { ...t, cx: at.cx, cz: at.cz };
+    });
+  };
   const you = g.you || { playing: false };
   if (you.playing) {
     const players = g.players || [];
     // The server matches names case-insensitively; so does the scene.
     const isMe = (p: GL) => String(p.name).toLowerCase() === String(me).toLowerCase();
     const meP = players.filter(isMe)[0] || players[0] || { name: me, hex: "#22d3ee" };
+    const turn = !!(g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated);
+    const own: Omit<TileT, "cx" | "cz"> = {
+      name: meP.name,
+      title: "Your waters" + (you.eliminated ? " — wreck" : ""),
+      hex: meP.hex,
+      ships: mkShips(you.fleet || [], (s) => !!s.sunk),
+      water: waterOf(you.incoming || {}, you.fleet || []),
+      canFire: false,
+      wreck: !!you.eliminated,
+      own: true,
+    };
+    // A free-for-all: one ocean per rival, each showing YOUR shots there
+    // (the server keeps a captain's record per target).
+    if (Array.isArray(you.targets) && players.length > 2) {
+      return place([
+        own,
+        ...you.targets.map((t: GL) => {
+          const fire = turn && !t.eliminated;
+          return {
+            name: t.name,
+            title: t.name + "'s waters" + (t.eliminated ? " — wreck" : fire ? " · tap to fire" : ""),
+            hex: t.hex,
+            ships: mkShips(t.sunk_ships || [], () => true),
+            water: waterOf(t.shots || {}, t.sunk_ships || []),
+            canFire: fire,
+            wreck: !!t.eliminated,
+          };
+        }),
+      ]);
+    }
     const foeP = players.filter((p: GL) => p !== meP)[0] || players[1] || { name: "?", hex: "#fb923c" };
-    const canFire = !!(g.status === "running" && g.phase === "play" && you.your_turn);
-    const fleetCells = new Set<string>();
-    (you.fleet || []).forEach((s: GL) => s.cells.forEach((c: string) => fleetCells.add(c)));
-    const ownWater = Object.keys(you.incoming || {})
-      .filter((c) => !fleetCells.has(c))
-      .map((c) => ({ label: c, result: you.incoming[c] }));
-    const sunkCells = new Set<string>();
-    (you.sunk_ships || []).forEach((s: GL) => s.cells.forEach((c: string) => sunkCells.add(c)));
-    const foeWater = Object.keys(you.shots || {})
-      .filter((c) => !sunkCells.has(c))
-      .map((c) => ({ label: c, result: you.shots[c] }));
-    return [
-      {
-        name: meP.name,
-        title: "Your waters",
-        hex: meP.hex,
-        cx: cxOf(0),
-        ships: mkShips(you.fleet || [], (s) => !!s.sunk),
-        water: ownWater,
-        canFire: false,
-      },
+    return place([
+      own,
       {
         name: foeP.name,
-        title: foeP.name + "'s waters" + (canFire ? " · tap to fire" : ""),
+        title: foeP.name + "'s waters" + (turn ? " · tap to fire" : ""),
         hex: foeP.hex,
-        cx: cxOf(1),
         ships: mkShips(you.sunk_ships || [], () => true),
-        water: foeWater,
-        canFire,
+        water: waterOf(you.shots || {}, you.sunk_ships || []),
+        canFire: turn,
       },
-    ];
+    ]);
   }
-  return (g.boards || []).map((b: GL, i: number) => {
-    const sunkCells = new Set<string>();
-    (b.sunk_ships || []).forEach((s: GL) => s.cells.forEach((c: string) => sunkCells.add(c)));
-    const water = Object.keys(b.incoming || {})
-      .filter((c) => !sunkCells.has(c))
-      .map((c) => ({ label: c, result: b.incoming[c] }));
-    return {
+  return place(
+    (g.boards || []).map((b: GL) => ({
       name: b.name,
-      title: b.name + "'s waters",
+      title: b.name + "'s waters" + (b.eliminated ? " — wreck" : ""),
       hex: b.hex,
-      cx: cxOf(i),
       ships: mkShips(b.sunk_ships || [], () => true),
-      water,
+      water: waterOf(b.incoming || {}, b.sunk_ships || []),
       canFire: false,
-    };
-  });
+      wreck: !!b.eliminated,
+    }))
+  );
 }
 
 /* Drifting patches of moonlight on the water - cheap ocean life. */
@@ -882,7 +934,17 @@ const BS_OCEAN: OceanLook = {
    hit is a medium beat - heavier when it is your ship; a sinking is a
    large one with a title card; the shot that ends the match adds slow
    motion. "You hit them" and "you were hit" never share a buzz. */
-function shotImpact(lm: GL, me: string, target: string, shipName: string, final: boolean): Impact {
+/* out: a free-for-all captain's last ship just sank, the match going on
+   without them - decisive for that captain (the viewer losing it gets
+   the full loss), large for everyone else. */
+/* Whose ocean a shot landed in: the server's record names the target;
+   a two-captain record without one means the shooter's rival. */
+function shotTarget(lm: GL, g: GL): string {
+  if (lm && lm.target) return String(lm.target);
+  return ((g.players || []) as GL[]).map((p) => String(p.name)).filter((n) => n !== (lm && lm.by))[0] || "";
+}
+
+function shotImpact(lm: GL, me: string, target: string, shipName: string, final: boolean, out?: boolean): Impact {
   const meL = (me || "").toLowerCase();
   const mine = String(lm.by || "").toLowerCase() === meL;
   const atMe = target.toLowerCase() === meL;
@@ -891,6 +953,13 @@ function shotImpact(lm: GL, me: string, target: string, shipName: string, final:
     return atMe
       ? { trauma: 0.45, stop: 110, pulse: 0.6, flash: "#ff4a3c", flashA: 0.22, buzz: BUZZ.hitYou, sound: "boom" }
       : { trauma: mine ? 0.35 : 0.25, stop: mine ? 100 : 70, pulse: 0.55, buzz: mine ? BUZZ.scored : undefined, sound: "boom" };
+  if (out && !final) {
+    if (atMe)
+      return { trauma: 0.85, stop: 260, slow: 1, pulse: 1, flash: "#ff3344", flashA: 0.45, buzz: BUZZ.lostMatch, sound: "bigboom", title: { big: "Your fleet is gone", small: "Sunk by " + lm.by + " · the sea fights on", tone: "bad" } };
+    if (mine)
+      return { trauma: 0.7, stop: 220, pulse: 1, flash: "#ffd36b", flashA: 0.32, buzz: BUZZ.sankTheirs, sound: "bigboom", title: { big: target + " is out", small: "Their last ship - yours", tone: "good" } };
+    return { trauma: 0.55, stop: 200, pulse: 0.9, sound: "bigboom", title: { big: target + " is out", small: lm.by + " sank their last ship", tone: "neutral" } };
+  }
   const slow = final ? { slow: 1, stop: 260 } : {};
   if (atMe)
     return {
@@ -948,8 +1017,8 @@ function Scene({
   // every ocean, shown or not (a phone shows one at a time)
   allTiles: TileT[];
   foeName: string | null;
-  onFire?: (label: string) => void;
-  onAim?: (label: string) => void;
+  onFire?: (label: string, target: string) => void;
+  onAim?: (label: string, target: string) => void;
   aimMode: boolean;
   cd: number;
   aim: string | null;
@@ -974,11 +1043,13 @@ function Scene({
     const m = new Map<string, number>();
     const shots = (g.shots || []) as GL[];
     const names = ((g.players || []) as GL[]).map((p) => String(p.name).toLowerCase());
-    if (names.length === 2 && shots.length) {
+    if (shots.length) {
       const perBoard = new Map<string, string[]>();
       for (const s of shots) {
         if (!s || s.result !== "hit") continue;
-        const owner = names.find((n) => n !== String(s.by).toLowerCase());
+        // the board it landed on: the record's target (a free-for-all
+        // always names one), else the shooter's one rival
+        const owner = s.target ? String(s.target).toLowerCase() : names.length === 2 ? names.find((n) => n !== String(s.by).toLowerCase()) : undefined;
         if (!owner) continue;
         const arr = perBoard.get(owner) || [];
         arr.push(String(s.cell));
@@ -993,7 +1064,7 @@ function Scene({
     return (tileName: string, cell: string): number => m.get(tileName.toLowerCase() + "|" + cell) ?? 1;
   })();
   const world = useRef<Group>(null);
-  const [hover, setHover] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ t: string; c: string } | null>(null);
   const downAt = useRef<{ x: number; y: number } | null>(null);
 
   /* Wrecks that appear while the view is open settle and burn in;
@@ -1021,7 +1092,7 @@ function Scene({
   const juice = useJuice();
   const ocean = useMemo(() => new OceanStore(), []);
   // calm water over each shown board (and its labels)
-  ocean.calms = tiles.map((t) => ({ x: t.cx, z: 0, hw: w / 2 + 0.7, hh: h / 2 + 0.7 }));
+  ocean.calms = tiles.map((t) => ({ x: t.cx, z: t.cz, hw: w / 2 + 0.7, hh: h / 2 + 0.7 }));
 
   useEffect(() => {
     const fresh: Record<string, number> = {};
@@ -1046,10 +1117,12 @@ function Scene({
     if (lmKey && lmKey !== seenLm.current) {
       seenLm.current = lmKey;
       shot = true;
-      const target = (g.players || []).map((p: GL) => p.name).filter((n: string) => n !== lm.by)[0] || "";
-      const tt = tiles.filter((t) => t.name !== lm.by)[0];
+      const target = shotTarget(lm, g);
+      const tt = tiles.filter((t) => t.name === target)[0];
       const ship = tt && lm.sunk ? tt.ships.filter((sh) => sh.cells.includes(lm.cell))[0] : undefined;
-      const imp = shotImpact(lm, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm.sunk ? SHIP_NAME(lm.sunk, 0) : "", ended);
+      // a free-for-all captain knocked out by this shot
+      const out = !!(lm.sunk && ((g.eliminated || []) as string[]).some((n) => String(n).toLowerCase() === target.toLowerCase()));
+      const imp = shotImpact(lm, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm.sunk ? SHIP_NAME(lm.sunk, 0) : "", ended, out);
       let sink: Sink | null = null;
       if (tt && ship) {
         const pts = ship.cells.map((c) => cellLocal(c, w, h));
@@ -1057,12 +1130,12 @@ function Scene({
         const zs = pts.map((p) => p.z);
         const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
         const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
-        sink = { id: lmKey, at: [tt.cx + cx, 0.1, cz], box: [Math.max(...xs) - Math.min(...xs) + 0.7, 0.7, Math.max(...zs) - Math.min(...zs) + 0.7] };
+        sink = { id: lmKey, at: [tt.cx + cx, 0.1, tt.cz + cz], box: [Math.max(...xs) - Math.min(...xs) + 0.7, 0.7, Math.max(...zs) - Math.min(...zs) + 0.7] };
       }
       if (tt && !still) {
         const loc = cellLocal(lm.cell, w, h);
         sfx("whistle");
-        const next: Anim = { id: lmKey, x: tt.cx + loc.x, z: loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink };
+        const next: Anim = { id: lmKey, x: tt.cx + loc.x, z: tt.cz + loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink };
         setAnims((l) => [...l.filter((a) => a.id !== next.id).slice(-5), next]);
       } else juice.hit(imp);
     }
@@ -1080,34 +1153,30 @@ function Scene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [g, tiles]);
 
-  const foeTile = tiles.filter((t) => t.canFire)[0];
-  /* The ocean a captain aims at - the enemy's, on or off their turn
-     (Enter or the Fire button only fires on their turn). */
+  /* The ocean a captain aims at - the enemy's (a free-for-all: the
+     rival last aimed at or fired on), on or off their turn (Enter or
+     the Fire button only fires on their turn). */
   const aimTile = foeName ? tiles.filter((t) => t.name === foeName)[0] : undefined;
-  const pickTile = aimMode ? aimTile : foeTile;
-  const shotCells = useMemo(() => {
-    const s = new Set<string>();
-    if (pickTile) {
-      pickTile.water.forEach((m) => s.add(m.label));
-      pickTile.ships.forEach((sh) => sh.cells.forEach((c) => s.add(c)));
-    }
-    return s;
-  }, [pickTile]);
-  const cellFromPoint = (p: { x: number; z: number }): string | null => {
-    if (!pickTile) return null;
-    const col = Math.round(p.x - pickTile.cx + (w - 1) / 2);
-    const row = Math.round(p.z + (h - 1) / 2);
+  /* Where a pointer picks a cell: on desktop every ocean you may fire
+     at now (a click fires there); on touch every rival ocean that is
+     not a wreck (a tap aims there, the Fire button fires). */
+  const pickTiles = tiles.filter((t) => (aimMode ? !t.own && !t.wreck && !!onAim : t.canFire));
+  const cellFromPoint = (tile: TileT, p: { x: number; z: number }): string | null => {
+    const col = Math.round(p.x - tile.cx + (w - 1) / 2);
+    const row = Math.round(p.z - tile.cz + (h - 1) / 2);
     if (col < 0 || col >= w || row < 0 || row >= h) return null;
     const label = String.fromCharCode(65 + col) + (row + 1);
-    return shotCells.has(label) ? null : label;
+    if (tile.water.some((m) => m.label === label) || tile.ships.some((sh) => sh.cells.includes(label))) return null;
+    return label;
   };
   const evXY = (e: ThreeEvent<PointerEvent>): { x: number; y: number } => {
     const n = (e as GL).nativeEvent || e;
     return { x: n.clientX || 0, y: n.clientY || 0 };
   };
 
-  const lmTile = lm ? tiles.filter((t) => t.name !== lm.by)[0] : undefined;
-  const ringAt = !aimMode && foeTile && hover ? { tile: foeTile, label: hover } : aimTile && aim ? { tile: aimTile, label: aim } : null;
+  const lmTile = lm ? tiles.filter((t) => t.name === shotTarget(lm, g))[0] : undefined;
+  const hoverTile = hover ? pickTiles.filter((t) => t.name === hover.t)[0] : undefined;
+  const ringAt = !aimMode && hover && hoverTile ? { tile: hoverTile, label: hover.c } : aimTile && aim ? { tile: aimTile, label: aim } : null;
   const ringHot = !!(ringAt && ringAt.tile.canFire);
 
   return (
@@ -1153,12 +1222,12 @@ function Scene({
               const cN = s.cells[s.cells.length - 1] ?? c0;
               const first = cellLocal(c0, w, h);
               const last = cellLocal(cN, w, h);
-              const center = { x: tile.cx + (first.x + last.x) / 2, z: (first.z + last.z) / 2 };
+              const center = { x: tile.cx + (first.x + last.x) / 2, z: tile.cz + (first.z + last.z) / 2 };
               const vertical = c0[0] === cN[0] && s.cells.length > 1;
               // where along the hull each shell struck (local x, bow +x)
               const localX = (c: string) => {
                 const l = cellLocal(c, w, h);
-                return vertical ? -(l.z - center.z) : tile.cx + l.x - center.x;
+                return vertical ? -(tile.cz + l.z - center.z) : tile.cx + l.x - center.x;
               };
               const deckY = shipGeometry(s.size, s.variant).D;
               shipEls.push(
@@ -1181,13 +1250,13 @@ function Scene({
                    the fleet findable, as the 2D board's tinted cells do. */
                 s.cells.forEach((c) => {
                   const loc = cellLocal(c, w, h);
-                  feet.push({ x: tile.cx + loc.x, z: loc.z, hex: tile.hex });
+                  feet.push({ x: tile.cx + loc.x, z: tile.cz + loc.z, hex: tile.hex });
                 });
                 // flames lick up out of each hole, spread along the hull
                 const dir: [number, number] = vertical ? [0, 1] : [1, 0];
                 s.hits.forEach((c) => {
                   const loc = cellLocal(c, w, h);
-                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: deckY - 0.04, z: loc.z, scale: 0.8, light: false, spread: 0.3, dir, kind: "ship", heat: heatAt(tile.name, c) });
+                  fires.push({ key: tile.name + ":h:" + c, x: tile.cx + loc.x, y: deckY - 0.04, z: tile.cz + loc.z, scale: 0.8, light: false, spread: 0.3, dir, kind: "ship", heat: heatAt(tile.name, c) });
                 });
                 // a holed hull bleeds oil
                 if (s.hits.length) slicks.push({ x: center.x, z: center.z, r: 0.25 + 0.15 * s.hits.length, s: 0.7 });
@@ -1221,7 +1290,7 @@ function Scene({
                     key: tile.name + ":w:" + s.key + ":" + ci,
                     x: tile.cx + loc.x,
                     y: 0.06,
-                    z: loc.z,
+                    z: tile.cz + loc.z,
                     scale: 1.05,
                     light,
                     spread: 0.45,
@@ -1235,20 +1304,27 @@ function Scene({
             tile.water.forEach((m) => {
               const loc = cellLocal(m.label, w, h);
               const x = tile.cx + loc.x;
+              const z = tile.cz + loc.z;
               if (m.result === "hit") {
                 // burning oil on the water where an unseen hull was holed
-                fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.05, z: loc.z, scale: 0.85, light: false, spread: 0.26, kind: "water", heat: heatAt(tile.name, m.label) });
-                glows.push({ x, y: 0.035, z: loc.z, r: 0.6, a: 0.33 });
-                slicks.push({ x, z: loc.z, r: 0.32, s: 0.55 });
-              } else misses.push({ x, z: loc.z });
+                fires.push({ key: tile.name + ":x:" + m.label, x, y: 0.05, z, scale: 0.85, light: false, spread: 0.26, kind: "water", heat: heatAt(tile.name, m.label) });
+                glows.push({ x, y: 0.035, z, r: 0.6, a: 0.33 });
+                slicks.push({ x, z, r: 0.32, s: 0.55 });
+              } else misses.push({ x, z });
             });
             return (
               <group key={tile.name}>
                 <group userData={NOMIR}>
                   <GridHolo tile={tile} w={w} h={h} />
-                  {sonar && tile.name !== sonar.for ? <SonarBand tile={tile} w={w} h={h} sonar={sonar} /> : null}
+                  {/* the ping marks the rival it names (a free-for-all's
+                      leader), else every ocean but the pinged captain's */}
+                  {sonar && (sonar.target ? tile.name === sonar.target : tile.name !== sonar.for) ? (
+                    <group position={[0, 0, tile.cz]}>
+                      <SonarBand tile={tile} w={w} h={h} sonar={sonar} />
+                    </group>
+                  ) : null}
                   {lm && lmTile === tile ? (
-                    <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={cellLocal(lm.cell, w, h).z} />
+                    <LastShotRing x={tile.cx + cellLocal(lm.cell, w, h).x} z={tile.cz + cellLocal(lm.cell, w, h).z} />
                   ) : null}
                 </group>
                 {shipEls}
@@ -1277,17 +1353,19 @@ function Scene({
             </OceanCtx.Provider>
           );
         })()}
-        {/* the pick surface over the enemy tile: a click fires on
-            desktop; on touch a tap aims and the Fire button fires */}
-        {pickTile ? (
+        {/* a pick surface over each ocean you can aim at: a click fires
+            on desktop; on touch a tap aims and the Fire button fires */}
+        {pickTiles.map((pt) => (
           <mesh
+            key={"pick:" + pt.name}
             userData={NOMIR}
-            position={[pickTile.cx, 0.08, 0]}
+            position={[pt.cx, 0.08, pt.cz]}
             rotation={[-Math.PI / 2, 0, 0]}
             onPointerMove={(e) => {
               if (aimMode) return;
-              const label = cellFromPoint(e.point);
-              if (label !== hover) setHover(label);
+              const label = cellFromPoint(pt, e.point);
+              const was = hover ? hover.t + ":" + hover.c : "";
+              if ((label ? pt.name + ":" + label : "") !== was) setHover(label ? { t: pt.name, c: label } : null);
             }}
             onPointerDown={(e) => {
               downAt.current = evXY(e);
@@ -1298,24 +1376,24 @@ function Scene({
               if (!d) return;
               const p = evXY(e);
               if (Math.hypot(p.x - d.x, p.y - d.y) > 8) return;
-              const label = cellFromPoint(e.point);
+              const label = cellFromPoint(pt, e.point);
               if (!label) return;
               if (aimMode) {
-                if (onAim) onAim(label);
-              } else if (onFire) onFire(label);
+                if (onAim) onAim(label, pt.name);
+              } else if (onFire) onFire(label, pt.name);
             }}
-            onPointerLeave={() => setHover(null)}
+            onPointerLeave={() => setHover((hv) => (hv && hv.t === pt.name ? null : hv))}
           >
             <planeGeometry args={[w, h]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>
-        ) : null}
+        ))}
         {ringAt
           ? (() => {
               const loc = cellLocal(ringAt.label, w, h);
               const c = ringHot ? "#ff5a3c" : "#9fd8ef";
               return (
-                <group position={[ringAt.tile.cx + loc.x, 0.07, loc.z]} userData={NOMIR}>
+                <group position={[ringAt.tile.cx + loc.x, 0.07, ringAt.tile.cz + loc.z]} userData={NOMIR}>
                   <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>
                     <ringGeometry args={[0.36, 0.46, 32]} />
                     <meshBasicMaterial color={c} toneMapped={false} depthWrite={false} depthTest={false} transparent opacity={0.95} />
@@ -1331,7 +1409,7 @@ function Scene({
         {pending && aimTile
           ? (() => {
               const loc = cellLocal(pending, w, h);
-              return <PendingMark x={aimTile.cx + loc.x} z={loc.z} />;
+              return <PendingMark x={aimTile.cx + loc.x} z={aimTile.cz + loc.z} />;
             })()
           : null}
         {!still
@@ -1357,7 +1435,7 @@ function Scene({
           <SinkFx key={sk.id} sink={sk} lite={q.lite} onDone={() => setSinks((l) => l.filter((x) => x.id !== sk.id))} />
         ))}
       </group>
-      <Sparkles count={50} scale={[30, 4, 14]} position={[0, 2.4, 0]} size={1.5} speed={still ? 0 : 0.22} opacity={0.45} color="#7dd3fc" />
+      <Sparkles count={50} scale={[Math.max(30, bsLayout(allTiles.length, w, h).spanW + 6), 4, Math.max(14, bsLayout(allTiles.length, w, h).spanD + 4)]} position={[0, 2.4, 0]} size={1.5} speed={still ? 0 : 0.22} opacity={0.45} color="#7dd3fc" />
       <ArenaPost q={q} bloom={1.15} threshold={0.72} smoothing={0.3} vignette={0.55} />
     </>
   );
@@ -1372,7 +1450,7 @@ function Scene({
    steeper angle and fitted to the tile with its labels, so cells are
    big enough to tap (about 30 px on a 390 px phone, against 8-12 px
    for two oceans side by side). */
-function bsHome(w: number, h: number, aspect: number, single: boolean): Home {
+function bsHome(w: number, h: number, aspect: number, single: boolean, n = 2): Home {
   if (single) {
     // Looking a little past the centre toward the near edge lifts the
     // ocean on screen, clearing the bottom strip where the Fire button
@@ -1380,6 +1458,12 @@ function bsHome(w: number, h: number, aspect: number, single: boolean): Home {
     const f = fitHome(w + 1.4, h + 3.6, 62, 48, aspect, 1.03);
     const tz = 1.1;
     return { pos: [f.pos[0], f.pos[1], f.pos[2] + tz], fov: f.fov, tz };
+  }
+  if (n > 2) {
+    // A free-for-all's rows: steeper, so the back row's cells don't
+    // flatten to slivers, and fitted to the whole spread with labels.
+    const lay = bsLayout(n, w, h);
+    return fitHome(lay.spanW + 2.8, lay.spanD + 3.4, n <= 4 ? 51 : 54, aspect < 1.3 ? 56 : 46, aspect, 1.04);
   }
   const span = 2 * w + 4;
   const cd = Math.min(44, Math.max(21, (span * 1.48) / Math.max(0.7, aspect)));
@@ -1397,7 +1481,9 @@ export default function BsArena3D({
   g: GL;
   me: string;
   aspect?: number;
-  onFire?: (label: string) => void;
+  /* target: the rival's name in a free-for-all (the shot goes out as
+     "Name:Cell"); undefined for two captains */
+  onFire?: (label: string, target?: string) => void;
   onReady?: () => void;
 }) {
   const still = useReducedMotion();
@@ -1409,18 +1495,25 @@ export default function BsArena3D({
   const w = g.w || 10;
   const h = g.h || 10;
   const tiles = useMemo(() => buildTiles(g, me), [g, me]);
+  const ffa = tiles.length > 2;
   const player = !!(g.you && g.you.playing);
-  const foe = player ? tiles[1] : undefined;
+  /* The oceans a captain can aim at (two captains: the one rival; a
+     free-for-all: every rival not yet a wreck) and the one aimed at
+     now - the last rival picked, else the first. */
+  const rivals = useMemo(() => (player ? tiles.filter((t) => !t.own && !t.wreck) : []), [tiles, player]);
+  const [target, setTarget] = useState<string | null>(null);
+  const foe = rivals.filter((t) => t.name === target)[0] || rivals[0];
   const canFire = !!(foe && foe.canFire);
-  /* Cells already fired at on the enemy ocean, and what they are. */
-  const taken = useMemo(() => {
+  /* Cells already fired at on an ocean, and what they are. */
+  const takenOf = (t: TileT | undefined) => {
     const m = new Map<string, string>();
-    if (foe) {
-      foe.water.forEach((x) => m.set(x.label, x.result === "hit" ? "a hit" : "a miss"));
-      foe.ships.forEach((s) => s.cells.forEach((c) => m.set(c, "a sunk ship")));
+    if (t) {
+      t.water.forEach((x) => m.set(x.label, x.result === "hit" ? "a hit" : "a miss"));
+      t.ships.forEach((s) => s.cells.forEach((c) => m.set(c, "a sunk ship")));
     }
     return m;
-  }, [foe]);
+  };
+  const taken = useMemo(() => takenOf(foe), [foe]);
   const [aim, setAim] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [say, setSay] = useState("");
@@ -1430,11 +1523,13 @@ export default function BsArena3D({
   /* The host's live size: a phone-width host shows one ocean. */
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.2 ? 390 : 700));
   const single = hostW < SINGLE_BELOW;
-  /* Which ocean a single view shows: the enemy's on your turn, yours
-     while you wait; a spectator sees the ocean the last shot landed
-     in. A tap on the switch overrides that until the turn changes. */
+  /* Which ocean a single view shows: the one you're aiming at on your
+     turn, yours while you wait; a spectator sees the ocean the last
+     shot landed in. A tap on the switch overrides that until the turn
+     changes. */
   const lm = g.last_move as GL;
-  const lastShotIdx = lm ? Math.max(0, tiles.findIndex((t) => t.name !== lm.by)) : 0;
+  const lastShotIdx = lm ? Math.max(0, tiles.findIndex((t) => t.name === shotTarget(lm, g))) : 0;
+  const foeIdx = foe ? Math.max(0, tiles.indexOf(foe)) : 1;
   /* A new shot holds the view on the ocean it landed in for a few
      seconds - you watch your shell land (or theirs hit you) before the
      view swaps to whichever ocean the turn needs. Derived during
@@ -1458,21 +1553,24 @@ export default function BsArena3D({
     const t = setTimeout(() => setLanding(null), 4600);
     return () => clearTimeout(t);
   }, [landing, lmK]);
-  const autoIdx = landing !== null ? landing : player ? (canFire ? 1 : 0) : lastShotIdx;
+  const autoIdx = landing !== null ? landing : player ? (canFire ? foeIdx : 0) : lastShotIdx;
   useEffect(() => {
     setManualIdx(null);
   }, [canFire]);
   // the landing hold wins over a manual pick: the shot must be seen
   const shownIdx = Math.min(tiles.length - 1, landing !== null ? landing : manualIdx ?? autoIdx);
+  const shownTile = tiles[shownIdx];
   const shown = useMemo(() => {
     if (!single) return tiles;
     const t = tiles[shownIdx];
     // Nudged right so the ocean plus its row-number column (west of
     // it) sits centred under the camera.
-    return t ? [{ ...t, cx: 0.45 }] : [];
+    return t ? [{ ...t, cx: 0.45, cz: 0 }] : [];
   }, [tiles, single, shownIdx]);
+  // a single view's Fire button and tip belong to the ocean you aim at
+  const foeShown = !single || !!(shownTile && foe && shownTile.name === foe.name);
 
-  const home = (a: number, width: number) => bsHome(w, h, a, width < SINGLE_BELOW);
+  const home = (a: number, width: number) => bsHome(w, h, a, width < SINGLE_BELOW, tiles.length);
   const first = home(aspect ?? 1.44, hostW);
   const cd = Math.hypot(first.pos[1], first.pos[2]);
 
@@ -1499,75 +1597,125 @@ export default function BsArena3D({
     }
     const parts: string[] = [];
     if (lm && lmKey && lmKey !== seen.current.lm)
-      parts.push(lm.by + " fired at " + lm.cell + ": " + (lm.result === "hit" ? (lm.sunk ? "hit, and a " + lm.sunk + "-ship sank" : "hit") : "miss") + ".");
+      parts.push(
+        lm.by + " fired at " + (ffa ? shotTarget(lm, g) + "'s " : "") + lm.cell + ": " + (lm.result === "hit" ? (lm.sunk ? "hit, and a " + lm.sunk + "-ship sank" : "hit") : "miss") + "."
+      );
     if (canFire && !seen.current.turn) parts.push("Your shot.");
     seen.current = { lm: lmKey, turn: canFire };
     if (parts.length) setSay(parts.join(" "));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lmKey, canFire]);
 
-  const describe = (label: string) =>
-    label + ", " + (taken.has(label) ? "already " + taken.get(label) : "open water") + (canFire ? "" : ", not your turn") + ".";
-  const fire = (label: string) => {
-    if (!canFire || !onFire) {
+  const where = (t: TileT | undefined, label: string) => (ffa && t ? t.name + "'s " : "") + label;
+  const describe = (label: string, t: TileT | undefined) => {
+    const tk = t === foe ? taken : takenOf(t);
+    return where(t, label) + ", " + (tk.has(label) ? "already " + tk.get(label) : "open water") + (canFire ? "" : ", not your turn") + ".";
+  };
+  const tileNamed = (name?: string) => (name ? rivals.filter((t) => t.name === name)[0] : foe);
+  const fire = (label: string, name?: string) => {
+    const t = tileNamed(name);
+    if (!canFire || !onFire || !t || !t.canFire) {
       setSay("Not your turn yet.");
       return;
     }
-    if (taken.has(label)) {
-      setSay(label + " is already " + taken.get(label) + ".");
+    const tk = t === foe ? taken : takenOf(t);
+    if (tk.has(label)) {
+      setSay(where(t, label) + " is already " + tk.get(label) + ".");
       return;
     }
+    setTarget(t.name);
     setPending(label);
     if (aimMode) setAim(null);
-    setSay("Firing at " + label + ".");
-    onFire(label);
+    setSay("Firing at " + where(t, label) + ".");
+    onFire(label, ffa ? t.name : undefined);
   };
-  const aimAt = (label: string) => {
+  const aimAt = (label: string, name?: string) => {
+    const t = tileNamed(name);
+    if (!t) return;
+    if (t !== foe) setTarget(t.name);
     setAim(label);
-    setSay(describe(label));
+    setSay(describe(label, t));
   };
   /* Keyboard play: arrow keys move an aim marker over the enemy
      ocean (row 1 is the far edge, as on screen), Enter or Space
-     fires at it. In a single-ocean view the enemy ocean comes up. */
+     fires at it. In a free-for-all an arrow past the left or right
+     edge crosses to the previous or next rival. In a single-ocean
+     view the aimed ocean comes up. */
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!foe) return;
     const k = e.key;
     const cur = aim ? labelXY(aim) : { col: Math.floor((w - 1) / 2), row: Math.floor((h - 1) / 2) };
     let col = cur.col;
     let row = cur.row;
-    if (k === "ArrowLeft") col--;
-    else if (k === "ArrowRight") col++;
-    else if (k === "ArrowUp") row--;
+    let tName = foe.name;
+    const cross = (d: number) => {
+      const i = rivals.indexOf(foe);
+      tName = rivals[(i + d + rivals.length) % rivals.length]!.name;
+    };
+    if (k === "ArrowLeft") {
+      if (ffa && col <= 0 && rivals.length > 1) {
+        cross(-1);
+        col = w - 1;
+      } else col--;
+    } else if (k === "ArrowRight") {
+      if (ffa && col >= w - 1 && rivals.length > 1) {
+        cross(1);
+        col = 0;
+      } else col++;
+    } else if (k === "ArrowUp") row--;
     else if (k === "ArrowDown") row++;
     else if (k === "Enter" || k === " ") {
       e.preventDefault();
-      if (single) setManualIdx(1);
+      if (single) setManualIdx(foeIdx);
       const label = String.fromCharCode(65 + col) + (row + 1);
       if (aim) fire(label);
       else aimAt(label);
       return;
     } else return;
     e.preventDefault();
-    if (single) setManualIdx(1);
+    if (single) setManualIdx(Math.max(0, tiles.findIndex((t) => t.name === tName)));
     col = Math.max(0, Math.min(w - 1, col));
     row = Math.max(0, Math.min(h - 1, row));
-    aimAt(String.fromCharCode(65 + col) + (row + 1));
+    aimAt(String.fromCharCode(65 + col) + (row + 1), tName);
   };
 
-  const spectatorLabel = "Battleship, 3D view of " + tiles.map((t) => t.name + "'s").join(" and ") + " waters.";
-  const intro = firstVisit ? { title: "Battleship", sub: tiles.map((t) => t.name).join(" vs ") || "Fleets at sea", color: "#2dd4bf" } : null;
+  /* Show ocean i; picking a live rival's ocean makes it your target. */
+  const pickOcean = (i: number) => {
+    setManualIdx(i);
+    const t = tiles[i];
+    if (player && t && !t.own && !t.wreck && foe && t.name !== foe.name) {
+      setTarget(t.name);
+      setAim(null);
+    }
+  };
+  const names = tiles.map((t) => t.name);
+  const spectatorLabel =
+    "Battleship, 3D view of " + (names.length > 2 ? names.slice(0, -1).map((n) => n + "'s").join(", ") + " and " + names[names.length - 1] + "'s" : names.map((n) => n + "'s").join(" and ")) + " waters.";
+  const intro = firstVisit ? { title: ffa ? "Battleship free-for-all" : "Battleship", sub: names.join(ffa ? " · " : " vs ") || "Fleets at sea", color: "#2dd4bf" } : null;
   const overlay = (
     <>
-      {single && tiles.length > 1 ? (
+      {single && tiles.length > 2 && shownTile ? (
+        /* 3-6 oceans: one compact cycler (a pill each ran under the
+           frame's tools on a phone) */
+        <div className="arena3d-swap arena3d-cycle" role="group" aria-label="Which ocean to show">
+          <button type="button" aria-label="Previous ocean" onClick={() => pickOcean((shownIdx - 1 + tiles.length) % tiles.length)}>
+            ‹
+          </button>
+          <span className={"arena3d-cycle-name" + (shownTile.wreck ? " wreck" : "")} aria-live="polite">
+            <span className="arena3d-swap-dot" style={{ background: shownTile.wreck ? "#6b7280" : shownTile.hex }} />
+            {shownTile.own ? "Yours" : shownTile.name}
+            <span className="arena3d-cycle-n">
+              {shownIdx + 1}/{tiles.length}
+            </span>
+          </span>
+          <button type="button" aria-label="Next ocean" onClick={() => pickOcean((shownIdx + 1) % tiles.length)}>
+            ›
+          </button>
+        </div>
+      ) : single && tiles.length > 1 ? (
         <div className="arena3d-swap" role="group" aria-label="Which ocean to show">
           {tiles.map((t, i) => (
-            <button
-              key={t.name}
-              type="button"
-              aria-pressed={i === shownIdx}
-              className={i === shownIdx ? "on" : ""}
-              onClick={() => setManualIdx(i)}
-            >
+            <button key={t.name} type="button" aria-pressed={i === shownIdx} className={i === shownIdx ? "on" : ""} onClick={() => pickOcean(i)}>
               <span className="arena3d-swap-dot" style={{ background: t.hex }} />
               {player ? (i === 0 ? "Yours" : t.name + "'s") : t.name + "'s"}
               {player && i === 1 && canFire ? " · fire" : ""}
@@ -1575,13 +1723,13 @@ export default function BsArena3D({
           ))}
         </div>
       ) : null}
-      {aimMode && canFire && aim && !taken.has(aim) && (!single || shownIdx === 1) ? (
+      {aimMode && canFire && aim && !taken.has(aim) && foeShown ? (
         <button type="button" className="arena3d-fire" onClick={() => fire(aim)}>
-          Fire at {aim}
+          Fire at {where(foe, aim)}
         </button>
       ) : null}
-      {aimMode && canFire && !aim && !pending && (!single || shownIdx === 1) ? (
-        <div className="arena3d-tip">Tap a cell to aim</div>
+      {aimMode && canFire && !aim && !pending && (!single || !!(shownTile && shownTile.canFire)) ? (
+        <div className="arena3d-tip">{ffa && !single ? "Tap a rival's cell to aim" : "Tap a cell to aim"}</div>
       ) : null}
       {foe ? (
         <div className="sr-only" aria-live="polite">
@@ -1603,7 +1751,11 @@ export default function BsArena3D({
           ? {
               tabIndex: 0,
               role: "application",
-              "aria-label": "Battleship, 3D view. " + foe.name + "'s waters: arrow keys aim, Enter fires.",
+              "aria-label":
+                "Battleship, 3D view. " +
+                foe.name +
+                "'s waters: arrow keys aim, Enter fires." +
+                (ffa && rivals.length > 1 ? " Arrow past the left or right edge for the next rival." : ""),
               onKeyDown: onKey,
               onBlur: (e) => {
                 // Leaving for the frame's own buttons (Fire, the ocean

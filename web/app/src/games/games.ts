@@ -211,7 +211,8 @@ export function createGameStore(opts: {
     sgPad?: SgPad | null;
     sgGuess?: { key: string; d: string } | null;
     lgPanel?: LgPanel | null;
-    bsFire?: ((label: string) => void) | null;
+    // target: the rival in a free-for-all (the shot goes out "Name:Cell")
+    bsFire?: ((label: string, target?: string) => void) | null;
   } | null = null;
   let gameViewTimer = 0;
   let gameRenderKey = "";
@@ -2241,14 +2242,12 @@ export function createGameStore(opts: {
         const banner = bsBanner(g, freshMove);
         if (banner) wrap.appendChild(banner);
         if (gameView) gameView.bsFire = null;
-        // The 3D arena is a two-board scene: a free-for-all (3+
-        // captains) spectates on the boards below - its only view. Two
-        // captains get the scene; without WebGL the scene is a note, so
-        // the boards follow it.
-        if (players.length > 2) dropBs3d();
-        else bsScene(g, wrap);
+        // Every match gets the scene (a free-for-all lays its 3-6 oceans
+        // in rows); without WebGL the scene is a note, so the boards
+        // follow it.
+        bsScene(g, wrap);
         const boards = el("div", "bs-boards");
-        if (players.length > 2 || !webglOk()) g.boards.forEach((b: GL) => {
+        if (!webglOk()) g.boards.forEach((b: GL) => {
           const states: Record<string, string> = {};
           Object.keys(b.incoming || {}).forEach((c) => {
             states[c] = b.incoming[c];
@@ -2366,14 +2365,23 @@ export function createGameStore(opts: {
       if (!note.textContent) note.textContent = "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
       wrap.appendChild(note);
     } else if (players.length > 2) {
-      // Free-for-all (2026-11-17): your own waters plus one board
-      // per rival, each showing YOUR shots at that captain - the
-      // board you tap is the target, and the shot goes out as
-      // "Name:Cell". Eliminated captains render as wreck charts
-      // (no fire). The 3D arena is two-board only, so FFA never
-      // routes there: this branch is always the 2D boards.
-      dropBs3d();
-      if (gameView) gameView.bsFire = null;
+      // Free-for-all (2026-11-17; in 3D since 2026-11-20): your own
+      // waters plus one ocean per rival, each showing YOUR shots at
+      // that captain - the ocean you tap is the target, and the shot
+      // goes out as "Name:Cell". Eliminated captains are wreck charts
+      // (no fire). Without WebGL the 2D boards below are the aim.
+      const canFire = g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated;
+      if (gameView) gameView.bsFire = canFire ? (label: string, target?: string) => { void sendMove(g.id, (target ? target + ":" : "") + label, note); } : null;
+      const banner = bsBanner(g, freshMove);
+      if (banner) wrap.appendChild(banner);
+      bsScene(
+        g,
+        wrap,
+        bsStrips3d(g, [
+          { label: "Your fleet" + (you.eliminated ? " — wreck" : ""), hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
+          ...(you.targets || []).map((t: GL) => ({ label: t.name + (t.eliminated ? " — wreck" : ""), hex: t.hex, sunk: (t.sunk_ships || []).map((s: GL) => s.size) })),
+        ])
+      );
       const boards = el("div", "bs-boards");
       const ownStates: Record<string, string> = {};
       (you.fleet || []).forEach((s: GL) => {
@@ -2384,6 +2392,7 @@ export function createGameStore(opts: {
       Object.keys(you.incoming || {}).forEach((c) => {
         if (!ownStates[c]) ownStates[c] = "miss";
       });
+      const flat = !webglOk();
       const ownWrap = el("div", "bs-side");
       ownWrap.appendChild(el("div", "bs-title", "Your waters" + (you.eliminated ? " — wreck" : "")));
       ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size), undefined, g.fleet_sizes));
@@ -2391,9 +2400,8 @@ export function createGameStore(opts: {
       markLastShot(ownGrid, g, myName, freshMove);
       markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
       ownWrap.appendChild(ownGrid);
-      boards.appendChild(ownWrap);
-      const canFire = g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated;
-      (you.targets || []).forEach((t: GL) => {
+      if (flat) boards.appendChild(ownWrap);
+      if (flat) (you.targets || []).forEach((t: GL) => {
         const tStates: Record<string, string> = {};
         Object.keys(t.shots || {}).forEach((c) => {
           tStates[c] = t.shots[c];
@@ -2421,9 +2429,7 @@ export function createGameStore(opts: {
         tWrap.appendChild(tGrid);
         boards.appendChild(tWrap);
       });
-      const banner = bsBanner(g, freshMove);
-      if (banner) wrap.appendChild(banner);
-      wrap.appendChild(boards);
+      if (boards.childElementCount) wrap.appendChild(boards);
       if (g.sonar && g.phase === "play" && g.status === "running")
         wrap.appendChild(
           el(
@@ -2442,7 +2448,12 @@ export function createGameStore(opts: {
         });
         if (you.eliminated) note.textContent = "You are eliminated — your fleet is a wreck chart now. The sea fights on without you.";
         else if (you.playing) {
-          const hint = arenaHint("bs-play-ffa", "Tap a cell on a rival's board to fire at that captain — ✕ is a hit, · is a miss, dark hulls are sunk. Wreck boards can't be fired at.");
+          const hint = flat
+            ? arenaHint("bs-play-ffa", "Tap a cell on a rival's board to fire at that captain — ✕ is a hit, · is a miss, dark hulls are sunk. Wreck boards can't be fired at.")
+            : arenaHint(
+                "bs-play-ffa-3d",
+                "Tap a cell in any rival's waters to fire at that captain (or arrow keys to aim - past an edge for the next rival - and Enter to fire). Grey wreck charts can't be fired at."
+              );
           if (hint) wrap.appendChild(hint);
         }
       }
@@ -2454,17 +2465,14 @@ export function createGameStore(opts: {
       if (gameView) gameView.bsFire = canFire ? (label: string) => { void sendMove(g.id, label, note); } : null;
       // In 3D the fleet strips (sizes still afloat) sit under the scene:
       // the 2D boards that carry them are not built.
-      const strips = el("div", "bs-strips3d");
-      [
-        { label: "Your fleet", hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
-        { label: opp.name + "'s fleet", hex: opp.hex, sunk: (you.sunk_ships || []).map((s: GL) => s.size) },
-      ].forEach((f) => {
-        const item = el("div", "bs-strip3d");
-        item.appendChild(el("span", "bs-strip3d-label", f.label));
-        item.appendChild(fleetStrip(f.hex, f.sunk, undefined, g.fleet_sizes));
-        strips.appendChild(item);
-      });
-      bsScene(g, wrap, strips);
+      bsScene(
+        g,
+        wrap,
+        bsStrips3d(g, [
+          { label: "Your fleet", hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
+          { label: opp.name + "'s fleet", hex: opp.hex, sunk: (you.sunk_ships || []).map((s: GL) => s.size) },
+        ])
+      );
       // No WebGL: the scene is a note, and their waters are the only
       // way to aim - a plain grid of your shots, a tap fires
       if (!webglOk()) {
@@ -2674,8 +2682,8 @@ export function createGameStore(opts: {
             g,
             me: opts.meName(),
             aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
-            onFire: (label: string) => {
-              if (gameView && gameView.bsFire) gameView.bsFire(label);
+            onFire: (label: string, target?: string) => {
+              if (gameView && gameView.bsFire) gameView.bsFire(label, target);
             },
             onReady: () => ready3d(h),
           })
@@ -2686,7 +2694,19 @@ export function createGameStore(opts: {
       }
     );
   }
-  /* The two-captain scene, with what follows it right under it. */
+  /* The fleet strips under the scene: each captain's sizes still afloat. */
+  function bsStrips3d(g: GL, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement {
+    const strips = el("div", "bs-strips3d");
+    fleets.forEach((f) => {
+      const item = el("div", "bs-strip3d");
+      item.appendChild(el("span", "bs-strip3d-label", f.label));
+      item.appendChild(fleetStrip(f.hex, f.sunk, undefined, g.fleet_sizes));
+      strips.appendChild(item);
+    });
+    return strips;
+  }
+  /* The scene (two captains side by side, a free-for-all in rows),
+     with what follows it right under it. */
   function bsScene(g: GL, wrap: HTMLElement, under?: HTMLElement) {
     if (!gameView) return;
     if (!gameView.bs3d) gameView.bs3d = makeHost3d("lc-board-big lc-3d-host bs-3d-host");

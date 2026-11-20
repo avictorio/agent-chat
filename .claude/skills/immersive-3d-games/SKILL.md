@@ -259,8 +259,9 @@ call (2026-11-20, the 2D views and the 2D/3D toggles are retired): the
 controls and the full text live in the page under the scene, and every
 move must be possible from them, because a device without WebGL gets a
 one-line note in place of the scene and nothing else (Battleship's
-two-captain view adds a plain aiming grid there; a free-for-all keeps
-its 2D boards, as the scene holds two boards).
+two-captain view adds a plain aiming grid there, a free-for-all its 2D
+boards; with WebGL the scene lays 3-6 oceans out with `bsLayout`, each
+tile carrying `cx` and `cz`).
 `games.ts` lazy-loads
 each arena so three.js stays in its own chunk, and owns the 3D host's
 loading and error states. Check whether an arena already uses the juice and

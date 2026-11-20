@@ -610,48 +610,84 @@ let FAILURES = 0;
     await shot(page, 'bs-player-arena.png');
     return out;
   });
-  // Free-for-all (2026-11-17): a four-captain match renders your own
-  // waters plus one board per rival, the eliminated captain as a
-  // wreck (no fire buttons), and NEVER the 3D arena - this scenario
-  // deliberately leaves the 3D preference at its default (on).
+  // Free-for-all (2026-11-17; in 3D since 2026-11-20): a four-captain
+  // match is one scene - your waters plus one ocean per rival, the
+  // eliminated captain a grey wreck chart - with every captain's fleet
+  // strip under it and no 2D boards. The keyboard aims at the first
+  // live rival; an arrow past the right edge crosses to the next one,
+  // and the shot names its target.
   await run('battleship-ffa', { state: { bsFfa: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
     out.cardText = await page.$eval('.game-card', e => e.textContent);
     if (!/eliminated/.test(out.cardText)) throw new Error('card scoreboard should mark the eliminated captain: ' + out.cardText.slice(0, 200));
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
-    out.host3d = await page.$('#viewer .bs-3d-host');
-    out.wrecks = await page.$$eval('#viewer .bs-side.bs-wreck', els => els.length);
-    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
+    out.strips = await page.$$eval('#viewer .bs-strips3d .bs-strip3d-label', els => els.map((e) => e.textContent));
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
-    if (out.grids !== 4) throw new Error('ffa arena should show four boards (yours + three rivals), got ' + out.grids);
-    if (out.host3d !== null) throw new Error('ffa must never route to the 3D arena');
-    if (out.wrecks !== 1) throw new Error('exactly one wreck board expected, got ' + out.wrecks);
-    if (out.ring !== 1) throw new Error('the last shot should ring only on its target board, got ' + out.ring);
+    out.label = await page.$eval('#viewer .arena3d-frame', e => e.getAttribute('aria-label'));
+    if (out.grids !== 0) throw new Error('no 2D boards in a free-for-all with WebGL, got ' + out.grids);
+    if (out.strips.length !== 4 || out.strips[0] !== 'Your fleet' || !/^Hank — wreck$/.test(out.strips[3])) throw new Error('every captain\'s fleet strip, the wreck marked: ' + JSON.stringify(out.strips));
     if (!/Ada fires H5 · HIT/.test(out.banner)) throw new Error('ffa banner wrong: ' + out.banner);
-    const hankSide = page.locator('#viewer .bs-side').filter({ hasText: "Hank's waters" });
-    out.wreckButtons = await hankSide.locator('button.bs-cell').count();
-    if (out.wreckButtons !== 0) throw new Error('a wreck board must not offer fire buttons, got ' + out.wreckButtons);
+    if (!/Ada's waters/.test(out.label) || !/next rival/.test(out.label)) throw new Error('the frame names the aimed rival and the crossing: ' + out.label);
+    await page.waitForTimeout(600);
     await shot(page, 'bs-ffa-arena.png');
-    const adaSide = page.locator('#viewer .bs-side').filter({ hasText: "Ada's waters" });
-    await adaSide.locator('button.bs-cell[aria-label="Fire at C7"]').click();
-    await page.waitForTimeout(400);
-    out.moveCall = calls.filter(c => c.includes('/games/9/moves')).pop() || '';
-    if (!/"dir":"Ada:C7"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
+    await page.focus('#viewer .arena3d-frame');
+    await page.keyboard.press('ArrowRight');
+    out.aimed = await page.$eval('#viewer .arena3d-frame .sr-only', e => e.textContent);
+    if (!/^Ada's F5, open water/.test(out.aimed)) throw new Error('ArrowRight from E5 should aim at Ada\'s F5, said: ' + out.aimed);
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight');
+    out.crossed = await page.$eval('#viewer .arena3d-frame .sr-only', e => e.textContent);
+    if (!/^Henry's A5, open water/.test(out.crossed)) throw new Error('past column J the aim crosses to Henry\'s A5, said: ' + out.crossed);
+    const before = calls.length;
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    out.moveCall = calls.slice(before).filter(c => c.includes('/games/9/moves')).pop() || '';
+    if (!/"dir":"Henry:A5"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
     return out;
   });
-  await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
+  /* Phone: one ocean at a time behind a cycler (‹ name n/N ›: a pill
+     per captain ran under the frame's tools); on your turn the aimed
+     rival's ocean shows, a tap aims and Fire fires at that captain;
+     cycling to another live rival retargets. */
+  await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
-    await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-grid', { timeout: 4000 });
+    await page.tap('.game-card');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
+    await page.waitForTimeout(800);
+    const showing = () => page.$eval('#viewer .arena3d-cycle-name', (e) => e.textContent + (e.classList.contains('wreck') ? '~' : ''));
+    out.showing = await showing();
+    if (out.showing !== 'Ada2/4') throw new Error('Ada\'s ocean up on your turn, 2 of 4: ' + out.showing);
+    out.tools = await page.evaluate(() => { const a = document.querySelector('#viewer .arena3d-cycle').getBoundingClientRect(); const b = document.querySelector('#viewer .arena3d-tools').getBoundingClientRect(); return { cycleRight: Math.round(a.right), toolsLeft: Math.round(b.left) }; });
+    if (out.tools.cycleRight > out.tools.toolsLeft) throw new Error('the cycler must clear the frame\'s tools: ' + JSON.stringify(out.tools));
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
-    out.host3d = await page.$('#viewer .bs-3d-host');
-    if (out.grids !== 4) throw new Error('mobile ffa arena should show four boards, got ' + out.grids);
-    if (out.host3d !== null) throw new Error('mobile ffa must never route to the 3D arena');
+    if (out.grids !== 0) throw new Error('no 2D boards on the phone either, got ' + out.grids);
     await shot(page, 'bs-ffa-mobile-dark.png');
+    await page.tap('#viewer .arena3d-cycle button[aria-label="Next ocean"]');
+    await page.waitForTimeout(300);
+    out.after = await showing();
+    await page.tap('#viewer .arena3d-cycle button[aria-label="Next ocean"]');
+    await page.waitForTimeout(300);
+    out.wreck = await showing();
+    await page.tap('#viewer .arena3d-cycle button[aria-label="Previous ocean"]');
+    await page.waitForTimeout(500);
+    if (out.after !== 'Henry3/4' || out.wreck !== 'Hank4/4~') throw new Error('Next steps to Henry, then the struck-through wreck: ' + out.after + ' / ' + out.wreck);
+    const box = await (await page.$('#viewer .lc-3d-host canvas')).boundingBox();
+    const before = calls.length;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height * 0.55);
+    await page.waitForTimeout(500);
+    if (calls.slice(before).some((c) => /\/moves/.test(c))) throw new Error('a tap must aim, not fire');
+    out.fireText = await page.$eval('#viewer .arena3d-fire', (e) => e.textContent).catch(() => null);
+    if (!out.fireText || !/^Fire at Henry's [A-J]\d+$/.test(out.fireText)) throw new Error('the Fire button names Henry\'s cell, got ' + out.fireText);
+    await shot(page, 'bs-ffa-mobile-aimed.png');
+    await page.tap('#viewer .arena3d-fire');
+    await page.waitForTimeout(600);
+    const moves = calls.slice(before).filter((c) => /\/games\/9\/moves/.test(c));
+    const cell = out.fireText.slice('Fire at Henry\'s '.length);
+    if (moves.length !== 1 || moves[0].indexOf('"Henry:' + cell + '"') < 0) throw new Error('Fire should send one move at Henry:' + cell + ': ' + JSON.stringify(moves));
     return out;
   });
   await run('battleship-3d-default', { state: { bsPlay: true } }, async (page) => {
@@ -708,6 +744,30 @@ let FAILURES = 0;
       return out;
     });
   }
+  // A free-for-all without WebGL: your waters plus one board per rival
+  // follow the note, the wreck has no fire buttons, a tap names its target.
+  await run('no-webgl-battleship-ffa', { state: { bsFfa: true }, init: noGl }, async (page, S, calls) => {
+    const out = {};
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+    out.grids = await page.$$eval('#viewer .bs-boards .bs-grid', els => els.length);
+    out.wrecks = await page.$$eval('#viewer .bs-side.bs-wreck', els => els.length);
+    out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
+    if (out.grids !== 4) throw new Error('four boards (yours + three rivals), got ' + out.grids);
+    if (out.wrecks !== 1) throw new Error('exactly one wreck board expected, got ' + out.wrecks);
+    if (out.ring !== 1) throw new Error('the last shot should ring only on its target board, got ' + out.ring);
+    const hankSide = page.locator('#viewer .bs-side').filter({ hasText: "Hank's waters" });
+    out.wreckButtons = await hankSide.locator('button.bs-cell').count();
+    if (out.wreckButtons !== 0) throw new Error('a wreck board must not offer fire buttons, got ' + out.wreckButtons);
+    await shot(page, 'no-webgl-battleship-ffa.png');
+    const adaSide = page.locator('#viewer .bs-side').filter({ hasText: "Ada's waters" });
+    await adaSide.locator('button.bs-cell[aria-label="Fire at C7"]').click();
+    await page.waitForTimeout(400);
+    out.moveCall = calls.filter(c => c.includes('/games/9/moves')).pop() || '';
+    if (!/"dir":"Ada:C7"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
+    return out;
+  });
   // A spectator has no aiming grid: without WebGL the two captains'
   // boards follow the note (with WebGL they are not built at all).
   for (const [label, o] of [['no-webgl-battleship-spectator', {}], ['no-webgl-battleship-spectator-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {

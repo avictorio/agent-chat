@@ -158,7 +158,7 @@ const VERT = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
 uniform float uTime;
-uniform vec4 uCalm[2];
+uniform vec4 uCalm[6];
 uniform int uCalmN;
 uniform vec4 uW[5];
 uniform vec2 uWP[5];
@@ -170,7 +170,7 @@ varying float vH;
 varying float vCalm;
 float calmAt(vec2 p) {
   float c = 0.0;
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 6; i++) {
     if (i >= uCalmN) break;
     vec2 d = abs(p - uCalm[i].xy) - uCalm[i].zw;
     float s = clamp(length(max(d, 0.0)) / ${CALM_EDGE.toFixed(2)}, 0.0, 1.0);
@@ -350,7 +350,7 @@ export function Ocean({ store, look, lite, still }: { store: OceanStore; look: O
         {
           uTime: { value: 0 },
           uSeaY: { value: OCEAN_Y },
-          uCalm: { value: [new Vector4(), new Vector4()] },
+          uCalm: { value: [new Vector4(), new Vector4(), new Vector4(), new Vector4(), new Vector4(), new Vector4()] },
           uCalmN: { value: 0 },
           uW: { value: WAVE_U.map((w) => new Vector4(w.dx, w.dz, w.amp, w.k)) },
           uWP: { value: WAVE_U.map((w) => new Vector2(w.w, w.ph)) },
@@ -425,8 +425,9 @@ export function Ocean({ store, look, lite, still }: { store: OceanStore; look: O
     const u = mat.uniforms;
     u.uTime!.value = still ? 7.3 : j.t;
     const calms = store.calms;
-    u.uCalmN!.value = Math.min(2, calms.length);
-    calms.slice(0, 2).forEach((c, i) => (u.uCalm!.value as Vector4[])[i]!.set(c.x, c.z, c.hw, c.hh));
+    // up to six boards (a Battleship free-for-all)
+    u.uCalmN!.value = Math.min(6, calms.length);
+    calms.slice(0, 6).forEach((c, i) => (u.uCalm!.value as Vector4[])[i]!.set(c.x, c.z, c.hw, c.hh));
     if (!rt) {
       u.uUseMirror!.value = 0;
       return;

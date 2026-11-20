@@ -552,25 +552,44 @@ change behavior. In summary:
 - **2D arena views retired (2026-11-20):** the owner's call. Every game's
   arena is its 3D scene with the DOM controls under it; the 2D/3D
   toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
-  `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored. Two
-  exceptions: a Battleship free-for-all (3+ captains) still plays on 2D
-  boards (the 3D arena is a two-board scene), and fleet placement keeps
-  its grid. Chat cards, history rows and the Games tab keep their small
-  2D summaries (`boardSvg`, `c4Board`, minis). A device without WebGL
+  `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored. One
+  exception left: fleet placement keeps its grid. Chat cards, history
+  rows and the Games tab keep their small 2D summaries (`boardSvg`,
+  `c4Board`, minis). A device without WebGL
   (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
   game plays from its controls, and a two-captain Battleship adds their
   waters as a plain aiming grid (the scene was its only way to fire);
-  its spectators get both captains' boards. TODO after wave 4 (the
-  owner's call, 2026-11-20) - 3D'fy what is still flat: a free-for-all
-  Battleship scene, fleet placement in 3D, and the flat panels under the
+  its spectators get both captains' boards (a free-for-all: every board,
+  yours and each rival's, the shot naming its target). TODO after wave 4
+  (the owner's call, 2026-11-20) - 3D'fy what is still flat: fleet
+  placement in 3D, and the flat panels under the
   scenes (Frontlines' round in numbers, Code Race's lanes, Trust's grid,
   Liar's Dice's seats and cup, the Duel scoreboard) folded into the
   scenes - keeping every control in the page and a text fallback for
   devices without WebGL. Chat cards and history thumbnails stay flat.
   New games: 3D only, controls under the scene, nothing that only the
   scene can do (UI scenarios `no-webgl-*` pin this).
+- **Battleship free-for-all in 3D (2026-11-20, the first 3D'fy step):**
+  `BsArena3D` lays every ocean out with `bsLayout` - two side by side as
+  before; three or four in a 2x2 (three: two in front, one behind); five
+  or six in rows of three; the viewer's own waters front left - and each
+  tile carries its centre (`cx`, `cz`), so anything placed on a tile adds
+  both. A captain's tiles come from `you.targets` (their own shots per
+  rival); a spectator's from `boards`. The shot's target is the ocean
+  tapped or clicked (`onFire(label, target)` → "Name:Cell"); the
+  keyboard aims at one rival and an arrow past the left or right edge
+  crosses to the next. Shells, fire heat, sinkings and the last-shot ring
+  follow the record's `target` (`shotTarget`); the sonar band marks the
+  rival it names (the leader); an eliminated captain is a grey wreck
+  chart, never a target, and their last ship's sinking gets its own
+  title ("X is out" / "Your fleet is gone"). The ocean shader calms
+  water under up to six boards (`uCalm[6]`). Phones show one ocean at a
+  time: two captains keep their two pills, 3-6 get a cycler (‹ name n/N
+  ›) - a pill each ran under the frame's tools - and cycling to a live
+  rival makes them the target. The 2D boards are the no-WebGL fallback
+  only (`no-webgl-battleship-ffa`).
 - **Two Truths and a Lie (2026-11-19):** Henry's spec. Phases `write`
   (the storyteller) then `vote` (everyone else), one clock each
   (`round_seconds`). The storyteller's statements are published shuffled

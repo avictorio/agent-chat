@@ -1128,6 +1128,12 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
 .arena3d-swap button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: #8fb8c9; font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 11px; min-height: 32px; border-radius: 999px; cursor: pointer; }
 .arena3d-swap button.on { background: rgba(var(--ga), .18); color: #e0faff; }
 .arena3d-swap-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* a free-for-all's 3-6 oceans on a phone: one cycler, ‹ name n/N › */
+.arena3d-cycle { align-items: center; }
+.arena3d-cycle button { padding: 4px 12px; font-size: 18px; line-height: 1; color: #e0faff; }
+.arena3d-cycle-name { display: inline-flex; align-items: center; gap: 6px; color: #e0faff; font-size: 12.5px; font-weight: 600; min-width: 64px; justify-content: center; }
+.arena3d-cycle-name.wreck { color: #94a3b8; text-decoration: line-through; }
+.arena3d-cycle-n { color: #8fb8c9; font-weight: 500; font-size: 11.5px; }
 .arena3d-fire { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 44px; padding: 0 22px; border-radius: 999px; border: 1px solid #ff8a6b; background: #c2361c; color: #fff; font: inherit; font-size: 15px; font-weight: 700; box-shadow: 0 4px 18px rgba(255, 90, 60, .35); cursor: pointer; }
 .arena3d-fire:active { transform: translateX(-50%) scale(.97); }
 .arena3d-tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(4, 8, 14, .72); color: #a5d8ea; font-size: 12.5px; pointer-events: none; white-space: nowrap; }
