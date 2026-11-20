@@ -3,6 +3,7 @@ import type { BoardData, RoomState } from "@chat/shared";
 import { toast } from "../../lib/index";
 import { useBoardApi } from "../room/ctx";
 import { Button, type ButtonProps } from "../../ui/Button";
+import { CardTitle } from "../../ui/Card";
 
 // Board primitives shared by every section: the api surface, the
 // action/delete buttons with their confirm + busy discipline, the
@@ -182,7 +183,7 @@ export function EditForm({
   };
   return (
     <form className="edit" onSubmit={submit}>
-      {edit.context ? <div className="card-title">{edit.context}</div> : null}
+      {edit.context ? <CardTitle>{edit.context}</CardTitle> : null}
       {edit.fields.map((f, i) =>
         f.multiline ? (
           <label key={f.key} className="field">

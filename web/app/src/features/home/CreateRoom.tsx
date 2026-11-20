@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { Button } from "../../ui/Button";
+import { Page } from "../../ui/Page";
+import { Card } from "../../ui/Card";
 
 // Create a room: the form, its validation ladder and the
 // status-mapped result messages. The genesis invite is emailed to
@@ -70,60 +72,56 @@ export function CreateView({ hidden }: { hidden: boolean }) {
   };
 
   return (
-    <section className="view" id="view-create" aria-label="Create a room" hidden={hidden}>
-      <div className="page">
-        <div className="page-inner">
-          <h1 className="page-title">Create a room</h1>
-          <p className="lede">
-            Every room is invite-only. Create one and its genesis invite - the first link into the room, made for your
-            name - is emailed to you. It is never shown on this page, so use an address you control.
+    <Page id="view-create" aria-label="Create a room" hidden={hidden}>
+      <h1 className="page-title">Create a room</h1>
+      <p className="lede">
+        Every room is invite-only. Create one and its genesis invite - the first link into the room, made for your
+        name - is emailed to you. It is never shown on this page, so use an address you control.
+      </p>
+      <Card>
+        <form id="createForm" noValidate onSubmit={submit} ref={formRef}>
+          <label className="field">
+            Room name
+            <input
+              id="cRoom"
+              maxLength={64}
+              autoCapitalize="off"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="e.g. henry-hank-order-up"
+              ref={roomRef}
+              onInput={(e) => {
+                const v = (e.currentTarget.value || "").trim().toLowerCase().replace(/\s+/g, "-");
+                setRoomUrl("chat.victorio.cloud/r/" + (v || "..."));
+              }}
+            />
+            <span className="hint" id="cRoomHint">
+              Lowercase letters, digits, - or _. The room lives at <span id="cRoomUrl">{roomUrl}</span>
+            </span>
+          </label>
+          <label className="field">
+            Your name
+            <input id="cName" maxLength={40} autoComplete="name" placeholder="e.g. Anthony" ref={nameRef} />
+            <span className="hint">The name your genesis invite carries. You post under it in the room.</span>
+          </label>
+          <label className="field">
+            Email
+            <input id="cEmail" type="email" maxLength={254} autoComplete="email" placeholder="you@example.com" ref={emailRef} />
+            <span className="hint">Your genesis invite link is sent to this address - and nowhere else.</span>
+          </label>
+          <Button type="submit" variant="primary" id="cGo" disabled={busy}>
+            Create room &amp; email my invite
+          </Button>
+          <p className={"hint" + (msg.bad ? " bad" : "")} id="cMsg" role="status">
+            {msg.text}
           </p>
-          <div className="card">
-            <form id="createForm" noValidate onSubmit={submit} ref={formRef}>
-              <label className="field">
-                Room name
-                <input
-                  id="cRoom"
-                  maxLength={64}
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  autoComplete="off"
-                  placeholder="e.g. henry-hank-order-up"
-                  ref={roomRef}
-                  onInput={(e) => {
-                    const v = (e.currentTarget.value || "").trim().toLowerCase().replace(/\s+/g, "-");
-                    setRoomUrl("chat.victorio.cloud/r/" + (v || "..."));
-                  }}
-                />
-                <span className="hint" id="cRoomHint">
-                  Lowercase letters, digits, - or _. The room lives at <span id="cRoomUrl">{roomUrl}</span>
-                </span>
-              </label>
-              <label className="field">
-                Your name
-                <input id="cName" maxLength={40} autoComplete="name" placeholder="e.g. Anthony" ref={nameRef} />
-                <span className="hint">The name your genesis invite carries. You post under it in the room.</span>
-              </label>
-              <label className="field">
-                Email
-                <input id="cEmail" type="email" maxLength={254} autoComplete="email" placeholder="you@example.com" ref={emailRef} />
-                <span className="hint">Your genesis invite link is sent to this address - and nowhere else.</span>
-              </label>
-              <Button type="submit" variant="primary" id="cGo" disabled={busy}>
-                Create room &amp; email my invite
-              </Button>
-              <p className={"hint" + (msg.bad ? " bad" : "")} id="cMsg" role="status">
-                {msg.text}
-              </p>
-            </form>
-          </div>
-          <p className="hint">
-            Treat the genesis invite like a password: anyone who opens it joins the room as you. From inside the room
-            you can invite other people and agents, each under their own name.
-          </p>
-        </div>
-      </div>
-    </section>
+        </form>
+      </Card>
+      <p className="hint">
+        Treat the genesis invite like a password: anyone who opens it joins the room as you. From inside the room
+        you can invite other people and agents, each under their own name.
+      </p>
+    </Page>
   );
 }
 

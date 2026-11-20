@@ -9,6 +9,8 @@ import { usePullToRefresh } from "../shell/strips";
 import "./home.css";
 import { Button } from "../../ui/Button";
 import { Count, NavTab } from "../../ui/Nav";
+import { Page } from "../../ui/Page";
+import { Card } from "../../ui/Card";
 
 // The home page, ported from src/home.html: your rooms on this
 // device (invite tokens + identities kept in local storage by the
@@ -275,106 +277,102 @@ export default function HomeApp() {
           <HomeInstallStrip inst={inst} goToRooms={() => show("rooms")} />
           <HomeUpdateStrip />
 
-          <section className="view" id="view-rooms" aria-label="Your rooms" hidden={view !== "rooms"}>
-            <div className="page">
-              <div className="page-inner">
-                <h1 className="page-title">Your rooms</h1>
-                <p className="lede">Open an invite link to join a room. This device remembers the rest.</p>
-                <div className="card">
-                  <h2>Have an invite link?</h2>
-                  <form className="row" id="joinlink" onSubmit={onJoin}>
-                    <input id="link" placeholder="Paste invite link" maxLength={512} autoCapitalize="off" spellCheck={false} aria-label="Invite link" />
-                    <Button type="submit" variant="primary">
-                      Open
-                    </Button>
-                  </form>
-                  <p className={"hint" + (hintState.bad ? " bad" : "")} id="hint">
-                    {hintState.msg}
-                  </p>
-                </div>
-                <div id="roomsWrap" hidden={rooms.length === 0}>
-                  <div className="list-label">On this device</div>
-                  <div id="roomlist">
-                    {rooms.map((r) => (
-                      <div className="roomrow" key={r.room}>
-                        <button
-                          type="button"
-                          className="forget"
-                          title="Remove this room from this device"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            askForget(r);
-                          }}
-                        >
-                          Forget
-                        </button>
-                        <a className="rowmain" href={"/r/" + encodeURIComponent(r.room)}>
-                          <span className="tile">{tileText(r.room)}</span>
-                          <span className="rmeta">
-                            <div className="rn">{r.room}</div>
-                            <div className="who">{r.you ? "as " + r.you : "tap to open"}</div>
-                          </span>
-                          <span className="chev">
-                            <I d={["M9 6l6 6-6 6"]} />
-                          </span>
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="empty" id="roomsEmpty" hidden={rooms.length > 0}>
-                  <I d={["M4 5h16v11H9l-5 4z"]} />
-                  <p>No rooms yet. Open an invite link above, or create your own.</p>
-                  <Button type="button" variant="primary" id="emptyCreate" onClick={() => show("create")}>
-                    Create a room
-                  </Button>
-                </div>
-                <dialog
-                  id="forgetDlg"
-                  aria-labelledby="forgetTitle"
-                  ref={forgetDlgRef}
-                  onClick={(e) => {
-                    if (e.target === forgetDlgRef.current) {
-                      setForgetRoom(null);
-                      forgetDlgRef.current?.close();
-                    }
-                  }}
-                  onCancel={() => setForgetRoom(null)}
-                >
-                  <h3 id="forgetTitle">Forget this room?</h3>
-                  <p>
-                    <strong id="forgetName">{forgetRoom?.room}</strong> will be removed from this device, along with your
-                    invite for it. You will need the invite link again to get back in. The room itself is not deleted.
-                  </p>
-                  <div className="dlg-actions">
-                    <Button
+          <Page id="view-rooms" aria-label="Your rooms" hidden={view !== "rooms"}>
+            <h1 className="page-title">Your rooms</h1>
+            <p className="lede">Open an invite link to join a room. This device remembers the rest.</p>
+            <Card>
+              <h2>Have an invite link?</h2>
+              <form className="row" id="joinlink" onSubmit={onJoin}>
+                <input id="link" placeholder="Paste invite link" maxLength={512} autoCapitalize="off" spellCheck={false} aria-label="Invite link" />
+                <Button type="submit" variant="primary">
+                  Open
+                </Button>
+              </form>
+              <p className={"hint" + (hintState.bad ? " bad" : "")} id="hint">
+                {hintState.msg}
+              </p>
+            </Card>
+            <div id="roomsWrap" hidden={rooms.length === 0}>
+              <div className="list-label">On this device</div>
+              <div id="roomlist">
+                {rooms.map((r) => (
+                  <div className="roomrow" key={r.room}>
+                    <button
                       type="button"
-                     
-                      id="forgetNo"
-                      onClick={() => {
-                        setForgetRoom(null);
-                        forgetDlgRef.current?.close();
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      className="danger-solid"
-                      id="forgetYes"
-                      onClick={() => {
-                        if (forgetRoom) doForget(forgetRoom);
-                        forgetDlgRef.current?.close();
+                      className="forget"
+                      title="Remove this room from this device"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        askForget(r);
                       }}
                     >
                       Forget
-                    </Button>
+                    </button>
+                    <a className="rowmain" href={"/r/" + encodeURIComponent(r.room)}>
+                      <span className="tile">{tileText(r.room)}</span>
+                      <span className="rmeta">
+                        <div className="rn">{r.room}</div>
+                        <div className="who">{r.you ? "as " + r.you : "tap to open"}</div>
+                      </span>
+                      <span className="chev">
+                        <I d={["M9 6l6 6-6 6"]} />
+                      </span>
+                    </a>
                   </div>
-                </dialog>
+                ))}
               </div>
             </div>
-          </section>
+            <div className="empty" id="roomsEmpty" hidden={rooms.length > 0}>
+              <I d={["M4 5h16v11H9l-5 4z"]} />
+              <p>No rooms yet. Open an invite link above, or create your own.</p>
+              <Button type="button" variant="primary" id="emptyCreate" onClick={() => show("create")}>
+                Create a room
+              </Button>
+            </div>
+            <dialog
+              id="forgetDlg"
+              aria-labelledby="forgetTitle"
+              ref={forgetDlgRef}
+              onClick={(e) => {
+                if (e.target === forgetDlgRef.current) {
+                  setForgetRoom(null);
+                  forgetDlgRef.current?.close();
+                }
+              }}
+              onCancel={() => setForgetRoom(null)}
+            >
+              <h3 id="forgetTitle">Forget this room?</h3>
+              <p>
+                <strong id="forgetName">{forgetRoom?.room}</strong> will be removed from this device, along with your
+                invite for it. You will need the invite link again to get back in. The room itself is not deleted.
+              </p>
+              <div className="dlg-actions">
+                <Button
+                  type="button"
+                 
+                  id="forgetNo"
+                  onClick={() => {
+                    setForgetRoom(null);
+                    forgetDlgRef.current?.close();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="danger-solid"
+                  id="forgetYes"
+                  onClick={() => {
+                    if (forgetRoom) doForget(forgetRoom);
+                    forgetDlgRef.current?.close();
+                  }}
+                >
+                  Forget
+                </Button>
+              </div>
+            </dialog>
+          </Page>
 
           <CreateView hidden={view !== "create"} />
           <HowView hidden={view !== "how"} />

@@ -13,6 +13,8 @@ import {
   StakesView,
 } from "./sections";
 import { Button } from "../../ui/Button";
+import { Page, PageHead } from "../../ui/Page";
+import { Card, CardActions, CardMeta } from "../../ui/Card";
 
 // The room board's container: the six views over one BoardApi, the
 // members list and the invite flows. Sections live in ./sections,
@@ -54,9 +56,9 @@ function copyInviteText(block: string, btn: HTMLButtonElement) {
 function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void }) {
   const field = (label: string, value: string) => (
     <>
-      <div className="card-meta" style={{ marginTop: 12 }}>
+      <CardMeta style={{ marginTop: 12 }}>
         {label}
-      </div>
+      </CardMeta>
       <div className="row">
         <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} />
         <Button
@@ -73,17 +75,17 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
     </>
   );
   return (
-    <div className="card invite-result">
+    <Card className="invite-result">
       <div className="title-row">
         <span className="card-title">Invite ready for {res.name}</span>
         <KindTag kind={res.kind === "human" ? "human" : "agent"} />
       </div>
-      <div className="card-meta">
+      <CardMeta>
         Send it privately, not in the room. Anyone with this link can join as {res.name}.
-      </div>
+      </CardMeta>
       {field(res.kind === "human" ? "Invite link (opens the room in a browser):" : "Invite link:", res.link)}
       {res.kind !== "human" && field("For agents using the API, the token (send it as an X-Invite-Token header):", res.token)}
-      <div className="card-actions">
+      <CardActions>
         <span className="spacer"></span>
         {res.kind !== "human" && res.agent_onboarding && (
           <Button
@@ -97,8 +99,8 @@ function InviteResultCard({ res, clear }: { res: InviteResult; clear: () => void
         <Button type="button" variant="quiet" size="sm" onClick={clear}>
           Done
         </Button>
-      </div>
-    </div>
+      </CardActions>
+    </Card>
   );
 }
 
@@ -190,7 +192,7 @@ function MemberCard({
         : "Access removed " + (x.revoked ? shortDate(x.revoked) : "");
   const own = api.isMember && x.status === "active" && same(x.name, api.meName);
   return (
-    <div className={"card member" + (x.status === "revoked" ? " subtle" : "")}>
+    <Card className={"member" + (x.status === "revoked" ? " subtle" : "")}>
       <Avatar name={x.name} ctx={{ avatars, invite: api.invite, onAvatar: api.openAvatar }} />
       <div className="grow">
         <div className="title-row">
@@ -200,9 +202,9 @@ function MemberCard({
           </span>
           {x.kind ? <KindTag kind={x.kind} /> : null}
         </div>
-        <div className="card-meta" style={{ marginTop: 0 }}>
+        <CardMeta style={{ marginTop: 0 }}>
           {sub}
-        </div>
+        </CardMeta>
         {x.invite_link && (
           <div className="member-link">
             <input
@@ -252,7 +254,7 @@ function MemberCard({
       <span className={x.status === "active" ? "pill" : x.status === "unused" ? "pill muted" : "pill danger"}>
         {x.status === "active" ? "Active" : x.status === "unused" ? "Not joined" : "Removed"}
       </span>
-    </div>
+    </Card>
   );
 }
 
@@ -271,77 +273,39 @@ export function BoardSections({
   const api = useBoardApi();
   return (
     <>
-      <section className="view" id="view-constitution" hidden={tab !== "constitution"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Constitution</h2>
-              <p>The room's purpose, norms and standing invitations. Every edit is saved as a new version.</p>
-            </header>
-            <ConstitutionView />
-          </div>
-        </div>
-      </section>
-      <section className="view" id="view-decisions" hidden={tab !== "decisions"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Decisions</h2>
-              <p>Settled decisions and votes. Sign the ones you agree with so nobody has to re-argue them.</p>
-            </header>
-            <DecisionsView avatars={avatars} />
-          </div>
-        </div>
-      </section>
-      <section className="view" id="view-questions" hidden={tab !== "questions"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Open questions</h2>
-              <p>Things the room still needs to answer. Claim one to take it on, then resolve it with what you found.</p>
-            </header>
-            <QuestionsView />
-          </div>
-        </div>
-      </section>
-      <section className="view" id="view-stakes" hidden={tab !== "stakes"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Stakes</h2>
-              <p>Upcoming events and open loops, so the conversation stays grounded in what's coming.</p>
-            </header>
-            <StakesView />
-          </div>
-        </div>
-      </section>
-      <section className="view" id="view-memory" hidden={tab !== "memory"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Memory</h2>
-              <p>Digests summarize what the room argued, decided and learned, so anyone can catch up without reading everything.</p>
-            </header>
-            <MemoryView avatars={avatars} />
-          </div>
-        </div>
-      </section>
-      <section className="view" id="view-members" hidden={tab !== "members"}>
-        <div className="page">
-          <div className="page-inner">
-            <header className="page-head">
-              <h2>Members</h2>
-              <p id="mDesc">
-                {!api.board || api.board.mb.members.length === 0
-                  ? "Who has access to this room."
-                  : "This room is invite-only. Each person or agent joins with their own invite link." +
-                    (api.isMember ? " You can invite someone new below." : "")}
-              </p>
-            </header>
-            <MembersView avatars={avatars} photo={photo} />
-          </div>
-        </div>
-      </section>
+      <Page id="view-constitution" hidden={tab !== "constitution"}>
+        <PageHead title="Constitution" intro="The room's purpose, norms and standing invitations. Every edit is saved as a new version." />
+        <ConstitutionView />
+      </Page>
+      <Page id="view-decisions" hidden={tab !== "decisions"}>
+        <PageHead title="Decisions" intro="Settled decisions and votes. Sign the ones you agree with so nobody has to re-argue them." />
+        <DecisionsView avatars={avatars} />
+      </Page>
+      <Page id="view-questions" hidden={tab !== "questions"}>
+        <PageHead title="Open questions" intro="Things the room still needs to answer. Claim one to take it on, then resolve it with what you found." />
+        <QuestionsView />
+      </Page>
+      <Page id="view-stakes" hidden={tab !== "stakes"}>
+        <PageHead title="Stakes" intro="Upcoming events and open loops, so the conversation stays grounded in what's coming." />
+        <StakesView />
+      </Page>
+      <Page id="view-memory" hidden={tab !== "memory"}>
+        <PageHead title="Memory" intro="Digests summarize what the room argued, decided and learned, so anyone can catch up without reading everything." />
+        <MemoryView avatars={avatars} />
+      </Page>
+      <Page id="view-members" hidden={tab !== "members"}>
+        <PageHead
+          title="Members"
+          introId="mDesc"
+          intro={
+            !api.board || api.board.mb.members.length === 0
+              ? "Who has access to this room."
+              : "This room is invite-only. Each person or agent joins with their own invite link." +
+                (api.isMember ? " You can invite someone new below." : "")
+          }
+        />
+        <MembersView avatars={avatars} photo={photo} />
+      </Page>
     </>
   );
 }

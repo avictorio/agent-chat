@@ -14,6 +14,7 @@ import {
   useEditing,
 } from "./shared";
 import { Button } from "../../ui/Button";
+import { Card, CardActions, CardMeta, CardText, CardTitle } from "../../ui/Card";
 
 // The board's five content sections, ported from the current app.
 
@@ -29,16 +30,16 @@ export function ConstitutionView() {
   return (
     <>
       <div id="conBody">
-        <div className="card">
+        <Card>
           {ed.edit ? (
             <EditForm edit={ed.edit} close={ed.close} />
           ) : !c ? (
             <>
-              <div className="card-title">No constitution yet</div>
-              <div className="card-meta">
+              <CardTitle>No constitution yet</CardTitle>
+              <CardMeta>
                 Write down what this room is for and how people here work together.
-              </div>
-              <div className="card-actions">
+              </CardMeta>
+              <CardActions>
                 <Button
                   type="button"
                   variant="primary" size="sm"
@@ -52,20 +53,20 @@ export function ConstitutionView() {
                 >
                   Write the first version
                 </Button>
-              </div>
+              </CardActions>
             </>
           ) : (
             <>
-              <div className="card-meta" style={{ marginTop: 0, marginBottom: 10 }}>
+              <CardMeta style={{ marginTop: 0, marginBottom: 10 }}>
                 <span className="pill">Version {c.version}</span>
                 <span>
                   Edited by {c.editor} · {shortDate(c.ts)}, {new Date(c.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                 </span>
-              </div>
+              </CardMeta>
               <div className="const-text">
                 <Linkify text={c.text} />
               </div>
-              <div className="card-actions">
+              <CardActions>
                 <Button
                   type="button"
                   size="sm"
@@ -79,10 +80,10 @@ export function ConstitutionView() {
                 >
                   Edit
                 </Button>
-              </div>
+              </CardActions>
             </>
           )}
-        </div>
+        </Card>
       </div>
       <div id="conHist">
         {older.length > 0 && (
@@ -93,8 +94,8 @@ export function ConstitutionView() {
                 <summary>
                   Version {h.version} · {h.editor || "unknown"} · {shortDate(h.ts)}
                 </summary>
-                <div className="card-text">{h.text}</div>
-                <div className="card-actions">
+                <CardText>{h.text}</CardText>
+                <CardActions>
                   <ActionButton
                     size="sm"
                     label="Restore this version"
@@ -104,7 +105,7 @@ export function ConstitutionView() {
                       await api.api("/constitution", "PUT", { from: n, text: h.text });
                     }}
                   />
-                </div>
+                </CardActions>
               </details>
             ))}
           </>
@@ -124,25 +125,25 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
   const active = (api.board?.mb.members || []).filter((m) => m.status === "active").map((m) => m.name);
   const missing = active.filter((a) => !signers.some((s) => same(s, a)));
   return (
-    <div className="card">
+    <Card>
       {ed.edit ? (
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
-          <div className="card-title">{x.title}</div>
+          <CardTitle>{x.title}</CardTitle>
           {x.note ? (
-            <div className="card-text">
+            <CardText>
               <Linkify text={x.note} />
-            </div>
+            </CardText>
           ) : null}
-          <div className="card-meta">
+          <CardMeta>
             <span>
               Recorded by {x.added_by} · {shortDate(x.ts)}
             </span>
             <span className={signers.length ? "pill" : "pill muted"}>
               {signers.length ? signers.length + (signers.length === 1 ? " signature" : " signatures") : "No signatures yet"}
             </span>
-          </div>
+          </CardMeta>
           {signers.length > 0 && (
             <div className="chips">
               {signers.map((s) => (
@@ -154,11 +155,11 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
             </div>
           )}
           {missing.length > 0 && (
-            <div className="card-meta">
+            <CardMeta>
               <span className="pill warn">Waiting on {missing.join(", ")}</span>
-            </div>
+            </CardMeta>
           )}
-          <div className="card-actions">
+          <CardActions>
             <ActionButton
               size="sm"
               variant={mine ? undefined : "primary"}
@@ -187,10 +188,10 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
               Edit
             </Button>
             <DeleteButton path={"/decisions/" + x.id} noun="decision" />
-          </div>
+          </CardActions>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -243,15 +244,15 @@ function QuestionCard({ x }: { x: Question }) {
   const ed = useEditing();
   const resolved = x.status === "resolved";
   return (
-    <div className={"card" + (resolved ? " subtle" : "")}>
+    <Card className={resolved ? "subtle" : undefined}>
       {ed.edit ? (
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
-          <div className="card-title">
+          <CardTitle>
             <Linkify text={x.text} />
-          </div>
-          <div className="card-meta">
+          </CardTitle>
+          <CardMeta>
             {x.status === "claimed" ? (
               <span className="pill warn">Claimed by {x.claimed_by}</span>
             ) : resolved ? (
@@ -262,13 +263,13 @@ function QuestionCard({ x }: { x: Question }) {
             <span>
               Asked by {x.added_by} · {rel(x.ts)}
             </span>
-          </div>
+          </CardMeta>
           {resolved && x.resolution ? (
-            <div className="card-text" style={{ marginTop: 8 }}>
+            <CardText style={{ marginTop: 8 }}>
               <Linkify text={x.resolution} />
-            </div>
+            </CardText>
           ) : null}
-          <div className="card-actions">
+          <CardActions>
             {x.status === "open" && (
               <ActionButton size="sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
             )}
@@ -308,10 +309,10 @@ function QuestionCard({ x }: { x: Question }) {
               Edit
             </Button>
             <DeleteButton path={"/questions/" + x.id} noun="question" />
-          </div>
+          </CardActions>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -384,18 +385,18 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
   const api = useBoardApi();
   const ed = useEditing();
   return (
-    <div className={"card" + (isDone ? " subtle" : "")}>
+    <Card className={isDone ? "subtle" : undefined}>
       {ed.edit ? (
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
-          <div className="card-title">{x.title}</div>
+          <CardTitle>{x.title}</CardTitle>
           {x.note ? (
-            <div className="card-text">
+            <CardText>
               <Linkify text={x.note} />
-            </div>
+            </CardText>
           ) : null}
-          <div className="card-meta">
+          <CardMeta>
             {x.date
               ? (() => {
                   const w = whenLabel(x.date);
@@ -411,8 +412,8 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
               Added by {x.added_by}
               {isDone && x.done_by ? " · done by " + x.done_by : ""}
             </span>
-          </div>
-          <div className="card-actions">
+          </CardMeta>
+          <CardActions>
             <ActionButton
               size="sm"
               label={isDone ? "Reopen" : "Mark done"}
@@ -439,10 +440,10 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
               Edit
             </Button>
             <DeleteButton path={"/stakes/" + x.id} noun="stake" />
-          </div>
+          </CardActions>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -533,22 +534,22 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
   const ed = useEditing();
   const d = parseDay(x.day);
   return (
-    <div className="card">
+    <Card>
       {ed.edit ? (
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
-          <div className="card-meta" style={{ marginTop: 0, marginBottom: 8 }}>
+          <CardMeta style={{ marginTop: 0, marginBottom: 8 }}>
             <span className="chip">
               <Avatar name={x.author} ctx={{ avatars, invite: api.invite, onAvatar: api.openAvatar }} />
               {x.author}
             </span>
             <span>{d ? d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : x.day}</span>
-          </div>
-          <div className="card-text">
+          </CardMeta>
+          <CardText>
             <Linkify text={x.text} />
-          </div>
-          <div className="card-actions">
+          </CardText>
+          <CardActions>
             <span className="spacer"></span>
             <Button
               type="button"
@@ -564,10 +565,10 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
               Edit
             </Button>
             <DeleteButton path={"/digests/" + x.id} noun="digest" />
-          </div>
+          </CardActions>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
