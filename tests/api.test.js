@@ -1527,6 +1527,60 @@ async function waitUp() {
     check('a quizmaster who runs out forfeits; the last round ends the game', tvG.status === 'finished' && tvG.rounds[2].forfeit === true && tvG.winner === Q0 && JSON.stringify(tvG.places) === JSON.stringify([Q0, Q1, Q2]) && tvG.players.find((p) => p.name === Q0).balance === 135, JSON.stringify(tvG).slice(0, 240));
     rtv = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Trivia result', (rtv.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trivia #' + tv.id + ' is over - ' + Q0 + ' wins with 135 points.') && x.text.includes('Best quizmaster: ' + Q0 + ' (split the table 1 time).')), JSON.stringify((rtv.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
+    // Sketch & Guess (2026-11-20, the owner's calls: image moves; the
+    // Referee is Claude). The artist's secret prompt, an image move checked
+    // by its bytes and served at a signed URL, sealed guesses, the plain
+    // match, the Referee's verdict (the test hook stands in for Claude), the
+    // fallback when the Referee can't be reached, and a forfeit.
+    let rsg = await req('POST', R2 + '/games', { token: TP, json: { game: 'sketch', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('sketch & guess needs 3 to 6 -> 400', rsg.status === 400 && /3 to 6/.test(rsg.json.error), rsg.status);
+    rsg = await req('POST', R2 + '/games', { token: TP, json: { game: 'pictionary', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rotations: 1 } });
+    const sg = rsg.json.game || {};
+    check('sketch & guess is created in a lobby (the pictionary alias works)', rsg.status === 201 && sg.type === 'sketch' && sg.status === 'lobby' && sg.rounds_total === 3 && sg.guess_seconds === 600 && sg.draw_seconds === 3600, rsg.status + ' ' + rsg.text.slice(0, 200));
+    for (const n of ['Rex', 'Rae']) await req('POST', R2 + '/games/' + sg.id + '/accept', { token: ldTok[n], json: {} });
+    const [A0sg, A1sg, A2sg] = sg.order || [];
+    const sgMove = (who, body) => req('POST', R2 + '/games/' + sg.id + '/moves', { token: ldTok[who], json: body });
+    const sgHook = (verdict) => req('POST', '/api/test-hooks/sketch-judge', { owner: true, json: { room: roomOf2, verdict } });
+    const pngUrl = 'data:image/png;base64,' + PNG.toString('base64');
+    rsg = await req('GET', R2 + '/games/' + sg.id, { token: ldTok[A0sg] });
+    const prompt1 = (rsg.json.game.you || {}).prompt || '';
+    check('the artist alone sees the prompt', rsg.json.game.status === 'running' && rsg.json.game.phase === 'draw' && rsg.json.game.artist === A0sg && prompt1.length > 3, rsg.text.slice(0, 200));
+    rsg = await req('GET', R2 + '/games/' + sg.id, { token: ldTok[A1sg] });
+    check('the prompt stays hidden from the guessers', rsg.json.game.you.prompt === undefined && !rsg.text.includes(prompt1), rsg.text.slice(0, 160));
+    rsg = await sgMove(A1sg, { guess: 'a cat' });
+    check('guessing before the drawing is up -> 409', rsg.status === 409, rsg.status);
+    rsg = await sgMove(A0sg, { dir: 'here it is' });
+    check('an artist move without an image -> 400', rsg.status === 400 && /data URL/.test(rsg.json.error), rsg.status + ' ' + rsg.text.slice(0, 120));
+    rsg = await sgMove(A0sg, { image: 'data:image/png;base64,AAAAAAAAAAAAAAAA' });
+    check('an image that is not a PNG, JPEG, GIF or WebP -> 400', rsg.status === 400 && /PNG, JPEG, GIF or WebP/.test(rsg.json.error), rsg.status + ' ' + rsg.text.slice(0, 120));
+    rsg = await sgMove(A0sg, { image: pngUrl });
+    const sgImg = (rsg.json.game || {}).image || {};
+    check('the drawing goes up and opens the guesses', rsg.status === 200 && rsg.json.game.phase === 'guess' && sgImg.type === 'image/png' && /\/games\/\d+\/sketch\/1\?exp=\d+&sig=/.test(sgImg.url || ''), rsg.status + ' ' + rsg.text.slice(0, 200));
+    let sgFetch = await fetch(BASE + sgImg.url);
+    let sgBytes = Buffer.from(await sgFetch.arrayBuffer());
+    check('the signed link serves the drawing', sgFetch.status === 200 && sgFetch.headers.get('content-type') === 'image/png' && sgBytes.equals(PNG), sgFetch.status + ' ' + sgFetch.headers.get('content-type'));
+    sgFetch = await fetch(BASE + sgImg.url.replace(/sig=[^&]+/, 'sig=nope'));
+    check('a forged signature -> 403', sgFetch.status === 403, sgFetch.status);
+    sgFetch = await fetch(BASE + R2 + '/games/' + sg.id + '/sketch/1');
+    check('no signature and no credential -> refused', sgFetch.status === 401 || sgFetch.status === 403, sgFetch.status);
+    await sgHook({ right: [A2sg], roast: '' });
+    rsg = await sgMove(A1sg, { guess: '  ' + prompt1.toUpperCase() + '!  ' });
+    check('a sealed guess', rsg.status === 200 && rsg.json.resolved === false && rsg.json.game.you.queued === prompt1.toUpperCase() + '!', rsg.status + ' ' + rsg.text.slice(0, 160));
+    rsg = await sgMove(A2sg, { guess: 'something close' });
+    let sgR = ((rsg.json.game || {}).rounds || [])[0] || {};
+    check('round 1: the plain match and the Referee\'s verdict both count', rsg.json.resolved === true && sgR.prompt === prompt1 && sgR.guesses[A1sg].right === true && sgR.guesses[A1sg].exact === true && sgR.guesses[A1sg].how === 'match' && sgR.guesses[A2sg].right === true && sgR.guesses[A2sg].how === 'referee' && sgR.points[A1sg] === 2 && sgR.points[A2sg] === 2 && sgR.points[A0sg] === 2 && sgR.judge === 'referee' && /\/sketch\/1\?/.test((sgR.image || {}).url || '') && rsg.json.game.artist === A1sg, JSON.stringify(sgR).slice(0, 300));
+    rsg = await sgMove(A1sg, { image: pngUrl });
+    await sgHook({ error: 'timeout' });
+    await sgMove(A0sg, { guess: 'nope' });
+    rsg = await sgMove(A2sg, { dir: 'nada' });
+    sgR = ((rsg.json.game || {}).rounds || [])[1] || {};
+    check('round 2: when the Referee can\'t be reached, the plain match stands, with a roast', rsg.json.resolved === true && sgR.right.length === 0 && sgR.judge === 'match' && sgR.judge_note === 'timeout' && sgR.points[A1sg] === 0 && (sgR.roast || '').includes(sgR.prompt), JSON.stringify(sgR).slice(0, 300));
+    await ttExpire(sg.id);
+    rsg = await req('GET', R2 + '/games/' + sg.id, { token: TP });
+    const sgG = rsg.json.game || {};
+    check('an artist who runs out forfeits (the prompt revealed); the last round ends the game', sgG.status === 'finished' && sgG.rounds[2].forfeit === true && sgG.rounds[2].prompt && sgG.winner === A1sg && sgG.places[0] === A1sg, JSON.stringify(sgG).slice(0, 260));
+    rsg = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    check('the Referee posts the Sketch & Guess result', (rsg.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Sketch & Guess #' + sg.id + ' is over - ' + A1sg + ' wins with 2 points.')), JSON.stringify((rsg.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
     // Reserved name (2026-11-12): "Referee" is the games' official -

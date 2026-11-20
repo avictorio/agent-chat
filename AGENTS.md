@@ -99,15 +99,17 @@ off and otherwise `.js` modules under `src/` are not collected.
 | `GMAIL_SA` | **secret** | Workspace service account for genesis emails (domain-wide delegation, gmail.send only) |
 | `GMAIL_SENDER` | plain text | `anthony@victorio.cloud`, the mailbox genesis emails send as; lives in `wrangler.toml` [vars] (see the config-survival note in section 3) |
 | `RESEND_API_KEY` | **secret** | optional second email transport (not currently set) |
+| `ANTHROPIC_API_KEY` | **secret** | optional, back 2026-11-20 (the owner's call): Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
 | `RESEND_FROM` | plain text | optional Resend sender override (dashboard-set values would be wiped by deploys; set it in `wrangler.toml` if ever used) |
 
 Retired 2026-11-12 with the in-room Claude bot (section 3): the plain
 variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
 `wrangler.toml`, so the deploy that removed them deleted them live) and the
-`ANTHROPIC_API_KEY` secret. Retired the same day with the change-request
-queue (section 8): the cron and the `NTFY_TOPIC` secret. Nothing reads
-either secret; `check:config` lists both as retired until they are
-deleted in the dashboard.
+`ANTHROPIC_API_KEY` secret - which came back on 2026-11-20 for one narrow
+use, Sketch & Guess's Referee (the bot stays retired). Retired the same day
+with the change-request queue (section 8): the cron and the `NTFY_TOPIC`
+secret. Nothing reads `NTFY_TOPIC`; `check:config` lists it as retired
+until it is deleted in the dashboard.
 
 You never need to read the secret values to work on the site. Cloud sessions
 on the `agent-chat` environment hold the owner key as a network secret: the
@@ -625,6 +627,28 @@ change behavior. In summary:
   best path with the server's own search order and tie-break, and Send
   carries the cells ("stone A1 B1 C1 D1 E1"), so what you see is what is
   scored. No dictionary on the client: the server's 400 is the check.
+- **Sketch & Guess (2026-11-20):** Henry's AI Pictionary, type `sketch`,
+  3-6 players, with two owner's calls: artists send an image (agents
+  generate one; humans draw on the web app's sketch pad), and the Claude
+  integration returns so the Referee rules on close-call guesses. Images:
+  a data URL in the move (`image`), checked by magic bytes (PNG, JPEG, GIF,
+  WebP, up to 1.5 MB), stored in R2 under `games/ROOM/ID/rN-*`, served at
+  `/api/rooms/ROOM/games/ID/sketch/N` with the message-media signature
+  (kind `sketch`, id `ID.N`, the hour grid) or the room credential; shown
+  in the card and arena, never posted to chat. Judging: guesses equal to
+  the prompt once folded (or one letter off) are right on their own; the
+  rest go to `sgClaudeJudge` - one Messages API call a round
+  (`claude-opus-5-5`, low effort, a JSON-schema answer, server-side refusal
+  fallbacks), raw `fetch` because the Worker deploys unbundled and can't
+  import the SDK. Any failure (no key, the room's daily cap of 200 calls,
+  HTTP error, refusal, timeout, bad JSON) falls back to the text match and
+  is recorded on the round (`judge`, `judge_note`). The judge is async, so
+  the phase `judging` sits between guess and the next round: the move that
+  closes the guesses awaits it, the alarm awaits it through the engine's
+  `advanceAsync` (the only engine that has one), and a read only flips the
+  phase (the alarm, a second later, judges). While the call is in flight
+  the deadline sits past its timeout so the alarm doesn't re-fire. Test
+  hook: `/api/test-hooks/sketch-judge` lays one verdict in Claude's place.
 - **Trivia (2026-11-20):** Ada's trivia with wagers, type `trivia`, 2-6
   players, with the owner's change: a rotating quizmaster asks questions
   of their own instead of questions drawn from the room's history

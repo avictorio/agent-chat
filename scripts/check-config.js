@@ -28,12 +28,15 @@ const REQUIRED_SECRETS = [
   "OWNER_KEY",
 ];
 // Optional secrets: fine either way, reported for visibility.
-const OPTIONAL_SECRETS = ["RESEND_API_KEY"];
+// ANTHROPIC_API_KEY came back 2026-11-20 (the owner's call) for Sketch &
+// Guess's Referee, which asks Claude about close-call guesses; without it
+// the game falls back to plain text matching.
+const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY"];
 // Retired secrets: nothing reads them any more. Still listed live means
 // the dashboard Secret should be deleted (and the credential revoked at
-// its issuer). Both retired 2026-11-12: ANTHROPIC_API_KEY fed the in-room
-// bot, NTFY_TOPIC the change-request queue's phone alerts.
-const RETIRED_SECRETS = ["ANTHROPIC_API_KEY", "NTFY_TOPIC"];
+// its issuer). Retired 2026-11-12: NTFY_TOPIC, the change-request queue's
+// phone alerts.
+const RETIRED_SECRETS = ["NTFY_TOPIC"];
 // Optional plain variables that may live only in wrangler.toml when used;
 // a live value with no file entry is still drift for these (the deploy
 // would delete it), they are listed so the fix is a file entry, not a

@@ -1,0 +1,136 @@
+# Sketch & Guess prompt deck (2026-11-20). Content as data: one prompt a
+# line; a match draws without repeats. Short, drawable phrases - a thing,
+# a scene or a small story - plus a few from the room's own lore (Henry's
+# spec). Lines starting with # are notes.
+Hank's fleet, slightly used
+the anaconda's helmet, never worn
+an aviator pup in a leather cap
+a lighthouse in a storm
+a cat stuck in a tree
+a snowman melting in the sun
+a pirate ship in a bottle
+a robot walking a dog
+a dragon guarding a pile of gold
+a bicycle built for two
+a volcano erupting
+a castle on a cloud
+an astronaut on the moon
+a penguin on an iceberg
+a haunted house
+a hot air balloon
+a whale jumping out of the sea
+a cactus wearing sunglasses
+a spider web with dew drops
+a treasure map
+a campfire under the stars
+a rainbow over a waterfall
+a knight fighting a windmill
+a cup of coffee with steam
+a submarine near a giant squid
+a birthday cake with candles
+a magician pulling a rabbit from a hat
+a traffic jam
+a tiny house on a giant mushroom
+an octopus playing drums
+a mermaid on a rock
+a train going through a tunnel
+a jellyfish glowing in the dark
+a scarecrow in a corn field
+a ghost riding a skateboard
+a bee visiting a sunflower
+a sandcastle with a moat
+a wizard reading a spell book
+a hamster on a wheel
+a parachute landing in a field
+a giraffe wearing a scarf
+a sinking ship
+a bowl of noodles with chopsticks
+a dinosaur in a museum
+a soccer goal at the last second
+a frog on a lily pad
+a crown on a pillow
+a polar bear eating ice cream
+an alien abduction of a cow
+a broken umbrella in the wind
+a knight on a horse
+a ladder to the moon
+a fish in a bowl watching TV
+a chef flipping a pancake
+a lost sock in the dryer
+a tornado picking up a house
+a cowboy riding a cactus
+a mouse stealing cheese from a trap
+a skier going off a jump
+a bird building a nest
+a sunflower field at sunset
+a time machine
+a queen on a chessboard
+a shark in a swimming pool
+a sleepy owl on a branch
+a kite stuck in power lines
+a camel in a sandstorm
+a lion with a toothache
+a hedgehog holding a balloon
+a dentist chair
+a message in a bottle
+a ferris wheel at night
+a cowboy hat on a horse
+a garden gnome on vacation
+a snail winning a race
+a teapot pouring tea
+a window washer on a skyscraper
+a monkey eating a banana in a hammock
+a robot watering plants
+a deep sea diver finding a chest
+a carousel horse
+a lumberjack and a tall tree
+a hammer and a nail
+a goldfish jumping between bowls
+a beehive dripping honey
+a pair of roller skates
+a starfish on the beach
+a vampire at the dentist
+a kangaroo with a full pouch
+a light bulb with an idea
+a clock melting off a table
+a paper airplane
+a lighthouse keeper with a lantern
+a skateboarding turtle
+an ant carrying a leaf
+a duck in a bathtub
+a hiker on a mountain top
+a fox in the snow
+a bus full of cats
+a whale in a raincoat
+a city skyline at night
+a picnic with ants
+an elephant on a tightrope
+a submarine sandwich
+a pumpkin carriage
+a squirrel hiding acorns
+a library with a secret door
+a cat knocking a glass off a table
+a horse jumping a fence
+a burning toast in a toaster
+a moon wearing a nightcap
+a hand of playing cards
+a mountain goat on a cliff
+a violin player on a rooftop
+a bridge over a river
+a cloud raining on one person
+a dragon breathing on a marshmallow
+a tent in the woods
+a bear catching a salmon
+a parrot on a pirate's shoulder
+a waterfall into a cave
+a crab with a pinch
+a rocket leaving earth
+a ship's anchor
+a mailbox full of letters
+a sloth hanging from a branch
+a ladder on a fire truck
+a balloon floating away
+a snow globe
+a desert island with one tree
+a baker taking bread out of an oven
+a fisherman catching a boot
