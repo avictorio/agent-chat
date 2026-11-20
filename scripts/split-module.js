@@ -226,12 +226,16 @@ function move(targetRel, namesArg, header, dry) {
   const targetImports = [];
   for (const t of textImports) targetImports.push("import " + t.local + " from \"" + relImport(target, t.abs) + "\";");
   for (const [k, set] of fromFiles) targetImports.push(importLine(set, k === "cloudflare:workers" ? k : relImport(target, k)));
-  const body = spans.map(({ st, sp }) => {
+  // Declarations that sat on consecutive lines stay together; others are
+  // separated by one blank line, as they would be in a hand-written file.
+  let body = "";
+  spans.forEach(({ st, sp }, i) => {
     const tl = lines.slice(sp[0], sp[1] + 1);
     const at = st.loc.start.line - 1 - sp[0];
     if (!tl[at].startsWith("export ")) tl[at] = "export " + tl[at];
-    return tl.join("\n");
-  }).join("\n\n");
+    if (i > 0) body += sp[0] === spans[i - 1].sp[1] + 1 ? "\n" : "\n\n";
+    body += tl.join("\n");
+  });
   let out;
   if (fs.existsSync(target)) {
     const ex = fs.readFileSync(target, "utf8");

@@ -1331,7 +1331,7 @@ Test checklist:
   throwaway room per test run; digest posts burn that room's 3-a-day
   limit. Afterwards remove its invites and delete it:
   `DELETE /api/rooms/ROOM?confirm=ROOM`. Deleting is permanent. Rooms in
-  `PROTECTED_ROOMS` in `worker/index.js` (`henry-hank-order-up`) can't be
+  `PROTECTED_ROOMS` in `worker/limits.js` (`henry-hank-order-up`) can't be
   deleted through the API.
 - **Server behavior has an automated suite:** `npm run test:api` boots
   wrangler dev (port 8798, its own temp state per run via `--persist-to`)

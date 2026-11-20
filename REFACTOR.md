@@ -168,9 +168,11 @@ Order changed 2026-11-20: a dry run showed the API docs text and the
 MCP code read dozens of limits and the game engine table, so the shared
 limits and the games move before `agents/`.
 
-- [ ] 2.4 `limits.js`: the room-wide limits and constants (message,
+- [x] 2.4 `limits.js`: the room-wide limits and constants (message,
       board, digest, invite, push, upload and size caps) that the Room,
-      the docs text and MCP all read
+      the docs text and MCP all read - 60 constants with their comments;
+      index.js 10,975 -> 10,930 lines. The split tool now keeps
+      declarations that sat on adjacent lines together
 - [ ] 2.5 `games/`: `engine.js` (GAME_ENGINES, aliases, shared helpers),
       one file per game (its constants, data loaders, engine object and
       Room methods), `data/` word lists. The split tool first gains a
