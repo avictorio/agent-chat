@@ -7,9 +7,11 @@
 //   npm run test:api
 //
 // Uses port 8798 and a throwaway .dev.vars (backed up and restored).
-// Hermetic: room names, emails and client IPs are unique per run - the
-// create-room caps count attempts in the persistent local KV, so reusing
-// identities makes the suite fail on its own leftovers.
+// Hermetic: each run gets its own local state directory (wrangler dev
+// --persist-to, removed afterwards). The create-room caps count in KV,
+// and one of them is room-wide (30 a day): with the shared .wrangler
+// state, the sixth same-day run failed its create checks as 429s. Room
+// names, emails and client IPs stay unique per run as well.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -24,6 +26,7 @@ const SUF = Date.now().toString(36);
 // their daily budget after a few same-day runs and fail as 429s.
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
+const STATE_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'apitest-state-'));
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -65,7 +68,7 @@ async function waitUp() {
   const hadVars = fs.existsSync(DEV_VARS);
   const backup = hadVars ? fs.readFileSync(DEV_VARS) : null;
   fs.writeFileSync(DEV_VARS, 'OWNER_KEY=' + OWNER + '\nRESEND_API_KEY=re_fake_for_tests\nTEST_HOOKS=1\n');
-  const child = spawn('npx', ['wrangler', 'dev', '--port', String(PORT)], { cwd: ROOT, detached: true, stdio: 'ignore' });
+  const child = spawn('npx', ['wrangler', 'dev', '--port', String(PORT), '--persist-to', STATE_DIR], { cwd: ROOT, detached: true, stdio: 'ignore' });
   try {
     check('wrangler dev comes up', await waitUp());
     const R = '/api/rooms/apitest-main-' + SUF;
@@ -948,10 +951,22 @@ async function waitUp() {
 
     // Frontlines (2026-11-19): 100 troops over 5 hills, secret splits,
     // hill by hill to the bigger army, the round to more hills held.
-    // Earlier sections leave live matches behind, and awaiting_you is
-    // capped: clear them so this section's nudge check sees its own match.
-    r = await req('GET', R2 + '/games', { owner: true });
-    for (const gl of (r.json.games || []).filter((x) => x.status === 'lobby' || x.status === 'running')) await req('POST', R2 + '/games/' + gl.id + '/cancel', { owner: true, json: {} });
+    // Earlier sections leave live matches behind, and awaiting_you shows
+    // at most 3 items: clear them so a nudge check sees its own match.
+    // The two abandoned Battleship tables stay - the late checks wait on
+    // them - so a player can still owe up to 2 turns there. A cancel
+    // needs a from even for the owner (without one it's a 400, which
+    // left this sweep doing nothing and the column check flaky).
+    const clearLive = async (label) => {
+      const gl = await req('GET', R2 + '/games', { owner: true });
+      const bad = [];
+      for (const x of (gl.json.games || []).filter((y) => (y.status === 'lobby' || y.status === 'running') && y.id !== bsAbandon && y.id !== bsFfaAbandon)) {
+        const c = await req('POST', R2 + '/games/' + x.id + '/cancel', { owner: true, json: { from: 'Owner' } });
+        if (c.status !== 200) bad.push(x.id + ':' + c.status);
+      }
+      check(label + ': leftover matches cancelled', bad.length === 0, bad.join(' '));
+    };
+    await clearLive('before frontlines');
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'frontlines', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
     check('frontlines needs exactly 2 -> 400', r.status === 400, r.status);
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'frontlines', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
@@ -1087,6 +1102,7 @@ async function waitUp() {
     const mcpHowGame = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
     check('MCP get_game carries how_to_play', !!mcpHowGame && /rock-paper-scissors/.test(mcpHowGame.how_to_play || ''), JSON.stringify(r.json).slice(0, 200));
     for (const id of extra) await req('POST', R2 + '/games/' + id + '/cancel', { token: TP, json: {} });
+    await clearLive('before four in a row');
 
     // Four in a Row (2026-11-19): turns on the turn-order helper, a 7x6
     // board, four in a line wins; who moves first is drawn at creation.
@@ -1101,7 +1117,7 @@ async function waitUp() {
     check('four in a row starts with the first mover to play', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === F, JSON.stringify(r.json.game).slice(0, 160));
     check('how_to_play: four in a row names who moves first', /moves first and plays X/.test(r.json.game.how_to_play || '') && /1 to 7 from the left/.test(r.json.game.how_to_play || ''), String(r.json.game.how_to_play).slice(0, 160));
     r = await req('GET', R2 + '/messages?limit=5', { token: tokOf[F] });
-    check('room_state asks the first mover for a column', ((r.json.room_state || {}).awaiting_you || []).some((a) => a.type === 'game' && a.id === c4.id && /column/.test(a.call.body.dir)), JSON.stringify(((r.json.room_state || {}).awaiting_you || []).map((a) => a.id + ':' + ((a.call || {}).body || {}).dir)));
+    check('room_state asks the first mover for a column', ((r.json.room_state || {}).awaiting_you || []).some((a) => a.type === 'game' && a.id === c4.id && /column/.test(a.call.body.dir)), JSON.stringify(((r.json.room_state || {}).awaiting_you || []).map((a) => a.id + ':' + ((a.call || {}).body || {}).dir)) + ' more ' + (r.json.room_state || {}).awaiting_you_more);
     r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[S], json: { dir: '4' } });
     check('moving out of turn -> 409', r.status === 409 && new RegExp("It's " + F + "'s turn").test(r.json.error), r.status + ' ' + r.text.slice(0, 120));
     r = await req('POST', R2 + '/games/' + c4.id + '/moves', { token: tokOf[F], json: { dir: '8' } });
@@ -2002,6 +2018,7 @@ async function waitUp() {
   } finally {
     try { process.kill(-child.pid, 'SIGKILL'); } catch (e) {}
     if (backup) fs.writeFileSync(DEV_VARS, backup); else try { fs.unlinkSync(DEV_VARS); } catch (e) {}
+    try { fs.rmSync(STATE_DIR, { recursive: true, force: true }); } catch (e) {}
   }
   console.log(failures ? 'API SUITE: ' + failures + ' failure(s)' : 'API SUITE: all checks passed');
   process.exit(failures ? 1 : 0);
