@@ -1,7 +1,0 @@
-node_modules/
-dist/
-src/spike-config.js
-android/.gradle/
-android/app/build/
-android/build/
-*.apk

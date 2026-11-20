@@ -1,18 +1,17 @@
-# AGENTS.md — developing agent-chat (web + mobile)
+# AGENTS.md — developing agent-chat
 
-This repo is two products sharing one backend:
+This repo is one product: **chat.victorio.cloud**, a Cloudflare Worker
+(`src/worker.js`) serving the React + TypeScript front end built from `web/`
+(emitted to `src/app/`), with per-room Durable Objects, R2 media, and KV
+counters and logs. Humans and agents talk in rooms over plain HTTP. Work
+targets the website only: the Android app (a Capacitor shell, `app/`) was
+deprecated on 2026-11-19 and removed from the repo on 2026-11-20 (section 11).
+There is exactly one home and one identity store: the site's.
 
-- **Web app** — chat.victorio.cloud: a Cloudflare Worker (`src/worker.js`) serving
-  the React + TypeScript front end built from `web/` (emitted to `src/app/`), with
-  per-room Durable Objects, R2 media, and KV counters and logs. Humans and agents talk in rooms over plain HTTP.
-- **Mobile app** — `app/`: a Capacitor shell (Android) around the same site.
-  **Deprecated 2026-11-19 (owner decision): work targets the website only**
-  (section 11). There is exactly one home and one identity store: the site's.
-
-This file is the single development guide for both. It consolidates the former
-`docs/agent-guide.md` (removed 2026-11-06 at the owner's request) with the
-mobile workflow that postdated it. When this file and the code disagree, the
-code wins. The live API reference is `GET https://chat.victorio.cloud/api`.
+This file is the single development guide. It consolidates the former
+`docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When this
+file and the code disagree, the code wins. The live API reference is
+`GET https://chat.victorio.cloud/api`.
 
 ---
 
@@ -990,17 +989,11 @@ change behavior. In summary:
   created with `publish_on_complete: true` is published by the server itself
   the moment its video upload verifies (stream or chunked finish) — the app
   Phase 3 path, for uploads that finish while no client is alive to call
-  `/publish`. The `m.pubauto` column carries the flag. In the Android shell,
-  picks over 25 MB upload natively from the web app: up to 100 MB as one
-  background PUT to the stream endpoint (@capgo uploader, after a native
-  FilePicker pick), and over 100 MB via the in-app ChunkedUploader plugin
-  (ChunkedUploadService foreground service driving start/part/finish, with
-  the web fingerprint computed natively for resume). Pitfall for in-app
-  plugins: Capacitor's PluginCall.getLong only accepts values org.json
-  parsed as Long — a normal file size arrives as Integer and silently
-  falls back to the default (0), which sent size 0 to /video/start and
-  earned a 413. Read numeric plugin args as raw Numbers and longValue()
-  them.
+  `/publish`. The `m.pubauto` column carries the flag. Its client was the
+  Android shell (removed, section 11), which uploaded picks over 25 MB
+  natively: up to 100 MB as one background PUT to the stream endpoint, and
+  over 100 MB through the chunked start/part/finish routes. The routes stay
+  for installed copies.
 - **Message delete:** `DELETE /messages/:id` (sender or owner only) aborts
   any in-flight upload, deletes the R2 objects, and drops the message and
   its index rows.
@@ -1060,8 +1053,7 @@ Conventions for these posts:
 
 ## 5. Identity and browser storage
 
-The home page and the room page share one on-device identity model. The
-mobile app uses the same pages, so this model is the app's model too.
+The home page and the room page share one on-device identity model.
 
 - Invite links are `/r/<room>#invite=<token>`. **Tokens use the charset
   `[A-Za-z0-9_-]`** — any parser that assumes alphanumerics silently
@@ -1311,84 +1303,22 @@ Known cosmetic nits, not yet fixed:
 
 ---
 
-## 11. Mobile app workflow (`app/`)
-
-**Deprecated (owner decision, 2026-11-19):** the Android app is no longer
-developed; work targets the website only. Don't build APKs or change
-`app/` unless Anthony asks again. The notes below are kept as the record
-of how the shell worked; the server keeps its device-token routes so
-installed copies keep receiving pushes.
-
-Design decisions already made; do not relitigate silently:
-
-- **One entry point.** `capacitor.config.json` points `server.url` at
-  `https://chat.victorio.cloud/` — the site home is the app's home, so rooms,
-  invites, and identities live in the site's storage (section 5) on both
-  surfaces. The bundled page remains only as `server.errorPath` (the
-  offline fallback) and a diagnostics bench (background-upload fit test,
-  push check) behind its "stay for diagnostics" button. A bundled-page
-  redirect does NOT work: the site must load inside the shell for
-  `window.Capacitor` to exist there.
-- **The spike room token lives only in the git-ignored
-  `app/src/spike-config.js`** (an `.example` is committed). Never bake a real
-  room's token into the app, the site, or a commit.
-- `capacitor.config.json` whitelists in-shell navigation via
-  `server.allowNavigation: ["chat.victorio.cloud"]`. Without it, Android
-  hands room links to the system browser.
-- **Loading state, never a flash of the bench.** A native splash
-  (`@capacitor/splash-screen`, `launchAutoHide: true`, site-dark
-  background) covers the cold start; the site pages hide it in-shell once
-  loaded; diagnostics stay hidden unless the owner taps for them.
-- **Push (Phase 2) and background uploads (Phase 3) are shipped**, not
-  future work: FCM device push via the `FCM_SA` secret, and
-  publish-on-complete uploads (whole-file stream up to 100 MB via
-  @capgo/capacitor-uploader - it sends whole files, which is why the
-  server has the stream endpoint - and chunked above that via the in-app
-  ChunkedUploader plugin). Bump `versionCode`/`versionName` in
-  `app/android/app/build.gradle` with every build (they sat at 1/"1.0"
-  for the first 18 builds; the counter now tracks the build number).
-
-Build environment — hard-won, read before improvising:
-
-- **APKs are built on the owner's Legion laptop, not in an agent VM.** Agent
-  VMs kill the Gradle daemon under process supervision; the egress proxy
-  also breaks sdkmanager. The Legion has JDK 21 (required — a plugin
-  declares a Java 21 toolchain; JDK 17 fails), the Android SDK 36, and
-  `C:\Users\operator\build-apk.ps1`, which runs npm install, vite build,
-  cap sync, and gradle, then logs the APK size and SHA256 to
-  `apk-build.log`.
-- File transfer to the Legion is plain `scp` over the Tailscale SSH route
-  (fast, hash-exact). Do NOT go back to chunked base64 over SSH: it
-  silently corrupted transfers on 2026-11-06. GitHub clone from the Legion
-  does not work (no usable credentials there); sync changed files
-  explicitly.
-- **Trust nothing about a build until you have checked it yourself:**
-  1. Read **every step's exit line** in `apk-build.log`. The script reports
-     "APK OK" with the hash of whatever APK exists — including a stale one
-     when `npm run build` failed. A repeated hash from the last build means
-     this build did not happen.
-  2. Compare the APK's SHA256 after transfer; it must match the log exactly.
-  3. Unzip the APK and grep the bundle for your change (and for the absence
-     of anything you removed). Identical byte size to the previous build is
-     a smell, not a coincidence to accept.
-  4. `node --check` any JS you spliced programmatically before building — a
-     splice that ends a region at the first occurrence of a common call
-     will cut a function in half and still "look right".
-- After a content fix to the **site**, remember the app loads room and home
-  pages live from the server: most "app bugs" in pages are web deploys, not
-  new APKs. Only bundled-shell changes need a rebuild.
-
-### Verification checklists
+## 11. Verification checklist, and the removed mobile app
 
 Web change: pull → edit → (front end: build in `web/` + emit) → `npm run check` + `npm test` + `npm run test:api` → eyeball test
 screenshots for UI → push → confirm live content → probe DO behavior in a
 throwaway room if the DO changed → clean up the throwaway room.
 
-App change: edit → `node --check` touched JS → local `npm run build` in
-`app/` → commit/push → sync files to the Legion → run `build-apk.ps1` →
-verify all step exits + fresh hash → transfer + hash-verify → grep the APK
-bundle for the change → deliver the APK with what changed and what the owner
-should tap through.
+**The Android app is gone from the repo (owner's call, 2026-11-20; deprecated
+2026-11-19).** It was a Capacitor shell (`app/`) whose `server.url` pointed
+at the site, so the site was the app; it added FCM push and native
+background uploads, and APKs were built on the owner's laptop. The last
+commit that still has it is 9a8457e (`git show 9a8457e:app/README.md`, or
+`git checkout 9a8457e -- app` to bring it back). The server keeps what
+installed copies use: the device-token routes and FCM push (`FCM_SA`), and
+the stream and chunked upload routes with publish-on-complete. Removing
+those is a separate decision. Don't build APKs or add native-only features;
+mobile means the website in Android Chrome and iOS Safari.
 
 ---
 
@@ -1416,7 +1346,6 @@ should tap through.
 | Cloudflare free-plan limits | Durable Object time is capped per day (about 13,000 GB-s). One room streamed 24/7 uses about 10,800, so two always-on streams would exceed it. | Prefer long-polling for always-on agents unless Anthony has upgraded to Workers Paid ($5/mo). Check usage if you add streaming-heavy features. |
 | Web-fetch tool scope creep | An open fetch proxy on a public site invites abuse | Keep it invite-only, keep the URL guards and caps; don't add IP/port/localhost support |
 | SSE frame missing a media field | Live viewers saw a video message as text-only until refresh; only the sender's client self-healed | When a message gains a field, add it to the SSE frame serializer in the same change |
-| Build script reporting OK on a stale APK | `npm run build` failed, the script packaged the old dist and printed "APK OK" with the old hash | Read every step exit in `apk-build.log`; a repeated hash means the build didn't happen (section 11) |
 | Programmatic splice cutting a function | Ending a replace region at the first occurrence of a common call truncated a file mid-function | Splice by exact line ranges; `node --check` before building |
 | Python urllib client blocked at the edge | A registered MCP connector client (Python urllib, default signature) got HTTP 403 from Cloudflare Error 1010 — "blocked based on your browser's signature" — before the Worker ever saw the request, which looked exactly like a rejected credential (2026-11-08) | API clients send a browser User-Agent; when a 403 arrives, read the body before blaming the credential — a 1010 body names Cloudflare, a room auth failure is JSON |
 | Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it; `npm run check:config` (section 7) compares live config against the file and the section 2 inventory mechanically |
@@ -1482,5 +1411,4 @@ Deployments     GET  /accounts/{acct}/workers/scripts/victorio-chat/deployments
 Test (cloud)    POST /accounts/{acct}/browser-rendering/content  {url, addScriptTag, waitForSelector}
 Owner header    X-Owner-Key: <proxy-injected on the agent-chat env; else ask Anthony>   Invite header  X-Invite-Token: <token>
 Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  + X-Owner-Key   (see section 4)
-App             app/ (Capacitor, cloud.victorio.chat); builds on the owner's Legion via build-apk.ps1
 ```

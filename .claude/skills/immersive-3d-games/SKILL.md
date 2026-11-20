@@ -28,7 +28,8 @@ treat them as the first guess of an on-device tuning pass.
 
 Read `AGENTS.md` before changing anything. The rules that bite hardest here:
 
-- **Target the website only.** The Android app is deprecated. Mobile web
+- **Target the website only.** The Android app is deprecated and its code
+  removed from the repo (2026-11-20). Mobile web
   means Android Chrome and iOS Safari. Skip anything that needs a native
   plugin or an APK.
 - Pull `main` first (other sessions push); pushing to `main` deploys.
