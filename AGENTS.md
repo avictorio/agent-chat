@@ -564,6 +564,21 @@ change behavior. In summary:
   turn is a silent beat (`beats`), two in a row leave the rotation
   (`active`); the honours can be shared (`honours`, then `winner` null
   and `draw`). Turn clock default 24 h, per the spec.
+- **Werewolf (2026-11-20):** SHA's spec, type `werewolf`, 5-9 players.
+  Secrecy is the whole game, and two channels leak if you are careless:
+  a game frame names its actor, and `targets` (from the public summary)
+  name who is awaited. So night moves and den talk save WITHOUT a frame,
+  `targets` is empty at night, and role holders are nudged only through
+  `stateItem` (rendered into each member's own `awaiting_you`, never
+  shown to anyone else). Roles, night picks (`acts`) and seer `checks`
+  appear only in the owner's `you`; the dead's roles and every dawn and
+  vote (`events`) are public; everything opens at the end. The day's
+  discussion lives in the game (`talk`, the owner's call, Nov 19), not
+  room chat: `say: TEXT` (town, living players, by day), `den: TEXT` (the
+  pack only; `say:` at night goes there too). A day closes early once
+  every living player has voted (the spec waits for the clock). Team
+  wins: the summary carries `winners` (`winner` stays null) and the
+  record counts a W for everyone on the side (live and archived rows).
 - **Twenty Questions (2026-11-20):** SHA's spec, type `twenty`, on the
   rotating role. Deviations from the spec, on purpose: the answerer
   rotates in seat order (the spec's "winner answers next" never ends);
