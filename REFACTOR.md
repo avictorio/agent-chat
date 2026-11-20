@@ -303,7 +303,9 @@ limits and the games move before `agents/`.
       (the host and arenas, still interleaved) and `new-game.css`.
       `styles.css` is now only the ordered `@import` list, which is the
       cascade. The production build is byte-identical (same CSS asset)
-- [ ] Screenshots at desktop and phone widths for each visible change
+- [x] Screenshots at desktop and phone widths for each visible change:
+      phase 3 made none (3.1, 3.2 and 3.4 built byte-identical output; 3.3
+      was checked with the UI suite's screenshots against run-to-run noise)
 
 ## Phase 4: contract and guard rails
 
@@ -374,3 +376,7 @@ limits and the games move before `agents/`.
 | 2026-11-20 | 2.9: comments | b40f07b | API suite green (631); version c5f0a87a. Live, read only: the 2.7 set again (pages, docs, a real room's reads, a match's full state, MCP `tools/list`, signed and ranged media). |
 | 2026-11-20 | 3.2: `app/`, `features/`, `lib/` | f66535e | Build byte-identical to 3.1's (all 25 output files), so the UI suite's 155/155 on that build stands; version e0e88e44. Live: stamps match `/api/build`, all 23 assets 200. |
 | 2026-11-20 | 3.4: CSS split | f7832cf | Build byte-identical (the CSS asset index-Caj7RHum.css included); version fac64a72. Live: the same CSS asset and all 23 assets 200. |
+| 2026-11-20 | 3.3a: Button, Dialog, NavTab, Count | 1f57cbd | UI suite 155/155; screenshot diff against two runs of the old build: every flag was clock drift (message times, game clocks) or 3D animation, and the shots the components appear in (board actions, members, dialogs, home) were clean. Version 23d87d7a, build 742791950ab7695d; all 23 live assets byte-identical to the tested build. |
+| 2026-11-20 | 3.3b: Page, PageHead, Card | 786cc10 | UI suite 154/155 - game-card timed out on a 4 s wait under load, then passed 3/3 alone (it touches nothing 3.3b changed); screenshots: relative times and an animated GIF avatar only. Version aa9eb2ba, build 350dcff4e53f5e26; 23/23 live assets identical. |
+| 2026-11-20 | 3.3c: Pill | 7646831 | UI suite 155/155; the board's pills unchanged in the screenshots. Version 9db62aba, build 4bbb8aad795abb7c; 23/23 live assets identical. |
+| 2026-11-20 | 4.4: wrangler pinned | 309c293 | The owner approved the build-command change (the auto-mode check had blocked it): the Workers Builds trigger now runs `npm ci && npm ci --prefix web && npm run build --prefix web`. The build log shows the root install and `wrangler 4.166.0`; version 66dc97ee. Live: all routes 200/206, build unchanged. |
