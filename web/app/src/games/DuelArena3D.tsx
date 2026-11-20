@@ -120,7 +120,6 @@ function bright(hex: string, k: number): Color {
   return new Color(hex).multiplyScalar(k);
 }
 
-const BEATS: Record<string, string> = { rock: "scissors", paper: "rock", scissors: "paper" };
 const VERB: Record<string, string> = { rock: "crushes", paper: "covers", scissors: "cut" };
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -717,7 +716,6 @@ function Record({ rounds, sides, phone }: { rounds: any[]; sides: Side[]; phone:
 /* ---------- the reveal ---------- */
 
 type Item = { idx: number; round: any; mode: Mode; final: { winner: string } | null; skip?: boolean };
-type Mark = "flip" | "contact" | "verdict" | "ko";
 
 function Reveal({
   item,
@@ -1229,7 +1227,7 @@ export default function DuelArena3D({
   const [queue, setQueue] = useState<Item[]>(init.queue);
   const [shown, setShown] = useState(init.shown);
   const [endShown, setEndShown] = useState(init.end);
-  const [catchup, setCatchup] = useState(init.catchup);
+  const [catchup] = useState(init.catchup);
   const [go, setGo] = useState(false);
   const current = go ? queue[0] || null : null;
 

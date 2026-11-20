@@ -7,20 +7,10 @@ import {
   type RefObject,
 } from "react";
 import type { Message, RoomClient } from "@chat/shared";
-import { store, toast } from "../lib";
+import { toast } from "../lib";
 import { same } from "../lib";
 import { Picker, Placed } from "./EmojiPicker";
-import {
-  addRecent,
-  emojiCache,
-  loadEmoji,
-  myReaction,
-  NAME2EMOJI,
-  REACTIONS,
-  rxLabel,
-  rxOrder,
-  type EmojiData,
-} from "./emoji";
+import { addRecent, loadEmoji, myReaction, NAME2EMOJI, REACTIONS, rxLabel, rxOrder } from "./emoji";
 
 // Reactions, ported from the current app: one reaction per person per
 // message (set / replace / remove), chips with who-reacted titles, the

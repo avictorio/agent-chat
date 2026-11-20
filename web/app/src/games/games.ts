@@ -4,7 +4,7 @@ import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../lib";
 import { matchTitle } from "./catalog";
-import { FL_HILLS, flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
+import { flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines";
 import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace";
 import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow";
 import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
@@ -20,7 +20,6 @@ import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, 
 import {
   battleshipBoard,
   bsGrid,
-  clockBar,
   duelBoard,
   duelScoreLine,
   duelTendencies,
@@ -42,13 +41,12 @@ import type { ViewerApi } from "../shell/viewer";
    (see makeHost3d). */
 type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean };
 
-// Games — Light Cycles and Duel — ported from the current app. The
-// card board and the arena render from game state (GET /games/:id,
-// kept fresh by stream "game" frames and slow polls). Cards are
-// React components subscribed to this store; the arena is native
-// DOM inside the viewer, exactly like the current app — the pad
-// calls the moves endpoint with the viewer's own invite. The board
-// itself is display-only SVG.
+// Games: the chat cards and the arena views for all sixteen games. Both
+// render from game state (GET /games/:id, kept fresh by stream "game"
+// frames and slow polls). Cards are React components subscribed to this
+// store; an arena view is native DOM inside the viewer around a lazy 3D
+// scene, and its controls call the moves endpoint with the viewer's own
+// invite. Without WebGL the flat panels the scenes replaced come back.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -1978,7 +1976,6 @@ export function createGameStore(opts: {
       if (hint) wrap.appendChild(hint);
       wrap.appendChild(
         ttWriter(
-          g,
           dr,
           (d) => {
             if (gameView !== gv) return;
@@ -2137,7 +2134,7 @@ export function createGameStore(opts: {
     if (g.status === "running" && g.phase !== "secret") wrap.appendChild(tqBudget(g));
     if (g.status === "running") wrap.appendChild(tqLog(g));
     wrap.appendChild(tqScores(g, me));
-    wrap.appendChild(tqReveal(g, tqLastRound(g)));
+    wrap.appendChild(tqReveal(tqLastRound(g)));
     if (g.status === "running" && !you.playing) note.textContent = "Spectating - the secret stays in the box until the round ends.";
     if (note.textContent) wrap.appendChild(note);
   }
@@ -2686,12 +2683,10 @@ export function createGameStore(opts: {
 
   /* ---- Battleship 3D board (R3F, 2026-11-12) ----
      Same bridge pattern as the Light Cycles scene: ./BsArena3D is a
-     dynamic import (three.js stays in the lazy chunk), the preference
-     persists per device and defaults to 3D (a stored "0" is an
-     explicit opt-out and is respected), and the React root lives
-     on gameView so re-appending the host keeps the canvas alive
-     across repaints. The component receives the same per-viewer state
-     as the 2D boards plus a fire callback wired to sendMove. */
+     dynamic import (three.js stays in the lazy chunk), and the React
+     root lives on gameView so re-appending the host keeps the canvas
+     alive across repaints. The component receives the per-viewer state
+     plus a fire callback wired to sendMove. */
   let bs3dComp: Promise<
     ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string, target?: string) => void; onReady?: () => void; placing?: BsPlacing }>
   > | null = null;
@@ -2774,9 +2769,7 @@ export function createGameStore(opts: {
 
   /* ---- Duel 3D arena (2026-11-13) ----
      Same bridge as the other two: ./DuelArena3D is a dynamic import,
-     the preference persists per device and defaults to 3D (a stored
-     "0" is an explicit opt-out), and the React root lives on gameView
-     so repaints keep the canvas. The scene replaces the two DOM duel
+     and the React root lives on gameView so repaints keep the canvas. The scene replaces the two DOM duel
      sides; the throw pad, the verdict banner and the scoreboard stay
      in the page - the scene shows, the page acts. */
   let duel3dComp: Promise<

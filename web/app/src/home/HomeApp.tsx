@@ -3,7 +3,6 @@ import { Icon as I } from "../ui/Icon";
 import { CreateView } from "./CreateRoom";
 import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
-import { fetchBuild } from "@chat/shared";
 import { store } from "../lib";
 import { registerServiceWorker } from "../shell/shell";
 import { usePullToRefresh } from "../shell/strips";

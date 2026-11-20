@@ -1,4 +1,3 @@
-import type { FormEvent } from "react";
 import { toast } from "../lib";
 
 // The room's shell-level views (locked, agent gate) and the board

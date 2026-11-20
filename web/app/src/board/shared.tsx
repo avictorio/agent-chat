@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import type { BoardData, InviteResult, Member, MembersResponse, RoomState } from "@chat/shared";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { BoardData, RoomState } from "@chat/shared";
 import { toast } from "../lib";
 import { useBoardApi } from "../room/ctx";
 

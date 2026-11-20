@@ -19,131 +19,20 @@ export interface PlayerColor {
   hex: string;
 }
 
-export interface DuelPlayer extends PlayerColor {
-  wins: number;
-  thrown: boolean;
-  accepted?: boolean;
-}
+/** Every game the server runs (GAME_ENGINES in src/worker.js). */
+export type GameType =
+  | "lightcycles" | "duel" | "battleship" | "frontlines" | "coderace" | "fourinarow"
+  | "trust" | "auction" | "liarsdice" | "twotruths" | "corpse" | "twenty"
+  | "werewolf" | "lettergrid" | "trivia" | "sketch";
 
-export interface DuelRound {
-  n: number;
-  throws: Record<string, string>;
-  winner: string | null;
-  at: number;
-  throws_at: Record<string, number>;
-}
-
-export interface DuelGame {
-  id: number;
-  type: "duel";
-  status: "lobby" | "running" | "finished" | "cancelled";
-  created_by: string;
-  card_msg: number;
-  round: number;
-  best_of: number;
-  target: number;
-  round_seconds: number;
-  deadline: number | null;
-  winner: string | null;
-  score: Record<string, number>;
-  players: DuelPlayer[];
-  rounds: DuelRound[];
-  lobby_deadline?: number | null;
-  declined_by?: string | null;
-  awaiting_accept?: string[];
-  you?: { playing: boolean; queued: string | null; accepted?: boolean };
-}
-
-export interface LightCyclesPlayer extends PlayerColor {
-  alive: boolean;
-  dir?: string;
-  moved?: boolean;
-  accepted?: boolean;
-}
-
-export interface LightCyclesGame {
-  id: number;
-  type: "lightcycles";
-  status: "lobby" | "running" | "finished" | "cancelled";
-  created_by: string;
-  card_msg: number;
-  w: number;
-  h: number;
-  tick: number;
-  tick_seconds: number;
-  deadline: number | null;
-  winner: string | null;
-  players: LightCyclesPlayer[];
-  trails: Array<[number, number, number]>;
-  log: Array<{ tick: number; text: string }>;
-  awaiting: string[];
-  lobby_deadline?: number | null;
-  declined_by?: string | null;
-  awaiting_accept?: string[];
-  you?: {
-    playing: boolean;
-    accepted?: boolean;
-    alive: boolean;
-    dir: string | null;
-    queued: string | null;
-    legal_moves: string[];
-  };
-}
-
-export interface BattleshipPlayer extends PlayerColor {
-  accepted?: boolean;
-  placed: boolean;
-  shots: number;
-  hits: number;
-  sunk: number;
-  afloat: number;
-}
-
-export interface BattleshipShip {
-  size: number;
-  cells: string[];
-  hits: string[];
-  sunk: boolean;
-}
-
-export interface BattleshipGame {
-  id: number;
-  type: "battleship";
-  status: "lobby" | "running" | "finished" | "cancelled";
-  created_by: string;
-  card_msg: number;
-  phase: "setup" | "play" | null;
-  turn: number;
-  turn_of: string | null;
-  turn_seconds: number;
-  deadline: number | null;
-  winner: string | null;
-  players: BattleshipPlayer[];
-  log: Array<{ tick: number; text: string }>;
-  lobby_deadline?: number | null;
-  declined_by?: string | null;
-  awaiting?: string[];
-  awaiting_accept?: string[];
-  you?: {
-    playing: boolean;
-    accepted?: boolean;
-    phase: "setup" | "play" | null;
-    your_turn: boolean;
-    fleet: BattleshipShip[] | null;
-    shots: Record<string, "hit" | "miss">;
-    incoming: Record<string, "hit" | "miss">;
-    sunk_ships: Array<{ size: number; cells: string[] }>;
-    opponent_afloat: number;
-    legal_moves: string[];
-  };
-}
-
-export type Game = DuelGame | LightCyclesGame | BattleshipGame;
+/** A full match state (GET /games/ID). Its shape depends on the game -
+ *  every one carries how_to_play - and the arenas read it loosely. */
+export type Game = { id: number; type: GameType; status: GameSummary["status"] } & Record<string, unknown>;
 
 /** The light game summary embedded in a message listing. */
 export interface GameSummary {
   id: number;
-  type: "duel" | "lightcycles" | "battleship";
+  type: GameType;
   status: "lobby" | "running" | "finished" | "cancelled";
   winner: string | null;
   players: Array<PlayerColor & Record<string, unknown>>;

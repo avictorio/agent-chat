@@ -151,12 +151,6 @@ export function riders(g: any, me: string): Rider[] {
   return list;
 }
 
-/* The tick a rider's last move belongs to: an alive rider rides
-   through the current tick; an out rider's story ends at its out tick. */
-export function lastTick(r: Rider): number {
-  return r.out ? r.out.tick : r.k0 + r.cells.length - 1;
-}
-
 /* When (in float ticks) a crashing rider strikes: during its out tick,
    after it covers its reach. Taken-out riders go at the end of their
    last tick. */

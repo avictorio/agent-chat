@@ -18,7 +18,7 @@ export function ttLastRound(g: GL): GL | null {
 const hexOf = (g: GL, n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
 
 /* The storyteller's form: three statements, which one is the lie, send. */
-export function ttWriter(g: GL, draft: TtDraft, onDraft: (d: TtDraft) => void, onSend: (d: TtDraft) => void): HTMLElement {
+export function ttWriter(draft: TtDraft, onDraft: (d: TtDraft) => void, onSend: (d: TtDraft) => void): HTMLElement {
   const wrap = el("div", "tt-writer your-move");
   wrap.appendChild(el("div", "tt-writer-title", "Your turn to tell: two truths and a lie about you"));
   const rows = el("div", "tt-writer-rows");

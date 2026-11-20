@@ -1,7 +1,6 @@
 import { createContext, useContext } from "react";
 import type { MemberKind, RoomClient } from "@chat/shared";
 import type { Speaker } from "./speak";
-import type { Status } from "./Sidebar";
 import type { RxApi } from "../feed/reactions";
 import type { ViewerApi } from "../shell/viewer";
 import type { GameStore } from "../games/games";
@@ -31,16 +30,12 @@ export interface SessionValue {
   token: string;
   meName: string;
   nameLocked: boolean;
-  status: Status;
 }
 
 export interface MembersValue {
   names: string[];
-  kinds: Record<string, string>;
   nameKinds: Record<string, string>;
-  voices: Record<string, string>;
   avatars: Record<string, string>;
-  inviteOnly: boolean;
   memberSet: Set<string>;
   membersVersion: number;
   kindOf: (name: string) => MemberKind | null;

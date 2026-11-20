@@ -18,7 +18,6 @@ import { lgCardBoard } from "./lettergrid";
 import { tvCardBoard } from "./trivia";
 import { sgCardBoard } from "./sketch";
 import { wwCardBoard } from "./werewolf";
-import type { GameStore } from "./games";
 
 // The game card in the feed: header (kind, name, live meta line) and
 // the board — the Light Cycles SVG or the Duel scoreboard — rendered

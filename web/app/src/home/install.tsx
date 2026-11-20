@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchBuild } from "@chat/shared";
-import { isStandaloneApp, store } from "../lib";
-import { Icon as I } from "../ui/Icon";
+import { store } from "../lib";
 
 // The home page's install affordances and update strip: same
 // dismissal keys and build check as the room shell's, with the

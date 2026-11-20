@@ -298,10 +298,6 @@ export function gameMetaText(g: GL): string {
     return "Round " + g.round + " · first to " + g.target + valued + " · " + tickLen(g.round_seconds || 180) + " per round";
   }
   if (g.type === "duel") {
-    const sc = g.score || {};
-    const dline = (g.players || [])
-      .map((p: GL) => p.name + " " + (sc[p.name] != null ? sc[p.name] : p.wins || 0))
-      .join(" · ");
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
       const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);

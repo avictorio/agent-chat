@@ -3,7 +3,7 @@ import { useBoardApi, useMembers } from "../room/ctx";
 import type { InviteResult, Member, MembersResponse } from "@chat/shared";
 import { same, toast } from "../lib";
 import { Avatar, KindTag } from "../feed/feed";
-import { ActionButton, EmptyState, errText, type BoardApi } from "./shared";
+import { ActionButton, EmptyState, errText } from "./shared";
 import { rel, shortDate } from "../dates";
 import {
   ConstitutionView,
@@ -12,7 +12,6 @@ import {
   QuestionsView,
   StakesView,
 } from "./sections";
-import { AvatarDialog, usePhotoUpload } from "./avatar";
 
 // The room board's container: the six views over one BoardApi, the
 // members list and the invite flows. Sections live in ./sections,

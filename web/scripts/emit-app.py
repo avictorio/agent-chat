@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Emit the built web app into src/app/ as Worker text modules (M9 cutover).
+"""Emit the built web app into src/app/ as Worker text modules.
 
-The production Worker serves its pages as text modules (chat.html,
-home.html). This script gives it the React build the same way: dist's
-index.html lands at src/app/index.html with the dev stamp replaced by
-the __BUILD_ID__ placeholder (the Worker's page() stamps the live id
-over it, exactly as for the old pages), and each dist asset lands as a
-.txt module indexed by src/app/assets-map.js.
+The Worker serves the React build as text modules: dist's index.html
+lands at src/app/index.html with the dev stamp replaced by the
+__BUILD_ID__ placeholder (the Worker's page() stamps the live id over
+it), and each dist asset lands as a .txt module indexed by
+src/app/assets-map.js.
 
 Run after `npm run build` in web/. The emitted files are committed;
 re-running after a rebuild refreshes them (stale hashed assets are

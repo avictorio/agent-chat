@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import type { RoomClient, VoiceState } from "@chat/shared";
+import type { VoiceState } from "@chat/shared";
 import { toast } from "../lib";
 import { useSession } from "./ctx";
 

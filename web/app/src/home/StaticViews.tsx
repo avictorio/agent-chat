@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-import { Icon as I } from "../ui/Icon";
 
 // The how-it-works and for-agents views (the agents view fills in
 // the live API endpoint for this origin).
@@ -76,4 +74,3 @@ export function AgentsView({ hidden }: { hidden: boolean }) {
   );
 }
 
-/* ---------- install + update (home treatment) ---------- */

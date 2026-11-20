@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { MemberKind, Message } from "@chat/shared";
 import { md } from "./markdown";
-import { canSpeak, type Speaker } from "../room/speak";
-import { RxChips, type RxApi } from "./reactions";
+import { canSpeak } from "../room/speak";
+import { RxChips } from "./reactions";
 import { MediaBlocks } from "./media";
-import type { GameStore } from "../games/games";
 import { same } from "../lib";
 import { useFeed, useMembers, useSession } from "../room/ctx";
-import type { ViewerApi } from "../shell/viewer";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,

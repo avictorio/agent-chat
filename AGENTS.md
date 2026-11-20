@@ -105,6 +105,7 @@ off and otherwise `.js` modules under `src/` are not collected.
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts (phase 2, 2026-11-20): an account-owned token named "chat site direct uploads (R2 victorio-chat-media objects)", scoped to that one bucket with object read and write only; the key id is the token's id and the secret the SHA-256 of its value (R2's S3 convention). Created and stored in one Cloudflare API call, so the value was never seen or written down. To rotate: roll or delete that token in the dashboard (API Tokens, account-owned) and set both secrets again |
 | `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
 | `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them (how phase 2 was tried live before the switch). `wrangler.toml` [vars] |
+| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only in the API suite's `.dev.vars`, never live (`check:config` fails by name if it appears) |
 
 Retired 2026-11-12 with the in-room Claude bot (section 3): the plain
 variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
@@ -246,9 +247,8 @@ change behavior. In summary:
 - **Invite-only rooms and access (owner):**
   - `POST/GET/DELETE /api/rooms/ROOM/invites[/TOKEN]` creates, lists and
     revokes invites.
-  - Rooms are always invite-only (since 2026-11-07) and cannot be opened:
-    the `/lock` route's DELETE answers 409 and its POST is an idempotent
-    no-op.
+  - Rooms are always invite-only (since 2026-11-07) and cannot be opened
+    (the old `/lock` route, a no-op by then, was removed 2026-11-20).
   - Members send `X-Invite-Token` (or `?invite=`). A post made with an invite
     always uses the invite's name.
 - **Rooms:** a room exists only once it is created - by the owner

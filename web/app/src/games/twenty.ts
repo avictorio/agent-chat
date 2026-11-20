@@ -161,7 +161,7 @@ export function tqScores(g: GL, me?: string, compact?: boolean): HTMLElement {
 }
 
 /* The last round: the secret, how it ended, the points. */
-export function tqReveal(g: GL, r: GL | null): HTMLElement {
+export function tqReveal(r: GL | null): HTMLElement {
   const box = el("div", "tq-reveal");
   if (!r) {
     box.appendChild(el("div", "tq-log-empty", "No secret has been revealed yet."));

@@ -1,12 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon as I } from "../ui/Icon";
-import {
-  ApiError,
-  RoomClient,
-  type MemberKind,
-  type Message,
-} from "@chat/shared";
-import { onToast, same, store, toast } from "../lib";
+import { ApiError, RoomClient, type MemberKind } from "@chat/shared";
+import { same, store, toast } from "../lib";
 import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
 import { ToastHost } from "../shell/ToastHost";
 import { AgentGateView, LockedView } from "./views";
@@ -24,7 +19,7 @@ import {
   type MembersValue,
   type SessionValue,
 } from "./ctx";
-import { ChatFeed, atBottom } from "../feed/feed";
+import { ChatFeed } from "../feed/feed";
 import { Composer } from "../composer/composer";
 import { Speaker } from "./speak";
 import { BoardSections } from "../board/board";
@@ -360,18 +355,14 @@ export function RoomShell({ room }: { room: string }) {
       token,
       meName: nameState.value,
       nameLocked: nameState.locked,
-      status,
     }),
-    [client, room, token, nameState, status]
+    [client, room, token, nameState]
   );
   const membersValue: MembersValue = useMemo(
     () => ({
       names: board.members.names,
-      kinds: board.members.kinds,
       nameKinds: board.members.nameKinds,
-      voices: board.members.voices,
       avatars: board.members.avatars,
-      inviteOnly: board.members.inviteOnly,
       memberSet,
       membersVersion: board.membersVersion,
       kindOf: (n) => (board.members.kinds[String(n || "").toLowerCase()] as MemberKind | undefined) ?? null,

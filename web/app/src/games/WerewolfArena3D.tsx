@@ -19,7 +19,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
-import { BufferGeometry, CanvasTexture, Color, Float32BufferAttribute, SRGBColorSpace, type Group, type MeshStandardMaterial } from "three";
+import {
+  BufferGeometry,
+  CanvasTexture,
+  Color,
+  Float32BufferAttribute,
+  SRGBColorSpace,
+  type Group,
+} from "three";
 import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuality, useReducedMotion, type Ctl, type Home } from "./arena3d";
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "./juice";
 import { Burst, LightPillar, SkyDome, type SkySpec } from "./atmos";

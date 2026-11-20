@@ -15,7 +15,17 @@ import {
   type Ctl,
   type Home,
 } from "./arena3d";
-import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Juice } from "./juice";
+import {
+  ArenaPost,
+  ImpactLayer,
+  Intro,
+  JuiceProvider,
+  JuiceRig,
+  SoundToggle,
+  useFirstVisit,
+  useJuice,
+  useJuiceStore,
+} from "./juice";
 import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
 import { BUZZ, sfx } from "./sfx";
 import { CYCLE_NOSE, CYCLE_REAR_WHEEL, CYCLE_WHEEL_R, CycleModel, EdgeWall, GridFloor, MAX_RIDERS, Ridges, TrailSystem, poolTexture, type TrailUniforms } from "./cycles";

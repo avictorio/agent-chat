@@ -6,7 +6,6 @@ import { pressable } from "../lib";
 import { fmtBytes } from "../composer/uploads";
 import type { ViewerApi } from "../shell/viewer";
 import { GameCardBlock } from "../games/gamecard";
-import type { GameStore } from "../games/games";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card
@@ -176,7 +175,7 @@ function DocBody({ id, url, memberSet }: { id: number; url: string; memberSet: S
 export function MediaBlocks({ m }: { m: Message }) {
   const { token } = useSession();
   const { memberSet } = useMembers();
-  const { openViewer, games } = useFeed();
+  const { openViewer } = useFeed();
   const yts = ytLinks(m.text || "");
   if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
   const memberSetRef = useRef(memberSet);

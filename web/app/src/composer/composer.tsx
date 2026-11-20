@@ -4,8 +4,7 @@ import { useDictation } from "./useDictation";
 import { useAttachments } from "./useAttachments";
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
-import { flushSync } from "react-dom";
-import type { Message, RoomClient, RoomState } from "@chat/shared";
+import type { Message, RoomState } from "@chat/shared";
 import { toast } from "../lib";
 import {
   UploadCancelled,

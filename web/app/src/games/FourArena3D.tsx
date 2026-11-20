@@ -21,7 +21,7 @@ import { Color, Object3D, type InstancedMesh, type Mesh, type MeshStandardMateri
 import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuality, useReducedMotion, type Ctl, type Home } from "./arena3d";
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "./juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "./atmos";
-import { BUZZ, sfx } from "./sfx";
+import { BUZZ } from "./sfx";
 
 const C4_SKY: SkySpec = {
   top: "#05030b",

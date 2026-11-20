@@ -2,10 +2,9 @@
 // rewrite (web/PARITY.md, M1), ported from the pre-React suite (root
 // tests/ui.test.js, removed with the old pages on 2026-11-19; its fixtures
 // stay in the root tests/fixtures/). It serves the built app (app/dist)
-// through a fake API, and /api/build
-// answers 'uitestbuild1' when current (the served page is stamped the same,\n// like the original suite stamps src/chat.html). A scenario counts toward
-// parity only when it passes here. Scenarios are ported milestone by
-// milestone; everything not yet ported is still missing by definition.
+// through a fake API, and /api/build answers 'uitestbuild1' when current
+// (the served page is stamped the same). Exits non-zero when a scenario
+// fails; ONLY=name1,name2 runs just those.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const DIST = __dirname + '/../app/dist';

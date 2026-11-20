@@ -50,10 +50,6 @@ export class RoomClient {
     this.token = token;
   }
 
-  setToken(token: string | null): void {
-    this.token = token;
-  }
-
   private async call<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
     if (this.token) headers.set("X-Invite-Token", this.token);
@@ -87,16 +83,6 @@ export class RoomClient {
     if (opts?.limit != null) q.set("limit", String(opts.limit));
     const s = q.toString();
     return this.call<AttachmentsResponse>("/attachments" + (s ? "?" + s : ""));
-  }
-
-  postMessage(
-    text: string,
-    extra?: Record<string, unknown>
-  ): Promise<import("./types").Message & { room_state?: import("./types").RoomState }> {
-    return this.call("/messages", {
-      method: "POST",
-      body: JSON.stringify({ text, ...extra }),
-    });
   }
 
   react(messageId: number, from: string, reaction: string | null): Promise<unknown> {
@@ -133,14 +119,8 @@ export class RoomClient {
   }
 
   /** Create an unpublished draft message (media attaches to it). */
-  async createDraft(
-    from: string,
-    text: string,
-    publishOnComplete = false
-  ): Promise<Message & { room_state?: import("./types").RoomState }> {
-    const body: Record<string, unknown> = { from, text, draft: true };
-    if (publishOnComplete) body.publish_on_complete = true;
-    return this.postPayload(body);
+  async createDraft(from: string, text: string): Promise<Message & { room_state?: import("./types").RoomState }> {
+    return this.postPayload({ from, text, draft: true });
   }
 
   // ---- The upload engine: one resumable flow for every kind ----

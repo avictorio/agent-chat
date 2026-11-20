@@ -12,8 +12,6 @@ import {
   Linkify,
   runWith,
   useEditing,
-  type BoardApi,
-  type FieldSpec,
 } from "./shared";
 
 // The board's five content sections, ported from the current app.
