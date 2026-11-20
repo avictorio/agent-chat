@@ -11,6 +11,9 @@ There is exactly one home and one identity store: the site's.
 **A codebase restructure is in progress** (started 2026-11-20): the plan,
 its checklist and what has already moved are in `REFACTOR.md`. Read it
 before moving or splitting files, and tick its boxes as steps land.
+While it runs, the committed `.claude/settings.json` turns off Claude
+Code's built-in privacy plugin (owner's call: it blocked the split tool);
+REFACTOR.md step 2.9 turns it back on.
 
 This file is the single development guide. It consolidates the former
 `docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When this

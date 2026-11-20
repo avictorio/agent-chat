@@ -11,6 +11,37 @@ picking this up should be able to continue from here alone. When every
 phase is done, fold the final layout into AGENTS.md and README.md and
 delete this file.
 
+## Resume here (next session)
+
+State on 2026-11-20: phase 1 and step 2.1 are live; 4.6 is done. Next is
+step 2.2. The built-in `cc-plugin-privacy` plugin blocked the split tool in
+the session that started this (it flags scripts that read the Worker code,
+which reads the sender address from config), so at the owner's request
+`.claude/settings.json` turns it off; that only applies in a new session.
+
+1. `npm i` at the repo root (the split tool's acorn), `npm i` in `web/`,
+   `npm run build`.
+2. Step 2.2, the four `lib/` modules:
+   ```
+   T="node scripts/split-module.js move"
+   $T worker/lib/http.js CORS,SSE_HEADERS,json,html,readBody,sseFrame,parseRange --header "HTTP helpers shared by the routes and the Room object."
+   $T worker/lib/crypto.js SHA256_K,sha256Bytes,hmacSha256,b64urlEncode,b64urlDecode,sha256hex,concatBytes,hkdf,hexBytes,hmacBytes,pemToDer --header "Hashing, HMAC, HKDF and base64url helpers (Web Crypto, plus a synchronous SHA-256)."
+   $T worker/lib/sniff.js sniffAudio,sniffImage,sniffVideo,decodeTextPayload,cleanFileName --header "File-type sniffing (never trust a Content-Type) and upload payload decoding."
+   $T worker/lib/text.js escHtml,clamp,clipText,daysBetween,capped,isPlaceholder,htmlToText,mentionsName,nameFold,memberNameProblem,MAX_NAME,speakableText --header "Small text and number helpers."
+   node scripts/split-module.js verify && npm run check
+   ```
+   Then fix the stray comment the move carries: "Identify an image by its
+   first bytes ... SVG is not accepted." sits above `parseRange` in
+   `lib/http.js`; it belongs above `sniffImage` in `lib/sniff.js`. And the
+   "Whether a room exists ..." comment above `escHtml` belongs to
+   `roomExists` (2.8). A `npx wrangler deploy --dry-run` should list the
+   new `lib/*.js` modules (the `**/*.js` ESModule rule).
+3. Gates (the API suite; the UI suite only if web/ changed), deploy, verify
+   live, log it below, then 2.3 onward the same way. `verify` after every
+   move is the safety net for imports `node --check` can't see.
+4. When phase 2 is done: remove `.claude/settings.json` and its
+   `.gitignore` exception, so the privacy plugin is back on.
+
 ## Ground rules for every step
 
 - **Behaviour stays the same.** Moves and splits only; a bug found on the
@@ -143,6 +174,8 @@ site stay as they are; turning them into plain functions can come later.
       members and invites, uploads, voices, streams, digest, games glue)
 - [ ] 2.8 Fix comments left in the wrong place by earlier edits (for
       example the stale "Whether a room exists" note above `escHtml`)
+- [ ] 2.9 Remove `.claude/settings.json` (and its `.gitignore`
+      exception): the privacy plugin back on once the split is done
 
 ## Phase 3: reorganize the web app
 
