@@ -1307,9 +1307,10 @@ let FAILURES = 0;
     });
   }
   // Four in a Row (2026-11-19): the card shows the board; the arena puts
-  // the drop buttons over the columns on your turn; a drop lands at the
-  // bottom of its column and the turn passes; a finished match glows its
-  // winning four and the result line counts the moves.
+  // the drop buttons under the scene on your turn; a drop lands (the
+  // scene counts it) and the turn passes; a finished match names the
+  // winner and the result line counts the moves (the board is the scene:
+  // the 2D grid was retired 2026-11-20).
   for (const [label, o] of [['fourinarow-arena', {}], ['fourinarow-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -1324,7 +1325,7 @@ let FAILURES = 0;
       await page.click('#viewer .c4-drop:nth-child(4)');
       await page.waitForTimeout(500);
       out.moveCall = calls.filter((c) => c.includes('/games/16/moves')).pop() || '';
-      out.landed = await page.$eval('#viewer .c4-grid', (g) => { const cells = [...g.children]; const i = 3 * 7 + 3; return cells[i] && cells[i].querySelector('.c4-disc.x.last') ? 'yes' : 'no'; });
+      out.landed = await page.waitForFunction(() => { const l = document.querySelector('#viewer .c4-3d-host [role="img"]'); return l && /7 discs on the board/.test(l.getAttribute('aria-label')) ? 'yes' : null; }, null, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => 'no');
       out.dropsAfter = await page.$$('#viewer .c4-drop').then((b) => b.length);
       out.bannerAfter = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       await shot(page, label + '-dropped.png');
@@ -1333,7 +1334,7 @@ let FAILURES = 0;
       if (!/Your move · turn 7/.test(out.banner)) throw new Error('the banner asks for your move: ' + out.banner);
       if (!/Ada1 timeout/.test(out.seats)) throw new Error('the seats show timeouts: ' + out.seats);
       if (!/"dir":"4"/.test(out.moveCall)) throw new Error('a drop sends the column: ' + out.moveCall);
-      if (out.landed !== 'yes') throw new Error('the disc lands on top of column 4 (row 3)');
+      if (out.landed !== 'yes') throw new Error('the dropped disc lands on the board (the scene counts 7)');
       if (out.dropsAfter !== 0 || !/Waiting on Ada/.test(out.bannerAfter)) throw new Error('the turn passes: ' + JSON.stringify(out));
       return out;
     });
@@ -1343,13 +1344,13 @@ let FAILURES = 0;
       const out = {};
       await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
       await page.click('.game-card.kind-fourinarow');
-      await page.waitForSelector('#viewer .c4-disc.win', { timeout: 6000 });
-      out.win = await page.$$eval('#viewer .c4-disc.win', (d) => d.length);
+      await page.waitForSelector('#viewer .game-winner', { timeout: 6000 });
+      out.scene = await page.waitForFunction(() => { const l = document.querySelector('#viewer .c4-3d-host [role="img"]'); return l && l.getAttribute('aria-label'); }, null, { timeout: 20000 }).then((h) => h.jsonValue());
       out.meta = await page.$eval('#viewer .lc-meta', (e) => e.textContent);
       out.winner = await page.$eval('#viewer .game-winner', (e) => e.textContent);
       out.drops = await page.$$('#viewer .c4-drop').then((b) => b.length);
       await shot(page, label + '.png');
-      if (out.win !== 4) throw new Error('the winning four glow: ' + out.win);
+      if (!/Ada won\. 12 discs on the board/.test(out.scene)) throw new Error('the scene names the winner: ' + out.scene);
       if (!/Four in a row · 12 moves/.test(out.meta)) throw new Error('the record line: ' + out.meta);
       if (!/Ada/.test(out.winner) || !/move 12/.test(out.winner)) throw new Error('the winner banner: ' + out.winner);
       if (out.drops !== 0) throw new Error('no drop buttons once it is over');
