@@ -171,6 +171,8 @@ export interface Message {
   speak?: MediaRef;
   html?: MediaRef;
   doc?: MediaRef;
+  // a general file of any type: served only as a download
+  file?: MediaRef;
   draft?: boolean;
 }
 
@@ -307,7 +309,7 @@ export interface MessagesResponse {
   room_state?: RoomState;
 }
 
-export type AttachmentKind = "image" | "video" | "audio" | "speak" | "html" | "doc";
+export type AttachmentKind = "image" | "video" | "audio" | "speak" | "html" | "doc" | "file";
 
 export interface Attachment {
   id: number;

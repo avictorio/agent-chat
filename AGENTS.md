@@ -134,10 +134,10 @@ There is no migration framework, so follow that pattern for schema changes.
 | Table | Holds |
 |---|---|
 | `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest 1000 are kept |
-| `md` / `mdp` | media index and per-part upload receipts; the bytes themselves live in R2 |
+| `md` / `upp` | media index (one row per message and kind; an upload in flight keeps its R2 upload id, pinned part plan, fingerprint, name and start time there) and per-part upload receipts (`upp`, keyed by message, kind and part; it replaced the video-only `mdp`, whose rows move over when a room wakes); the bytes themselves live in R2 |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute) |
 | `cfg` | room settings: `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), test-hook flags (the old `open` flag is retired: rooms can no longer be opened) |
-| `ut` | upload tickets: only the SHA-256 of each ticket, its draft, kind, member, expiry, tries, and `owner` (minted with the owner key) |
+| `ut` | upload tickets: only the SHA-256 of each ticket, its draft, kind, member, expiry, tries, `owner` (minted with the owner key) and `sess` (a resumable upload link, good for its upload's 7 days) |
 | `push` | Web Push subscriptions per member (newest 10 per member kept; revoking a member's last invite deletes theirs) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (50 per 24 hours) |
@@ -276,8 +276,10 @@ change behavior. In summary:
   under its own name; the owner key may pass `as`); unauthenticated callers
   get no catalog. Media delegates: `post_message`/`attach_media` carry small
   inline files (same sniff/limits as REST), `begin_upload` creates a draft
-  and returns the REST upload session (single-shot PUT or the chunked video
-  flow) so bytes never ride the protocol. Owner-only administration
+  and returns upload URLs that need no credential - a single-shot PUT for a
+  small image, clip or video, or (given `size`, always for kind `file`) a
+  resumable link set for the upload engine - so bytes never ride the
+  protocol. Owner-only administration
   (invites, room deletion, push diagnostics) is deliberately NOT in the
   catalog. It does not solve waking a sleeping agent — MCP is pull, same
   as REST; the wake mechanics live in the stream and the recipe, not MCP.
@@ -922,10 +924,18 @@ change behavior. In summary:
   404, a revoked member 403. Every PUT counts as an attempt (5 per ticket,
   then 410), a member holds at most 20 open tickets (429), and the ticket is
   claimed before the R2 write so two parallel PUTs cannot both land.
-  Owner-minted tickets carry `ut.owner` and skip the member check. Chunked video stays on invite-token auth in
-  v1, and the begin_upload response says so. Note: Workers observability
-  logs record request URLs, so spent/expired tickets exist in Cloudflare
-  logs — accepted, because they are single-use and live 15 minutes.
+  Owner-minted tickets carry `ut.owner` and skip the member check.
+  **Resumable links (2026-11-20):** given a `size` (always for kind `file`,
+  and for an image, clip or video past its single-shot cap), the same mint
+  starts an upload-engine session and returns `/api/uploads/<room>/<link>/
+  (part|status|finish|abort)` instead (`ut.sess`). A link is not spent by
+  use; it lives as long as its upload can (7 days), acts only on its one
+  message and kind as the member who opened it, cannot start a new
+  session, and counts toward the 20 open links only while its upload is in
+  flight. Note: Workers observability logs record request URLs, so tickets
+  and links exist in Cloudflare logs — accepted: a single-shot ticket is
+  single-use and lives 15 minutes, and a link can only add parts to,
+  finish or cancel its own upload.
   Phase B (same day) drained the legacy in-DB media store. The drain
   check covered every known room (the watcher registry, the
   genesis-email log, and the build records — 11 rooms): each room
@@ -977,19 +987,53 @@ change behavior. In summary:
   other header-less clients use it there). A page left open past the
   one-hour expiry gets fresh URLs from any listing re-read (stream
   reconnect or pull-to-refresh).
-  Video goes up single-shot (≤25 MB), chunked multipart, or via the
-  whole-file stream endpoint (`PUT /messages/:id/video/stream`, built for
-  the native uploader plugin); size and magic bytes are verified at finish,
-  and reads stream through the Worker with Range support — never buffer a
-  large file through the DO (it OOMs). A message is **not officially posted
+  **The upload engine (2026-11-20; owner's call: "optimize for size not
+  budget... the largest file sizes regardless of type... resumable"):**
+  every kind - image, audio, video and `file` (a general file of any type)
+  - uploads past its inline cap one way: `POST /messages/:id/:kind/start
+  {size, name, type, fingerprint}` pins a part plan (`uploadPlan`: about
+  2,000 parts, each 8-90 MiB; all equal but the last, which R2 requires),
+  `PUT .../part?n=N` sends each part, in any order and in parallel,
+  `GET .../status` lists the parts received, `POST .../finish` checks every
+  part is in (409 with `missing`), completes the R2 multipart upload,
+  checks the size (and, for typed kinds, the magic bytes) and attaches,
+  `POST .../abort` cancels; `POST /upload/resume {size, fingerprint}` finds
+  a draft with that file in flight, and start again with the same size
+  resumes. The Worker streams each part's request body straight into
+  `uploadPart` (no buffering, never through the DO; part 1 of a typed kind
+  is sniffed through a FixedLengthStream before anything is stored, so a
+  wrong kind fails at its first part), and a refused part's body is read
+  away before the answer so the client sees the reason, not a dropped
+  connection. Ceiling through the Worker: 10,000 x 90 MiB, about 943 GB
+  (`UP_MAX`); 90 MiB keeps every part under the zone's 100 MB request cap
+  (section 2). An unfinished R2 multipart upload dies 7 days after its
+  start, so a session does too (`UP_SESSION_MS`). The old chunked video
+  routes (`/video/start|part|finish|abort|status`, `/video/resume`) are
+  this engine with kind video. A `file` is served only as a download
+  (`application/octet-stream`, `Content-Disposition: attachment` with its
+  name, nosniff, the locked-down CSP; Range works) and listed as
+  `file: {type, bytes, name, url}` - never rendered on this origin. The
+  web composer (composer/uploads.ts) sends small media inline as before
+  and everything else through the engine with XMLHttpRequest for byte
+  progress (percent, size, speed, time left), per-part retries with
+  backoff, a pause while offline that picks up on reconnect, a Cancel that
+  aborts and deletes the draft, and an "interrupted upload" note after a
+  reload (re-attach the same file to resume). A pick is routed by its
+  bytes: a photo type the chat can't show (HEIC, SVG) attaches as a file.
+  Images over 15 MB show as a card instead of an inline `<img>`.
+  Video can also go up single-shot (≤25 MB) or via the whole-file stream
+  endpoint (`PUT /messages/:id/video/stream`; the edge's 100 MB request
+  cap is its real limit); reads stream through the Worker with Range
+  support — never buffer a large file through the DO (it OOMs). A message is **not officially posted
   until its attached media upload completes** (owner rule): `POST /messages
   {draft: true}` creates an invisible draft, uploads attach to it, and
   `/publish` makes it live. A draft's media is visible only to its sender
   (and the owner) until it publishes. Abandoned drafts are swept after 24 h
-  (checked on post and on chunked-upload start, throttled per instance),
+  - or, while an upload for one is in flight, 7 days from that upload's
+  start (checked on post and on upload start, throttled per instance),
   and drafts are exempt from the 1000-message trim. A draft
   created with `publish_on_complete: true` is published by the server itself
-  the moment its video upload verifies (stream or chunked finish) — the app
+  the moment its upload verifies (stream, or the engine's finish) — the app
   Phase 3 path, for uploads that finish while no client is alive to call
   `/publish`. The `m.pubauto` column carries the flag. It and the one-PUT
   stream endpoint were built for the Android shell's background uploads
@@ -1359,6 +1403,8 @@ features; mobile means the website in Android Chrome and iOS Safari.
 | Room deletion orphaning R2 | `destroy()` wiped only the Durable Object; media and voice samples stayed in the bucket forever | Deletion paths clean every store they touch (DO + R2 + multipart aborts), mirroring `deleteMessage` |
 | A test suite that cannot fail | The UI suite printed findings and always exited 0; server behavior had no tests at all | Suites exit non-zero on failure (uncaught page errors; API checks). If a suite can't go red, it isn't a suite |
 | Native upload event missed | Upload listeners were registered after `startUpload`, so an early completion event left the promise unsettled and the composer wedged | Register listeners before starting native work, and back them with a read-only liveness poll |
+| Early answer to a streaming upload | A part refused before its body was read (wrong length, wrong member) came back as "Network connection lost" in wrangler dev, and a browser still sending would see a dropped connection instead of the reason (2026-11-20) | Read a refused request body away (`pipeTo(new WritableStream())`) before answering; the engine's part step and its links do |
+| Upload control calls that give up on a blip | The first web engine retried parts but sent start/status/finish/publish once: going offline as the last part landed failed the whole upload (caught by an end-to-end probe, 2026-11-20) | Every call of a long upload rides out offline and transient errors, and a 409 after a retry means "already done, the answer was lost" - check status, don't fail |
 | Interactive element inside a link | The home room rows nested the Forget <button> inside the row's <a> (invalid HTML, flaky a11y) | Row = container div; link and button are siblings |
 
 ---

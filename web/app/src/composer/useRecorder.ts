@@ -123,7 +123,16 @@ export function useRecorder(opts: {
       recReset();
       if (!keep) return;
       if (blob.size > 5000000) {
-        toast("That recording is over the 5 MB cap", true);
+        // too long to ride inline: it goes up through the upload engine
+        const ext0 = blob.type.indexOf("mp4") >= 0 ? "m4a" : blob.type.indexOf("ogg") >= 0 ? "ogg" : "webm";
+        const heard0 = recHeardRef.current.replace(/\s+/g, " ").trim();
+        setClip({
+          blob,
+          name: "voice-message." + ext0,
+          label: "🎙 Voice message (" + secs + ", " + kb(blob.size) + ") - attaches to your next message",
+          transcript: heard0 || null,
+        });
+        setRecLabel("");
         return;
       }
       const rd = new FileReader();

@@ -72,6 +72,7 @@ export function useMessages(opts: {
           (m.audio && !old.audio) ||
           (m.html && !old.html) ||
           (m.doc && !old.doc) ||
+          (m.file && !old.file) ||
           (m.text || "") !== (old.text || "");
         if (!richer) return arr;
         const next = [...arr];

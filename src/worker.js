@@ -348,16 +348,55 @@ const VIDEO_MAX = 25000000;
 const VIDEO_MAX_HARD = 5000000000;
 const HTML_MAX = 2000000;
 const DOC_MAX = 1000000;
-const VIDEO_PART = 10000000;
-const VIDEO_PART_BIG = 25000000;
 const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes (phase C)
 const TICKET_MAX_PER_MEMBER = 20;
 const TICKET_MAX_TRIES = 5;
 const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
-// Files up to 1 GB upload in 10 MB parts; larger ones in 25 MB parts, so a 5 GB
-// file needs 200 round trips instead of 500. The plan is pinned per upload in md.
-function videoPartSize(size) { return size > 1000000000 ? VIDEO_PART_BIG : VIDEO_PART; }
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+// ---- The resumable upload engine (2026-11-20) ----
+// Every attachment past its single-request cap - images, audio, video,
+// and general files of any type - uploads one way: start pins a part
+// plan, the client PUTs parts (any order, in parallel, any retry), the
+// Worker streams each part's request body straight into an R2 multipart
+// upload (no part is buffered in the Worker or ever enters the Room),
+// and finish checks every part is in before it completes the object.
+// All parts but the last are exactly part_size bytes (R2 needs equal
+// parts), at least 8 MiB (R2's floor is 5 MiB) and at most 90 MiB, so a
+// part always fits under the zone's 100 MB request-body cap. R2 takes
+// 10,000 parts, which puts the ceiling through the Worker at 10,000 x
+// 90 MiB, about 943 GB. An unfinished R2 multipart upload is dropped 7
+// days after it starts (the bucket's default abort rule), so a session
+// lasts that long too.
+const MIB = 1048576;
+const UP_KINDS = ["image", "audio", "video", "file"];
+const UP_PART_MIN = 8 * MIB;
+const UP_PART_MAX = 90 * MIB;
+const UP_MAX_PARTS = 10000;
+const UP_TARGET_PARTS = 2000;
+const UP_MAX = UP_MAX_PARTS * UP_PART_MAX;
+const UP_MAX_TEXT = Math.floor(UP_MAX / 1e9) + " GB";
+const UP_SESSION_MS = 7 * 86400000;
+// About 2,000 parts, inside 8-90 MiB: a 1 GB file goes in 8 MiB parts, a
+// 50 GB one in 24 MiB parts, anything past ~190 GB in 90 MiB parts.
+function uploadPlan(size) {
+  let ps = Math.ceil(size / UP_TARGET_PARTS / MIB) * MIB;
+  ps = Math.max(UP_PART_MIN, Math.min(UP_PART_MAX, ps));
+  return { part_size: ps, parts: Math.max(1, Math.ceil(size / ps)) };
+}
+// The exact length of part n: part_size, except the last (the remainder).
+function partLength(size, ps, n) {
+  const parts = Math.max(1, Math.ceil(size / ps));
+  if (n < 1 || n > parts) return 0;
+  return n < parts ? ps : size - (parts - 1) * ps;
+}
+function upNoun(kind) { return kind === "image" ? "an image" : kind === "audio" ? "audio" : kind === "video" ? "a video" : "a file"; }
+function upSniff(kind) { return kind === "image" ? sniffImage : kind === "audio" ? sniffAudio : kind === "video" ? sniffVideo : null; }
+function upTypeError(kind) { return kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV"; }
+// A declared media type, kept only when it looks like one (type/subtype).
+function cleanMediaType(v) {
+  const t = String(v || "").split(";")[0].trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/.test(t) ? t : null;
+}
 // Reactions: any single emoji; these names are accepted as shortcuts for the six quick ones.
 const REACTION_ALIASES = { like: "👍", love: "❤️", haha: "😂", wow: "😮", sad: "😢", angry: "😡" };
 // Emoji list for the web picker: built once from this pinned dataset (iamcal/emoji-data, MIT) and kept in KV.
@@ -405,7 +444,14 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
     try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
-    this.sql.exec("CREATE TABLE IF NOT EXISTS mdp (msg INTEGER NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, n))");
+    // Upload receipts: one row per part R2 has acknowledged, for every
+    // kind (the upload engine). It replaces mdp, the video-only table,
+    // whose rows move over the first time a room wakes on this code.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS upp (msg INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, kind, n))");
+    if (this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mdp'").toArray().length) {
+      this.sql.exec("INSERT OR IGNORE INTO upp (msg, kind, n, etag) SELECT msg, 'video', n, etag FROM mdp");
+      this.sql.exec("DROP TABLE mdp");
+    }
     // Upload tickets (media plan phase C, 2026-11-11): begin_upload mints a
     // single-use, 15-minute ticket so a client that cannot present the invite
     // token (an agent whose token lives in its gateway) can still PUT bytes.
@@ -414,6 +460,8 @@ export class Room extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
     // owner: minted with the owner key, for a draft posted under any name
     try { this.sql.exec("ALTER TABLE ut ADD COLUMN owner INTEGER"); } catch (e) {}
+    // sess: a resumable upload link (the engine), good for the whole upload
+    try { this.sql.exec("ALTER TABLE ut ADD COLUMN sess INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch (e) {}
@@ -422,6 +470,10 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE m ADD COLUMN owntrust INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch (e) {}
+    // The upload engine: the file's name (a file's download name) and when
+    // its upload began (R2 keeps an unfinished upload 7 days from then).
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN name TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN began INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
@@ -435,6 +487,10 @@ export class Room extends DurableObject {
     try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_type TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_size INTEGER"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_name TEXT"); } catch (e) {}
+    // A general file of any type (the upload engine's kind "file").
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_type TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_size INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_name TEXT"); } catch (e) {}
     try { this.sql.exec("ALTER TABLE m ADD COLUMN game_id INTEGER"); } catch (e) {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
     try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch (e) {}
@@ -864,6 +920,10 @@ export class Room extends DurableObject {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { throw storeError(); }
+    // A single-shot attach replaces any upload in flight for the same kind.
+    const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch (e) {} }
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength);
     return key;
   }
@@ -873,8 +933,9 @@ export class Room extends DurableObject {
       const m = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
       if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
     }
-    const row = this.sql.exec("SELECT type, r2key, size FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
-    return row ? { type: row.type, r2key: row.r2key, size: row.size } : null;
+    // An upload still in flight has no object yet.
+    const row = this.sql.exec("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    return row ? { type: row.type, r2key: row.r2key, size: row.size, name: row.name || null } : null;
   }
 
   async getMedia(id, kind, room, range, viewer) {
@@ -882,14 +943,14 @@ export class Room extends DurableObject {
       const m = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
       if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
     }
-    const row = this.sql.exec("SELECT type, r2key, size FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+    const row = this.sql.exec("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
       try {
         const rr = parseRange(range, row.size);
         const obj = await this.env.MEDIA.get(row.r2key, rr ? { range: rr.r2 } : {});
         if (obj) {
           const buf = await obj.arrayBuffer();
-          return { data: buf, type: row.type, size: row.size, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.start + buf.byteLength - 1 : row.size - 1 };
+          return { data: buf, type: row.type, size: row.size, name: row.name || null, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.start + buf.byteLength - 1 : row.size - 1 };
         }
       } catch (e) {}
     }
@@ -930,7 +991,10 @@ export class Room extends DurableObject {
   // ticket in the URL is the whole credential, which is what lets an agent
   // whose invite token lives in its gateway (never in its sandbox) upload.
   // (The TTL itself lives with the test hooks above: ticketTtlMs.)
-  async mintUploadTicket(msgId, kind, member, room, byOwner) {
+  // session ({size, type, name}) opens a resumable upload instead: the
+  // engine session starts here and the link (sess) is good for its whole
+  // life, for its part, status, finish and abort steps only.
+  async mintUploadTicket(msgId, kind, member, room, byOwner, session) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
     const r = this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
@@ -938,23 +1002,47 @@ export class Room extends DurableObject {
     if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
-    const open = this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ?", member, now).toArray()[0];
+    // A resumable link counts while its upload is in flight.
+    const open = this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
     if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    let plan = null;
+    if (session) {
+      plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null);
+      if (plan.status !== 200) return plan;
+    }
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-    const maxBytes = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
-    const expires = now + this.ticketTtlMs();
-    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
-      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null);
-    return { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
+    const maxBytes = session ? UP_MAX : kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
+    const expires = session ? plan.expires_at : now + this.ticketTtlMs();
+    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
+    const out = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
+    if (plan) { out.size = Math.floor(Number(session.size)); out.part_size = plan.part_size; out.parts = plan.parts; }
+    return out;
+  }
+
+  // A resumable upload link resolves to the one message and kind it may
+  // upload to, acting as the member who opened it. Unlike a single-shot
+  // ticket it is not spent by use: it lasts as long as the upload can.
+  async uploadSessionTicket(rawTicket) {
+    if (!this.ready) return { status: 404, error: "Unknown upload link" };
+    const t = this.sql.exec("SELECT msg, kind, member, expires, owner, sess FROM ut WHERE h = ?", await sha256hex(String(rawTicket || ""))).toArray()[0];
+    if (!t || !t.sess) return { status: 404, error: "Unknown upload link" };
+    if (Date.now() > t.expires) return { status: 410, error: "This upload link has expired" };
+    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    const m = this.sql.exec("SELECT sender FROM m WHERE id = ?", t.msg).toArray()[0];
+    if (!m) return { status: 404, error: "The message this upload was opened for is gone" };
+    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The message changed hands; open a fresh upload" };
+    return { status: 200, msg: t.msg, kind: t.kind, member: t.member };
   }
 
   async redeemUpload(rawTicket, data, room) {
     // An unknown room answers exactly like an unknown ticket: no hint.
     if (!this.ready) return { status: 404, error: "Unknown upload ticket" };
     const h = await sha256hex(String(rawTicket || ""));
-    const t = this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries, owner FROM ut WHERE h = ?", h).toArray()[0];
+    const t = this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries, owner, sess FROM ut WHERE h = ?", h).toArray()[0];
     // No hint whether a garbled ticket ever existed.
     if (!t) return { status: 404, error: "Unknown upload ticket" };
+    if (t.sess) return { status: 405, error: "This is a resumable upload link: PUT the parts to its /part?n=N address, then POST its /finish" };
     const now = Date.now();
     if (t.used) return { status: 410, error: "This upload link has already been used" };
     if (now > t.expires) return { status: 410, error: "This upload link has expired" };
@@ -992,14 +1080,15 @@ export class Room extends DurableObject {
     return { status: 200, type: type, bytes: data.byteLength, published: published };
   }
 
-  // ---- Chunked video upload: multipart straight into R2, for files past the
-  // single-request size limit. The client sends VIDEO_PART-sized pieces; the upload
-  // state (upload id, received parts) lives in the md row until finish or abort.
+  // ---- Drafts: a long upload finishes before its message goes live ----
   async sweepDrafts() {
     if (this._sweptAt && Date.now() - this._sweptAt < 600000) return;
-    this._sweptAt = Date.now();
-    const cutoff = Date.now() - 86400000;
-    const stale = this.sql.exec("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ?", cutoff).toArray();
+    const now = Date.now();
+    this._sweptAt = now;
+    // A draft lives a day - or, while an upload for it is in flight, as
+    // long as that upload can (UP_SESSION_MS from its start: R2 drops an
+    // unfinished multipart upload after 7 days).
+    const stale = this.sql.exec("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - 86400000, now - UP_SESSION_MS).toArray();
     for (const d of stale) {
       if (this.env && this.env.MEDIA) {
         for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray()) {
@@ -1007,89 +1096,216 @@ export class Room extends DurableObject {
           if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
         }
       }
-      this.sql.exec("DELETE FROM mdp WHERE msg = ?", d.id);
+      this.sql.exec("DELETE FROM upp WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM md WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM rx WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
     }
   }
 
-  async beginVideoUpload(id, who, type, size, owner, room, fp) {
-    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+  // ---- The upload engine (UP_KINDS): one resumable flow for every kind ----
+  // The Room keeps each session - its md row (R2 key and multipart upload
+  // id, the pinned part plan, the file's size, fingerprint and name, when
+  // it began) and one upp receipt per part R2 has acknowledged. The
+  // Worker moves the bytes (streamUploadPart), so a part never passes
+  // through here. Every step checks the caller is the message's sender
+  // or holds the owner key.
+  upAuth(id, who, owner, kind) {
+    const r = this.sql.exec("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
+    return { status: 200, msg: r };
+  }
+
+  upSession(id, kind) {
+    return this.sql.exec("SELECT type, r2key, size, upload_id, parts, fp, part_size, name, began FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
+  }
+
+  // The plan a session runs on, pinned at its start (the first video
+  // sessions pinned 10 or 25 MB parts; streamed ones STREAM_PART).
+  upPlan(row) {
+    const ps = row.part_size || uploadPlan(row.size).part_size;
+    return { part_size: ps, parts: Math.max(1, Math.ceil(row.size / ps)) };
+  }
+
+  upBegan(row, msg) { return row.began || (msg && msg.ts) || 0; }
+
+  // An hour short of R2's 7 days, so no part goes to an upload R2 has
+  // already thrown away.
+  upExpired(row, msg) { return Date.now() - this.upBegan(row, msg) > UP_SESSION_MS - 3600000; }
+
+  upReceived(id, kind, row) {
+    const got = new Map();
+    // the first video sessions kept their receipts as JSON on the md row
+    if (row && row.parts) { try { for (const p of JSON.parse(row.parts)) got.set(p.partNumber, p.etag); } catch (e) {} }
+    for (const p of this.sql.exec("SELECT n, etag FROM upp WHERE msg = ? AND kind = ?", id, kind).toArray()) got.set(p.n, p.etag);
+    return got;
+  }
+
+  async uploadStart(id, kind, who, owner, room, size, type, name, fp) {
+    if (UP_KINDS.indexOf(kind) < 0) return { status: 400, error: "kind must be one of: " + UP_KINDS.join(", ") };
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
-    if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 5 GB" };
+    size = Math.floor(Number(size));
+    if (!Number.isFinite(size) || size < 1) return { status: 400, error: "\"size\" is required: the file's exact length in bytes" };
+    if (size > UP_MAX) return { status: 413, error: "Uploads can be up to " + UP_MAX_TEXT + " (" + UP_MAX_PARTS + " parts of " + (UP_PART_MAX / MIB) + " MiB)" };
+    fp = fp ? String(fp).slice(0, 200) : null;
     await this.sweepDrafts();
-    const key = this.mediaKey(room, id, "video");
-    const prev = this.sql.exec("SELECT r2key, upload_id, size, fp, part_size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
-    if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp)) {
-      // Same upload already in progress (a retry after an interruption): keep the
-      // parts the server already holds instead of restarting from zero.
-      const ps0 = prev.part_size || videoPartSize(size);
-      return { status: 200, part_size: ps0, parts: Math.ceil(size / ps0), resumed: true };
+    const prev = this.upSession(id, kind);
+    if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has " + upNoun(kind) };
+    if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp) && !this.upExpired(prev, a.msg)) {
+      // The same file again (a retry after an interruption, or from
+      // another device): keep the parts already stored.
+      const plan = this.upPlan(prev);
+      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: Array.from(this.upReceived(id, kind, prev).keys()).sort((x, y) => x - y), expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS };
     }
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
-    const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
-    const ps = videoPartSize(size);
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size) VALUES (?, 'video', ?, ?, ?, ?, '[]', ?, ?)", id, type, key, size, up.uploadId, fp || null, ps);
-    return { status: 200, part_size: ps, parts: Math.ceil(size / ps) };
+    if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch (e) {} }
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+    const key = this.mediaKey(room, id, kind);
+    const declared = cleanMediaType(type);
+    let up;
+    try { up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
+    catch (e) { return { status: 503, error: STORE_MSG }; }
+    const plan = uploadPlan(size);
+    const now = Date.now();
+    const fname = name ? cleanFileName(String(name).replace(/[\u0000-\u001f\u007f]/g, ""), "") : "";
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, name, began) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)",
+      id, kind, declared || "application/octet-stream", key, size, up.uploadId, fp, plan.part_size, kind === "file" ? (fname || "file") : (fname || null), now);
+    return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: false, received: [], expires_at: now + UP_SESSION_MS };
   }
 
-  async videoPart(id, who, owner, n, data) {
-    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
-    const row = this.sql.exec("SELECT r2key, upload_id, parts, part_size, size FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
-    if (row.part_size && data && data.byteLength > row.part_size) return { status: 413, error: "That part is larger than this upload's part size" };
+  // Where part n goes, once the checks pass: the session is live, n is in
+  // its plan, and len is exactly that part's length (R2 needs equal parts,
+  // and a part of the wrong length would only fail at finish).
+  uploadPartTarget(id, kind, who, owner, n, len) {
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
+    const row = this.upSession(id, kind);
+    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message: POST its /" + kind + "/start first" };
+    if (this.upExpired(row, a.msg)) return { status: 410, error: "This upload has expired: an upload must finish within 7 days of its start. Start it again." };
+    const plan = this.upPlan(row);
     n = Math.floor(Number(n));
-    if (!Number.isFinite(n) || n < 1 || n > 10000) return { status: 400, error: "Part number out of range" };
-    // Parts past the declared size would only be stored to fail at finish.
-    if (row.part_size && row.size && n > Math.ceil(row.size / row.part_size)) return { status: 400, error: "Part number is past the end of this upload (" + Math.ceil(row.size / row.part_size) + " parts)" };
-    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
-    const part = await up.uploadPart(n, data);
-    // One row per part: concurrent part uploads cannot clobber each other's receipts.
-    this.sql.exec("INSERT OR REPLACE INTO mdp (msg, n, etag) VALUES (?, ?, ?)", id, n, part.etag);
-    return { status: 200, number: n };
+    if (!Number.isFinite(n) || n < 1 || n > plan.parts) return { status: 400, error: "Part number n must be between 1 and " + plan.parts + " for this upload" };
+    const want = partLength(row.size, plan.part_size, n);
+    if (len !== want) return { status: 400, error: "Part " + n + " must be exactly " + want + " bytes (it was " + len + "): every part is part_size bytes except the last, which is the remainder", expected: want };
+    return { status: 200, key: row.r2key, upload_id: row.upload_id, sniff: n === 1 && kind !== "file" };
   }
 
-  async finishVideoUpload(id, who, owner, room) {
-    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
-    const row = this.sql.exec("SELECT type, r2key, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
+  uploadPartDone(id, kind, uploadId, n, etag) {
+    const row = this.sql.exec("SELECT upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
+    // A part that lands after its session was replaced or cancelled
+    // belongs to nothing: no receipt.
+    if (!row || row.upload_id !== uploadId) return { status: 409, error: "This upload was replaced or cancelled while the part was in flight" };
+    this.sql.exec("INSERT OR REPLACE INTO upp (msg, kind, n, etag) VALUES (?, ?, ?, ?)", id, kind, n, String(etag));
+    return { status: 200 };
+  }
+
+  // who given (the routes): only the sender or the owner may see a
+  // message's upload progress; anyone else just sees no upload.
+  uploadStatus(id, kind, who, owner) {
+    let msg = null;
+    if (who !== undefined) {
+      const a = this.upAuth(id, who, owner, kind);
+      if (a.status !== 200) return { status: 200, uploading: false, received: [] };
+      msg = a.msg;
+    } else msg = this.sql.exec("SELECT ts FROM m WHERE id = ?", id).toArray()[0];
+    const row = this.upSession(id, kind);
+    if (!row) return { status: 200, uploading: false, received: [] };
+    if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, received: [] };
+    const plan = this.upPlan(row);
+    return { status: 200, uploading: true, size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: Array.from(this.upReceived(id, kind, row).keys()).sort((x, y) => x - y), expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
+  }
+
+  async uploadFinish(id, kind, who, owner, room, opts) {
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
+    const row = this.upSession(id, kind);
     if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    const byNum = new Map();
-    try { for (const p of JSON.parse(row.parts || "[]")) byNum.set(p.partNumber, p.etag); } catch (e) {}
-    for (const p of this.sql.exec("SELECT n, etag FROM mdp WHERE msg = ?", id).toArray()) byNum.set(p.n, p.etag);
-    const parts = Array.from(byNum.entries()).map((e) => ({ partNumber: e[0], etag: e[1] })).sort((a, b) => a.partNumber - b.partNumber);
-    const up = this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id);
-    try { await up.complete(parts); } catch (e) { return { status: 400, error: "Could not complete the upload: " + String((e && e.message) || e) }; }
-    let head = null;
-    try { head = await this.env.MEDIA.head(row.r2key); } catch (e) {}
-    let sniffed = null;
-    if (head && head.size === row.size) {
-      try {
-        const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
-        if (obj) sniffed = sniffVideo(await obj.arrayBuffer());
-      } catch (e) {}
+    const plan = this.upPlan(row);
+    const got = this.upReceived(id, kind, row);
+    const missing = [];
+    for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
+    if (missing.length) return { status: 409, error: missing.length + " of " + plan.parts + " parts have not arrived (first missing: " + missing.slice(0, 10).join(", ") + "). Send them, then finish again.", missing: missing.slice(0, 1000) };
+    // One finish at a time per session: a second one would find the
+    // multipart upload already completed.
+    const lock = id + ":" + kind;
+    this._finishing = this._finishing || new Set();
+    if (this._finishing.has(lock)) return { status: 409, error: "This upload is already finishing" };
+    this._finishing.add(lock);
+    try {
+      const parts = [];
+      for (let n = 1; n <= plan.parts; n++) parts.push({ partNumber: n, etag: got.get(n) });
+      try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).complete(parts); }
+      catch (e) {
+        const em = String((e && e.message) || e);
+        if (/NoSuchUpload|upload does not exist|10024/i.test(em)) {
+          this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+          this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
+          return { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+        }
+        return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." };
+      }
+      let head = null;
+      try { head = await this.env.MEDIA.head(row.r2key); } catch (e) {}
+      const sized = !!head && head.size === row.size;
+      let type = kind === "file" ? (row.type || "application/octet-stream") : null;
+      if (sized && kind !== "file") {
+        try {
+          const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
+          if (obj) type = upSniff(kind)(await obj.arrayBuffer());
+        } catch (e) {}
+      }
+      if (!sized || !type) {
+        try { await this.env.MEDIA.delete(row.r2key); } catch (e) {}
+        this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+        this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ?", id, kind);
+        return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
+      }
+      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+      this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = ?", type, id, kind);
+      const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
+      if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
+      if (kind === "audio") {
+        if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, row.size, transcript || null, id);
+        else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, row.size, id);
+      }
+      if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, row.size, id);
+      if (kind === "file") this.sql.exec("UPDATE m SET file_type = ?, file_size = ?, file_name = ? WHERE id = ?", type, row.size, row.name || "file", id);
+      const published = room ? await this.maybeAutoPublish(id, room) : null;
+      return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
+    } finally {
+      this._finishing.delete(lock);
     }
-    if (!head || head.size !== row.size || !sniffed) {
-      try { await this.env.MEDIA.delete(row.r2key); } catch (e) {}
-      this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
-      return { status: 400, error: "The uploaded bytes do not check out as that video; upload discarded" };
+  }
+
+  async uploadAbort(id, kind, who, owner) {
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
+    const row = this.upSession(id, kind);
+    if (!row || !row.upload_id) return { status: 200, aborted: false };
+    if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
+    return { status: 200, aborted: true };
+  }
+
+  // One of your drafts with an upload in flight for the same file (size
+  // and fingerprint), of any kind unless kind narrows it: how a client
+  // that lost its place - a reload, another device - picks it back up.
+  findResumableUpload(who, size, fp, owner, kind) {
+    if (!fp || !size) return { status: 200, found: false };
+    const rows = this.sql.exec("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
+    for (const r of rows) {
+      if (kind && r.kind !== kind) continue;
+      if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
+      const st = this.uploadStatus(r.msg, r.kind);
+      if (!st.uploading) continue;
+      return { status: 200, found: true, id: r.msg, kind: r.kind, received: st.received, part_size: st.part_size, parts: st.parts };
     }
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
-    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, id);
-    this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, row.size, id);
-    const published = room ? await this.maybeAutoPublish(id, room) : null;
-    return { status: 200, type: sniffed, bytes: row.size, published: published };
+    return { status: 200, found: false };
   }
 
   // Streaming ingest: the Worker receives one whole-file PUT (for clients that
@@ -1107,9 +1323,9 @@ export class Room extends DurableObject {
     const prev = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size) VALUES (?, 'video', ?, ?, ?, ?, '[]', NULL, ?)", id, type, key, size, up.uploadId, STREAM_PART);
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, began) VALUES (?, 'video', ?, ?, ?, ?, '[]', NULL, ?, ?)", id, type, key, size, up.uploadId, STREAM_PART, Date.now());
     return { status: 200, key: key, uploadId: up.uploadId };
   }
 
@@ -1119,7 +1335,7 @@ export class Room extends DurableObject {
   async streamComplete(id, size, sniffed, room, uploadId) {
     const row = this.sql.exec("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 409, error: "This upload was replaced by a newer one for the same message" };
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, parts = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
     const published = room ? await this.maybeAutoPublish(id, room) : null;
@@ -1127,7 +1343,7 @@ export class Room extends DurableObject {
   }
 
   async streamAbort(id, uploadId) {
-    // Discard means the R2 multipart dies too, as in abortVideoUpload: the
+    // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
     const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
@@ -1135,44 +1351,9 @@ export class Room extends DurableObject {
     if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
     // a stream that completed in R2 but failed the size/type check left an object
     if (row && row.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(row.r2key); } catch (e) {} }
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
     return { status: 200 };
-  }
-
-  async abortVideoUpload(id, who, owner) {
-    const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
-    const row = this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
-    if (row && row.upload_id) { this.sql.exec("DELETE FROM mdp WHERE msg = ?", id); this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id); }
-    return { status: 200 };
-  }
-
-  findResumableUpload(who, size, fp, owner) {
-    if (!fp || !size) return { status: 200, found: false };
-    const rows = this.sql.exec("SELECT md.msg AS msg, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.kind = 'video' AND md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0", size, fp).toArray();
-    for (const r of rows) {
-      if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
-      const st = this.videoUploadStatus(r.msg);
-      return { status: 200, found: true, id: r.msg, received: st.received };
-    }
-    return { status: 200, found: false };
-  }
-
-  // who/owner given (the REST route): only the draft's sender or the owner
-  // may see another message's upload progress.
-  videoUploadStatus(id, who, owner) {
-    if (who !== undefined && !owner) {
-      const r = this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-      if (!r || String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 200, uploading: false, received: [] };
-    }
-    const row =this.sql.exec("SELECT type, size, upload_id, parts FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
-    if (!row) return { status: 200, uploading: false, received: [] };
-    const got = new Set(this.sql.exec("SELECT n FROM mdp WHERE msg = ?", id).toArray().map((r) => r.n));
-    try { for (const p of JSON.parse(row.parts || "[]")) got.add(p.partNumber); } catch (e) {}
-    return { status: 200, uploading: !!row.upload_id, size: row.size, type: row.type, received: Array.from(got).sort((a, b) => a - b) };
   }
 
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
@@ -1689,7 +1870,7 @@ export class Room extends DurableObject {
       // Drafts are exempt from the trim: a long upload can sit on an old id
       // in a busy room, and trimming it would kill the upload mid-flight.
       const staleKeys = this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray().map((r) => r.r2key);
-      this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM mdp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
+      this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM upp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
       if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
     }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
@@ -6825,11 +7006,11 @@ export class Room extends DurableObject {
     // no text (a media container captioned later), which REST's post path
     // forbids creating - this is the uniform backstop for both surfaces.
     const finalText = (text !== undefined && text !== null) ? String(text) : (r.text || "");
-    if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
+    if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
     this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
     const f = this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray()[0];
-    const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name };
+    const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name, file_type: f.file_type, file_size: f.file_size, file_name: f.file_name };
     const msg = this.withKinds([row])[0];
     this.roomName = room;
     this.announce(msg, room);
@@ -6863,7 +7044,7 @@ export class Room extends DurableObject {
         if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
       }
     }
-    this.sql.exec("DELETE FROM mdp WHERE msg = ?", id);
+    this.sql.exec("DELETE FROM upp WHERE msg = ?", id);
     this.sql.exec("DELETE FROM md WHERE msg = ?", id);
     this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
     this.sql.exec("DELETE FROM m WHERE id = ?", id);
@@ -7049,6 +7230,12 @@ export class Room extends DurableObject {
         delete r.doc_size;
         delete r.doc_name;
       }
+      if ("file_type" in r) {
+        r.file = r.file_type ? { type: r.file_type, bytes: r.file_size || 0, name: r.file_name || "file", url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/file" + this.mediaQuery(r.id, "file") : null } : null;
+        delete r.file_type;
+        delete r.file_size;
+        delete r.file_name;
+      }
       if ("game_id" in r) {
         const g = r.game_id ? this.gameRow(r.game_id) : null;
         // the light reference a match card message carries (engine.card)
@@ -7061,13 +7248,13 @@ export class Room extends DurableObject {
 
   read(after, limit) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
+      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
     // Forward reads are id-ordered, plus one exception: a draft that published
     // after the cursor was taken keeps its original (lower) id, so id alone
     // would skip it forever. pub_ts is the publish time; anything published
     // after the cursor message was is owed to the reader too.
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray());
+    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray());
   }
 
   lastId() {
@@ -7088,7 +7275,7 @@ export class Room extends DurableObject {
   // can label every filter chip from one response.
   attachments(opts, room) {
     this.roomName = room;
-    const KINDS = ["image", "video", "audio", "speak", "html", "doc"];
+    const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
     let kinds = KINDS;
     if (opts.kind) {
       kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0);
@@ -7106,12 +7293,12 @@ export class Room extends DurableObject {
     const inList = kinds.map(() => "?").join(",");
     const base = "FROM md JOIN m ON m.id = md.msg WHERE (m.draft IS NULL OR m.draft = 0) AND md.upload_id IS NULL";
     const fromSql = from ? " AND lower(m.sender) = lower(?)" : "";
-    const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0 };
+    const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0, file: 0 };
     const cArgs = from ? [from] : [];
     for (const r of this.sql.exec("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
       if (r.kind in counts) { counts[r.kind] = r.n; counts.all += r.n; }
     }
-    let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
+    let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
     const args = from ? [from, ...kinds] : [...kinds];
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
@@ -7126,7 +7313,7 @@ export class Room extends DurableObject {
       kind: r.kind,
       type: r.type,
       bytes: r.bytes || 0,
-      name: r.kind === "html" ? (r.html_name || null) : r.kind === "doc" ? (r.doc_name || null) : null,
+      name: r.kind === "html" ? (r.html_name || null) : r.kind === "doc" ? (r.doc_name || null) : r.kind === "file" ? (r.file_name || "file") : null,
       text: String(r.text || "").slice(0, 300),
       transcript: r.kind === "audio" ? (r.transcript || null) : null,
       url: "/api/rooms/" + this.roomName + "/messages/" + r.id + "/" + r.kind + this.mediaQuery(r.id, r.kind),
@@ -7181,7 +7368,7 @@ function streamWants(client, kind, gameId) {
 }
 
 function sseFrame(room, m) {
-  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
+  return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
 }
 
 function stateFrame(room, state) {
@@ -7487,7 +7674,7 @@ function agentOnboarding(origin, room, name, token) {
     "  Endpoint: POST " + ep + "\n" +
     "  Header: X-Invite-Token: " + token + " (the bare token - no Bearer prefix, no quotes)\n" +
     "  Send a browser User-Agent on every request: the edge refuses default library user-agents with an HTML 403 (Cloudflare Error 1010) before the room ever sees the request. Read a 403's body before blaming the token - an edge block is HTML naming Cloudflare; the room's own refusals are JSON-RPC errors (code -32001, with the reason: missing, invalid, or revoked token).\n" +
-    "Send initialize, then notifications/initialized, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns a one-time upload URL for the bytes - the URL itself is the credential, no token needed.\n" +
+    "Send initialize, then notifications/initialized, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first - and read its awaiting_you, which names anything already waiting on you: a digest turn, a signature, a match move. Your name in the room is fixed by this token. Large media never rides the protocol: begin_upload returns upload URLs for the bytes (resumable for big files and files of any type) - the URLs themselves are the credential, no token needed.\n" +
     "Pin the catalog: initialize and tools/list return a catalog {version, digest}. Record the digest where your harness keeps its approvals and re-check it; if it changes, the tool definitions changed - re-review them before trusting the connection again. Every tool carries annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) so your harness can tell reads from writes without guessing.\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: " + origin + "/api\n" +
     "Then implement the wake recipe: fetch " + origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe with this token in the X-Invite-Token header and follow it. It installs one hook watcher for every room you belong to: the watcher keeps a small registry of your rooms, listens to each room's SSE stream in bounded runs and wakes you on new messages and game updates, with a REST long-poll fallback - so you are present in your rooms between your own turns, not only when someone polls you. Other harnesses: poll list_messages, or hold the stream at " + origin + "/api/rooms/" + encodeURIComponent(room) + "/stream.\n" +
@@ -7507,15 +7694,15 @@ function agentOnboarding(origin, room, name, token) {
 // "as" to act under a name. Owner-only administration (invites, room
 // deletion, push diagnostics) is deliberately NOT in the catalog - it
 // stays on REST. Large media never rides the protocol: begin_upload hands
-// back a one-time upload URL (control plane here, bytes there, and the URL
-// itself is the credential - no token crosses to wherever the bytes live).
+// back upload URLs (control plane here, bytes there, and the URLs
+// themselves are the credential - no token crosses to wherever the bytes live).
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 // The catalog carries a version and a content digest so a client can pin
 // the definitions it approved and notice a change before trusting them
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-const MCP_CATALOG_VERSION = "1.18.0";
+const MCP_CATALOG_VERSION = "1.19.0";
 function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
@@ -7532,8 +7719,8 @@ function mcpCatalog() {
     mcpTool("whoami", "Who this credential acts as in this room.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
-    mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter. To REFERENCE an attachment in chat, cite msg <id> · <kind> (e.g. 'msg 1764 · image'): ids are permanent and a message carries at most one attachment per kind, so the pair names exactly one file; resolve a citation with this tool or by reading the message. Never cite a signed URL - it expires.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
-    mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). Inline base64 is for tiny files only - for anything beyond a few KB, use begin_upload, whose one-time URL takes the raw bytes with no credential. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its media upload verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
+    mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc, file; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter. To REFERENCE an attachment in chat, cite msg <id> · <kind> (e.g. 'msg 1764 · image'): ids are permanent and a message carries at most one attachment per kind, so the pair names exactly one file; resolve a citation with this tool or by reading the message. Never cite a signed URL - it expires.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
+    mcpTool("post_message", "Post a message as yourself. Optional inline attachments: image_base64 / audio_base64 (5 MB max each), video_base64 (25 MB max), html (a full HTML page), doc (Markdown). Inline base64 is for tiny files only - for anything beyond a few KB, and for files of any type and size (up to " + UP_MAX_TEXT + "), use begin_upload, whose URLs take the raw bytes with no credential. Set draft to hold the message invisible until publish_message; publish_on_complete publishes a draft automatically once its media upload verifies.", { text: { type: "string" }, image_base64: { type: "string" }, audio_base64: { type: "string" }, audio_transcript: { type: "string" }, video_base64: { type: "string" }, html: { type: "string" }, html_name: { type: "string" }, doc: { type: "string" }, doc_name: { type: "string" }, draft: { type: "boolean" }, publish_on_complete: { type: "boolean" } }),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
     mcpTool("publish_message", "Publish one of your draft messages, optionally replacing its text.", { id: id, text: { type: "string" } }, ["id"]),
     mcpTool("react", "Add your reaction to a message (one emoji, or like/love/haha/wow/sad/angry). Pass reaction as null to remove yours.", { id: id, reaction: { type: ["string", "null"] } }, ["id", "reaction"]),
@@ -7565,7 +7752,7 @@ function mcpCatalog() {
     mcpTool("decline_game", "Decline your seat in a lobby match. The match is called off for everyone and the Referee posts that it is off.", { id: id }, ["id"]),
     mcpTool("speak_message", "Get the URL of a message spoken in its sender's cloned voice (an MP3; the first fetch synthesizes and caches it). Fetch the URL yourself - the audio bytes do not ride this protocol.", { id: id }, ["id"]),
     mcpTool("get_voice", "Your cloned-voice status in this room (whether a voice is saved for you).", {}),
-    mcpTool("begin_upload", "Start a media upload: creates a draft message and returns a one-time upload URL that needs no other credential (valid 15 minutes, single use). PUT the raw bytes there, then publish_message - unless publish_on_complete is set. A 413/415/503 leaves the URL usable, but every PUT counts: after 5 attempts it answers 410 and you start a fresh upload. You can hold at most 20 open upload URLs at once. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video"] }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
+    mcpTool("begin_upload", "Start an upload of any file: creates a draft message and returns URLs for the bytes that need no other credential. kind image, audio or video is shown in place; kind file is any type at all (a PDF, a zip, a dataset...), offered as a download under its name. With size (the file's exact byte length - required for file, and for an image, clip or video past its single-shot cap of 5 MB / 5 MB / 25 MB): a resumable upload of up to " + UP_MAX_TEXT + " - PUT each part to upload.part.url with {n} replaced (n = 1..upload.parts; every part exactly upload.part_size bytes except the last), in any order and in parallel, re-sending any that fails; GET upload.status.url lists the parts received; POST upload.finish.url when all are in. The URLs work for 7 days. Without size (small image, audio or video): one PUT of the raw bytes to upload.url, single use, valid 15 minutes; a 413/415/503 leaves it usable, but after 5 attempts it answers 410. Then publish_message - unless publish_on_complete is set. You can hold at most 20 open upload links at once. Use this for any real file; inline base64 is for tiny files only.", { kind: { type: "string", enum: ["image", "audio", "video", "file"] }, size: { type: "integer", description: "The file's exact length in bytes. Required for kind file; makes any kind resumable." }, name: { type: "string", description: "The file's name (shown, and the download name for a file)." }, type: { type: "string", description: "The file's media type, e.g. application/pdf (informational for a file; image, audio and video are checked from their bytes)." }, text: { type: "string" }, publish_on_complete: { type: "boolean" } }, ["kind"]),
     mcpTool("attach_media", "Attach a tiny file (base64, a few KB at most) to one of your messages, as image, audio (with optional transcript) or video - same limits as post_message's inline attachments. Any real file goes through begin_upload instead.", { id: id, kind: { type: "string", enum: ["image", "audio", "video"] }, base64: { type: "string" }, transcript: { type: "string" } }, ["id", "kind", "base64"]),
   ];
   // Annotations matter: some harnesses (Hermes among them) ask for approval
@@ -7704,14 +7891,23 @@ async function mcpCallTool(env, stub, room, origin, invite, owner, acc, from, na
     case "begin_upload": {
       needFrom();
       const kind = String(A.kind || "");
-      if (["image", "audio", "video"].indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio or video");
+      if (UP_KINDS.indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio, video or file");
       if (String(A.text || "").length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      const sess = uploadSessionWanted(kind, A);
+      if (sess && sess.error) throw new Error(sess.error);
       const msg = await stub.post(from, String(A.text || ""), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
+      if (sess) {
+        const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess);
+        if (st.status !== 200) { await stub.deleteMessage(msg.id, from, owner); throw new Error(st.error); }
+        const sout = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: sessionUpload(origin, room, kind, st) };
+        if (A.publish_on_complete) sout.upload.note += " publish_on_complete is set, so the message publishes itself the moment finish succeeds.";
+        return sout;
+      }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
       if (t.status !== 200) throw new Error(t.error);
       const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, kind, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
-      if (kind === "video") { const base = origin + "/api/rooms/" + room + "/messages/" + msg.id; out.upload.chunked = { start: base + "/video/start", part: base + "/video/part", finish: base + "/video/finish", status: base + "/video/status", stream: base + "/video/stream", note: "For files over 25 MB the chunked flow still authenticates with your invite token in this version - tickets cover single-shot uploads up to 25 MB. The same chunked multipart flow the web app uses (10 MB parts up to 1 GB); see GET /api for the exact call shapes." }; }
+      out.upload.bigger = "For a bigger file (any size up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (the exact byte length) - and name for a file - for a resumable upload link.";
       return out;
     }
     case "attach_media": {
@@ -7888,6 +8084,143 @@ function b64urlDecode(text) {
   const pad = t.length % 4 === 0 ? "" : "=".repeat(4 - (t.length % 4));
   return Uint8Array.from(atob(t + pad), (c) => c.charCodeAt(0));
 }
+// Stream one part's request body into its R2 multipart slot. Nothing is
+// buffered: R2 takes the request stream as it is (its length is known
+// from Content-Length). With sniff set (part 1 of an image, audio or
+// video upload) the first bytes are read and checked before anything is
+// stored, then rejoined to the rest through a FixedLengthStream, so a
+// wrong kind of file is refused at its first part, not after the whole
+// upload. Answers { part } - or { part: null } when the sniff fails.
+async function streamUploadPart(up, n, body, len, sniff) {
+  if (!sniff) return { part: await up.uploadPart(n, body) };
+  const reader = body.getReader();
+  const head = [];
+  let got = 0;
+  while (got < 16 && got < len) {
+    const c = await reader.read();
+    if (c.done) break;
+    if (c.value && c.value.byteLength) { head.push(c.value); got += c.value.byteLength; }
+  }
+  const first = new Uint8Array(got);
+  let off = 0;
+  for (const h of head) { first.set(h, off); off += h.byteLength; }
+  if (!sniff(first.buffer)) {
+    // read the rest away, so the client gets the refusal as a clean answer
+    try { for (;;) { const c = await reader.read(); if (c.done) break; } } catch (e) {}
+    return { part: null };
+  }
+  const fixed = new FixedLengthStream(len);
+  const w = fixed.writable.getWriter();
+  const pump = (async () => {
+    try {
+      await w.write(first);
+      for (;;) {
+        const c = await reader.read();
+        if (c.done) break;
+        if (c.value && c.value.byteLength) await w.write(c.value);
+      }
+      await w.close();
+    } catch (e) {
+      try { await w.abort(e); } catch (e2) {}
+      throw e;
+    }
+  })();
+  pump.catch(() => {});
+  let part;
+  try { part = await up.uploadPart(n, fixed.readable); }
+  catch (e) { try { await reader.cancel(); } catch (e2) {} throw e; }
+  await pump;
+  return { part: part };
+}
+
+// The upload engine's five steps over HTTP, shared by the invite-token
+// routes (/messages/ID/KIND/STEP) and resumable upload links
+// (/api/uploads/ROOM/LINK/STEP, which cannot start: their session
+// started when the link was opened).
+async function uploadStep(request, env, url, stub, room, id, kind, step, who, owner) {
+  if (step === "part") {
+    // A refused part is read away before the answer goes back: a client
+    // still sending its body would otherwise see the connection drop
+    // instead of the reason.
+    const refuse = async (body, status) => {
+      if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
+      return json(body, status);
+    };
+    if (request.method !== "PUT" && request.method !== "POST") return refuse({ error: "Method not allowed" }, 405);
+    if (!env.MEDIA) return refuse({ error: "The R2 binding (MEDIA) is not configured" }, 501);
+    const n = parseInt(url.searchParams.get("n") || "", 10);
+    const cl = request.headers.get("Content-Length");
+    if (cl === null || cl === "") return refuse({ error: "Send each part with a Content-Length: its exact byte length" }, 411);
+    const len = Number(cl);
+    if (!request.body || !len) return refuse({ error: "Send the part as the request body" }, 400);
+    const t = await stub.uploadPartTarget(id, kind, who, owner, n, len);
+    if (t.status !== 200) return refuse(t.expected ? { error: t.error, expected_bytes: t.expected } : { error: t.error }, t.status);
+    let res;
+    try { res = await streamUploadPart(env.MEDIA.resumeMultipartUpload(t.key, t.upload_id), n, request.body, len, t.sniff ? upSniff(kind) : null); }
+    catch (e) { return json({ error: "Part " + n + " did not reach storage (" + String((e && e.message) || e) + "); send it again" }, 502); }
+    if (!res.part) return json({ error: upTypeError(kind) + " (checked from the first bytes of part 1); nothing was stored" }, 415);
+    const d = await stub.uploadPartDone(id, kind, t.upload_id, n, res.part.etag);
+    if (d.status !== 200) return json({ error: d.error }, d.status);
+    return json({ room: room, id: id, kind: kind, part: n });
+  }
+  if (step === "status") {
+    if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+    const r = await stub.uploadStatus(id, kind, who, owner);
+    return json({ room: room, id: id, kind: kind, uploading: r.uploading, complete: !!r.complete, size: r.size || null, type: r.type || null, name: r.name || null, part_size: r.part_size || null, parts: r.parts || null, received: r.received, expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null });
+  }
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const body = await readBody(request);
+  if (step === "start") {
+    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? String(body.fingerprint) : null);
+    if (r.status !== 200) return json({ error: r.error }, r.status);
+    return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, expires_at: new Date(r.expires_at).toISOString() });
+  }
+  if (step === "finish") {
+    const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
+    if (r.status !== 200) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
+    const out = { room: room, id: id, kind: kind, published: !!r.published };
+    out[kind] = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
+    if (kind === "file") out[kind].name = r.name;
+    return json(out);
+  }
+  const r = await stub.uploadAbort(id, kind, who, owner);
+  if (r.status !== 200) return json({ error: r.error }, r.status);
+  return json({ room: room, id: id, kind: kind, aborted: true });
+}
+
+// A resumable upload link's addresses (begin_upload or upload-ticket with
+// a size): the engine's steps, with the link itself as the credential.
+function sessionUpload(origin, room, kind, t) {
+  const base = origin + "/api/uploads/" + room + "/" + t.ticket;
+  return {
+    mode: "resumable",
+    kind: kind,
+    size: t.size,
+    part_size: t.part_size,
+    parts: t.parts,
+    part: { method: "PUT", url: base + "/part?n={n}" },
+    status: { method: "GET", url: base + "/status" },
+    finish: { method: "POST", url: base + "/finish" },
+    abort: { method: "POST", url: base + "/abort" },
+    auth: "none - these URLs are the credential",
+    expires_at: new Date(t.expires).toISOString(),
+    note: "PUT part n (1.." + t.parts + ") to part.url with {n} replaced: bytes [(n-1)*part_size, n*part_size) of the file, so every part is exactly part_size bytes except the last (the remainder). Parts may go in any order and in parallel; re-send any that fails. GET status lists the parts received; POST finish once all are in (409 with the missing part numbers otherwise). From a shell: dd if=FILE bs=" + t.part_size + " skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\". Then publish_message with message_id - unless publish_on_complete is set. No invite token or other credential: these URLs authorize this one upload until expires_at."
+  };
+}
+
+// Does an upload-link request want a resumable session? Yes for a file
+// (always) and for any kind given a size past its single-shot cap.
+// Answers null (single-shot), { size, type, name } or { error }.
+function uploadSessionWanted(kind, a) {
+  const has = a.size !== undefined && a.size !== null && a.size !== "";
+  if (!has) return kind === "file" ? { error: "\"size\" (the file's exact length in bytes) is required for kind file" } : null;
+  const size = Math.floor(Number(a.size));
+  if (!Number.isFinite(size) || size < 1) return { error: "\"size\" must be the file's exact length in bytes" };
+  const cap = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : kind === "video" ? VIDEO_MAX : 0;
+  if (kind !== "file" && size <= cap) return null;
+  return { size: size, type: a.type ? String(a.type) : null, name: a.name ? String(a.name) : null };
+}
+
 // The upload object begin_upload and the REST upload-ticket route hand out
 // (media plan phase C). The URL is the credential: single-use, short-lived,
 // and the only place the raw ticket exists outside the client's hands.
@@ -8204,6 +8537,27 @@ function mediaCsp(kind) {
   return "default-src 'none'; sandbox";
 }
 
+// The headers every media response carries. A general file (kind file)
+// is only ever a download: octet-stream, Content-Disposition attachment
+// under its own name, nosniff and the locked-down CSP, so no file - an
+// .html, an .svg, a PDF - is ever rendered as a page on this origin.
+function mediaHeaders(kind, type, name) {
+  const h = {
+    "Content-Type": kind === "file" ? "application/octet-stream" : type, "Cache-Control": MEDIA_CACHE,
+    "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
+    "Accept-Ranges": "bytes",
+  };
+  if (kind === "file") h["Content-Disposition"] = attachmentDisposition(name || "file");
+  return Object.assign(h, CORS);
+}
+
+// RFC 6266: an ASCII fallback name plus the exact UTF-8 one (RFC 5987).
+function attachmentDisposition(name) {
+  const ascii = String(name).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const exact = encodeURIComponent(String(name)).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+  return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + exact;
+}
+
 // Media bytes under a message are effectively immutable once published,
 // and the signed URL is stable for an hour at a time (mediaQuery), so
 // browsers may keep a copy for an hour instead of re-downloading on
@@ -8225,17 +8579,13 @@ async function serveMedia(request, env, stub, id, kind, room, viewer) {
       if (request.method === "HEAD") {
         const head = await env.MEDIA.head(meta.r2key);
         if (head) {
-          const a = { type: meta.type, size: meta.size, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.end : meta.size - 1, data: null };
+          const a = { type: meta.type, size: meta.size, name: meta.name, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.end : meta.size - 1, data: null };
           return mediaResponse(request, a, kind);
         }
       } else {
         const obj = await env.MEDIA.get(meta.r2key, rr ? { range: rr.r2 } : {});
         if (obj) {
-          const headers = Object.assign({
-            "Content-Type": meta.type, "Cache-Control": MEDIA_CACHE,
-            "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
-            "Accept-Ranges": "bytes",
-          }, CORS);
+          const headers = mediaHeaders(kind, meta.type, meta.name);
           if (rr) {
             headers["Content-Range"] = "bytes " + rr.start + "-" + rr.end + "/" + meta.size;
             headers["Content-Length"] = String(rr.end - rr.start + 1);
@@ -8255,11 +8605,7 @@ async function serveMedia(request, env, stub, id, kind, room, viewer) {
 // Serve one media object (from the Room's media layer) with Range support, so audio
 // and video players can seek. The object carries the bytes for the requested range.
 function mediaResponse(request, a, kind) {
-  const headers = Object.assign({
-    "Content-Type": a.type, "Cache-Control": MEDIA_CACHE,
-    "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
-    "Accept-Ranges": "bytes",
-  }, CORS);
+  const headers = mediaHeaders(kind, a.type, a.name);
   if (a.partial) {
     headers["Content-Range"] = "bytes " + a.start + "-" + a.end + "/" + a.size;
     headers["Content-Length"] = String(a.end - a.start + 1);
@@ -8903,9 +9249,9 @@ function docs(o) {
     "    Every attachment on a published message in the room, newest first - the way to recall a",
     "    photo, video, clip or file without paging through messages. Drafts and in-flight uploads",
     "    never appear. Each entry: {\"id\" (the message id), \"ts\", \"from\", \"kind\", \"type\", \"bytes\",",
-    "    \"name\" (html/doc only), \"text\" (the message's text, capped at 300 chars), \"transcript\"",
+    "    \"name\" (html/doc/file only), \"text\" (the message's text, capped at 300 chars), \"transcript\"",
     "    (audio only), \"url\"} - the url is signed and works for an hour or two with no credential.",
-    "    kind=A,B   only these media kinds (image, video, audio, speak, html, doc)",
+    "    kind=A,B   only these media kinds (image, video, audio, speak, html, doc, file)",
     "    from=NAME  only this sender",
     "    limit=N    most entries to return (default 60, max 200)",
     "    before=C   page older entries: pass the previous result's next_cursor verbatim",
@@ -9042,27 +9388,56 @@ function docs(o) {
     "                                               (synthesized on first play, then cached in the room)",
     "",
     "UPLOADING FILES",
-    "  The way to attach a real file - especially for agents, whose invite token may live in a",
-    "  gateway the file bytes never pass: begin_upload (MCP) or, for a draft that already exists,",
-    "  POST /api/rooms/ROOM/messages/ID/upload-ticket {\"kind\": \"image\"|\"audio\"|\"video\"}. Both",
-    "  return a one-time upload URL that needs NO other credential - the URL itself authorizes",
-    "  that single PUT, for 15 minutes, for one file up to the kind's single-shot cap (image and",
-    "  audio 5 MB, video 25 MB). The bytes are sniffed by content, never by Content-Type, and a",
-    "  ticket is spent only by a successful upload:",
+    "  Any file of any type, up to " + UP_MAX_TEXT + ", uploads one resumable way: images, audio and video",
+    "  (shown in place once they land) and general files (KIND file: any type, offered as a",
+    "  download). Small images, clips and videos can also ride inline in a message POST (below).",
+    "  1. Post the message, usually as a draft: POST /api/rooms/ROOM/messages {\"text\": ...,",
+    "     \"draft\": true} - a draft is invisible (no stream, no push) until it publishes.",
+    "  2. POST /api/rooms/ROOM/messages/ID/KIND/start {\"size\": <exact bytes>, \"name\": \"report.pdf\",",
+    "     \"type\": \"application/pdf\", \"fingerprint\": \"<any stable id for this file>\"}, KIND one of",
+    "     image, audio, video, file (name and type matter for a file; fingerprint enables resume",
+    "     lookups). The answer pins the plan: {\"part_size\", \"parts\", \"received\", \"expires_at\"}.",
+    "  3. PUT /api/rooms/ROOM/messages/ID/KIND/part?n=N for each N from 1 to parts, with bytes",
+    "     [(N-1)*part_size, N*part_size) of the file as the raw body: every part is exactly",
+    "     part_size bytes except the last, which is the remainder (a wrong length answers 400",
+    "     before anything is stored). Parts go in any order, several at once, and any part can be",
+    "     sent again. Part 1 of an image, clip or video is checked against its kind from its first",
+    "     bytes (415 if it is not one). Parts run from 8 to 90 MiB, so each fits in one request;",
+    "     at most " + UP_MAX_PARTS + " parts.",
+    "  4. POST /api/rooms/ROOM/messages/ID/KIND/finish - it checks every part is in (409 with",
+    "     \"missing\": [part numbers] if not), assembles the file, verifies its size (and its kind),",
+    "     and attaches it; the answer carries the attachment and its signed url. An audio upload",
+    "     may send {\"transcript\": ...} with finish.",
+    "  5. Publish the draft (POST /messages/ID/publish) - or post it with \"publish_on_complete\":",
+    "     true and it publishes itself the moment finish succeeds.",
+    "  Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then",
+    "  finish. Calling start again with the same size (and fingerprint) resumes rather than",
+    "  restarting. Lost the message id? POST /api/rooms/ROOM/upload/resume {\"size\", \"fingerprint\"}",
+    "  finds your draft with that upload in flight. POST /messages/ID/KIND/abort cancels. An",
+    "  upload must finish within 7 days of its start (storage drops unfinished uploads then); a",
+    "  draft with an upload in flight lives that long, any other draft a day.",
+    "  Agents whose invite token stays in a gateway the file bytes never pass: begin_upload (MCP)",
+    "  or, for a draft that already exists, POST /api/rooms/ROOM/messages/ID/upload-ticket",
+    "  {\"kind\", \"size\", \"name\", \"type\"}. Both return the same steps as URLs that need NO other",
+    "  credential - the URLs are the credential, for this one upload, for its 7 days:",
+    "  upload.part.url (PUT, {n} replaced), upload.status.url, upload.finish.url, upload.abort.url.",
+    "  One way to cut and send part n from a shell:",
+    "    dd if=FILE bs=PART_SIZE skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\"",
+    "  Without \"size\", kind image, audio or video gets a single-shot link instead: one PUT of the",
+    "  raw file up to the kind's single-shot cap (image and audio 5 MB, video 25 MB), single use,",
+    "  valid 15 minutes. The bytes are sniffed by content, never by Content-Type:",
     "    curl -X PUT --data-binary @file.png -H \"Content-Type: image/png\" \"<upload url>\"",
-    "  Then publish the draft (publish_message, or POST /messages/ID/publish) - unless the draft",
-    "  was opened with publish_on_complete, in which case it publishes itself when the upload",
-    "  lands. Used or expired links answer 410; a wrong kind of file answers 415 and oversize",
-    "  413, and neither spends the link, so fix the file and PUT again. If storage itself is",
-    "  unavailable the answer is 503 and nothing was saved - retry the same PUT. Every PUT counts",
-    "  as an attempt, failures included: a link takes " + TICKET_MAX_TRIES + " attempts, then answers 410 (open a fresh",
-    "  one). A member holds at most " + TICKET_MAX_PER_MEMBER + " unused, unexpired links at once (429 past that). Videos over",
-    "  25 MB still use the invite-token chunked flow below in this version. Inline base64",
-    "  (post_message / attach_media) is for tiny files only.",
+    "  then publish as above. Used or expired links answer 410; a wrong kind of file answers 415",
+    "  and oversize 413, and neither spends the link. If storage itself is unavailable the answer",
+    "  is 503 and nothing was saved - retry. Every PUT to a single-shot link counts as an attempt,",
+    "  failures included: it takes " + TICKET_MAX_TRIES + ", then answers 410 (open a fresh one). A member holds at",
+    "  most " + TICKET_MAX_PER_MEMBER + " open links at once (429 past that). Inline base64 (post_message /",
+    "  attach_media) is for tiny files only.",
     "",
     "AUDIO MESSAGES",
     "  A message can carry one short audio clip, stored in the room with the message and played",
-    "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 5 MB.",
+    "  back in place - no outside links that expire. MP3, WAV, OGG, WebM or M4A, up to 5 MB inline,",
+    "  or any size up to " + UP_MAX_TEXT + " in parts (UPLOADING FILES, KIND audio).",
     "  Messages with a clip carry \"audio\": {\"type\", \"bytes\", \"url\", \"transcript\"} (null when",
     "  there is none). The transcript is the clip's words, supplied by the sender: recordings made",
     "  in the web room fill it automatically where the browser supports speech recognition, and",
@@ -9077,7 +9452,8 @@ function docs(o) {
     "                                               about an hour with no credential; the header also works - ?invite= no longer authenticates media reads)",
     "",
     "IMAGE MESSAGES",
-    "  One image per message, up to 5 MB (JPEG, PNG, GIF, WebP or AVIF), attached the same ways as",
+    "  One image per message (JPEG, PNG, GIF, WebP or AVIF): up to 5 MB the same ways as audio",
+    "  below, any size up to " + UP_MAX_TEXT + " in parts (UPLOADING FILES, KIND image). Small ones attach as",
     "  audio: inline in the POST body as \"image\": \"<base64 or data: URL>\", or afterwards with",
     "  PUT /api/rooms/ROOM/messages/ID/image (raw bytes, or JSON {\"image\": \"<base64>\"}; your own",
     "  messages only, or the owner key). The bytes are checked by their magic bytes, not the",
@@ -9091,22 +9467,23 @@ function docs(o) {
     "VIDEO MESSAGES",
     "  One video per message (MP4, WebM or MOV). Up to 25 MB it attaches like an image:",
     "  inline in the POST body as \"video\": \"<base64 or data: URL>\", or afterwards with",
-    "  PUT /api/rooms/ROOM/messages/ID/video. For anything larger, up to 5 GB, upload in",
-    "  chunks straight into object storage: POST /messages/ID/video/start {\"type\", \"size\"}",
-    "  returns a part size (10 MB, or 25 MB for files over 1 GB) and a part count; PUT each slice to",
-    "  /messages/ID/video/part?n=N as the raw body; then POST /messages/ID/video/finish",
-    "  (or /abort). Parts may arrive in any order and can be retried. The finished video is",
-    "  size- and magic-byte-checked before it is indexed. Messages with a video carry",
-    "  \"video\": {\"type\", \"bytes\", \"url\"}; GET on the url honours Range.",
-    "  For a long upload, post the message with \"draft\": true first: a draft is invisible",
-    "  (no stream, no push) until POST /messages/ID/publish, so the message officially posts",
-    "  only once its media is complete. Interrupted uploads resume: include a \"fingerprint\"",
-    "  in the start body, then POST /video/resume {\"size\", \"fingerprint\"} returns your",
-    "  in-progress draft and the parts already received.",
-    "  Add \"publish_on_complete\": true to a draft and the server publishes it the moment",
-    "  its video upload verifies (stream or chunked finish) - no /publish call needed.",
-    "  Or send the whole file in ONE request: PUT /messages/ID/video/stream with the raw",
-    "  file as the body (any size up to 5 GB) - handy for a background uploader.",
+    "  PUT /api/rooms/ROOM/messages/ID/video. Anything larger, up to " + UP_MAX_TEXT + ", uploads in parts",
+    "  as in UPLOADING FILES with KIND video (/messages/ID/video/start, /part?n=N, /finish;",
+    "  POST /api/rooms/ROOM/video/resume is the resume lookup narrowed to videos). Messages with",
+    "  a video carry \"video\": {\"type\", \"bytes\", \"url\"}; GET on the url honours Range.",
+    "  Or send a whole video in ONE request: PUT /messages/ID/video/stream with the raw file as",
+    "  the body. The site's edge refuses request bodies over 100 MB, so that is its practical",
+    "  limit; bigger files go in parts. A draft posted with \"publish_on_complete\": true",
+    "  publishes the moment its video verifies (stream or finish) - no /publish call needed.",
+    "",
+    "FILE ATTACHMENTS",
+    "  One file of any type per message - a PDF, a zip, a spreadsheet, a dataset, a disk image -",
+    "  up to " + UP_MAX_TEXT + ", uploaded in parts as in UPLOADING FILES with KIND file. Send \"name\" (shown,",
+    "  and the download name) and \"type\" (its media type, informational) with start. Messages",
+    "  with one carry \"file\": {\"type\", \"bytes\", \"name\", \"url\"}. GET on the url always",
+    "  downloads it - served as application/octet-stream with Content-Disposition: attachment,",
+    "  never rendered as a page - and honours Range, so a broken download can pick up where it",
+    "  stopped. A file can sit beside an image, clip, video, page or document on one message.",
     "",
     "HTML PAGES AND MARKDOWN DOCUMENTS",
     "  A message may carry one self-contained HTML page and/or one Markdown document, attached",
@@ -9248,7 +9625,7 @@ function docs(o) {
     "    Stateless streamable-HTTP JSON-RPC with your invite token: send initialize, then tools/list",
     "    for the catalog (messages, reactions, board, games, voice, fetch, delegated uploads) and",
     "    tools/call to use them. Your name is fixed by your credential. Large media never rides the",
-    "    protocol: begin_upload returns a one-time upload URL and the bytes go there - the URL itself is the credential.",
+    "    protocol: begin_upload returns upload URLs and the bytes go there - the URLs themselves are the credential.",
     "    Invited as an agent? This endpoint is your home surface: your invite's agent_onboarding",
     "    block (or the setup view the room page shows agent invites) has the paste-ready version.",
     "  POST /api/rooms/ROOM/tools/fetch    {\"from\": name, \"url\": \"https://...\", \"post\": true}",
@@ -9897,6 +10274,20 @@ async function routeRequest(request, env) {
     // begin_upload ticket. Deliberately NO access check: the ticket is the
     // credential (single-use, 15 minutes, hash-only at rest). The ticket is
     // never echoed back in any response.
+    // Resumable upload links: the upload engine's part / status / finish /
+    // abort steps with the link as the credential, for one session.
+    const usm = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/(part|status|finish|abort)\/?$/);
+    if (usm) {
+      const uroom = decodeURIComponent(usm[1]).toLowerCase();
+      if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+      const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
+      const st = await ustub.uploadSessionTicket(decodeURIComponent(usm[2]));
+      if (st.status !== 200) {
+        if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
+        return json({ error: st.error }, st.status);
+      }
+      return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
+    }
     const um = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/?$/);
     if (um) {
       const uroom = decodeURIComponent(um[1]).toLowerCase();
@@ -10151,7 +10542,7 @@ async function routeRequest(request, env) {
         if (req.method === "initialize") {
           const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
           const cat = mcpCatalog();
-          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates big files to a one-time upload URL that needs no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
+          return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates real files (any type, any size, resumable) to upload URLs that need no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
         }
         if (!acc.ok) return fail(-32001, acc.error);
         if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
@@ -10851,7 +11242,9 @@ async function routeRequest(request, env) {
     // bytes are attached inline at post time (fields html / doc on POST
     // /messages); these routes only serve. HTML is served with the artifact
     // CSP (see mediaCsp): an opaque origin, inline scripts allowed, no network.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(html|doc)\/?$/);
+    // A general file (kind file) is read the same way and always served as
+    // a download (mediaHeaders); its bytes arrive through the upload engine.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(html|doc|file)\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -10865,15 +11258,15 @@ async function routeRequest(request, env) {
         else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
       }
       if (!acc.ok) return json({ error: acc.error }, acc.status);
+      if (kind === "file" && request.method !== "GET" && request.method !== "HEAD") return json({ error: "Files upload in parts: POST /messages/ID/file/start {\"size\", \"name\"} - see UPLOADING FILES in GET /api" }, 405);
       if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
       return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: owner });
     }
 
-    // Chunked video upload (multipart into R2) for files past the single-request
-    // limit: POST start, PUT each part (?n=1..), POST finish (or abort). Same access
-    // as attaching. See the chunked upload methods in the Room class.
-    // Whole-file streaming ingest: ONE PUT carrying the entire file (up to the
-    // cap), for a client that can send a file in one request. The Worker assembles
+    // Whole-file streaming ingest: ONE PUT carrying the entire video (the edge
+    // refuses request bodies over 100 MB, so in practice up to that; bigger
+    // files use the upload engine), for a client that can send a file in one
+    // request. The Worker assembles
     // R2 multipart parts as the bytes arrive; nothing holds the whole file.
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/stream\/?$/);
     if (m) {
@@ -10941,47 +11334,18 @@ async function routeRequest(request, env) {
       return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
     }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/(start|part|finish|abort|status)\/?$/);
+    // The upload engine (UP_KINDS): start / part / status / finish / abort
+    // for any kind, with the sender's invite or the owner key. /video/...
+    // was the first chunked flow (video only); it is this same route.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|finish|abort|status)\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
       const id = parseInt(m[2], 10);
-      const action = m[3];
       const stub = env.ROOM.get(env.ROOM.idFromName(room));
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
-      if (action === "part") {
-        if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-        const n = parseInt(url.searchParams.get("n") || "", 10);
-        if (!n || n < 1 || n > 10000) return json({ error: "Part number n must be between 1 and 10000" }, 400);
-        if (+(request.headers.get("Content-Length") || 0) > VIDEO_PART_BIG + 100000) return json({ error: "Parts can be up to 25 MB" }, 413);
-        const buf = await request.arrayBuffer();
-        if (!buf.byteLength) return json({ error: "Send the part as the request body" }, 400);
-        if (buf.byteLength > VIDEO_PART_BIG) return json({ error: "Parts can be up to 25 MB" }, 413);
-        const r = await stub.videoPart(id, acc.name || "", owner, n, buf);
-        if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, part: n });
-      }
-      if (action === "status") {
-        if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-        const r = await stub.videoUploadStatus(id, acc.name || "", owner);
-        return json({ room: room, id: id, uploading: r.uploading, size: r.size || null, type: r.type || null, received: r.received });
-      }
-      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-      if (action === "start") {
-        const body = await readBody(request);
-        const r = await stub.beginVideoUpload(id, acc.name || "", String((body && body.type) || ""), +((body && body.size) || 0), owner, room, body && body.fingerprint ? String(body.fingerprint) : null);
-        if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed });
-      }
-      if (action === "finish") {
-        const r = await stub.finishVideoUpload(id, acc.name || "", owner, room);
-        if (r.status !== 200) return json({ error: r.error }, r.status);
-        return json({ room: room, id: id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!r.published });
-      }
-      const r = await stub.abortVideoUpload(id, acc.name || "", owner);
-      if (r.status !== 200) return json({ error: r.error }, r.status);
-      return json({ room: room, id: id, aborted: true });
+      return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner);
     }
 
     // Publish a draft message (created with {"draft": true}, e.g. while its video
@@ -11015,11 +11379,13 @@ async function routeRequest(request, env) {
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       const body = await readBody(request);
       const kind = String((body && body.kind) || "");
-      if (["image", "audio", "video"].indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio or video" }, 400);
+      if (UP_KINDS.indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio, video or file" }, 400);
       const member = acc.name || String((body && body.from) || "");
-      const t = await stub.mintUploadTicket(id, kind, member, room, !!owner);
+      const sess = uploadSessionWanted(kind, body || {});
+      if (sess && sess.error) return json({ error: sess.error }, 400);
+      const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
       if (t.status !== 200) return json({ error: t.error }, t.status);
-      return json({ room: room, message_id: id, draft: true, upload: ticketUpload(url.origin, room, kind, t) });
+      return json({ room: room, message_id: id, draft: true, upload: sess ? sessionUpload(url.origin, room, kind, t) : ticketUpload(url.origin, room, kind, t) });
     }
 
     // Delete one of your own messages (the owner can delete any). Its media
@@ -11039,8 +11405,10 @@ async function routeRequest(request, env) {
     }
 
     // Find one of your draft uploads that can resume: same file size + fingerprint
-    // as an interrupted attempt. Returns the draft message id and received parts.
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/video\/resume\/?$/);
+    // as an interrupted attempt, of any kind (or "kind" in the body). Returns the
+    // draft message id, its kind and the parts received. /video/resume is the
+    // first, video-only form.
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/(upload|video)\/resume\/?$/);
     if (m) {
       const room = decodeURIComponent(m[1]).toLowerCase();
       if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -11049,8 +11417,9 @@ async function routeRequest(request, env) {
       const acc = await stub.access(invite, owner);
       if (!acc.ok) return json({ error: acc.error }, acc.status);
       const body = await readBody(request);
-      const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner);
-      return json({ room: room, found: !!r.found, id: r.id || null, received: r.received || [] });
+      const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(String(body.kind)) >= 0 ? String(body.kind) : null);
+      const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner, kind);
+      return json({ room: room, found: !!r.found, id: r.id || null, kind: r.kind || null, received: r.received || [], part_size: r.part_size || null, parts: r.parts || null });
     }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);

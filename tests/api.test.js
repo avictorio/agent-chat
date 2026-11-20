@@ -1952,6 +1952,117 @@ async function waitUp() {
     check('empty draft cannot publish', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upE.message_id, text: 'captioned at publish' } }, { token: TP });
     check('publish with a caption completes the empty draft', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+
+    // The upload engine: one resumable flow for every kind, general files
+    // included. A fresh member keeps these clear of Poc's open-link cap.
+    const invU = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Upl', kind: 'human' } });
+    const TU = invU.json.token;
+    const MiB = 1048576;
+    const BIG = Buffer.alloc(17 * MiB + 12345);
+    for (let i = 0; i < BIG.length; i += 997) BIG[i] = (i * 31) & 255;
+    const sha = (b) => require('crypto').createHash('sha256').update(b).digest('hex');
+    const fdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'a big file', draft: true } });
+    const fid = fdr.json && fdr.json.id;
+    const FP = 'fp-' + SUF;
+    const startArgs = { size: BIG.length, name: 'résumé data.bin', type: 'application/x-probe', fingerprint: FP };
+    r = await req('POST', R2 + '/messages/' + fid + '/file/start', { token: TU, json: startArgs });
+    check('file upload start pins a plan', r.status === 200 && r.json.part_size === 8 * MiB && r.json.parts === 3 && r.json.resumed === false && !!r.json.expires_at, JSON.stringify(r.json));
+    const PS = (r.json && r.json.part_size) || 8 * MiB;
+    const slice = (n) => BIG.subarray((n - 1) * PS, Math.min(BIG.length, n * PS));
+    const putPart = (n, body, token) => req('PUT', R2 + '/messages/' + fid + '/file/part?n=' + n, { token: token || TU, body });
+    r = await putPart(2, slice(2).subarray(1));
+    check('a part of the wrong length -> 400 naming the length', r.status === 400 && r.json && r.json.expected_bytes === PS, r.status + ' ' + r.text.slice(0, 160));
+    r = await putPart(4, slice(3));
+    check('a part number past the plan -> 400', r.status === 400, r.status);
+    r = await putPart(3, slice(3));
+    check('the last part (the remainder) lands', r.status === 200 && r.json && r.json.part === 3, r.status + ' ' + r.text.slice(0, 120));
+    r = await putPart(1, slice(1));
+    check('parts land in any order', r.status === 200, r.status);
+    r = await putPart(1, slice(1), TP);
+    check('another member cannot send parts -> 403', r.status === 403, r.status);
+    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    check('finish with a part missing -> 409 naming it', r.status === 409 && JSON.stringify(r.json && r.json.missing) === '[2]', r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TU });
+    check('status lists the parts received', !!(r.json && r.json.uploading === true && JSON.stringify(r.json.received) === '[1,3]' && r.json.parts === 3 && r.json.name === 'résumé data.bin'), JSON.stringify(r.json));
+    r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TP });
+    check('status shows nothing to another member', !!(r.json && r.json.uploading === false && r.json.received.length === 0), JSON.stringify(r.json));
+    r = await req('POST', R2 + '/upload/resume', { token: TU, json: { size: BIG.length, fingerprint: FP } });
+    check('resume lookup finds the draft and its parts', !!(r.json && r.json.found && r.json.id === fid && r.json.kind === 'file' && JSON.stringify(r.json.received) === '[1,3]'), JSON.stringify(r.json));
+    r = await req('POST', R2 + '/upload/resume', { token: TP, json: { size: BIG.length, fingerprint: FP } });
+    check('resume lookup is per member', !!(r.json && r.json.found === false), JSON.stringify(r.json));
+    r = await req('POST', R2 + '/messages/' + fid + '/file/start', { token: TU, json: startArgs });
+    check('start again resumes with the parts kept', !!(r.json && r.json.resumed === true && JSON.stringify(r.json.received) === '[1,3]'), JSON.stringify(r.json));
+    r = await putPart(2, slice(2));
+    check('the missing part lands', r.status === 200, r.status);
+    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    check('finish assembles and attaches the file', r.status === 200 && !!(r.json && r.json.file && r.json.file.bytes === BIG.length && r.json.file.name === 'résumé data.bin' && /sig=/.test(r.json.file.url) && r.json.published === false), r.status + ' ' + r.text.slice(0, 200));
+    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    check('a second finish -> 409', r.status === 409, r.status);
+    r = await req('GET', R2 + '/messages/' + fid + '/file', { token: TP });
+    check('a draft file stays private before publish', r.status === 404, r.status);
+    r = await req('POST', R2 + '/messages/' + fid + '/publish', { token: TU, json: {} });
+    check('publish the file draft', r.status === 200 && !!(r.json && r.json.file && r.json.file.name === 'résumé data.bin'), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/messages?limit=20', { token: TP });
+    const fmsg = ((r.json && r.json.messages) || []).find(x => x.id === fid);
+    check('listings carry the file', !!(fmsg && fmsg.file && fmsg.file.bytes === BIG.length && fmsg.file.type === 'application/x-probe' && /sig=/.test(fmsg.file.url)), JSON.stringify(fmsg && fmsg.file));
+    const fURL = BASE + new URL(fmsg.file.url, BASE).pathname + new URL(fmsg.file.url, BASE).search;
+    let ff = await fetch(fURL);
+    const fbuf = Buffer.from(await ff.arrayBuffer());
+    check('the file downloads with a signed url, byte for byte', ff.status === 200 && fbuf.length === BIG.length && sha(fbuf) === sha(BIG), ff.status + ' ' + fbuf.length);
+    const cd = ff.headers.get('content-disposition') || '';
+    check('a file is served only as a download', ff.headers.get('content-type') === 'application/octet-stream' && cd.startsWith('attachment;') && cd.includes("filename*=UTF-8''r%C3%A9sum%C3%A9%20data.bin") && ff.headers.get('x-content-type-options') === 'nosniff' && (ff.headers.get('content-security-policy') || '').includes('sandbox'), ff.headers.get('content-type') + ' | ' + cd);
+    ff = await fetch(fURL, { headers: { Range: 'bytes=' + (PS - 8) + '-' + (PS + 7) } });
+    const rbuf = Buffer.from(await ff.arrayBuffer());
+    check('a file download honours Range across a part boundary', ff.status === 206 && rbuf.equals(BIG.subarray(PS - 8, PS + 8)), ff.status + ' ' + rbuf.length);
+    r = await req('PUT', R2 + '/messages/' + fid + '/file', { token: TU, body: PNG });
+    check('PUT on a file explains the parts flow -> 405', r.status === 405 && /file\/start/.test(r.text), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/attachments?kind=file', { token: TP });
+    check('attachments list files with their names', !!(r.json && (r.json.attachments || []).some(a => a.id === fid && a.kind === 'file' && a.name === 'résumé data.bin') && r.json.counts && r.json.counts.file === 1), JSON.stringify(r.json).slice(0, 200));
+    // Typed kinds through the engine: part 1 is checked against the kind.
+    const idr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'engine image', draft: true } });
+    r = await req('POST', R2 + '/messages/' + idr.json.id + '/image/start', { token: TU, json: { size: 9 * MiB } });
+    r = await req('PUT', R2 + '/messages/' + idr.json.id + '/image/part?n=1', { token: TU, body: Buffer.alloc(8 * MiB, 3) });
+    check('an image upload whose first bytes are not an image -> 415 at part 1', r.status === 415, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages/' + idr.json.id + '/image/status', { token: TU });
+    check('a refused part leaves no receipt', !!(r.json && r.json.uploading === true && r.json.received.length === 0), JSON.stringify(r.json));
+    r = await req('POST', R2 + '/messages/' + idr.json.id + '/image/start', { token: TU, json: { size: PNG.length } });
+    check('a new size restarts the session', !!(r.json && r.json.resumed === false && r.json.parts === 1), JSON.stringify(r.json));
+    r = await req('PUT', R2 + '/messages/' + idr.json.id + '/image/part?n=1', { token: TU, body: PNG });
+    r = await req('POST', R2 + '/messages/' + idr.json.id + '/image/finish', { token: TU });
+    check('a one-part image finishes as an image', r.status === 200 && !!(r.json && r.json.image && r.json.image.type === 'image/png'), r.status + ' ' + r.text.slice(0, 160));
+    // The first chunked flow's addresses are the engine's (kind video), and
+    // publish_on_complete fires on finish.
+    const vdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'engine video', draft: true, publish_on_complete: true } });
+    r = await req('POST', R2 + '/messages/' + vdr.json.id + '/video/start', { token: TU, json: { type: 'video/mp4', size: mp4().length } });
+    r = await req('PUT', R2 + '/messages/' + vdr.json.id + '/video/part?n=1', { token: TU, body: mp4() });
+    r = await req('POST', R2 + '/messages/' + vdr.json.id + '/video/finish', { token: TU });
+    check('/video/start-part-finish is the engine, publishing on complete', r.status === 200 && !!(r.json && r.json.video && r.json.video.type === 'video/mp4' && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
+    // Abort cancels the session and its parts.
+    const adr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'aborted audio', draft: true } });
+    await req('POST', R2 + '/messages/' + adr.json.id + '/audio/start', { token: TU, json: { size: 20 * MiB } });
+    r = await req('POST', R2 + '/messages/' + adr.json.id + '/audio/abort', { token: TU });
+    check('abort cancels an upload', r.status === 200 && !!(r.json && r.json.aborted === true), r.status);
+    r = await req('GET', R2 + '/messages/' + adr.json.id + '/audio/status', { token: TU });
+    check('nothing is left after abort', !!(r.json && r.json.uploading === false), JSON.stringify(r.json));
+    // Agents: begin_upload with a size opens a resumable link set that needs
+    // no credential; a file needs a size.
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'file', name: 'notes.txt' } }, { token: TU });
+    check('begin_upload of a file without size is a tool error', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    const NOTE = Buffer.from('agent notes, any type at all\n'.repeat(40));
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'file', size: NOTE.length, name: 'notes.txt', type: 'text/plain', text: 'agent file', publish_on_complete: true } }, { token: TU });
+    const sup = r.json && r.json.result && r.json.result.structuredContent;
+    check('begin_upload with a size returns a resumable link set', !!(sup && sup.upload && sup.upload.mode === 'resumable' && sup.upload.parts === 1 && /\/part\?n=\{n\}$/.test(sup.upload.part.url) && String(sup.upload.auth).includes('credential') && !JSON.stringify(sup).includes(TU)), JSON.stringify(r.json).slice(0, 240));
+    const linkPath = (u) => new URL(u).pathname + new URL(u).search;
+    r = await req('PUT', linkPath(sup.upload.part.url.replace('{n}', '1')), { body: NOTE });
+    check('a link part lands with no credential', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', linkPath(sup.upload.status.url), {});
+    check('a link status lists the part', !!(r.json && JSON.stringify(r.json.received) === '[1]'), JSON.stringify(r.json));
+    r = await req('PUT', new URL(sup.upload.part.url).pathname.replace(/\/part$/, ''), { body: NOTE });
+    check('a resumable link is not a single-shot link -> 405', r.status === 405, r.status);
+    r = await req('POST', linkPath(sup.upload.finish.url), {});
+    check('a link finish attaches and auto-publishes', r.status === 200 && !!(r.json && r.json.file && r.json.file.name === 'notes.txt' && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('PUT', '/api/uploads/' + room2Name + '/' + 'B'.repeat(43) + '/part?n=1', { body: NOTE });
+    check('a garbled link -> 404', r.status === 404, r.status);
     // Digest edits need an identity, like every sibling MCP write.
     r = await mcp(R2, 'tools/call', { name: 'file_digest', arguments: { text: 'A digest filed for the identity check.' } }, { token: TP });
     const dg = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.digest;

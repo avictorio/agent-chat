@@ -8,16 +8,27 @@ import { flushSync } from "react-dom";
 import type { Message, RoomClient, RoomState } from "@chat/shared";
 import { toast } from "../lib";
 import {
-  sendBigVideo,
+  UploadCancelled,
+  dataUrlBlob,
+  discardPending,
+  fmtBytes,
+  fmtEta,
+  pendingUploads,
+  sendWithUploads,
+  type PendingUpload,
+  type UpItem,
+  type UpState,
 } from "./uploads";
 
 // The composer, ported from the current app: name handling, the
 // mention highlight overlay and autocomplete menu, dictation (one-
 // phrase mode on phones, continuous on desktop), the send flow, and
-// attachments — an audio clip, an image, a video (small ones inline,
-// big ones up under a draft in resumable parts), an HTML page or a
-// Markdown document, plus the voice-message recorder. A message does
-// not officially post until its media upload completes.
+// attachments — an audio clip, an image, a video, a file of any type
+// and size, an HTML page or a Markdown document, plus the voice-message
+// recorder. Small media rides inline in the post; anything bigger, and
+// every general file, goes up first under a draft in resumable parts
+// (uploads.ts), with live progress and a Cancel - the message does not
+// officially post until every upload has completed.
 
 export interface ComposerProps {
   onCommitName: (v: string) => void;
@@ -161,10 +172,28 @@ export function Composer(p: ComposerProps) {
 
   const att = useAttachments();
   const {
-    clip, clipRef, setClip, image, setImage, art, setArt, video, setVideo,
-    vidProgress, setVidProgress, imgFileRef, clipFileRef, artFileRef, vidFileRef,
-    onClipFile, onImgFile, onArtFile, onVidFile,
+    clip, clipRef, setClip, image, setImage, art, setArt, video, setVideo, fileAtt, setFileAtt,
+    imgFileRef, clipFileRef, artFileRef, vidFileRef, anyFileRef,
+    onClipFile, onImgFile, onArtFile, onVidFile, onAnyFile,
   } = att;
+  // ---- resumable uploads: live progress, Cancel, and what was interrupted ----
+  const [up, setUp] = useState<UpState | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [interrupted, setInterrupted] = useState<PendingUpload[]>(() => pendingUploads(room));
+  useEffect(() => {
+    setInterrupted(pendingUploads(room));
+  }, [room]);
+  // Leaving the page mid-upload loses the browser's hold on the file:
+  // ask first (the parts already sent are kept either way).
+  useEffect(() => {
+    if (!up) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [!!up]);
   const rec = useRecorder({ textRef, grow, clipRef, setClip, stopDictation });
   const { recActive, recLabel, recClick } = rec;
   const clipChipText = recActive ? recLabel : clip ? clip.label : "";
@@ -202,7 +231,7 @@ export function Composer(p: ComposerProps) {
     }
     let text = textEl ? textEl.value : "";
     const typed = text;
-    if (!text.trim() && !clip && !image && !video && !art) return;
+    if (!text.trim() && !clip && !image && !video && !art && !fileAtt) return;
     if (!text.trim())
       text = clip
         ? "🎙️ Audio message"
@@ -210,37 +239,63 @@ export function Composer(p: ComposerProps) {
           ? "🎬 Video message"
           : image
             ? "🖼️ Image"
-            : art!.kind === "html"
-              ? "🗔 Page: " + art!.name
-              : "📄 " + art!.name;
+            : fileAtt
+              ? "📎 " + fileAtt.file.name
+              : art!.kind === "html"
+                ? "🗔 Page: " + art!.name
+                : "📄 " + art!.name;
     if (from !== committed) p.onCommitName(from);
     setChanging(false);
     sendingRef.current = true;
     setSending(true);
     setErr(null);
     try {
-      // A big video goes up first, under a draft: the message does
-      // not officially post until the upload completes and the draft
-      // is published. Nothing is cleared up front: if the upload
-      // fails, the caption is still in the composer and any other
-      // attachment stays armed, so a retry sends what was written.
-      if (video && video.big) {
-        const bigFile = video.file;
+      // Anything past the inline caps, and any general file, goes up
+      // first under a draft: the message does not officially post until
+      // every upload completes and the draft is published. The image,
+      // clip and video in the same message ride along through the same
+      // engine. Nothing is cleared up front: if an upload fails, the
+      // caption and every attachment stay armed, and sending again
+      // resumes where it stopped (the parts already sent are kept).
+      if (fileAtt || (image && image.big) || (clip && !clip.data) || (video && video.big)) {
+        const items: UpItem[] = [];
+        if (image) {
+          const b = image.file || dataUrlBlob(image.data || "", "image/png");
+          items.push({ kind: "image", blob: b, name: image.file ? image.file.name : "image", type: b.type });
+        }
+        if (clip) {
+          const b = clip.blob || dataUrlBlob(clip.data || "", "audio/webm");
+          items.push({ kind: "audio", blob: b, name: clip.name, type: b.type, transcript: clip.transcript || null });
+        }
+        if (video) {
+          const b = video.file || dataUrlBlob(video.data || "", "video/mp4");
+          items.push({ kind: "video", blob: b, name: video.file ? video.file.name : "video", type: b.type });
+        }
+        if (fileAtt) items.push({ kind: "file", blob: fileAtt.file, name: fileAtt.file.name, type: fileAtt.file.type });
+        const ctl = new AbortController();
+        abortRef.current = ctl;
         try {
-          const live = await sendBigVideo(client, room, from, text, bigFile!, (label) => setVidProgress(label));
+          const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
           clearSent(textEl, typed);
           grow();
+          setClip(null);
+          setImage(null);
           setVideo(null);
-          setVidProgress(null);
-          // A big-video send carries only the video and the caption:
-          // any clip, image or page stays armed for the next message.
-          // Never let that be silent, and never discard them either.
-          if (clip || image || art)
-            toast("Video sent. Your other attachment is still in the composer - send again to post it, or remove it.");
+          setFileAtt(null);
+          // A page or document can't ride a draft: it stays armed for
+          // the next message. Never let that be silent.
+          if (art) toast("Sent. Your page or document is still in the composer - send again to post it, or remove it.");
           p.onPosted(live);
         } catch (uerr) {
-          const msg = uerr instanceof Error ? uerr.message : String(uerr);
-          toast("Video upload interrupted: " + msg + " - re-attach the same file to resume", true);
+          if (uerr instanceof UploadCancelled) toast("Upload cancelled - nothing was posted");
+          else {
+            const msg = uerr instanceof Error ? uerr.message : String(uerr);
+            toast("Upload interrupted: " + msg + ". Send again to pick up where it stopped.", true);
+          }
+        } finally {
+          abortRef.current = null;
+          setUp(null);
+          setInterrupted(pendingUploads(room));
         }
         return;
       }
@@ -263,7 +318,6 @@ export function Composer(p: ComposerProps) {
       setClip(null);
       setImage(null);
       setVideo(null);
-      setVidProgress(null);
       setArt(null);
       p.onPosted(d);
     } catch (err) {
@@ -304,9 +358,32 @@ export function Composer(p: ComposerProps) {
             }}
           />
           <div className="compose-box">
+            {up ? (
+              <div className="upl" id="uplCard" role="status" aria-live="polite">
+                <div className="upl-row">
+                  <span className="upl-name">Uploading {up.label}</span>
+                  <button type="button" className="linkbtn" id="uplCancel" onClick={() => abortRef.current?.abort()}>
+                    Cancel
+                  </button>
+                </div>
+                <div className="upl-bar" aria-hidden="true">
+                  <span style={{ width: (up.total ? Math.min(100, (up.sent / up.total) * 100) : 0) + "%" }}></span>
+                </div>
+                <div className={"upl-meta" + (up.waiting ? " wait" : "")} id="uplMeta">
+                  {up.waiting ||
+                    Math.floor(up.total ? (up.sent / up.total) * 100 : 0) +
+                      "% · " +
+                      fmtBytes(up.sent) +
+                      " of " +
+                      fmtBytes(up.total) +
+                      (up.rate > 0 ? " · " + fmtBytes(up.rate) + "/s" : "") +
+                      (up.eta != null && up.sent < up.total ? " · " + fmtEta(up.eta) : "")}
+                </div>
+              </div>
+            ) : null}
             <div className="attach-row" id="attachRow" hidden={!image}>
               <span id="imgChip" className="clip-chip">
-                <img id="imgThumb" className="img-thumb" alt="" src={image ? image.data : undefined} />
+                <img id="imgThumb" className="img-thumb" alt="" src={image ? image.thumb : undefined} />
                 <span id="imgName">{image ? image.name : ""}</span>{" "}
                 <button type="button" className="linkbtn" id="imgRemove" onClick={() => setImage(null)}>
                   Remove
@@ -406,6 +483,20 @@ export function Composer(p: ComposerProps) {
                   void onVidFile(f || null);
                 }}
               />
+              <button id="fileBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a file" title="Attach a file (any type, any size)" onClick={() => anyFileRef.current?.click()}>
+                <I d={["M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"]} />
+              </button>
+              <input
+                id="anyFile"
+                type="file"
+                hidden
+                ref={anyFileRef}
+                onChange={(e) => {
+                  const f = e.target.files && e.target.files[0];
+                  e.target.value = "";
+                  void onAnyFile(f || null);
+                }}
+              />
               <button id="artBtn" className="btn quiet icon-btn" type="button" aria-label="Attach a page or document" title="Attach an HTML page or Markdown document" onClick={() => artFileRef.current?.click()}>
                 <I d={["M6 2h9l5 5v15H6z", "M14 2v6h6"]} />
               </button>
@@ -489,19 +580,35 @@ export function Composer(p: ComposerProps) {
             </button>
           </span>
           <span id="vidChip" className="clip-chip" hidden={!video}>
-            <span id="vidName">{vidProgress || (video ? video.name : "")}</span>{" "}
-            <button
-              type="button"
-              className="linkbtn"
-              id="vidRemove"
-              onClick={() => {
-                setVideo(null);
-                setVidProgress(null);
-              }}
-            >
+            <span id="vidName">{video ? video.name : ""}</span>{" "}
+            <button type="button" className="linkbtn" id="vidRemove" hidden={!!up} onClick={() => setVideo(null)}>
               Remove
             </button>
           </span>
+          <span id="fileChip" className="clip-chip" hidden={!fileAtt}>
+            <span id="fileName">{fileAtt ? fileAtt.label : ""}</span>{" "}
+            <button type="button" className="linkbtn" id="fileRemove" hidden={!!up} onClick={() => setFileAtt(null)}>
+              Remove
+            </button>
+          </span>
+          {!up && interrupted.length ? (
+            <span id="uplResume" className="clip-chip warn-chip">
+              <span>
+                {interrupted[0]!.names.join(", ") || "An upload"} didn't finish uploading - attach the same file and send to pick up where it stopped
+              </span>{" "}
+              <button
+                type="button"
+                className="linkbtn"
+                id="uplDiscard"
+                onClick={() => {
+                  const it = interrupted[0]!;
+                  void discardPending(client, room, it).then(() => setInterrupted(pendingUploads(room)));
+                }}
+              >
+                Discard
+              </button>
+            </span>
+          ) : null}
           <span id="artChip" className="clip-chip" hidden={!art}>
             <span id="artName">{art ? art.label : ""}</span>{" "}
             <button type="button" className="linkbtn" id="artRemove" onClick={() => setArt(null)}>

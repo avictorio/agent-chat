@@ -3,15 +3,27 @@ import { useFeed, useMembers, useSession } from "../room/ctx";
 import type { Message } from "@chat/shared";
 import { md } from "./markdown";
 import { pressable } from "../lib";
+import { fmtBytes } from "../composer/uploads";
 import type { ViewerApi } from "../shell/viewer";
 import { GameCardBlock } from "../games/gamecard";
 import type { GameStore } from "../games/games";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card
-// (inert sandboxed preview) and the Markdown document card (rendered
-// preview). Cards are previews only — no links or buttons on them;
-// tapping opens the full-screen viewer.
+// (inert sandboxed preview), the Markdown document card (rendered
+// preview) and the file card (a general file of any type: tapping it
+// downloads, nothing is ever opened in the page). Other cards are
+// previews only — no links or buttons on them; tapping opens the
+// full-screen viewer. A very large image shows as a card too, so a
+// scroll past it never pulls hundreds of MB.
+
+// Past this an image is a card that opens on tap instead of an inline <img>.
+const INLINE_IMAGE_MAX = 15 * 1024 * 1024;
+
+function fileExt(name: string): string {
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec(name || "");
+  return m ? m[1]!.toUpperCase() : "FILE";
+}
 
 // Media URLs arrive from the server already signed (phase E): the
 // signature in the query string authorizes the read for about an hour,
@@ -166,7 +178,7 @@ export function MediaBlocks({ m }: { m: Message }) {
   const { memberSet } = useMembers();
   const { openViewer, games } = useFeed();
   const yts = ytLinks(m.text || "");
-  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.game) return null;
+  if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
   const memberSetRef = useRef(memberSet);
   memberSetRef.current = memberSet;
   return (
@@ -174,7 +186,34 @@ export function MediaBlocks({ m }: { m: Message }) {
       {yts.map((yt) => (
         <YtCard key={yt.id} id={yt.id} openViewer={openViewer} />
       ))}
-      {m.image && m.image.url && (
+      {m.image && m.image.url && (m.image.bytes || 0) > INLINE_IMAGE_MAX && (
+        <div
+          className="art-card big-img-card"
+          {...pressable(() => {
+            const iurl = withInvite(m.image!.url, token);
+            openViewer(
+              "Image",
+              (vb) => {
+                const vi = document.createElement("img");
+                vi.className = "viewer-img";
+                vi.src = iurl;
+                vi.alt = "Attached image";
+                vb.appendChild(vi);
+              },
+              iurl
+            );
+          }, "Open the attached image (" + fmtBytes(m.image.bytes || 0) + ")")}
+        >
+          <div className="art-head">
+            <span className="art-kind">Photo</span>
+            <span className="art-name">Large image</span>
+            <span className="art-size">{fmtBytes(m.image.bytes || 0)}</span>
+            <span className="sp"></span>
+            <span className="art-go">›</span>
+          </div>
+        </div>
+      )}
+      {m.image && m.image.url && (m.image.bytes || 0) <= INLINE_IMAGE_MAX && (
         <img
           className="msg-img"
           src={withInvite(m.image.url, token)}
@@ -261,6 +300,25 @@ export function MediaBlocks({ m }: { m: Message }) {
           </div>
           <DocBody id={m.id} url={withInvite(m.doc.url, token)} memberSet={memberSet} />
         </div>
+      )}
+      {m.file && m.file.url && (
+        <a
+          className="file-card"
+          href={withInvite(m.file.url, token)}
+          download={m.file.name || "file"}
+          aria-label={"Download " + (m.file.name || "file") + ", " + fmtBytes(m.file.bytes || 0)}
+        >
+          <span className="file-ico" aria-hidden="true">
+            <span>{fileExt(m.file.name || "")}</span>
+          </span>
+          <span className="file-meta">
+            <span className="art-name">{m.file.name || "file"}</span>
+            <span className="art-size">{fmtBytes(m.file.bytes || 0)}</span>
+          </span>
+          <span className="file-dl" aria-hidden="true">
+            <svg className="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+          </span>
+        </a>
       )}
       {m.game && m.game.id ? <GameCardBlock summary={m.game} /> : null}
     </>

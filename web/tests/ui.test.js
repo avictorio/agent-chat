@@ -26,6 +26,7 @@ function fresh(opts) {
       { id: 4, ts: now - 40 * 60e3, from: 'claude', text: 'Nice. Mention me if you want anything changed on the site.' },
       { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
+      ...(opts.files ? [{ id: 60, ts: now - 50e3, from: 'Ada', kind: 'agent', text: 'The full dataset, as promised.', file: { type: 'application/zip', bytes: 734003200, name: 'lima-survey-2026.zip', url: '/api/rooms/demo/messages/60/file?exp=1&sig=x' } }, { id: 61, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Raw drone shot.', image: { type: 'image/png', bytes: 48000000, url: '/api/rooms/demo/messages/61/image?exp=1&sig=x' } }] : []),
       ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
       ...(opts.duel || opts.duelDone ? [{ id: 10, ts: now - 45e3, from: 'Ada', kind: 'agent', text: 'Duel match #2 - Ada (cyan) vs Anthony (orange). Rock-paper-scissors, first to 3. Tap the card for the arena.', game: { id: 2, type: 'duel', status: opts.duelDone ? 'finished' : 'running', round: opts.duelDone ? 7 : 4, target: 3, winner: opts.duelDone ? 'Anthony' : null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', wins: opts.duelDone ? 2 : 1, thrown: !opts.duelDone }, { name: 'Anthony', color: 'orange', hex: '#fb923c', wins: opts.duelDone ? 3 : 0, thrown: false }] } }] : []),
@@ -434,6 +435,33 @@ async function setup(page, S, calls) {
       if (body.reaction) (r[body.reaction] = r[body.reaction] || []).push(body.from);
       msg.reactions = r; return J({ room: 'demo', id: msg.id, reactions: r });
     }
+    if ((am = p.match(/\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|status|finish|abort)$/))) {
+      const id = +am[1], kind = am[2], step = am[3], key = id + ':' + kind;
+      S.ups = S.ups || {};
+      if (step === 'start') { const ps = 65536; S.ups[key] = { size: body.size, name: body.name, type: body.type, ps, parts: Math.max(1, Math.ceil(body.size / ps)), got: new Set() }; return J({ room: 'demo', id, kind, part_size: ps, parts: S.ups[key].parts, resumed: false, received: [], expires_at: new Date(Date.now() + 7 * D).toISOString() }); }
+      const u0 = S.ups[key];
+      if (step === 'status') return J({ room: 'demo', id, kind, uploading: !!u0 && !u0.done, complete: !!(u0 && u0.done), received: u0 ? [...u0.got] : [] });
+      if (step === 'abort') { delete S.ups[key]; return J({ room: 'demo', id, kind, aborted: true }); }
+      if (!u0) return J({ error: 'No upload in progress for that message' }, 409);
+      if (step === 'part') {
+        const n = +u.searchParams.get('n');
+        if (S.partDelay) await new Promise((r) => setTimeout(r, S.partDelay));
+        if (S.failOnce === n && !S.failedOnce) { S.failedOnce = true; return J({ error: 'Part did not reach storage' }, 502); }
+        const len = (req.postDataBuffer() || []).length; const want = n < u0.parts ? u0.ps : u0.size - (u0.parts - 1) * u0.ps;
+        if (len !== want) return J({ error: 'wrong length', expected_bytes: want }, 400);
+        u0.got.add(n); return J({ room: 'demo', id, kind, part: n });
+      }
+      if (u0.got.size < u0.parts) return J({ error: 'parts missing', missing: [] }, 409);
+      u0.done = true;
+      const ref = { type: kind === 'file' ? (u0.type || 'application/octet-stream') : kind + '/x', bytes: u0.size, url: '/api/rooms/demo/messages/' + id + '/' + kind + '?exp=1&sig=x' };
+      if (kind === 'file') ref.name = u0.name;
+      const dr = (S.drafts || []).find((x) => x.id === id); if (dr) dr[kind] = ref;
+      return J({ room: 'demo', id, kind, [kind]: ref, published: false });
+    }
+    if (p.endsWith('/upload/resume')) return J({ room: 'demo', found: false, id: null, received: [] });
+    if ((am = p.match(/\/messages\/(\d+)\/publish$/))) { const dr = (S.drafts || []).find((x) => x.id === +am[1]); if (!dr) return J({ error: 'No message with that id' }, 404); S.drafts = S.drafts.filter((x) => x !== dr); if (body.text) dr.text = body.text; S.msgs.push(dr); return J(Object.assign({ room: 'demo' }, dr, { room_state: roomState(S) })); }
+    if ((am = p.match(/\/messages\/(\d+)$/)) && m === 'DELETE') { S.drafts = (S.drafts || []).filter((x) => x.id !== +am[1]); S.msgs = S.msgs.filter((x) => x.id !== +am[1]); return J({ room: 'demo', deleted: +am[1] }); }
+    if (p.endsWith('/messages') && m === 'POST' && body.draft) { const x = { id: ++S.nid, ts: Date.now(), from: body.from, text: body.text }; (S.drafts = S.drafts || []).push(x); return J(Object.assign({ draft: true }, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: Date.now(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages')) return J(S.agentYou
       ? { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
@@ -466,7 +494,7 @@ async function setup(page, S, calls) {
       const kinds = (u.searchParams.get('kind') || '').split(',').filter(Boolean);
       const fromF = (u.searchParams.get('from') || '').toLowerCase();
       const lim = parseInt(u.searchParams.get('limit') || '60', 10);
-      const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0 };
+      const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0, file: 0 };
       for (const a of all) { if (!fromF || a.from.toLowerCase() === fromF) { counts[a.kind]++; counts.all++; } }
       let list = all.filter(a => (!kinds.length || kinds.includes(a.kind)) && (!fromF || a.from.toLowerCase() === fromF));
       const before = u.searchParams.get('before');
@@ -3173,6 +3201,122 @@ let FAILURES = 0;
 
   // The media shelf: the attachments listing as a filterable grid,
   // the full-screen viewer, and the jump back to the message.
+  // Uploads (2026-11-20): any file through the paperclip goes up in
+  // resumable parts under a draft, with byte progress, a retry on a failed
+  // part, and the message posting only once the upload is done.
+  const must = (c, msg) => { if (!c) throw new Error(msg); };
+  await run('upload-file', { state: { files: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    const out = {};
+    const fc = page.locator('.file-card').first();
+    await fc.waitFor({ timeout: 4000 });
+    out.dl = await fc.getAttribute('download');
+    out.href = await fc.getAttribute('href');
+    out.fcText = (await fc.textContent()).replace(/\s+/g, ' ').trim();
+    must(out.dl === 'lima-survey-2026.zip' && /\/messages\/60\/file\?/.test(out.href) && /ZIP/.test(out.fcText) && /700 MB/.test(out.fcText), 'file card: ' + JSON.stringify(out));
+    out.bigImgCards = await page.locator('.big-img-card').count();
+    out.inlineBig = await page.locator('img.msg-img[src*="/61/"]').count();
+    must(out.bigImgCards === 1 && out.inlineBig === 0, 'a very large image should be a card: ' + JSON.stringify(out));
+    S.partDelay = 120;
+    S.failOnce = 3;
+    await page.setInputFiles('#anyFile', { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300000, 7) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    out.chip = await page.textContent('#fileName');
+    must(/report\.pdf \(293 KB\)/.test(out.chip), 'file chip: ' + out.chip);
+    await shot(page, 'upload-armed.png');
+    await page.fill('#text', 'Quarterly report');
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    await page.waitForFunction(() => /\d+% · .+ of 293 KB/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 4000 });
+    out.meta = await page.textContent('#uplMeta');
+    await shot(page, 'upload-progress.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+    const card = page.locator('.file-card', { hasText: 'report.pdf' });
+    await card.waitFor({ timeout: 4000 });
+    const seq = calls.map((c) => c.split(' ').slice(0, 2).join(' '));
+    const at = (re) => seq.findIndex((c) => re.test(c));
+    out.parts = seq.filter((c) => /PUT .*\/messages\/101\/file\/part\?n=/.test(c)).length;
+    out.part3 = seq.filter((c) => /\/file\/part\?n=3$/.test(c)).length;
+    out.order = [at(/^POST .*\/messages$/), at(/\/101\/file\/start$/), at(/\/101\/file\/finish$/), at(/\/101\/publish$/)];
+    must(out.parts === 6 && out.part3 === 2, 'five parts, part 3 retried once: ' + JSON.stringify(out));
+    must(out.order.every((x, i) => x >= 0 && (i === 0 || x > out.order[i - 1])), 'draft, start, finish, publish in order: ' + JSON.stringify(out.order));
+    out.chipGone = await page.$eval('#fileChip', (e) => e.hidden);
+    out.textCleared = (await page.inputValue('#text')) === '';
+    must(out.chipGone && out.textCleared, 'composer cleared after the send: ' + JSON.stringify(out));
+    out.resumeNote = await page.locator('#uplResume').count();
+    must(out.resumeNote === 0, 'no interrupted-upload note after a clean send');
+    await shot(page, 'upload-file.png');
+    return { meta: out.meta, parts: out.parts };
+  });
+  await run('upload-file-dark', { state: { files: true }, hash: '#invite=tok_Anthony', scheme: 'dark', w: 390, h: 844, touch: true }, async (page) => {
+    const fc = page.locator('.file-card').first();
+    await fc.waitFor({ timeout: 4000 });
+    await fc.scrollIntoViewIfNeeded();
+    const box = await fc.boundingBox();
+    must(box && box.x >= 0 && box.x + box.width <= 390, 'file card fits the phone: ' + JSON.stringify(box));
+    await shot(page, 'upload-file-dark-phone.png');
+    return { w: Math.round(box.width) };
+  });
+  await run('upload-cancel', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    S.partDelay = 900;
+    await page.setInputFiles('#anyFile', { name: 'big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(400000, 1) });
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    await page.click('#uplCancel');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 5000 });
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /cancelled/i.test(t.textContent || ''); }, null, { timeout: 3000 });
+    await page.waitForTimeout(300);
+    const aborted = calls.some((c) => /^POST .*\/messages\/101\/file\/abort/.test(c));
+    const deleted = calls.some((c) => /^DELETE .*\/messages\/101$/.test(c));
+    const published = calls.some((c) => /\/publish/.test(c));
+    must(aborted && deleted && !published, 'cancel aborts the upload and deletes the draft: ' + JSON.stringify({ aborted, deleted, published }));
+    must(await page.locator('#fileChip').isVisible(), 'the file stays armed after a cancel');
+    must((await page.locator('#uplResume').count()) === 0, 'a cancelled upload leaves no interrupted note');
+    return { aborted, deleted };
+  });
+  await run('upload-interrupted', {
+    hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
+    init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch (e) {} },
+  }, async (page, S, calls) => {
+    const note = page.locator('#uplResume');
+    await note.waitFor({ timeout: 4000 });
+    const text = (await note.textContent()).replace(/\s+/g, ' ');
+    must(/holiday\.mp4 didn't finish uploading/.test(text), 'interrupted note: ' + text);
+    await shot(page, 'upload-interrupted-phone.png');
+    await page.click('#uplDiscard');
+    await note.waitFor({ state: 'detached', timeout: 3000 });
+    must(calls.some((c) => /^POST .*\/messages\/77\/video\/abort/.test(c)) && calls.some((c) => /^DELETE .*\/messages\/77$/.test(c)), 'discard aborts and deletes the draft');
+    const stored = await page.evaluate(() => localStorage.getItem('chat-upl:demo'));
+    must(stored === null, 'discard forgets the note: ' + stored);
+    return { ok: true };
+  });
+  await run('upload-route-phone', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page) => {
+    // a photo through the paperclip lands in the image slot
+    await page.setInputFiles('#anyFile', require('path').join(__dirname, '../../tests/fixtures/photo.png'));
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    // a photo type the chat can't show attaches as a file, with a note
+    await page.setInputFiles('#imgFile', { name: 'IMG_0042.heic', mimeType: 'image/heic', buffer: Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic'), Buffer.alloc(5000, 3)]) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    const chip = await page.textContent('#fileName');
+    const toastText = await page.$eval('#toast', (t) => t.textContent || '');
+    must(/IMG_0042\.heic/.test(chip) && /can't be shown/.test(toastText), 'routing: ' + chip + ' | ' + toastText);
+    await shot(page, 'upload-route-phone.png');
+    // and the progress card at phone width
+    return { chip };
+  });
+  await run('upload-progress-phone', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page, S) => {
+    S.partDelay = 2500;
+    await page.setInputFiles('#anyFile', { name: 'site-survey-final-version-2.dwg', mimeType: 'application/acad', buffer: Buffer.alloc(260000, 5) });
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    await page.waitForFunction(() => /\d+% ·/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 4000 });
+    const box = await page.locator('#uplCard').boundingBox();
+    must(box && box.width <= 390 && box.x >= 0, 'progress card fits the phone: ' + JSON.stringify(box));
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    must(sw <= 390, 'no horizontal scroll: ' + sw);
+    await shot(page, 'upload-progress-phone.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+    return { box: Math.round(box.width) };
+  });
   await run('media-shelf', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony' }, async (page) => {
     await page.click('.tab[data-tab="media"]');
     await page.waitForSelector('.media-tile', { timeout: 5000 });

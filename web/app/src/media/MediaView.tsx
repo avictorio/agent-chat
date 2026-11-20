@@ -5,6 +5,7 @@ import { rel } from "../dates";
 import { loadDoc } from "../feed/media";
 import { md } from "../feed/markdown";
 import { Icon as I } from "../ui/Icon";
+import { fmtBytes as fmtSize } from "../composer/uploads";
 
 // The room's attachments as a browsable shelf: every photo, video,
 // clip and file shared in the room, newest first, filterable by
@@ -19,14 +20,11 @@ const GROUPS: { id: Group; label: string; kind?: string }[] = [
   { id: "image", label: "Photos", kind: "image" },
   { id: "video", label: "Videos", kind: "video" },
   { id: "audio", label: "Audio", kind: "audio,speak" },
-  { id: "files", label: "Files", kind: "html,doc" },
+  { id: "files", label: "Files", kind: "html,doc,file" },
 ];
 
 function fmtBytes(n: number): string {
-  if (!n) return "";
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + " KB";
-  return (n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "") + " MB";
+  return n ? fmtSize(n) : "";
 }
 
 function groupCount(counts: Record<string, number> | null, g: Group): number {
@@ -35,7 +33,7 @@ function groupCount(counts: Record<string, number> | null, g: Group): number {
   if (g === "image") return counts.image || 0;
   if (g === "video") return counts.video || 0;
   if (g === "audio") return (counts.audio || 0) + (counts.speak || 0);
-  return (counts.html || 0) + (counts.doc || 0);
+  return (counts.html || 0) + (counts.doc || 0) + (counts.file || 0);
 }
 
 const KIND_LABEL: Record<Attachment["kind"], string> = {
@@ -45,6 +43,7 @@ const KIND_LABEL: Record<Attachment["kind"], string> = {
   speak: "Voice",
   html: "Page",
   doc: "Doc",
+  file: "File",
 };
 
 // The citation form agents resolve: permanent message id + kind.
@@ -175,6 +174,23 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
           au.autoplay = true;
           wrap.appendChild(au);
           vb.appendChild(wrap);
+        } else if (a.kind === "file") {
+          // a general file is never opened in the page: a card, and the download
+          const card = document.createElement("div");
+          card.className = "viewer-file";
+          const nm = document.createElement("div");
+          nm.className = "viewer-file-name";
+          nm.textContent = a.name || "file";
+          const sz = document.createElement("div");
+          sz.className = "viewer-file-meta";
+          sz.textContent = fmtBytes(a.bytes) + (a.type && a.type !== "application/octet-stream" ? " · " + a.type : "");
+          const dl = document.createElement("a");
+          dl.className = "btn primary";
+          dl.href = a.url;
+          dl.setAttribute("download", a.name || "file");
+          dl.textContent = "Download";
+          card.append(nm, sz, dl);
+          vb.appendChild(card);
         } else if (a.kind === "html") {
           const f = document.createElement("iframe");
           f.className = "viewer-frame";
@@ -347,11 +363,11 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
                     <span className="media-kind">{KIND_LABEL[a.kind]}</span>
                   </span>
                   <span className="media-meta">
-                    <span className="media-from-name">{a.kind === "html" || a.kind === "doc" ? a.name || a.from : a.from}</span>
+                    <span className="media-from-name">{a.kind === "html" || a.kind === "doc" || a.kind === "file" ? a.name || a.from : a.from}</span>
                     <span className="media-when">{rel(a.ts)}</span>
                   </span>
-                  {(a.kind === "html" || a.kind === "doc" || a.kind === "audio") && (a.name || a.transcript || a.text) ? (
-                    <span className="media-sub">{a.kind === "doc" || a.kind === "html" ? a.from + " · " + fmtBytes(a.bytes) : a.transcript || a.text}</span>
+                  {(a.kind === "html" || a.kind === "doc" || a.kind === "file" || a.kind === "audio") && (a.name || a.transcript || a.text) ? (
+                    <span className="media-sub">{a.kind === "doc" || a.kind === "html" || a.kind === "file" ? a.from + " · " + fmtBytes(a.bytes) : a.transcript || a.text}</span>
                   ) : null}
                   <span className="media-ref">{refOf(a)}</span>
                 </button>

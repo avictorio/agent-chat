@@ -19,6 +19,8 @@ import type {
 export type GameRecordRow = { name: string; hex: string; w: number; l: number; p2?: number; p3?: number };
 export type GameLadderRow = { name: string; hex: string | null; rating: number; w: number; l: number; d: number; last: number };
 
+export type UploadKind = "image" | "audio" | "video" | "file";
+
 export class ApiError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -47,11 +49,6 @@ export class RoomClient {
   constructor(room: string, token: string | null) {
     this.room = room;
     this.token = token;
-  }
-
-  /** The current invite token (the native uploaders send it as a header). */
-  inviteToken(): string | null {
-    return this.token;
   }
 
   setToken(token: string | null): void {
@@ -147,44 +144,62 @@ export class RoomClient {
     return this.postPayload(body);
   }
 
-  /** Find a resumable chunked-video draft by file size + fingerprint. */
-  async videoResume(size: number, fingerprint: string): Promise<{ found?: boolean; id?: number }> {
-    return this.call("/video/resume", {
+  // ---- The upload engine: one resumable flow for every kind ----
+  // start pins a part plan, parts go up as raw PUTs (the composer sends
+  // them with XMLHttpRequest for byte progress: see partRequest), finish
+  // assembles and attaches. See UPLOADING FILES in GET /api.
+
+  /** Find one of my drafts with this file's upload in flight (size + fingerprint). */
+  uploadResume(
+    size: number,
+    fingerprint: string,
+    kind?: UploadKind
+  ): Promise<{ found?: boolean; id?: number | null; kind?: UploadKind | null; received?: number[] }> {
+    return this.call("/upload/resume", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size, fingerprint }),
+      body: JSON.stringify(kind ? { size, fingerprint, kind } : { size, fingerprint }),
     });
   }
 
-  async videoStatus(id: number): Promise<{ uploading?: boolean; received?: number[] }> {
-    return this.call("/messages/" + id + "/video/status");
-  }
-
-  async videoStart(
+  uploadStart(
     id: number,
-    body: { type: string; size: number; fingerprint?: string }
-  ): Promise<{ part_size: number; parts: number }> {
-    return this.call("/messages/" + id + "/video/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    kind: UploadKind,
+    body: { size: number; type?: string; name?: string; fingerprint?: string }
+  ): Promise<{ part_size: number; parts: number; resumed: boolean; received: number[]; expires_at: string }> {
+    return this.call("/messages/" + id + "/" + kind + "/start", { method: "POST", body: JSON.stringify(body) });
   }
 
-  async videoPart(id: number, n: number, blob: Blob): Promise<void> {
-    await this.call("/messages/" + id + "/video/part?n=" + n, {
-      method: "PUT",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: blob,
-    });
+  uploadStatus(
+    id: number,
+    kind: UploadKind
+  ): Promise<{ uploading: boolean; complete?: boolean; received: number[]; part_size?: number | null; parts?: number | null }> {
+    return this.call("/messages/" + id + "/" + kind + "/status");
   }
 
-  async videoFinish(id: number): Promise<void> {
-    await this.call("/messages/" + id + "/video/finish", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    });
+  uploadFinish(
+    id: number,
+    kind: UploadKind,
+    extra?: { transcript?: string | null }
+  ): Promise<{ published?: boolean } & Record<string, unknown>> {
+    return this.call("/messages/" + id + "/" + kind + "/finish", { method: "POST", body: JSON.stringify(extra || {}) });
+  }
+
+  uploadAbort(id: number, kind: UploadKind): Promise<unknown> {
+    return this.call("/messages/" + id + "/" + kind + "/abort", { method: "POST", body: "{}" });
+  }
+
+  /** Where part n goes, with the headers it needs (sent by the caller, for progress events). */
+  partRequest(id: number, kind: UploadKind, n: number): { url: string; headers: Record<string, string> } {
+    const headers: Record<string, string> = { "Content-Type": "application/octet-stream" };
+    if (this.token) headers["X-Invite-Token"] = this.token;
+    return {
+      url: "/api/rooms/" + encodeURIComponent(this.room) + "/messages/" + id + "/" + kind + "/part?n=" + n,
+      headers,
+    };
+  }
+
+  deleteMessage(id: number): Promise<unknown> {
+    return this.call("/messages/" + id, { method: "DELETE" });
   }
 
   async publishMessage(
@@ -247,7 +262,7 @@ export class RoomClient {
     return this.call<{ games: GameSummary[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }>("/games");
   }
 
-  /** The room API base path (the native uploaders need absolute URLs). */
+  /** The room API base path. */
   basePath(): string {
     return "/api/rooms/" + this.room;
   }
