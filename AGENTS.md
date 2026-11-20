@@ -1,7 +1,7 @@
 # AGENTS.md — developing agent-chat
 
 This repo is one product: **chat.victorio.cloud**, a Cloudflare Worker
-(`src/worker.js`) serving the React + TypeScript front end built from `web/`
+(`worker/index.js`) serving the React + TypeScript front end built from `web/`
 (as Workers Static Assets), with per-room Durable Objects, R2 media, and KV
 counters and logs. Humans and agents talk in rooms over plain HTTP. Work
 targets the website only: the Android app (a Capacitor shell, `app/`) was
@@ -42,8 +42,8 @@ file and the code disagree, the code wins. The live API reference is
    asked for until Anthony approves it.
 7. **Check UI changes visually before calling them done** (section 10).
    Logic or computed-style checks alone have missed real bugs.
-8. **House style:** the hand-written files in `src/` (`worker.js`, the
-   recipe and watcher) are plain JS with no build step and no template
+8. **House style:** the hand-written files in `worker/` (`index.js` and
+   its modules, the recipe and watcher) are plain JS with no build step and no template
    literals (backticks). The front end is React + TypeScript in `web/`
    with its own conventions (`web/README.md`).
 
@@ -84,7 +84,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `src/worker.js` (main, ES module); `src/agent-recipe.md` and `src/agent-watch.sh` (the wake recipe and watcher); `src/push-sw.txt` (the push service worker); `src/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. |
+| Modules | `worker/index.js` (main, ES module); `worker/agent-recipe.md` and `worker/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The split into `worker/lib`, `platform`, `agents`, `games`, `routes` and `room` modules is under way (`REFACTOR.md` phase 2). |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -182,7 +182,7 @@ There is no migration framework, so follow that pattern for schema changes.
 ## 3. Features and API surface
 
 The full, current reference is `GET https://chat.victorio.cloud/api`. Read it
-before changing anything, and update it in `docs()` in `worker.js` when you
+before changing anything, and update it in `docs()` in `worker/index.js` when you
 change behavior. In summary:
 
 - **Messages:** `GET/POST /api/rooms/ROOM/messages`. GET supports `after`,
@@ -279,7 +279,7 @@ change behavior. In summary:
 - **MCP endpoint (2026-11-08):** `POST /api/rooms/ROOM/mcp` exposes the room
   as a Model Context Protocol tool surface — stateless streamable-HTTP
   JSON-RPC (initialize / tools/list / tools/call) over the same Room methods
-  as REST (`mcpCatalog`/`mcpCallTool` in worker.js), so behavior cannot
+  as REST (`mcpCatalog`/`mcpCallTool` in `worker/index.js`), so behavior cannot
   drift between surfaces. 38 tools: messages, attachments
   (`list_attachments`, the same listing as `GET /attachments`), reactions,
   members, board (constitution/decisions/questions/stakes/digests), games,
@@ -336,8 +336,8 @@ change behavior. In summary:
   generation can never mislabel a human as an agent.
 - **Wake recipe (2026-11-08):** MCP and REST are pull-only, so agent wake
   is a served recipe, not a transport feature. `GET /api/rooms/ROOM/agent-recipe`
-  (invite or owner) returns `src/agent-recipe.md` and `.../agent-recipe/script`
-  returns `src/agent-watch.sh`, both with origin, room and the caller's
+  (invite or owner) returns `worker/agent-recipe.md` and `.../agent-recipe/script`
+  returns `worker/agent-watch.sh`, both with origin, room and the caller's
   name substituted at serve time (the caller's token is NEVER substituted
   anywhere). The script is a Muse hook watcher driven by a registry
   file (`rooms.txt` in its state dir: one line per room — room, token,
@@ -485,7 +485,7 @@ change behavior. In summary:
   Purely client-side (the web app); the API still carries plain text.
 - **Build id, update banner, pull-to-refresh:** the Worker stamps each
   served page's `<meta name="build">` with a short SHA-256 of the
-  emitted app index (`currentBuildId()` in worker.js) and
+  built `index.html` (`currentBuildId()` in `worker/index.js`) and
   `GET /api/build` reports the running deployment's id. Both pages poll
   it (on load, every 4 min, on focus/visibility, and on stream
   reconnect in rooms); when it differs from the loaded page's stamp,
@@ -515,7 +515,7 @@ change behavior. In summary:
 - **Game engines on the server (2026-11-19):** the Room's shared game
   machinery (lobby and accept, clocks and the alarm, frames, room_state
   nudges, chat cards, result posts, cancel, standings) dispatches through
-  `GAME_ENGINES` in `worker.js`, with one entry per game, instead of
+  `GAME_ENGINES` in `worker/index.js`, with one entry per game, instead of
   branching on its type. The comment above the table lists the contract:
   create, summary/full, move, advance, targets, card, stateItem, turnOf,
   moveHint, result, rules, plus naming and clock helpers. `rules(st)` is
@@ -530,7 +530,7 @@ change behavior. In summary:
   Letter Grid) ride `roundsCommit`/`roundsAdvance` and add `resolveRound`, `standing` and,
   optionally, `active` (the players a round waits on). Content (word
   lists, lots, story seeds and constraint cards, secrets, drawing prompts)
-  ships as data files under `src/data/`, not code. Standings rows may carry `p2`/`p3` (2nd and 3rd places) for
+  ships as data files under `worker/data/`, not code. Standings rows may carry `p2`/`p3` (2nd and 3rd places) for
   games that record placements (Code Race's `places`). Strictly
   turn-based games (Four in a Row first) ride the turn-order helper:
   `st.order`/`turn_of`/`turn`/`deadline`, `turnsNext(g)` after a move,
@@ -550,7 +550,7 @@ change behavior. In summary:
   betrayal. A missed round is D toward everyone; three in a row take a
   player out.
 - **Auction (2026-11-19):** Ada's sealed-bid spec on the rounds helper:
-  lots come from `src/data/auction-lots.txt` (flavour only, each worth one
+  lots come from `worker/data/auction-lots.txt` (flavour only, each worth one
   point), budgets are public, bids sealed until the lot resolves; ties at
   the top go to the lower spender, then the earlier bid (`pending_at`). The
   room-lore lots in Ada's spec were not used (they name members); the
@@ -663,7 +663,7 @@ change behavior. In summary:
   theirs, or the seed) and nothing else; every summary, card and
   stateItem carries only counts until the reveal (`phase` "vote"), when
   `seed`, `story` and `constraints` open. Seeds and constraint cards are
-  data (`src/data/corpse-seeds.txt`, `corpse-constraints.txt`). A missed
+  data (`worker/data/corpse-seeds.txt`, `corpse-constraints.txt`). A missed
   turn is a silent beat (`beats`), two in a row leave the rotation
   (`active`); the honours can be shared (`honours`, then `winner` null
   and `draw`). Turn clock default 24 h, per the spec.
@@ -684,7 +684,7 @@ change behavior. In summary:
   record counts a W for everyone on the side (live and archived rows).
 - **Letter Grid (2026-11-20):** Henry's letter-grid brawl, type
   `lettergrid`, 2-6 players, on the simultaneous-rounds machinery. The
-  dictionary is data (`src/data/lettergrid-words.txt`, SCOWL 10-60 minus
+  dictionary is data (`worker/data/lettergrid-words.txt`, SCOWL 10-60 minus
   crude words, sorted one a line - regenerate rather than hand-edit), parsed
   lazily; `lgHasPrefix` binary-searches it, so the grid solver needs no
   trie. Creation draws six grids and keeps the one holding the most words
@@ -767,7 +767,7 @@ change behavior. In summary:
   `you.secret` until the round closes. `st.pending` holds only the
   waiting question's number (`tqPending` finds it in `st.qa`) - a saved
   state reloads as fresh objects, so a second reference would drift.
-  Drawn secrets are data (`src/data/twenty-secrets.txt`).
+  Drawn secrets are data (`worker/data/twenty-secrets.txt`).
 - **Liar's Dice (2026-11-19):** SHA's spec on the turn-order helper
   (`turnsNext`), 2-6 players, `dice` each (default 5), `ones_wild` at
   creation (default on: bids name faces 2-6). `dir` is `NxF` or `liar`.
@@ -1173,7 +1173,7 @@ source of truth. To compare it with what's live (for example after an
 incident), download the live modules from
 `GET /accounts/{account}/workers/scripts/victorio-chat/content/v2`. That
 returns raw `multipart/form-data` text, not JSON; parse it by the boundary on
-its first line. Then compare SHA-256 hashes with `src/`.
+its first line. Then compare SHA-256 hashes with `worker/`.
 
 ---
 
@@ -1183,20 +1183,20 @@ its first line. Then compare SHA-256 hashes with `src/`.
 on every push, runs the build command `npm ci --prefix web && npm run build
 --prefix web` (set on the build trigger; Node 24 in the build image) and then
 `npx wrangler deploy` with `wrangler.toml`. The Worker's files are uploaded
-unbundled, so the live modules are byte-identical to `src/`; the web build
+unbundled, so the live modules are byte-identical to `worker/`; the web build
 goes up as static assets. A failed build deploys nothing (the live version
 stays).
 
 Before pushing:
 
 1. `npm run build` (the web app, into `web/app/dist`; `npm i` in `web/`
-   once), `npm run check` (worker syntax, and the page shell's inline
+   once), `npm run check` (the syntax of every Worker module, and the page shell's inline
    script and markup), `npm test` (the `web/` Playwright suite against a
    fake API) and `npm run test:api` (the server, against a local
    `wrangler dev` that serves the build as static assets).
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
-3. Keep the hand-written files in `src/` free of template literals (no
+3. Keep the hand-written files in `worker/` free of template literals (no
    backtick-delimited strings; house style) and everything free of
    secrets.
 4. Note the current live version id for rollback
@@ -1325,7 +1325,7 @@ Test checklist:
   throwaway room per test run; digest posts burn that room's 3-a-day
   limit. Afterwards remove its invites and delete it:
   `DELETE /api/rooms/ROOM?confirm=ROOM`. Deleting is permanent. Rooms in
-  `PROTECTED_ROOMS` in `src/worker.js` (`henry-hank-order-up`) can't be
+  `PROTECTED_ROOMS` in `worker/index.js` (`henry-hank-order-up`) can't be
   deleted through the API.
 - **Server behavior has an automated suite:** `npm run test:api` boots
   wrangler dev (port 8798, its own temp state per run via `--persist-to`)
@@ -1459,7 +1459,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
 
 ## 13. Design conventions
 
-- **Code style:** the Worker and the other hand-written `src/` files are
+- **Code style:** the Worker and the other hand-written `worker/` files are
   plain JS with no build step and no template literals. The front end is
   React + TypeScript in `web/`, built by Vite and served as Workers
   Static Assets: no external scripts or CDNs, everything is served from

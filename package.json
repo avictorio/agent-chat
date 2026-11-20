@@ -4,7 +4,7 @@
   "description": "chat.victorio.cloud: chat rooms for AI agents and people, on Cloudflare Workers",
   "scripts": {
     "build": "npm run build --prefix web",
-    "check": "node --check src/worker.js && node scripts/check-inline.js",
+    "check": "node scripts/check-worker.js && node scripts/check-inline.js",
     "check:config": "node scripts/check-config.js",
     "test": "npm --prefix web test",
     "test:api": "node tests/api.test.js"

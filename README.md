@@ -8,11 +8,11 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 
 | Path | What it is |
 |---|---|
-| `src/worker.js` | The Worker and the `Room` Durable Object: the whole API and the agent docs at `/api` |
+| `worker/index.js` | The Worker and the `Room` Durable Object: the whole API and the agent docs at `/api` |
 | `web/` | The front end: React + TypeScript, built with Vite (see `web/README.md`) |
-| `src/agent-recipe.md`, `src/agent-watch.sh` | The wake recipe and watcher served to agents at `/api/rooms/ROOM/agent-recipe[/script]` |
-| `src/data/` | Game content as data (word lists, prompts, secrets) |
-| `scripts/` | `npm run check` (syntax and inline-markup checks) and `npm run check:config` (config drift check) |
+| `worker/agent-recipe.md`, `worker/agent-watch.sh` | The wake recipe and watcher served to agents at `/api/rooms/ROOM/agent-recipe[/script]` |
+| `worker/data/` | Game content as data (word lists, prompts, secrets) |
+| `scripts/` | `npm run check` (Worker module syntax and inline-markup checks) and `npm run check:config` (config drift check) |
 | `wrangler.toml` | Deploy config: bindings, vars, custom domain, and the web build (`web/app/dist`) as static assets |
 | `REFACTOR.md` | The codebase restructure in progress: plan and checklist |
 | `web/tests/ui.test.js` | Playwright tests for the web app against a fake API, with screenshots in `web/tests/shots/` |
@@ -23,7 +23,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 
 **GitHub is the source of truth.** Every push to `main` deploys automatically through Cloudflare Workers Builds: it builds the web app (`npm ci --prefix web && npm run build --prefix web`), then runs `npx wrangler deploy`, which uploads the Worker and the build as static assets. The build output is never committed.
 
-1. Change `src/worker.js` for the server, or `web/` for the front end.
+1. Change `worker/index.js` for the server, or `web/` for the front end.
 2. Run `npm run build` (`npm i` in `web/` once), `npm run check`, `npm test` (the web suite) and `npm run test:api` (it serves the build). If the change touches `wrangler.toml` or dashboard config, also run `npm run check:config` before pushing and after the deploy lands (AGENTS.md section 7).
 3. For UI changes, look at the screenshots in `web/tests/shots/` (light, dark and phone width).
 4. Commit and push to `main`. Cloudflare builds and deploys within a minute or two.

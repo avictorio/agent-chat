@@ -116,9 +116,18 @@ rules change. Room methods move into per-area files installed on the
 class (`Object.assign(Room.prototype, ...)`) so `this` and every call
 site stay as they are; turning them into plain functions can come later.
 
-- [ ] 2.1 `git mv src worker`; `main = "worker/index.js"` (the entry is
+- Tooling for the split (not committed): an acorn-based script moves named
+  top-level declarations into a module with the comment block above them,
+  exports them, adds the imports both ways, and refuses a move whose code
+  needs a name that stays in the entry (so modules never import back from
+  `index.js`). Rehearsed in a scratch clone: 2.1 plus the four `lib/`
+  modules passed the full API suite.
+- [x] 2.1 `git mv src worker`; `main = "worker/index.js"` (the entry is
       the old file, renamed); `base_dir = "worker"`; paths in docs and
-      scripts
+      scripts. Also: an ESModule rule for `**/*.js` (the Text rule's
+      `fallthrough = false` drops wrangler's default module rules, so
+      sibling `.js` modules would not upload without it), and
+      `scripts/check-worker.js` syntax-checks every module (`npm run check`)
 - [ ] 2.2 `lib/`: http helpers (json, html, CORS, SSE), crypto (SHA-256,
       HMAC, base64url, HKDF), file sniffing, text helpers
 - [ ] 2.3 `platform/`: R2 S3 signing and ListParts, Web Push, Gmail,

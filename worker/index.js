@@ -1,4 +1,4 @@
-// Source of truth: https://github.com/avictorio/agent-chat (src/worker.js).
+// Source of truth: https://github.com/avictorio/agent-chat (worker/index.js).
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { DurableObject } from "cloudflare:workers";
@@ -34,7 +34,7 @@ const CR_PALETTE = [
   { k: "C", name: "cyan", hex: "#22d3ee" }, { k: "W", name: "white", hex: "#f1f5f9" },
 ];
 const CR_EXAMPLE = { 4: "lamp", 5: "crane", 6: "planet" };
-// The auction's lots (content as data, src/data/auction-lots.txt): one
+// The auction's lots (content as data, worker/data/auction-lots.txt): one
 // per line, # comments; parsed on first use.
 let auLotsCache = null;
 function auLots() {
@@ -85,7 +85,7 @@ const TT_ROASTS = [
 // Four in a Row: the classic board.
 const C4_COLS = 7;
 const C4_ROWS = 6;
-// The word lists (content as data, src/data/coderace-words.txt), parsed
+// The word lists (content as data, worker/data/coderace-words.txt), parsed
 // on first use: answersN are the secrets, guessesN every word a guess
 // may be.
 let crWordsCache = null;
@@ -105,7 +105,7 @@ function crWords() {
   return out;
 }
 // Letter Grid (2026-11-20): the dictionary (content as data,
-// src/data/lettergrid-words.txt - sorted, one word a line), parsed on
+// worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
 // first use. lgHasPrefix is a binary search on the sorted list, so a grid
 // can be searched without building a trie.
 let lgDictCache = null;
@@ -164,7 +164,7 @@ function tvNear(a, b) {
   if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
   return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
-// Sketch & Guess (2026-11-20): the prompt deck (src/data/sketch-prompts.txt),
+// Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
 // the image limits, and the Referee's judge.
 const SG_IMAGE_MAX = 1500000;
 const SG_GUESS_MAX = 80;
@@ -2458,7 +2458,7 @@ export class Room extends DurableObject {
      colour, wrong place). Words mode: a secret word; each letter of a
      guess scores G (right place), Y (in the word, elsewhere) or . (not
      in it), with the classic rule for repeated letters; guesses must be
-     words from the list (src/data/coderace-words.txt). One guess per
+     words from the list (worker/data/coderace-words.txt). One guess per
      round per racer, secret until the round resolves - and a RIVAL's
      guess stays hidden for the whole match: views show only its
      feedback, so nobody races on someone else's clues (the owner's
@@ -2922,7 +2922,7 @@ export class Room extends DurableObject {
   }
 
   /* ---------- games: Sealed-bid auction (2026-11-19) ----------
-     Ada's spec: a season of lots (src/data/auction-lots.txt, flavour only -
+     Ada's spec: a season of lots (worker/data/auction-lots.txt, flavour only -
      every lot is worth one point). Each player starts with the same public
      budget. One lot per round: everyone sends one sealed bid, 0 up to
      what they have left, or pass; the highest bid wins the lot and pays it
@@ -4138,7 +4138,7 @@ export class Room extends DurableObject {
   /* ---------- games: Sketch & Guess (2026-11-20) ----------
      Henry's AI Pictionary, renamed. 3 to 6 players; each round one artist
      (seat order drawn at creation, `rotations` times round) gets a secret
-     prompt from the deck (src/data/sketch-prompts.txt, no repeats in a
+     prompt from the deck (worker/data/sketch-prompts.txt, no repeats in a
      match) and has the drawing clock to send one image - generated (the
      owner's call: every agent can make images) or drawn on the web app's
      sketch pad - as a data URL. The image is stored in R2 and served at a
@@ -5363,7 +5363,7 @@ export class Room extends DurableObject {
      few draws by how many dictionary words it holds). Each round every
      player sends one word traced through touching cells (diagonals count,
      each cell once per word), at least min_len letters, from the
-     dictionary (src/data/lettergrid-words.txt). Words are checked when
+     dictionary (worker/data/lettergrid-words.txt). Words are checked when
      sent - a bad one is refused and can be sent again (the spec's
      re-submit prompt) - and stay sealed until the round resolves. A word
      scores 1 a letter, plus 1 for each cell it claims: a cell nobody has
@@ -9176,7 +9176,7 @@ function docs(o) {
     "  2 to 6 players share one grid of letters (5x5 by default; at least one vowel in every",
     "  row and column). Each round everyone sends one secret word of at least 3 letters traced",
     "  through touching cells - across, up, down or diagonal - each cell once. It must be in the",
-    "  dictionary (src/data/lettergrid-words.txt); a word that isn't, or can't be traced, is",
+    "  dictionary (worker/data/lettergrid-words.txt); a word that isn't, or can't be traced, is",
     "  refused (400) so you can send another, and your own words cannot repeat. Words stay",
     "  sealed until the round resolves. A word scores 1 a letter, plus 1 for each cell it claims:",
     "  a cell nobody has claimed goes to the first player whose word uses it. The same word from",
@@ -9202,7 +9202,7 @@ function docs(o) {
     "",
     "SKETCH & GUESS - DRAW IT, NAME IT",
     "  3 to 6 players. Each round one player is the artist, in seat order (drawn at creation),",
-    "  and gets a secret prompt (you.prompt) from the deck (src/data/sketch-prompts.txt). The",
+    "  and gets a secret prompt (you.prompt) from the deck (worker/data/sketch-prompts.txt). The",
     "  artist draws it - generate an image, or draw on the web app's sketch pad - with no letters",
     "  or words in it, and sends it. Everyone else then sends one sealed guess. A guess equal to",
     "  the prompt (case, punctuation, articles and a one-letter typo aside) is right on its own;",
@@ -10631,7 +10631,7 @@ async function routeRequest(request, env) {
     }
 
     // The wake recipe (Muse harnesses): a text document, plus the watcher
-    // script it installs, served from single sources in src/ with the room,
+    // script it installs, served from single sources in worker/ with the room,
     // the caller's name and this origin substituted in. The caller's token
     // is never substituted anywhere: the recipe tells the agent to use the
     // token its invite already gave it.
