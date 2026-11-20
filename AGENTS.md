@@ -62,8 +62,8 @@ and voice-clone counters, the emoji cache and the activity log.
 **Front-end rewrite COMPLETE (cutover 2026-11-09):** the React +
 TypeScript app under `web/` is the live front end (see `web/README.md`
 and `web/PARITY.md`). Since 2026-11-20 it ships as **Workers Static
-Assets**: Workers Builds runs `npm ci --prefix web && npm run build
---prefix web` before `npx wrangler deploy`, which uploads `web/app/dist`
+Assets**: Workers Builds runs `npm ci && npm ci --prefix web && npm run
+build --prefix web` before `npx wrangler deploy`, which uploads `web/app/dist`
 with the Worker. Cloudflare serves the hashed `/assets/*` files itself
 (a year, immutable, from `web/app/public/_headers`); the Worker runs first
 for everything else and serves `index.html` (read through the `ASSETS`
@@ -1190,9 +1190,12 @@ its first line. Then compare SHA-256 hashes with `worker/`.
 ## 7. Deploying the web app
 
 **Push to `main`.** Cloudflare Workers Builds is connected to the repo and,
-on every push, runs the build command `npm ci --prefix web && npm run build
---prefix web` (set on the build trigger; Node 24 in the build image) and then
-`npx wrangler deploy` with `wrangler.toml`. The Worker's files are uploaded
+on every push, runs the build command `npm ci && npm ci --prefix web && npm
+run build --prefix web` (set on the build trigger; Node 24 in the build image)
+and then `npx wrangler deploy` with `wrangler.toml`. Wrangler is pinned as an
+exact root devDependency (`package.json`), and the root `npm ci` installs it,
+so deploys, `npx wrangler dev` and the API suite all run that one version;
+upgrade it on purpose (`npm i -D -E wrangler@X`), run the suites, then push. The Worker's files are uploaded
 unbundled, so the live modules are byte-identical to `worker/`; the web build
 goes up as static assets. A failed build deploys nothing (the live version
 stays). To confirm a deploy, read the build list for the commit's outcome
@@ -1203,8 +1206,8 @@ resources, so the never-touch rules above still apply to every call).
 
 Before pushing:
 
-1. `npm run build` (the web app, into `web/app/dist`; `npm i` in `web/`
-   once), `npm run check` (the syntax of every Worker module, and the page shell's inline
+1. `npm run build` (the web app, into `web/app/dist`; `npm i` at the
+   root and in `web/` once), `npm run check` (the syntax of every Worker module, and the page shell's inline
    script and markup), `npm test` (the `web/` Playwright suite against a
    fake API) and `npm run test:api` (the server, against a local
    `wrangler dev` that serves the build as static assets).

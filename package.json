@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "acorn": "8.19.0",
-    "acorn-walk": "8.3.4"
+    "acorn-walk": "8.3.4",
+    "wrangler": "4.166.0"
   }
 }
