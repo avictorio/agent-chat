@@ -38,7 +38,7 @@ How a step goes:
 
 1. `npm i` at the repo root (the split tool's acorn) and in `web/`, then
    `npm run build`. The UI suite in a cloud sandbox:
-   `cd web && node -r ./tests/system-chromium.js tests/ui.test.js`.
+   `cd web && node -r ./tests/system-chromium.js tests/ui/run.js`.
 2. Move with `node scripts/split-module.js move <target> <names> --header
    "..."` (add `--dry` to try first), then `node scripts/split-module.js
    verify && npm run check`. The tool refuses a move whose code needs a
@@ -389,7 +389,7 @@ Agreed with the owner on 2026-11-21, in this order:
       on each arena root). UI scenarios `error-boundary-row` (+ phone,
       dark): a message with malformed reactions blanked the whole page on
       the old build; now only that row shows a notice
-- [ ] 5.2 A client-side game registry. `createGameStore` in
+- [x] 5.2 A client-side game registry. `createGameStore` in
       `features/games/games.ts` is one 2,987-line function with 78
       `g.type === "..."` branches; each game's folder should register its
       panels, card, history rows and catalog entry (the 1,020-line
@@ -491,3 +491,4 @@ Agreed with the owner on 2026-11-21, in this order:
 | 2026-11-21 | 4.2b: hooks warnings to zero | e4a64da | Lint clean with --deny-warnings; UI suite 155/155 (compared with the post-midnight run: day separators and times only). Version 94e53cf3, build 0ab6772fda7dd94a; 23/23 live assets identical to the tested build. |
 | 2026-11-21 | 5.1 error boundaries | 5cc1593 | UI suite 157/157, including the two new `error-boundary-row` scenarios (desktop light, phone dark: only message 71 shows a notice, the rest of the feed and the composer work). Version 467b851f, build 3a3e4f44bce6a981; 23/23 live assets identical to the tested build; all live routes 200/206. |
 | 2026-11-21 | 5.2a-c: game views, cards, history and catalog through the registry | 21fff51 | UI suite 157/157; screenshots against the 5.1 run differ only in clock times and countdowns (cards and the Games tab compared side by side). Version 6793e84c, build 45cda96603d92e06; 23/23 live assets identical to the tested build; all live routes 200/206. |
+| 2026-11-21 | 5.2d: per-game status hooks | b3fbe52 | UI suite 157/157. Old (21fff51) and new code bundled for Node and fed the same 20,000 random match states (all 16 types, no type, an unknown one; every status and phase): finalScore, recordLine, metaText, stateLine, waitingOn, youLabel, lengthLine, durOf, signature, mover colour, isLoaded, the turn banner, the your-move count and the rematch body all identical, no exceptions; a planted change was caught. Version 8fae1df9, build 7b7ed9d63261a13d; 23/23 live assets identical to the tested build; all live routes 200/206. |
