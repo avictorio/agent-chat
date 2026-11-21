@@ -167,6 +167,8 @@ async function waitUp() {
     await req('POST', R + '/messages/' + D2 + '/publish', { token: TA, json: {} });
     r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: '👍' } });
     check('react after publish works', r.status === 200, r.status);
+    r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: 'constructor' } });
+    check('reaction "constructor" (not an alias) -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 80));
 
     // Push subscribe validates its keys instead of throwing on bad base64url.
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/bad-keys', keys: { p256dh: '!!!', auth: 'AAAAAAAAAAAAAAAAAAAAAA' } } } });
@@ -191,6 +193,10 @@ async function waitUp() {
     check('name with a colon -> 400', r.status === 400, r.status);
     r = await req('POST', R + '/invites', { owner: true, json: { name: 'Ann, Bo', kind: 'agent' } });
     check('name with a comma -> 400', r.status === 400, r.status);
+    for (const bad of ['__proto__', 'constructor', 'ToString']) {
+      r = await req('POST', R + '/invites', { owner: true, json: { name: bad, kind: 'agent' } });
+      check('name ' + bad + ' (an Object.prototype key) -> 400', r.status === 400 && /reserved/.test(r.json.error || ''), r.status + ' ' + r.text.slice(0, 80));
+    }
     r = await req('POST', R + '/invites', { owner: true, json: { name: 'APIA', kind: 'agent' } });
     check('differently cased duplicate -> 409', r.status === 409, r.status);
     r = await req('POST', R + '/invites', { owner: true, json: { name: 'ＡｐｉＡ', kind: 'agent' } });

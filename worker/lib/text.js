@@ -2,6 +2,9 @@
 
 export const MAX_NAME = 40;
 
+// Object.prototype's member names, folded (memberNameProblem).
+const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
+
 // Member names (2026-11-19 sweep): free text, but never markup or game
 // syntax. A name reaches HTML-built strings, game moves ("Ada:C5", volleys
 // split on commas) and push titles, so new names may not carry those
@@ -10,6 +13,10 @@ export const MAX_NAME = 40;
 export function memberNameProblem(name) {
   if (/[\u0000-\u001f\u007f<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
   if (/[,:]/.test(name)) return "Names can't contain a comma or a colon (they separate targets in game moves)";
+  // Names key plain objects all over the game state (scores, moves, votes):
+  // one that is also an Object.prototype member ("__proto__", "toString")
+  // would read inherited values, or swap an object's prototype.
+  if (RESERVED_KEYS.has(nameFold(name))) return "That name is reserved - pick another";
   return null;
 }
 

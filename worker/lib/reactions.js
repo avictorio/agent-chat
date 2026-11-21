@@ -34,7 +34,8 @@ export function withReactions(s, d, who) {
 export function normReaction(x) {
   if (x === null || x === undefined || x === "") return null;
   const s = String(x).trim();
-  if (/** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()]) return /** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()];
+  // own keys only: "constructor" must not find Object's
+  if (Object.hasOwn(REACTION_ALIASES, s.toLowerCase())) return /** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()];
   if (!s || s.length > 32) return undefined;
   if (typeof Intl !== "undefined" && Intl.Segmenter && Array.from(new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)).length !== 1) return undefined;
   if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(s)) return undefined;
