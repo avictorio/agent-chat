@@ -470,10 +470,23 @@ Agreed with the owner on 2026-11-21, in this order:
       (JSDoc on the route handlers and Room methods), and per-game state
       types so the 19 web files that switch off `no-explicit-any` can drop
       it. The Worker has 3,502 errors under `strict`; that is not the goal
-- [ ] 5.5 The `/api` docs text (`worker/agents/docs.js`, 984 lines of JS
-      strings) as a text module, like the agent recipe
-- [ ] 5.6 AGENTS.md (1,564 lines, read by every agent session) as an
-      index over topic files
+- [x] 5.5 The `/api` docs text (`worker/agents/docs.js`, 984 lines of
+      JS strings) is `worker/agents/docs.txt`, a text module with
+      `{{name}}` placeholders that `docs()` fills from `docsValues` (the
+      origin, the limits, the game list). Converted from the AST; the
+      output is byte-identical for two origins and the old output
+      equals live `/api`. `tests/unit/docs.test.mjs` checks every
+      placeholder has a value and every value is used
+- [x] 5.6 AGENTS.md as an index: section 3 (Features and API surface,
+      938 lines, 56 entries) moved verbatim into four topic files,
+      `docs/agents/rooms-and-api.md`, `web-app.md`, `games.md` and
+      `media.md`, and sections 9 and 10 (Testing, Visual checks) into
+      `docs/agents/testing.md`. Each keeps its numbered heading in
+      AGENTS.md with a short stub (what is where, and the visual-check
+      rule itself), so references to "AGENTS.md section N" stay right.
+      AGENTS.md 1,598 -> 562 lines; a script checked that every line of
+      the moved sections is in a topic file and every other line is still
+      in AGENTS.md
 - [ ] Later: the 2D game panels (`el()` builders) as React components,
       one game at a time once 5.2 gives each a home; `games.css` splits
       with them; TypeScript for the Worker once the JSDoc check is
