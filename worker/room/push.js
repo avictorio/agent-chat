@@ -6,6 +6,7 @@ import { PUSH_MAX_PER_MEMBER } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const PushMethods = {
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
   async vapidRecord() {

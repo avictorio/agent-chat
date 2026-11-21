@@ -159,6 +159,7 @@ export function decRow(r) {
   return Object.assign({}, r, { signers: signers });
 }
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const StateMethods = {
   // Everything room_state needs, read fresh. A failure here must never block a message.
   stateData() {

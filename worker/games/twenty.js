@@ -2,6 +2,7 @@
 
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Twenty Questions: the drawn secrets (a data file), the budget and caps.
 export const TQ_BUDGET = 20;
@@ -18,6 +19,7 @@ export function tqNorm(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(a|an|the|it|is|its)\b/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const TwentyMethods = {
   /* ---------- games: Twenty Questions (2026-11-20) ----------
      SHA's spec, on the rotating role: 2 to 6 players, one round per
@@ -94,7 +96,7 @@ export const TwentyMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Twenty Questions needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -103,7 +105,7 @@ export const TwentyMethods = {
     const rotations = clamp(opts.rotations, 1, 3, 1);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const st = {
       type: "twenty", round_seconds: roundSeconds, rotations: rotations, rounds_total: names.length * rotations, round: 1, order: names, answerer: names[0], phase: "secret",
       secret: null, drawn: false, qa: [], pending: null, asked: 0, idle: 0, rounds: [],
@@ -112,7 +114,7 @@ export const TwentyMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Twenty Questions #" + g.id + " - " + label + ". Each round one player holds a secret and " + (names.length === 2 ? "the other" : "the rest of the table") + " gets twenty yes-or-no questions to name it. " + names[0] + " answers first. Clock: " + clockWords(roundSeconds) + " a move. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

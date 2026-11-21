@@ -1,6 +1,7 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
 
 import { clockWords, seatAccepted, tvMatch } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Trivia (2026-11-20): balances, wagers, the quizmaster's split bonus.
 export const TV_START = 100;
@@ -9,6 +10,7 @@ export const TV_SPLIT = 10;
 export const TV_Q_MAX = 200;
 export const TV_A_MAX = 60;
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const TriviaMethods = {
   /* ---------- games: Trivia (2026-11-20) ----------
      Ada's trivia with wagers, with the owner's change (Nov 20): the
@@ -96,7 +98,7 @@ export const TriviaMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Trivia needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -106,7 +108,7 @@ export const TriviaMethods = {
     const rotations = clamp(opts.rotations, 1, 4, Math.max(1, Math.min(4, Math.round(8 / names.length))));
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const balance = {};
     const prog = {};
     for (const n of names) {
@@ -121,7 +123,7 @@ export const TriviaMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trivia #" + g.id + " - " + label + ". Each round a quizmaster asks a question of their own; everyone else answers and wagers up to " + TV_MAX_WAGER + " of their " + TV_START + " points. " + names[0] + " asks first. Clock: " + clockWords(roundSeconds) + " a phase. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

@@ -2,6 +2,7 @@
 
 import LG_WORDS_TXT from "../data/lettergrid-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Letter Grid (2026-11-20): the dictionary (content as data,
 // worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
@@ -36,6 +37,7 @@ export const LG_VOWELS = "aeiou";
 // A cell's label: column letter, then row number - A1 is the top left.
 export const lgLabel = (r, c) => String.fromCharCode(65 + c) + (r + 1);
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LetterGridMethods = {
   // Letter Grid in tests: lay a known grid (rows of letters, the match's
   // size), so words and paths are deterministic.
@@ -254,7 +256,7 @@ export const LetterGridMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Letter Grid needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const size = clamp(opts.size, 4, 6, 5);
     const rounds = clamp(opts.rounds, 3, 20, 8);
@@ -284,7 +286,7 @@ export const LetterGridMethods = {
       winner: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Letter Grid match #" + g.id + " - " + label + ". One " + size + "x" + size + " grid of letters for everyone; each round, trace one secret word through touching cells (diagonals count). 1 point a letter, plus 1 for every cell you claim first. " + rounds + " rounds; round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

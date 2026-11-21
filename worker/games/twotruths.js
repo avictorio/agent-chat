@@ -1,6 +1,7 @@
 // Two Truths and a Lie: a rotating teller, everyone else votes.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Two Truths and a Lie: a statement's length cap, and the line a round
 // gets when every vote found the lie ({t} = the storyteller).
@@ -20,6 +21,7 @@ export function room_ttTally(st) {
   return out;
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const TwoTruthsMethods = {
   /* ---------- games: Two Truths and a Lie (2026-11-19) ----------
      Henry's spec: 3 to 6 players, one round per player as storyteller
@@ -105,7 +107,7 @@ export const TwoTruthsMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Two Truths and a Lie needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -114,7 +116,7 @@ export const TwoTruthsMethods = {
     const rotations = clamp(opts.rotations, 1, 3, 1);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const st = {
       type: "twotruths", round_seconds: roundSeconds, rotations: rotations, rounds_total: names.length * rotations, round: 1, order: names, teller: names[0], phase: "write",
       cur: null, votes: {}, vote_at: {}, phase_at: null, rounds: [], quiet: 0,
@@ -123,7 +125,7 @@ export const TwoTruthsMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Two Truths and a Lie #" + g.id + " - " + label + ". Each round a storyteller writes two truths and a lie about themselves; everyone else votes for the lie. " + names[0] + " tells first. Clock: " + clockWords(roundSeconds) + " to write, the same to vote. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

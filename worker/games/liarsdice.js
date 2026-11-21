@@ -1,7 +1,9 @@
 // Liar's Dice: hidden dice, rising bids, call liar; ones are wild.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LiarsDiceMethods = {
   // Liar's Dice in tests: set the cups (each must keep its die count) and/or
   // expire the turn clock so the next read runs the timeout.
@@ -135,7 +137,7 @@ export const LiarsDiceMethods = {
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     // seats in a random order; the first seat opens
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -146,7 +148,7 @@ export const LiarsDiceMethods = {
     const each = Math.min(6, Math.max(2, Math.floor(Number(opts.dice) || 5)));
     const wild = opts.ones_wild === undefined || opts.ones_wild === null ? true : !(opts.ones_wild === false || opts.ones_wild === "false" || opts.ones_wild === 0);
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const count = {};
     const cups = {};
     names.forEach((n) => {
@@ -161,7 +163,7 @@ export const LiarsDiceMethods = {
       winner: null, places: null, forfeit: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Liar's Dice #" + g.id + " - " + label + ". " + each + " hidden dice each" + (wild ? ", ones wild" : "") + ": raise the bid or call liar; the last one with dice wins. " + names[0] + " opens. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

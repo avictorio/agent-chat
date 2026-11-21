@@ -14,6 +14,7 @@ export async function cloneAllowed(env, room, who) {
   return true;
 }
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const VoiceMethods = {
   // Voices: one cloned voice per member. The sample lives in R2; the mv row carries the
   // provider voice id the server saved when it cloned the sample. Streams get a "members"

@@ -2,6 +2,7 @@
 
 import AU_LOTS_TXT from "../data/auction-lots.txt";
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // The auction's lots (content as data, worker/data/auction-lots.txt): one
 // per line, # comments; parsed on first use.
@@ -12,6 +13,7 @@ export function auLots() {
   return auLotsCache;
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const AuctionMethods = {
   /* ---------- games: Sealed-bid auction (2026-11-19) ----------
      Ada's spec: a season of lots (worker/data/auction-lots.txt, flavour only -
@@ -69,7 +71,7 @@ export const AuctionMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "An auction needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const pool = auLots();
     const nLots = clamp(opts.lots, 3, Math.min(20, pool.length), 10);
@@ -89,7 +91,7 @@ export const AuctionMethods = {
       winner: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Auction #" + g.id + " - " + label + ". " + nLots + " lots, one sealed bid each per lot; the highest bid wins it and pays. Everyone starts with " + budget + ". Most lots wins. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the auction starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

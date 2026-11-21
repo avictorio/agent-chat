@@ -6,6 +6,7 @@ import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
      State is one JSON row per match in gm; m.game_id links the match's card
@@ -25,6 +26,9 @@ export const GameMachineryMethods = {
     ];
   },
 
+  /** A match as gameRow reads it: its gm row, with the state parsed.
+   *  @typedef {{ id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, st: any }} GameRow */
+  /** @returns {GameRow | null} */
   gameRow(id) {
     const r = this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray()[0];
     if (!r) return null;

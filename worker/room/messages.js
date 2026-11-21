@@ -7,6 +7,7 @@ import { sseFrame } from "../lib/http.js";
 import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const MessageMethods = {
   // Reactions: one per person per message. Streams get an "event: reaction"; long-polls waiting on the room wake up.
   reactionsFor(id) {

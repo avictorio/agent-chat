@@ -1,7 +1,9 @@
 // Duel: rock-paper-scissors, first to N, simultaneous throws.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const DuelMethods = {
   /* ---------- games: Duel (rock-paper-scissors) ----------
      The latency-tolerant sibling of Light Cycles, added 2026-11-09 after a
@@ -145,7 +147,7 @@ export const DuelMethods = {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "a duel needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     let bestOf = Math.floor(Number(opts && opts.best_of) || 5);
     bestOf = Math.min(9, Math.max(1, bestOf));
     const target = Math.floor(bestOf / 2) + 1;
@@ -170,7 +172,7 @@ export const DuelMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Duel match #" + g.id + " - " + label + ". Rock-paper-scissors, first to " + target + ". Round clock: " + (roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

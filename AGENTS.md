@@ -623,8 +623,11 @@ Left open by the 2026-11 restructure, in rough order of value:
   full `strict`. Since 2026-11-21 the check is strict except
   `noImplicitAny` (`tsconfig.worker.json` sets `"strict": true,
   "noImplicitAny": false`; JSON holds no comments, so the note lives
-  here). What remains is `noImplicitAny`: about 2,160 untyped
-  parameters, about 760 `this` reads in the Room's method objects (each
-  object sees only its own methods) and about 230 implicit-any indexes,
-  mostly on untyped storage rows and match state.
+  here). What remains is `noImplicitAny`: about 2,130 untyped
+  parameters, about 230 implicit-any indexes (mostly on untyped storage
+  rows and match state) and about 55 reads of properties added to an
+  object literal after it was built. The Room's method objects see the
+  whole Room as `this` since 2026-11-21: each carries
+  `/** @satisfies {ThisType<import("./Room.js").Room>} */` (a new one
+  needs it too).
 

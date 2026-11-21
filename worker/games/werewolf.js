@@ -1,10 +1,12 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Werewolf: a line of talk's cap.
 export const WW_TALK_MAX = 400;
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const WerewolfMethods = {
   /* ---------- games: Werewolf (2026-11-20) ----------
      SHA's spec (with Claude's Night shift folded in): 5 to 9 players,
@@ -131,7 +133,7 @@ export const WerewolfMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 5 || playersIn.length > 9) return { status: 400, error: "Werewolf needs 5 to 9 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     const deck = this.wwDeal(names.length);
     for (let i = deck.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -155,7 +157,7 @@ export const WerewolfMethods = {
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const rip = this.wwRolesInPlay(st);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Werewolf #" + g.id + " - " + label + ". " + rip.werewolf + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + " and " + rip.villager + " villagers, dealt in secret. Nights the wolves hunt; days the village talks it out in the game and votes. Each phase: " + clockWords(phaseSeconds) + ". Lobby open - the first night falls when everyone accepts; tap the card to take your seat.";
