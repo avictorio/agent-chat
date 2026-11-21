@@ -26,6 +26,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const LG_SKY: SkySpec = {
   top: "#020509",
   mid: "#05141a",
@@ -455,8 +459,8 @@ export default function LetterArena3D({
   const meL = me.toLowerCase();
   const grid: string[] = (g && g.grid) || [];
   const n = grid.length || 5;
-  const players: any[] = (g && g.players) || [];
-  const rounds: any[] = (g && g.rounds) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const seats: Seat[] = useMemo(() => players.map((p: any) => ({ name: String(p.name), hex: String(p.hex || "#2dd4bf"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
 

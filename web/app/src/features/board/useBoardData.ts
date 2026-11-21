@@ -121,7 +121,7 @@ export function useBoardData(opts: {
       window.clearTimeout(boardTimerRef.current);
       boardTimerRef.current = window.setTimeout(() => void loadAllRef.current(), tabRef.current === "chat" ? 3000 : 700);
     }
-  }, []);
+  }, [tabRef]);
 
   // Opening a board tab reloads anything older than 15 s (what the
   // pre-React page did): edits that room_state does not reflect - a
@@ -212,7 +212,7 @@ export function useBoardData(opts: {
       }
       if (!deniedRef.current) toast("Couldn't load the room board: " + (e as Error).message, true);
     }
-  }, [client, deny, applyMembersData]);
+  }, [client, deny, applyMembersData, deniedRef]);
   const loadAllRef = useRef(loadAll);
   loadAllRef.current = loadAll;
 

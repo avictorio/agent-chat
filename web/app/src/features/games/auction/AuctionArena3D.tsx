@@ -25,6 +25,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const AU_SKY: SkySpec = {
   top: "#03030a",
   mid: "#0a0a1e",
@@ -460,8 +464,8 @@ export default function AuctionArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
-  const rounds: any[] = (g && g.rounds) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const budget0 = (g && g.budget) || 100;

@@ -96,7 +96,7 @@ export function useMessages(opts: {
       if (next.length > 1200) next = next.slice(-1000);
       return next;
     });
-  }, []);
+  }, [tabRef, nameRef]);
 
   useEffect(() => {
     const list = listRef.current;

@@ -33,6 +33,10 @@ import { Burst, LightPillar, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const NIGHT_SKY: SkySpec = { top: "#01030c", mid: "#050b22", horizon: "#13204a", ground: "#020308", glow: "#93c5fd", glowAmt: 0.1, stars: 0.9 };
 const DAY_SKY: SkySpec = { top: "#1e3a8a", mid: "#3b6fb6", horizon: "#f6c28b", ground: "#1a1408", glow: "#fde68a", glowAmt: 0.35, stars: 0 };
 
@@ -377,8 +381,8 @@ export default function WerewolfArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
-  const events: any[] = (g && g.events) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const events: any[] = (g && g.events) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const you = (g && g.you) || {};

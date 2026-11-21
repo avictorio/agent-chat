@@ -23,6 +23,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const C4_SKY: SkySpec = {
   top: "#05030b",
   mid: "#140818",
@@ -390,7 +394,7 @@ export default function FourArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
   const moves: any[] = (g && g.moves) || [];
   const finished = !!g && g.status === "finished";
   const seats: Seat[] = useMemo(

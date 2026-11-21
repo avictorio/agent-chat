@@ -185,6 +185,7 @@ export function Composer(p: ComposerProps) {
   }, [room]);
   // Leaving the page mid-upload loses the browser's hold on the file:
   // ask first (the parts already sent are kept either way).
+  /* eslint-disable react-hooks/exhaustive-deps -- re-runs only when an upload starts or ends (!!up), not on every progress tick */
   useEffect(() => {
     if (!up) return;
     const warn = (e: BeforeUnloadEvent) => {
@@ -194,6 +195,7 @@ export function Composer(p: ComposerProps) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [!!up]);
+  /* eslint-enable react-hooks/exhaustive-deps */
   const rec = useRecorder({ textRef, grow, clipRef, setClip, stopDictation });
   const { recActive, recLabel, recClick } = rec;
   const clipChipText = recActive ? recLabel : clip ? clip.label : "";

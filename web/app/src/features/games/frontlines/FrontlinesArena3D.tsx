@@ -39,6 +39,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const FL_SKY: SkySpec = {
   top: "#05070f",
   mid: "#151a36",
@@ -665,8 +669,8 @@ export default function FrontlinesArena3D({
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const phone = hostW < PHONE_BELOW;
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
-  const rounds: any[] = (g && g.rounds) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const winner = String((g && g.winner) || "");

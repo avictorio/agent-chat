@@ -88,7 +88,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       board.innerHTML = boardSvg(g);
       board.appendChild(lcCardFoot(g));
     }
-  }, [g]);
+  }, [g, store]);
 
   // Spectator pulse: when the cached game actually advances (a shot,
   // a round, a tick, the finish), flash the card once in the mover's

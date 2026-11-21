@@ -23,6 +23,10 @@ import { LightPillar, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const EC_SKY: SkySpec = {
   top: "#030202",
   mid: "#080504",
@@ -447,7 +451,7 @@ export default function CorpseArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const revealed = !!g && !!g.story;

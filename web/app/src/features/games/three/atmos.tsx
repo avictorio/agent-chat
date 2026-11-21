@@ -268,6 +268,7 @@ export function HorizonGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+  /* eslint-disable react-hooks/exhaustive-deps -- keyed on the vectors' numbers, not the arrays rebuilt each render */
   useLayoutEffect(() => {
     mat.uniforms.uHalf!.value = half;
     mat.uniforms.uOff!.value = off;
@@ -275,6 +276,7 @@ export function HorizonGrid({
     (mat.uniforms.uA!.value as Color).set(a);
     (mat.uniforms.uB!.value as Color).set(b);
   }, [mat, half[0], half[1], off[0], off[1], cell, a, b]);
+  /* eslint-enable react-hooks/exhaustive-deps */
   useFrame(() => {
     if (!j.still) mat.uniforms.uTime!.value = j.t;
   });

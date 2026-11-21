@@ -510,6 +510,7 @@ export function GridFloor({ w, h, own, hexes, terr }: { w: number; h: number; ow
     []
   );
   useEffect(() => () => mat.dispose(), [mat]);
+  /* eslint-disable react-hooks/exhaustive-deps -- keyed on the colours' values (hexes.join), not the array rebuilt each render */
   useLayoutEffect(() => {
     mat.uniforms.uSize!.value = [w, h];
     mat.uniforms.uOwn!.value = tex;
@@ -529,6 +530,7 @@ export function GridFloor({ w, h, own, hexes, terr }: { w: number; h: number; ow
     }
     tex.needsUpdate = true;
   }, [mat, tex, w, h, own, hexes.join(",")]);
+  /* eslint-enable react-hooks/exhaustive-deps */
   const terrRef = useRef(0);
   useFrame((state, delta) => {
     mat.uniforms.uTime!.value = j.still ? 0 : j.t;

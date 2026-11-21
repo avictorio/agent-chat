@@ -338,12 +338,17 @@ limits and the games move before `agents/`.
       message that gained media after its first render (an upload
       publishing) would throw React's hook-order error and, with no error
       boundary, blank the room (fixed in its own commit)
-  - [ ] 4.2b The 39 exhaustive-deps warnings left: mostly the arenas'
-        `useMemo` over `players`/`rounds` built fresh each render (`|| []`),
-        so the memo recomputes every render; refs read in cleanups (Duel);
-        stable refs missing from deps (board, feed). Each changes when
-        something recomputes, so fix them arena by arena with the UI suite
-        and a look at the scene
+  - [x] 4.2b The 39 exhaustive-deps warnings, to zero; lint now fails on
+        warnings too (`--deny-warnings`). 26 were the arenas'
+        `(g && g.players) || []`: a fresh empty list each render, so the
+        memos over it recomputed every render - a shared `NO_ITEMS` (the
+        arenas never mutate these lists; checked). 4 were stable refs and
+        the games store missing from deps (added; their identity never
+        changes). The rest are deliberate and say why in a scoped disable:
+        the composer's unload guard keyed on `!!up`, the Duel cleanup
+        reading its refs at cleanup time, and two scene effects keyed on
+        values (`hexes.join`, the vectors' numbers) instead of arrays
+        rebuilt each render
 - [x] 4.3 Unit tests (`node:test`) for the game engines and `lcmodel`:
       `npm run test:unit`, 22 tests (see AGENTS.md section 9)
 - [x] 4.4 Pin `wrangler` as a dev dependency so deploys and local runs

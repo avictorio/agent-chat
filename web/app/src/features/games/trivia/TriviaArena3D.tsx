@@ -25,6 +25,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const TV_SKY: SkySpec = {
   top: "#05020d",
   mid: "#12062a",
@@ -433,8 +437,8 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || [];
-  const rounds: any[] = (g && g.rounds) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const seats: Seat[] = useMemo(() => players.map((p: any) => ({ name: String(p.name), hex: String(p.hex || "#c084fc"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
   const n = seats.length || 2;

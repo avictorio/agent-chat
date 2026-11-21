@@ -68,6 +68,10 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx, type SfxName } from "../three/sfx";
 
+// One empty list for matches without players or rounds yet, so the memos
+// below keep their inputs from one render to the next.
+const NO_ITEMS: never[] = [];
+
 const DUEL_SKY: SkySpec = {
   top: "#020108",
   mid: "#0a0520",
@@ -814,6 +818,7 @@ function Reveal({
         lean(matchPoint ? 0.8 : 0.88);
       }
     }
+    /* eslint-disable react-hooks/exhaustive-deps -- the cleanup resets these refs' values as they stand when it runs, on purpose */
     return () => {
       if (rv.current) {
         rv.current.t0 = null;
@@ -825,6 +830,7 @@ function Reveal({
         if (h) goHome(ctl, h, !j.still);
       }
     };
+    /* eslint-enable react-hooks/exhaustive-deps */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1188,8 +1194,8 @@ export default function DuelArena3D({
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const rv = useRef<RevealRef>({ t0: null, plan: null, absent: null });
-  const players: any[] = (g && g.players) || [];
-  const rounds: any[] = (g && g.rounds) || [];
+  const players: any[] = (g && g.players) || NO_ITEMS;
+  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
   const target = (g && g.target) || 3;
   const meL = me.toLowerCase();
   const finished = !!g && g.status === "finished";
