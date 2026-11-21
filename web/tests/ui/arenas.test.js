@@ -28,6 +28,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       // one hill nudged: Lock in goes off again (95 placed)
       await page.click('#viewer .fl-row:nth-of-type(2) .fl-step:first-of-type');
       out.leftAfterNudge = await page.$eval('#viewer .fl-left', (e) => e.textContent);
+      // the planner is React (ctx.panel): a repaint keeps the half-made split
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .fl-plan', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .fl-left', (e) => e.textContent) + '|' + (await page.$$eval('#viewer .fl-num', (n) => n.map((x) => x.value).join(',')));
       await page.click('#viewer .fl-acts button:nth-child(1)');
       await page.click('#viewer .fl-go');
       await settle(page);
@@ -40,6 +45,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.flags.join(',') !== 'level,Anthony,Ada,level,level') throw new Error('round 2 flags: ' + out.flags);
       if (!out.lockOffAtZero || !out.lockOnAt100) throw new Error('Lock in waits for exactly 100: ' + JSON.stringify(out));
       if (!/All 100 placed/.test(out.left) || !/5 left to place/.test(out.leftAfterNudge)) throw new Error('the troop counter: ' + JSON.stringify(out));
+      if (out.kept !== '5 left to place|15,20,20,20,20') throw new Error('a repaint keeps the split: ' + out.kept);
       if (!/"dir":"20,20,20,20,20"/.test(out.moveCall)) throw new Error('the commit sends the split: ' + out.moveCall);
       if (!/Locked in/.test(out.lockedLabel)) throw new Error('the planner reads locked after the commit: ' + out.lockedLabel);
       return out;
@@ -331,6 +337,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       await page.click('#viewer .tv-chip-btn:has-text("20")');
       out.stake = await page.$eval('#viewer .tv-stake', (e) => e.textContent);
       out.focusAfterType = await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('tv-in-a'));
+      // the form is React (ctx.panel): a repaint keeps the answer and the stake
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .tv-answer', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .tv-answer', (f) => f.querySelector('.tv-in-a').value + '|' + f.querySelector('.tv-range').value + '|' + f.querySelector('.tv-stake').textContent);
       await shot(page, label + '.png');
       await page.click('#viewer .tv-answer .tv-send');
       await settle(page);
@@ -342,6 +353,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (!/Your answer · round 2 of 6/.test(out.banner)) throw new Error('the banner: ' + out.banner);
       if (out.reveal.length !== 3 || !/Ada.*Red.*\+15/.test(out.reveal[0]) || !/Anthony.*blue.*−10/.test(out.reveal[1]) || !/Henry.*split the table.*\+10/.test(out.reveal[2])) throw new Error('the last round: ' + JSON.stringify(out.reveal));
       if (out.stake !== '20 of 25') throw new Error('a quick stake sets the wager: ' + out.stake);
+      if (out.kept !== 'Lisbon|20|20 of 25') throw new Error('a repaint keeps the answer and the stake: ' + out.kept);
       if (!/"dir":"\{\\"answer\\":\\"Lisbon\\",\\"wager\\":20\}"/.test(out.call)) throw new Error('the answer goes out with its wager: ' + out.call);
       if (!/Your answer is in/.test(out.title)) throw new Error('the sealed answer shows: ' + out.title);
       return out;
@@ -459,6 +471,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.events = await page.$eval('#viewer .ww-events', (e) => e.textContent);
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       await page.fill('#viewer .ww-talk-input', 'I agree - Henry.');
+      // the talk panel is React (ctx.panel): a repaint keeps what you typed
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .ww-talk-input', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .ww-talk-input', (i) => i.value);
       await shot(page, label + '.png');
       await page.click('#viewer .ww-say');
       await settle(page);
@@ -475,6 +492,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.talk.join(',') !== 'The village square:1') throw new Error('a villager sees only the town square: ' + JSON.stringify(out.talk));
       if (!/Jax was killed in the night - villager/.test(out.events)) throw new Error('the timeline: ' + out.events);
       if (!/Day 1 · talk it out, then vote/.test(out.banner)) throw new Error('the banner: ' + out.banner);
+      if (out.kept !== 'I agree - Henry.') throw new Error('a repaint keeps the line being typed: ' + out.kept);
       if (!/"dir":"say: I agree - Henry\."/.test(out.sayCall)) throw new Error('Say talks in the game: ' + out.sayCall);
       if (!/"dir":"vote Henry"/.test(out.voteCall) || !/Henry/.test(out.voted)) throw new Error('a tap votes: ' + JSON.stringify(out));
       return out;
@@ -735,6 +753,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       } else {
         await page.click('#viewer .ld-face[aria-label="twos"]');
         out.go1 = await page.$eval('#viewer .ld-go', (b) => b.textContent);
+        // the bid builder is React (ctx.panel): a repaint keeps the draft
+        await page.click('#viewer .arena-tabs button:nth-child(2)');
+        await page.click('#viewer .arena-tabs button:nth-child(1)');
+        await page.waitForSelector('#viewer .ld-bidder', { timeout: 10000 });
+        out.kept = await page.$eval('#viewer .ld-go', (b) => b.textContent);
         await page.click('#viewer .ld-bid-row .fl-step[aria-label="One fewer die"]');
         out.blocked = await page.$eval('#viewer .ld-go', (b) => b.disabled + '|' + (document.querySelector('#viewer .ld-why') || {}).textContent);
         await page.click('#viewer .ld-face[aria-label="fives"]');
@@ -745,6 +768,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
         out.afterBanner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
         out.builderGone = !(await page.$('#viewer .ld-bidder'));
         if (out.go1 !== 'Bid 4 twos') throw new Error('a face pick keeps the count: ' + out.go1);
+        if (out.kept !== 'Bid 4 twos') throw new Error('a repaint keeps the draft: ' + out.kept);
         if (!/^true\|Beat 3 fours/.test(out.blocked)) throw new Error('a bid that does not beat the last is blocked: ' + out.blocked);
         if (out.go2 !== 'Bid 3 fives|false' || !/"dir":"3x5"/.test(out.moveCall)) throw new Error('the same count of a higher face is a raise: ' + JSON.stringify(out));
         if (!/Waiting on Henry/.test(out.afterBanner) || !out.builderGone) throw new Error('the turn passes on: ' + out.afterBanner);
