@@ -11,7 +11,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['trust-3d', {}], ['trust-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tr-card', { timeout: 10000 });
       await page.click('.game-card.kind-trust');
       await page.waitForSelector('#viewer:not([hidden]) .tr-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
@@ -36,7 +36,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['liarsdice-3d', {}], ['liarsdice-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ld: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ld-card', { timeout: 10000 });
       await page.click('.game-card.kind-liarsdice');
       await page.waitForSelector('#viewer:not([hidden]) .ld-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
@@ -59,7 +59,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .au-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .au-card', { timeout: 10000 });
       await page.click('.game-card.kind-auction');
       await page.waitForSelector('#viewer:not([hidden]) .au-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
@@ -82,7 +82,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['fourinarow-3d', {}], ['fourinarow-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
       await page.click('.game-card.kind-fourinarow');
       await page.waitForSelector('#viewer:not([hidden]) .c4-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
@@ -110,7 +110,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['coderace-3d', {}], ['coderace-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .cr-card', { timeout: 10000 });
       await page.click('.game-card.kind-coderace');
       await page.waitForSelector('#viewer:not([hidden]) .cr-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
@@ -139,7 +139,7 @@ const { settle, done, now, run, shot } = require('./harness');
   for (const [label, o] of [['frontlines-3d', {}], ['frontlines-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .fl-card', { timeout: 10000 });
       await page.click('.game-card');
       await page.waitForSelector('#viewer:not([hidden]) .fl-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });

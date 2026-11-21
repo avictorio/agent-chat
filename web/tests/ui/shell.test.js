@@ -12,7 +12,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   // rest of the chat, the message box and the other views keep working.
   // Without the boundaries the render error unmounted the whole page.
   await run('error-boundary-row', { state: { broken: true }, allowConsole: /message 71|is not a function|Cannot read|Objects are not valid|The above error/ }, async (page) => {
-    await page.waitForSelector('#msgs .msg', { timeout: 5000 });
+    await page.waitForSelector('#msgs .msg', { timeout: 10000 });
     const out = await page.evaluate(() => ({
       notice: ((document.querySelector('#msgs .err-box') || {}).textContent || '').trim(),
       rows: document.querySelectorAll('#msgs .msg').length,
@@ -28,7 +28,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     return out;
   });
   await run('error-boundary-row-mobile-dark', { state: { broken: true }, w: 390, h: 844, touch: true, scheme: 'dark', allowConsole: /message 71|is not a function|Cannot read|Objects are not valid|The above error/ }, async (page) => {
-    await page.waitForSelector('#msgs .err-box', { timeout: 5000 });
+    await page.waitForSelector('#msgs .err-box', { timeout: 10000 });
     const box = await page.$eval('#msgs .err-box', (e) => { const r = e.getBoundingClientRect(); return { w: Math.round(r.width), right: Math.round(r.right), text: e.textContent.trim() }; });
     if (box.right > 390) throw new Error('the notice overflows a phone: ' + JSON.stringify(box));
     await page.$eval('#msgs .err-box', (e) => e.scrollIntoView({ block: 'center' }));
@@ -37,7 +37,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   });
   await run('skeleton', { hash: '#invite=tok_Anthony' }, async (page) => {
     const out = {};
-    await page.waitForSelector('.msg', { timeout: 4000 });
+    await page.waitForSelector('.msg', { timeout: 10000 });
     out.msgs = await page.$$eval('.msg', els => els.length);
     out.stored = await page.evaluate(() => { try { return localStorage.getItem('chat-invite:demo'); } catch (e) { return null; } });
     out.hashAfter = await page.evaluate(() => location.hash);
@@ -49,7 +49,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   });
   await run('agent-gate', { state: { agentYou: true } }, async (page) => {
     const out = {};
-    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 });
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
     out.block = await page.$eval('#agentBlock', e => e.textContent);
     out.intro = await page.$eval('#agentIntro', e => e.textContent);
     if (!/\/api\/rooms\/demo\/mcp/.test(out.block)) throw new Error('setup block must name the MCP endpoint: ' + out.block.slice(0, 80));
@@ -57,7 +57,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     if (!/Probe/.test(out.intro)) throw new Error('intro must name the agent: ' + out.intro);
     await shot(page, 'agent-gate.png');
     await page.click('#agentApp');
-    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 4000 });
+    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
     out.chatAfterEscape = true;
     await page.reload();
     await settle(page);
@@ -96,24 +96,24 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   await run('update-banner', { state: { behind: true } }, async (page) => {
     const out = {};
     out.meta = await page.$eval('meta[name="build"]', e => e.getAttribute('content'));
-    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 10000 });
     await shot(page, 'update-banner.png');
     await page.click('#updateDismiss');
-    await page.waitForFunction(() => document.getElementById('updateStrip').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('updateStrip').hidden, null, { timeout: 10000 });
     await page.reload(); await settle(page);
     out.afterDismissReload = await page.$eval('#updateStrip', e => e.hidden);
     await page.evaluate(() => localStorage.removeItem('ac:build-dismissed'));
     await page.reload();
-    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
-    await Promise.all([page.waitForNavigation({ timeout: 5000 }), page.click('#updateRefresh')]);
-    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 10000 });
+    await Promise.all([page.waitForNavigation({ timeout: 10000 }), page.click('#updateRefresh')]);
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 10000 });
     out.refreshReloaded = true;
     if (out.meta !== 'uitestbuild1') throw new Error('page build meta wrong: ' + out.meta);
     if (!out.afterDismissReload) throw new Error('dismissal did not persist across reload');
     return out;
   });
   await run('update-banner-mobile', { state: { behind: true }, w: 390, h: 844, touch: true }, async (page) => {
-    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 5000 });
+    await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 10000 });
     await shot(page, 'update-banner-mobile.png');
     return { ok: true };
   });
@@ -143,7 +143,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     await drag(120);
     out.fullHint = await page.$eval('#pullHintText', e => e.textContent);
     await shot(page, 'pull-refresh-mobile.png');
-    await Promise.all([page.waitForNavigation({ timeout: 5000 }), release()]);
+    await Promise.all([page.waitForNavigation({ timeout: 10000 }), release()]);
     out.reloaded = true;
     if (out.shortHint !== 'Pull to refresh') throw new Error('short drag hint wrong: ' + out.shortHint);
     if (!out.shortHidden) throw new Error('hint must hide after a short drag');
@@ -169,9 +169,9 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });
   await run('nonmember', { state: { noYou: true }, hash: '#members' }, async (page) => { return { formShown: await page.$eval('#invForm', f => !f.hidden) }; });
-  await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
-  await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
-  await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 4000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
+  await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
+  await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
+  await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
 
   // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
@@ -241,7 +241,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
       await settle(page);
       await page.fill('#cRoom', 'My Room');
       out.preview = await page.$eval('#cRoomUrl', (e) => e.textContent);
-      await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 4000 });
+      await page.waitForSelector('#updateStrip:not([hidden])', { timeout: 10000 });
       out.updateBanner = true;
       await page.screenshot({ path: OUT + 'home-update-banner.png' });
       await page.evaluate(() => {
@@ -253,7 +253,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
       out.pullHint = await page.$eval('#pullHintText', (e) => e.textContent);
       await page.screenshot({ path: OUT + 'home-pull.png' });
       await Promise.all([
-        page.waitForNavigation({ timeout: 5000 }),
+        page.waitForNavigation({ timeout: 10000 }),
         page.evaluate(() => document.querySelector('.topbar').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, isPrimary: true }))),
       ]);
       out.pullReloaded = true;

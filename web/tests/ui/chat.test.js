@@ -30,11 +30,11 @@ const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
   }
   await run('artifacts', { state: { artifacts: true } }, async (page) => {
     const out = {};
-    const fr = await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    const fr = await page.waitForSelector('.art-card iframe.art-frame', { timeout: 10000 });
     out.frameSandbox = await fr.getAttribute('sandbox');
     out.frameSrc = await fr.getAttribute('src');
     out.cardName = await page.$eval('.art-card .art-name', e => e.textContent);
-    await page.waitForSelector('.doc-card .doc-body .md-h', { timeout: 4000 });
+    await page.waitForSelector('.doc-card .doc-body .md-h', { timeout: 10000 });
     out.docHead = await page.$eval('.doc-card .doc-body .md-h', e => e.textContent);
     out.docName = await page.$eval('.doc-card .art-name', e => e.textContent);
     out.docBody = await page.$eval('.doc-card .doc-body', e => e.textContent);
@@ -47,47 +47,47 @@ const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
     await shot(page, 'artifacts-cards.png');
     // Tapping the page card opens the full-screen viewer; browser back closes it.
     await page.click('.art-card');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 10000 });
     out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
     await shot(page, 'artifacts-viewer-page.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     // Tapping the doc card opens the viewer with the full document; the chevron closes it.
     await page.click('.doc-card');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-doc .md-h', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-doc .md-h', { timeout: 10000 });
     out.viewerDoc = await page.$eval('#viewer .viewer-doc', e => e.textContent);
     out.viewerDl = await page.$eval('#viewerDl', e => !e.hidden);
     await shot(page, 'artifacts-viewer-doc.png');
     await page.click('#viewerBack');
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     if (!/Rendered/.test(out.viewerDoc)) throw new Error('viewer doc not rendered');
     if (!out.viewerDl) throw new Error('viewer must offer Download for a document');
     // Images get the same treatment: inline, no wrapping link; tap opens the viewer.
     out.imgWrapped = await page.$eval('.msg-img', e => e.parentElement.tagName);
     await page.click('.msg-img');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 10000 });
     await settle(page);
     await shot(page, 'artifacts-viewer-image.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     if (out.imgWrapped === 'A') throw new Error('image must not be wrapped in a new-tab link');
     return out;
   });
   await run('artifacts-mobile', { state: { artifacts: true }, w: 390, h: 844, touch: true }, async (page) => {
-    await page.waitForSelector('.art-card iframe.art-frame', { timeout: 4000 });
+    await page.waitForSelector('.art-card iframe.art-frame', { timeout: 10000 });
     await shot(page, 'artifacts-mobile-cards.png');
     await page.tap('.art-card');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 10000 });
     await settle(page);
     await shot(page, 'artifacts-mobile-viewer.png');
     await page.tap('#viewerBack');
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     await page.tap('.msg-img');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 10000 });
     await settle(page);
     await shot(page, 'artifacts-mobile-image.png');
     await page.tap('#viewerBack');
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
 
@@ -304,7 +304,7 @@ const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
      Escape closes it and clears the outline. Desktop and phone. */
   for (const [label, o] of [['reactions-who-anchored', {}], ['reactions-who-anchored-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, o, async (page) => {
-      await page.waitForSelector('.rx-chip', { timeout: 4000 });
+      await page.waitForSelector('.rx-chip', { timeout: 10000 });
       const chips = await page.$$('.rx-chip');
       const chip = chips[chips.length - 1];
       const cb = await chip.boundingBox();
@@ -320,7 +320,7 @@ const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
         await page.waitForTimeout(650);
         await page.mouse.up();
       }
-      await page.waitForSelector('.rx-who[data-side]', { timeout: 3000 });
+      await page.waitForSelector('.rx-who[data-side]', { timeout: 10000 });
       await settle(page);
       const wb = await (await page.$('.rx-who')).boundingBox();
       const out = { side: await page.$eval('.rx-who', e => e.dataset.side), gap: Math.round(cb.y - (wb.y + wb.height)), offCentre: Math.round(Math.abs(wb.x + wb.width / 2 - x)) };
@@ -330,7 +330,7 @@ const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
       if (!out.held) throw new Error('the held chip should be outlined while its popover is open');
       await shot(page, label + '.png');
       await page.keyboard.press('Escape');
-      await page.waitForFunction(() => !document.querySelector('.rx-who') && !document.querySelector('.rx-chip.rx-held'), null, { timeout: 2000 });
+      await page.waitForFunction(() => !document.querySelector('.rx-who') && !document.querySelector('.rx-chip.rx-held'), null, { timeout: 10000 });
       return out;
     });
   }

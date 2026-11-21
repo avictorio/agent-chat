@@ -7,7 +7,8 @@ import { type GL, recordLine, tickLen } from "../shared/render";
 
 export const fourinarowStatus: GameStatus = {
   finalScore(g: GL): string {
-    return g.winner && g.moves ? "move " + g.moves.length : "";
+    // a forfeit was not won on the last move: say how it was won
+    return g.winner && g.moves ? (g.forfeit ? "by forfeit" : "move " + g.moves.length) : "";
   },
 
   recordLine(g: GL): string {

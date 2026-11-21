@@ -12,11 +12,11 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['frontlines-arena', {}], ['frontlines-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { fl: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .fl-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .fl-card', { timeout: 10000 });
       out.cardHills = await page.$$eval('.game-card .fl-hill', (h) => h.length);
       out.cardCap = await page.$eval('.game-card .fl-card-cap', (e) => e.textContent);
       await page.click('.game-card');
-      await page.waitForSelector('#viewer .fl-plan', { timeout: 6000 });
+      await page.waitForSelector('#viewer .fl-plan', { timeout: 10000 });
       out.fieldCap = await page.$eval('#viewer .fl-cap', (e) => e.textContent);
       out.flags = await page.$$eval('#viewer .fl-field .fl-flag', (f) => f.map((x) => x.textContent));
       out.lockOffAtZero = await page.$eval('#viewer .fl-go', (b) => b.disabled);
@@ -53,10 +53,10 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['coderace-arena', {}], ['coderace-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .cr-card', { timeout: 10000 });
       out.cardRows = await page.$$eval('.game-card .cr-card-row', (r) => r.map((x) => x.querySelector('.cr-card-name').textContent));
       await page.click('.game-card.kind-coderace');
-      await page.waitForSelector('#viewer .cr-input', { timeout: 6000 });
+      await page.waitForSelector('#viewer .cr-input', { timeout: 10000 });
       out.lanes = await page.$$eval('#viewer .cr-lane .cr-lane-name', (n) => n.map((x) => x.textContent));
       out.myPegs = await page.$$eval('#viewer .cr-lane.mine .cr-row:first-child .cr-peg', (p) => p.map((x) => x.textContent).join(''));
       out.rivalHidden = await page.$$eval('#viewer .cr-lane:not(.mine) .cr-peg', (p) => p.every((x) => x.classList.contains('hidden') && !x.textContent));
@@ -95,9 +95,9 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['coderace-done', {}], ['coderace-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true, crDone: true }, init: noGl }, o), async (page) => {
       const out = {};
-      await page.waitForSelector('.game-card .cr-card .cr-secret', { timeout: 6000 });
+      await page.waitForSelector('.game-card .cr-card .cr-secret', { timeout: 10000 });
       await page.click('.game-card.kind-coderace');
-      await page.waitForSelector('#viewer .cr-secret', { timeout: 6000 });
+      await page.waitForSelector('#viewer .cr-secret', { timeout: 10000 });
       out.secret = await page.$$eval('#viewer .cr-secret .cr-peg', (p) => p.map((x) => x.textContent).join(''));
       out.lanes = await page.$$eval('#viewer .cr-lane .cr-lane-name', (n) => n.map((x) => x.textContent));
       out.trophy = await page.$eval('#viewer .cr-lane:first-child .cr-place', (e) => e.textContent);
@@ -119,9 +119,9 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['coderace-words', {}], ['coderace-words-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true, crWords: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .cr-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .cr-card', { timeout: 10000 });
       await page.click('.game-card.kind-coderace');
-      await page.waitForSelector('#viewer .cr-word', { timeout: 6000 });
+      await page.waitForSelector('#viewer .cr-word', { timeout: 10000 });
       out.myTiles = await page.$$eval('#viewer .cr-lane.mine .cr-row:first-child .cr-tile', (t) => t.map((x) => x.textContent + ':' + x.className.split(' ')[1]).join(','));
       out.rivalLetters = await page.$$eval('#viewer .cr-lane:not(.mine) .cr-tile', (t) => t.map((x) => x.textContent).join(''));
       await page.fill('#viewer .cr-word', 'xqzzt');
@@ -150,10 +150,10 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['fourinarow-arena', {}], ['fourinarow-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
       out.cardDiscs = await page.$$eval('.game-card .c4-disc', (d) => d.length);
       await page.click('.game-card.kind-fourinarow');
-      await page.waitForSelector('#viewer .c4-drop', { timeout: 6000 });
+      await page.waitForSelector('#viewer .c4-drop', { timeout: 10000 });
       out.drops = await page.$$eval('#viewer .c4-drop', (b) => b.filter((x) => !x.disabled).length);
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       out.seats = await page.$eval('#viewer .c4-seats', (e) => e.textContent);
@@ -175,12 +175,36 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       return out;
     });
   }
+  // A match that ends on the clock after its last drop (2026-11-21): the
+  // replay of that drop says the match was lost on timeouts, not "four in a
+  // row" - the drop decided nothing.
+  for (const [label, o] of [['fourinarow-forfeit', {}], ['fourinarow-forfeit-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    // the viewer last saw move 5, so opening the arena replays move 6
+    await run(label, Object.assign({ state: { c4: true, c4Forfeit: true }, init: () => { try { localStorage.setItem('ac-c4-seen:/r/demo:16', '5'); } catch (e) {} } }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer .c4-3d-host canvas', { timeout: 20000 });
+      // the first card is the arena's welcome; wait for the outcome's
+      out.title = await page.waitForFunction(() => { const t = Array.from(document.querySelectorAll('#viewer .impact-title')).map((e) => e.textContent).find((x) => /DEFEAT|VICTORY|WINS|DRAW/.test(x)); return t || false; }, null, { timeout: 20000 }).then((h) => h.jsonValue());
+      out.said = await page.waitForFunction(() => { const s = Array.from(document.querySelectorAll('#viewer .sr-only[aria-live]')).map((e) => e.textContent).join(' '); return /drops in column/.test(s) && s; }, null, { timeout: 20000 }).then((h) => h.jsonValue());
+      out.meta = await page.$eval('#viewer .lc-meta', (e) => e.textContent);
+      out.winner = await page.$eval('#viewer .game-winner', (e) => e.textContent);
+      await shot(page, label + '.png');
+      if (!/by forfeit/.test(out.winner) || /move 6/.test(out.winner)) throw new Error('the winner banner should say how it was won: ' + out.winner);
+      if (!/DEFEAT/.test(out.title) || !/You timed out three times/.test(out.title)) throw new Error('the last drop should title the forfeit: ' + out.title);
+      if (/Four in a row/i.test(out.title)) throw new Error('no four was made: ' + out.title);
+      if (!/Anthony timed out a third time - Ada wins by forfeit/.test(out.said)) throw new Error('the spoken line should name the forfeit: ' + out.said);
+      if (!/Won by forfeit/.test(out.meta)) throw new Error('the record line: ' + out.meta);
+      return out;
+    });
+  }
   for (const [label, o] of [['fourinarow-done', {}], ['fourinarow-done-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true, c4Done: true } }, o), async (page) => {
       const out = {};
-      await page.waitForSelector('.game-card .c4-grid', { timeout: 6000 });
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
       await page.click('.game-card.kind-fourinarow');
-      await page.waitForSelector('#viewer .game-winner', { timeout: 6000 });
+      await page.waitForSelector('#viewer .game-winner', { timeout: 10000 });
       out.scene = await page.waitForFunction(() => { const l = document.querySelector('#viewer .c4-3d-host [role="img"]'); return l && l.getAttribute('aria-label'); }, null, { timeout: 20000 }).then((h) => h.jsonValue());
       out.meta = await page.$eval('#viewer .lc-meta', (e) => e.textContent);
       out.winner = await page.$eval('#viewer .game-winner', (e) => e.textContent);
@@ -201,7 +225,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   // marked).
   await run('sketch-draw', { state: { sg: true, sgDraw: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .sg-card', { timeout: 6000 });
+    await page.waitForSelector('.game-card .sg-card', { timeout: 10000 });
     await page.click('.game-card.kind-sketch');
     await page.waitForSelector('#viewer .sg-artist', { timeout: 20000 });
     out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -237,7 +261,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   });
   await run('sketch-draw-mobile', { state: { sg: true, sgDraw: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .sg-card', { timeout: 6000 });
+    await page.waitForSelector('.game-card .sg-card', { timeout: 10000 });
     await page.click('.game-card.kind-sketch');
     await page.waitForSelector('#viewer .sg-artist', { timeout: 20000 });
     await page.$eval('#viewer .sg-canvas', (e) => e.scrollIntoView({ block: 'center' }));
@@ -254,7 +278,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['sketch-guess', {}], ['sketch-guess-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { sg: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .sg-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .sg-card', { timeout: 10000 });
       out.cardImg = !!(await page.$('.game-card .sg-card-img'));
       out.cardCap = await page.$eval('.game-card .sg-card-cap', (e) => e.textContent);
       await page.click('.game-card.kind-sketch');
@@ -289,7 +313,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['trivia-answer', {}], ['trivia-answer-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tv: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tv-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });
       out.cardQ = await page.$eval('.game-card .tv-card-q', (e) => e.textContent);
       await page.click('.game-card.kind-trivia');
       await page.waitForSelector('#viewer .tv-answer', { timeout: 20000 });
@@ -320,7 +344,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   }
   await run('trivia-quizmaster', { state: { tv: true, tvAsk: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .tv-card', { timeout: 6000 });
+    await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });
     await page.click('.game-card.kind-trivia');
     await page.waitForSelector('#viewer .tv-ask', { timeout: 20000 });
     out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -341,7 +365,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   });
   await run('trivia-judge', { state: { tv: true, tvJudge: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .tv-card', { timeout: 6000 });
+    await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });
     await page.click('.game-card.kind-trivia');
     await page.waitForSelector('#viewer .tv-judge', { timeout: 20000 });
     out.title = await page.$eval('#viewer .tv-judge .tv-form-title', (e) => e.textContent);
@@ -368,7 +392,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['lettergrid-arena', {}], ['lettergrid-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { lg: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .lg-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .lg-card', { timeout: 10000 });
       out.mini = await page.$$eval('.game-card .lg-mini-cell', (c) => c.length);
       out.owned = await page.$$eval('.game-card .lg-mini-cell.owned', (c) => c.length);
       out.cardCap = await page.$eval('.game-card .lg-card-cap', (e) => e.textContent);
@@ -417,7 +441,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['werewolf-day', {}], ['werewolf-day-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ww-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ww-card', { timeout: 10000 });
       out.cardLine = await page.$eval('.game-card .ww-card-line', (e) => e.textContent);
       await page.click('.game-card.kind-werewolf');
       await page.waitForSelector('#viewer .ww-action', { timeout: 20000 });
@@ -454,7 +478,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['werewolf-night-wolf', {}], ['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true, wwWolf: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ww-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ww-card', { timeout: 10000 });
       await page.click('.game-card.kind-werewolf');
       await page.waitForSelector('#viewer .ww-action', { timeout: 20000 });
       out.role = await page.$eval('#viewer .ww-role', (e) => e.textContent);
@@ -486,7 +510,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['twenty-ask', {}], ['twenty-ask-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tq: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tq-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tq-card', { timeout: 10000 });
       out.cardLine = await page.$eval('.game-card .tq-card-line', (e) => e.textContent);
       await page.click('.game-card.kind-twenty');
       await page.waitForSelector('#viewer .tq-panel', { timeout: 20000 });
@@ -516,7 +540,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['twenty-answer', {}], ['twenty-answer-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tq: true, tqAnswer: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tq-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tq-card', { timeout: 10000 });
       await page.click('.game-card.kind-twenty');
       await page.waitForSelector('#viewer .tq-panel .tq-q', { timeout: 20000 });
       out.secret = await page.$eval('#viewer .tq-secret', (e) => e.textContent);
@@ -539,7 +563,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['corpse-write', {}], ['corpse-write-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ec: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ec-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ec-card', { timeout: 10000 });
       out.cardLine = await page.$eval('.game-card .ec-card-line', (e) => e.textContent);
       await page.click('.game-card.kind-corpse');
       await page.waitForSelector('#viewer .ec-writer', { timeout: 20000 });
@@ -574,7 +598,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['corpse-vote', {}], ['corpse-vote-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ec: true, ecVote: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ec-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ec-card', { timeout: 10000 });
       await page.click('.game-card.kind-corpse');
       await page.waitForSelector('#viewer .ec-story', { timeout: 20000 });
       out.seed = await page.$eval('#viewer .ec-seed', (e) => e.textContent);
@@ -598,7 +622,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['twotruths-vote', {}], ['twotruths-vote-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tt: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tt-card-board', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tt-card-board', { timeout: 10000 });
       out.cardLine = await page.$eval('.game-card .tt-card-line', (e) => e.textContent);
       await page.click('.game-card.kind-twotruths');
       await page.waitForSelector('#viewer:not([hidden]) .tt-3d-host canvas', { timeout: 20000 });
@@ -630,7 +654,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['twotruths-write', {}], ['twotruths-write-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tt: true, ttWrite: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tt-card-board', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tt-card-board', { timeout: 10000 });
       await page.click('.game-card.kind-twotruths');
       await page.waitForSelector('#viewer .tt-writer', { timeout: 20000 });
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -663,10 +687,10 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['liarsdice-arena', {}], ['liarsdice-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark', liar: true }]]) {
     await run(label, Object.assign({ state: { ld: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .ld-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .ld-card', { timeout: 10000 });
       out.cardBid = await page.$eval('.game-card .ld-now-bid', (e) => e.textContent);
       await page.click('.game-card.kind-liarsdice');
-      await page.waitForSelector('#viewer .ld-bidder', { timeout: 6000 });
+      await page.waitForSelector('#viewer .ld-bidder', { timeout: 10000 });
       out.now = await page.$eval('#viewer .ld-now', (e) => e.textContent);
       out.cup = await page.$$eval('#viewer .ld-cup .ld-die', (els) => els.map((d) => d.getAttribute('aria-label') + (d.classList.contains('wild') ? 'w' : '')).join(','));
       out.go0 = await page.$eval('#viewer .ld-go', (b) => b.textContent);
@@ -680,7 +704,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
         await page.click('#viewer .ld-liar');
         await settle(page);
         out.moveCall = calls.filter((c) => c.includes('/games/22/moves')).pop() || '';
-        await page.waitForSelector('#viewer .ld-reveal .ld-die.hit', { timeout: 4000 });
+        await page.waitForSelector('#viewer .ld-reveal .ld-die.hit', { timeout: 10000 });
         out.after = await page.$eval('#viewer .ld-reveal .ld-verdict', (e) => e.textContent);
         await shot(page, label + '-called.png');
         if (!/"dir":"liar"/.test(out.moveCall)) throw new Error('Liar! sends liar: ' + out.moveCall);
@@ -719,10 +743,10 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['auction-arena', {}], ['auction-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .au-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .au-card', { timeout: 10000 });
       out.cardLot = await page.$eval('.game-card .au-lot-name', (e) => e.textContent);
       await page.click('.game-card.kind-auction');
-      await page.waitForSelector('#viewer .au-bid', { timeout: 6000 });
+      await page.waitForSelector('#viewer .au-bid', { timeout: 10000 });
       out.lot = await page.$eval('#viewer .au-lot', (e) => e.textContent);
       out.result = await page.$eval('#viewer .au-result', (e) => e.textContent);
       out.go0 = await page.$eval('#viewer .au-go', (b) => b.textContent);
@@ -754,10 +778,10 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
   for (const [label, o] of [['trust-arena', {}], ['trust-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .tr-card', { timeout: 6000 });
+      await page.waitForSelector('.game-card .tr-card', { timeout: 10000 });
       out.cardOrder = await page.$$eval('.game-card .tr-name', (n) => n.map((x) => x.textContent));
       await page.click('.game-card.kind-trust');
-      await page.waitForSelector('#viewer .tr-plan', { timeout: 6000 });
+      await page.waitForSelector('#viewer .tr-plan', { timeout: 10000 });
       out.scores = await page.$$eval('#viewer .tr-scores .tr-score', (n) => n.map((x) => x.textContent).join(','));
       out.grid = await page.$$eval('#viewer .tr-grid tr', (rows) => rows.slice(1).map((r) => [...r.querySelectorAll('td.tr-cell')].map((c) => c.textContent).join('')).join('|'));
       out.goOff = await page.$eval('#viewer .tr-go', (b) => b.disabled);

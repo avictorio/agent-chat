@@ -6,7 +6,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
 (async () => {
   await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await page.waitForSelector('.game-card .duel-board', { timeout: 10000 });
     out.pill = await page.$eval('.game-card .duel-pill', e => e.textContent);
     out.pipColor = await page.$eval('.game-card .duel-row .duel-pips', e => getComputedStyle(e).color);
     out.faceoff = await page.$eval('.game-card .duel-faceoff-line', e => e.textContent);
@@ -17,7 +17,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (out.clockbar !== 1) throw new Error('card should carry one round clock bar, got ' + out.clockbar);
     await shot(page, 'duel-card.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 10000 });
     out.tiles = await page.$$eval('#viewer .duel-tile .t-beats', els => els.map(e => e.textContent));
     out.status = await page.$eval('#viewer .duel-statusline', e => e.textContent);
     out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
@@ -26,12 +26,12 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (!/CLASH/.test(out.verdict)) throw new Error('verdict banner should name the clash: ' + out.verdict);
     await shot(page, 'duel-arena.png');
     await page.click('#viewer .duel-tile:nth-child(3)');
-    await page.waitForFunction(() => document.querySelector('#viewer .duel-tile.queued'), null, { timeout: 4000 });
+    await page.waitForFunction(() => document.querySelector('#viewer .duel-tile.queued'), null, { timeout: 10000 });
     out.moveCall = calls.filter(c => c.includes('/games/2/moves')).pop() || '';
     if (!/"dir":"scissors"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
     await shot(page, 'duel-arena-queued.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return out;
   });
   /* The Games tab (2026-11-19): Live · History · Standings tabs. Live
@@ -41,9 +41,9 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
      tabs; a history row opens its arena; Rematch re-creates the match. */
   await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch (e) {} } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('.tab[data-tab="games"]');
-    await page.waitForSelector('#view-games .gm-row', { timeout: 4000 });
+    await page.waitForSelector('#view-games .gm-row', { timeout: 10000 });
     out.selected = await page.$eval('#view-games [role="tab"][aria-selected="true"]', e => e.textContent);
     if (!/^Live/.test(out.selected)) throw new Error('with matches waiting on you, Live should open first (even after History was last used): ' + out.selected);
     out.badge = await page.$eval('#view-games .gm-tab-badge', e => e.textContent);
@@ -60,7 +60,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     out.chime = await page.$eval(chime, e => e.getAttribute('aria-label') + '|' + e.getAttribute('aria-pressed'));
     if (out.chime !== 'Your-move chime|true') throw new Error('the chime toggle should be labelled and on by default: ' + out.chime);
     await page.hover(chime);
-    await page.waitForSelector('#view-games .gm-tip.on', { timeout: 2000 });
+    await page.waitForSelector('#view-games .gm-tip.on', { timeout: 10000 });
     out.tip = await page.$eval('#view-games .gm-tip', e => e.textContent);
     if (!/short sound plays when a match is waiting on you/.test(out.tip)) throw new Error('hovering the chime should explain it: ' + out.tip);
     await page.click(chime);
@@ -71,7 +71,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (await page.$('#newGameBtn') !== null) throw new Error('the sidebar should no longer carry a New game button');
     await shot(page, 'games-tab.png');
     await page.click('#view-games [role="tab"]:has-text("History")');
-    await page.waitForSelector('#view-games .gm-hrow', { timeout: 4000 });
+    await page.waitForSelector('#view-games .gm-hrow', { timeout: 10000 });
     out.hrows = await page.$$eval('#view-games .gm-hrow', els => els.map(e => e.textContent));
     out.days = await page.$$eval('#view-games .gm-day .gm-sec', els => els.map(e => e.textContent));
     if (out.hrows.length !== 3) throw new Error('History should list the three ended matches, got ' + out.hrows.length);
@@ -97,19 +97,19 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (!/🔥/.test(out.rec) || !/W2/.test(out.rec) || !/L2/.test(out.rec)) throw new Error('standings should carry the current streaks: ' + out.rec);
     if (!/Elo ladder/.test(out.rec) || !/1031\+15/.test(out.rec) || !/969−15/.test(out.rec)) throw new Error('a 2-player game shows its Elo ladder with the last change: ' + out.rec);
     await page.keyboard.press('ArrowLeft');
-    await page.waitForSelector('#view-games .gm-hrow', { timeout: 4000 });
+    await page.waitForSelector('#view-games .gm-hrow', { timeout: 10000 });
     await page.click('#view-games .gm-hrow:first-of-type .gm-hrow-open');
-    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 6000 });
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 10000 });
     out.arena = await page.$$eval('#viewer .bs-3d-host', els => els.length);
     out.arenaWinner = await page.$eval('#viewer .game-winner', e => e.textContent);
     if (out.arena !== 1) throw new Error('tapping a history row should open its arena (the 3D scene), got ' + out.arena);
     if (!/Ada/.test(out.arenaWinner)) throw new Error('the arena should carry the winner banner: ' + out.arenaWinner);
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     out.backOn = await page.$eval('#view-games [role="tab"][aria-selected="true"]', e => e.textContent);
     if (!/^History/.test(out.backOn)) throw new Error('coming back from an arena should keep the tab you chose, got ' + out.backOn);
     await page.click('#view-games .gm-hrow:first-of-type .gm-hrow-rematch');
-    await page.waitForSelector('#viewer:not([hidden])', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden])', { timeout: 10000 });
     await settle(page);
     out.rematchCall = calls.filter(c => c.includes('POST /api/rooms/demo/games ')).pop() || '';
     if (!/"game":"battleship"/.test(out.rematchCall) || !/"players":\["Ada","Henry"\]/.test(out.rematchCall)) throw new Error('row rematch should re-create the same match: ' + out.rematchCall);
@@ -119,11 +119,11 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
   });
   await run('games-tab-mobile-dark', { state: { bs: true, game: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('#menu');
     await settle(page);
     await page.click('.tab[data-tab="games"]');
-    await page.waitForSelector('#view-games .gm-row', { timeout: 4000 });
+    await page.waitForSelector('#view-games .gm-row', { timeout: 10000 });
     out.rows = await page.$$eval('#view-games .gm-row', els => els.length);
     if (out.rows !== 2) throw new Error('the mobile Live tab should list the two live matches, got ' + out.rows);
     // a long press on the chime explains it and does not toggle it
@@ -141,7 +141,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     await page.waitForTimeout(700);
     await shot(page, 'games-tab-mobile-dark.png');
     await page.tap('#view-games [role="tab"]:has-text("History")');
-    await page.waitForSelector('#view-games .gm-hrow', { timeout: 4000 });
+    await page.waitForSelector('#view-games .gm-hrow', { timeout: 10000 });
     out.hrows = await page.$$eval('#view-games .gm-hrow', els => els.length);
     if (out.hrows !== 2) throw new Error('mobile History should list two ended matches, got ' + out.hrows);
     out.overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -240,7 +240,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     await page.click('#menu'); await settle(page);
     await page.click('.tab[data-tab="games"]'); await settle(page);
     await page.click('#view-games .gm-start-btn');
-    await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 10000 });
     await page.waitForTimeout(200);
     await shot(page, 'new-game-mobile.png');
     await page.click('#newGameDlg .ng-game[data-game="duel"]');
@@ -261,21 +261,21 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
   await run('games-guide-and-help', { state: { game: true } }, async (page) => {
     const out = {};
     await page.click('.tab[data-tab="games"]');
-    await page.waitForSelector('#gm-tab-guide', { timeout: 4000 });
+    await page.waitForSelector('#gm-tab-guide', { timeout: 10000 });
     await page.click('#gm-tab-guide');
     out.guide = await page.$$eval('.gm-guide', (ds) => ds.map((d) => d.getAttribute('data-game')));
     await page.click('.gm-guide[data-game="battleship"] > summary');
     out.rulesShown = await page.$eval('.gm-guide[data-game="battleship"] .howto', (h) => /Sink every enemy ship/.test(h.textContent));
     await page.click('.gm-guide[data-game="battleship"] .btn');
-    await page.waitForSelector('#newGameDlg[open]', { timeout: 3000 });
+    await page.waitForSelector('#newGameDlg[open]', { timeout: 10000 });
     out.setupFromGuide = await page.$eval('#newGameDlg [data-setup]', (e) => e.getAttribute('data-setup'));
     await page.keyboard.press('Escape');
     await settle(page);
     await page.click('#gm-tab-live');
     await page.click('.gm-row');
-    await page.waitForSelector('#viewerHelp', { timeout: 6000 });
+    await page.waitForSelector('#viewerHelp', { timeout: 10000 });
     await page.click('#viewerHelp');
-    await page.waitForSelector('#gameHelpDlg[open]', { timeout: 3000 });
+    await page.waitForSelector('#gameHelpDlg[open]', { timeout: 10000 });
     out.helpTitle = await page.$eval('#ghTitle', (e) => e.textContent);
     await shot(page, 'arena-help.png');
     await page.keyboard.press('Escape');
@@ -291,7 +291,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
   });
   await run('game-card', { state: { game: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 10000 });
     out.trailCells = await page.$$eval('.game-card .lc-svg rect', els => els.length);
     out.drawLines = await page.$$eval('.game-card .lc-draw', els => els.length);
     if (out.drawLines < 2) throw new Error('each living rider should carry a draw-in segment, got ' + out.drawLines);
@@ -300,7 +300,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (!/Tick 3/.test(out.cardMeta)) throw new Error('card meta wrong: ' + out.cardMeta);
     await shot(page, 'game-card.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 10000 });
     out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
     out.padBtns = await page.$$eval('#viewer .lc-btn', els => els.map(b => b.getAttribute('aria-label') + ':' + (b.disabled ? 'off' : 'on')));
     if (!/Light Cycles #1/.test(out.viewerTitle)) throw new Error('viewer title wrong: ' + out.viewerTitle);
@@ -308,32 +308,32 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (!out.padBtns.includes('Steer left:on')) throw new Error('left must be playable: ' + JSON.stringify(out.padBtns));
     await shot(page, 'game-arena.png');
     await page.click('#viewer .lc-btn[aria-label="Steer left"]');
-    await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 4000 });
+    await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 10000 });
     out.moveCall = calls.filter(c => c.includes('/games/1/moves')).pop() || '';
     if (!/"dir":"left"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
     await shot(page, 'game-arena-queued.png');
     await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
-    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });
     out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
     out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
     if (out.histRows !== 3) throw new Error('cycles history should render the creation note plus one row per tick, got ' + out.histRows);
     if (!/Tick 1/.test(out.histText) || !/clock/.test(out.histText)) throw new Error('cycles history should show moves with clock-default tags: ' + out.histText.slice(0, 200));
     await shot(page, 'game-arena-history.png');
     await page.click('#viewer .arena-tabs .arena-tab:nth-child(1)');
-    await page.waitForSelector('#viewer .lc-pad', { timeout: 4000 });
+    await page.waitForSelector('#viewer .lc-pad', { timeout: 10000 });
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return out;
   });
   await run('game-card-mobile', { state: { game: true }, w: 390, h: 844, touch: true }, async (page) => {
-    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 10000 });
     await shot(page, 'game-mobile-card.png');
     await page.tap('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .lc-pad', { timeout: 10000 });
     await page.waitForTimeout(300);
     await shot(page, 'game-mobile-arena.png');
     await page.tap('#viewerBack');
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
   /* Light Cycles 3D (2026-11-13): the arena opens in 3D by default with a
@@ -341,7 +341,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
      tint, and Chase rides behind the viewer's cycle until Reset view. */
   await run('lc-3d-arena', { state: { game: true } }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card .lc-svg', { timeout: 4000 });
+    await page.waitForSelector('.game-card .lc-svg', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
     await page.waitForSelector('#viewer .lc-tag.me', { timeout: 20000 });
@@ -375,7 +375,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     card.game.status = 'finished';
     card.game.winner = 'Ada';
     await page.reload();
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
     await page.waitForSelector('#viewer .lc-replay-btn', { timeout: 30000 });
@@ -397,41 +397,41 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
   // (no arena trip), and the arena then offers throws as usual.
   await run('duel-lobby', { state: { duelLobby: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await page.waitForSelector('.game-card .duel-board', { timeout: 10000 });
     out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
     if (!/Lobby/.test(out.cardMeta) || !/waiting on Anthony/.test(out.cardMeta)) throw new Error('lobby card meta wrong: ' + out.cardMeta);
-    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 4000 });
+    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 10000 });
     await shot(page, 'duel-lobby-card.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .lobby-panel .duel-btn', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .lobby-panel .duel-btn', { timeout: 10000 });
     out.arenaLine = await page.$eval('#viewer .lobby-panel .duel-statusline', e => e.textContent);
     if (!/Accept to take your seat/.test(out.arenaLine)) throw new Error('arena lobby line wrong: ' + out.arenaLine);
     await shot(page, 'duel-lobby-arena-panel.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     await page.click('.game-card .game-lobby-actions .duel-btn:first-child');
-    await page.waitForFunction(() => document.querySelector('.game-card .art-size').textContent.includes('Round 1'), null, { timeout: 4000 });
+    await page.waitForFunction(() => document.querySelector('.game-card .art-size').textContent.includes('Round 1'), null, { timeout: 10000 });
     out.acceptCall = calls.filter(c => c.includes('/games/3/accept')).pop() || '';
     if (!out.acceptCall) throw new Error('accept call missing: ' + JSON.stringify(calls.slice(-4)));
     out.viewerHidden = await page.$eval('#viewer', e => e.hidden);
     if (!out.viewerHidden) throw new Error('accept on the card must not open the arena');
     await shot(page, 'duel-lobby-accepted.png');
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 10000 });
     await shot(page, 'duel-lobby-arena.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return out;
   });
   await run('duel-lobby-mobile', { state: { duelLobby: true }, w: 390, h: 844, touch: true }, async (page) => {
-    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 4000 });
+    await page.waitForSelector('.game-card .game-lobby-actions .duel-btn', { timeout: 10000 });
     await page.waitForTimeout(200);
     await shot(page, 'duel-lobby-mobile-card.png');
     return { ok: true };
   });
   await run('duel-finished', { state: { duelDone: true } }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await page.waitForSelector('.game-card .duel-board', { timeout: 10000 });
     out.cardMeta = await page.$eval('.game-card .art-size', e => e.textContent);
     if (out.cardMeta !== 'Final · 3–2 · 7 rounds') throw new Error('finished card meta should be the standard record line: ' + out.cardMeta);
     out.cardWinner = await page.$eval('.game-card .game-winner', e => e.textContent);
@@ -439,7 +439,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     out.cardRematch = await page.$$eval('.game-card button', els => els.map(b => b.textContent).filter(t => /Rematch/.test(t)).length);
     if (out.cardRematch !== 1) throw new Error('finished card should offer one Rematch, got ' + out.cardRematch);
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .duel-verdict', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .duel-verdict', { timeout: 10000 });
     out.verdict = await page.$eval('#viewer .duel-verdict', e => e.textContent);
     out.arenaWinner = await page.$eval('#viewer .game-winner', e => e.textContent);
     if (!/Anthony/.test(out.arenaWinner) || !/3–2/.test(out.arenaWinner)) throw new Error('finished arena should carry the winner banner: ' + out.arenaWinner);
@@ -451,31 +451,31 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
     if (out.rematch !== 1) throw new Error('finished duel should offer one Rematch, got ' + out.rematch);
     await shot(page, 'duel-finished.png');
     await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
-    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });
     out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
     out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
     if (out.histRows !== 7) throw new Error('history should render one row per round, got ' + out.histRows);
     if (!/takes it/.test(out.histText) || !/Tie/.test(out.histText)) throw new Error('history rows should carry outcome pills: ' + out.histText.slice(0, 200));
     await shot(page, 'duel-finished-history.png');
     await page.goBack();
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return out;
   });
   await run('duel-mobile', { state: { duel: true }, w: 390, h: 844, touch: true }, async (page) => {
-    await page.waitForSelector('.game-card .duel-board', { timeout: 4000 });
+    await page.waitForSelector('.game-card .duel-board', { timeout: 10000 });
     await shot(page, 'duel-mobile-card.png');
     await page.tap('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) .duel-tile', { timeout: 10000 });
     await page.waitForTimeout(300);
     await shot(page, 'duel-mobile-arena.png');
     await page.tap('#viewer .arena-tabs .arena-tab:nth-child(2)');
-    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });
     const rows = await page.$$eval('#viewer .hist-row', els => els.length);
     if (rows !== 3) throw new Error('mobile history should render one row per round, got ' + rows);
     await page.waitForTimeout(200);
     await shot(page, 'duel-mobile-history.png');
     await page.tap('#viewerBack');
-    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 4000 });
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
 

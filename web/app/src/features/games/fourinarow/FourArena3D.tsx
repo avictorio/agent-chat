@@ -314,6 +314,16 @@ function landImpact(g: FourInARowState, mv: FourInARowMove, seats: Seat[], last:
   const you = seats.find((s) => s.you);
   const mine = !!you && mv.by === you.name;
   if (last) {
+    // The match can also end on the clock after the last drop: a third
+    // timeout forfeits it, or the pass limit draws it. Then this drop did
+    // not decide it, and the title says what did.
+    const full = (g.board || []).every((row) => row.indexOf(".") < 0);
+    if (g.draw && !full) return { trauma: 0.2, stop: 80, sound: "whoosh", title: { big: "DRAW", small: "The turns ran out on the clock", tone: "neutral" } };
+    if (g.winner && g.forfeit) {
+      if (you && g.winner === you.name) return { trauma: 0.5, stop: 150, pulse: 0.8, buzz: BUZZ.wonMatch, sound: "win", title: { big: "VICTORY", small: g.forfeit + " timed out three times", tone: "good" } };
+      if (you && g.forfeit === you.name) return { trauma: 0.5, stop: 150, pulse: 0.6, buzz: BUZZ.lostMatch, sound: "lose", title: { big: "DEFEAT", small: "You timed out three times", tone: "bad" } };
+      return { trauma: 0.3, stop: 120, pulse: 0.6, buzz: BUZZ.scored, sound: "win", title: { big: g.winner.toUpperCase() + " WINS", small: "By forfeit: " + g.forfeit + " timed out", tone: "neutral" } };
+    }
     if (g.draw) return { trauma: 0.2, stop: 80, sound: "whoosh", title: { big: "DRAW", small: "The board is full", tone: "neutral" } };
     if (g.winner && you && g.winner === you.name) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: "Four in a row on move " + mv.n, tone: "good" } };
     if (g.winner && you) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 0.8, buzz: BUZZ.lostMatch, sound: ["clash", "lose"], title: { big: "DEFEAT", small: g.winner + " connects four on move " + mv.n, tone: "bad" } };
@@ -426,7 +436,7 @@ export default function FourArena3D({
 
   const isLast = (n: number) => finished && n === moves.length;
   const sayMove = (mv: FourInARowMove, last: boolean) =>
-    mv.by + " drops in column " + mv.col + "." + (last ? (g!.draw ? " The board is full - a draw." : g!.winner ? " " + g!.winner + " connects four and wins." : "") : "");
+    mv.by + " drops in column " + mv.col + "." + (last ? (g!.draw ? ((g!.board || []).every((row) => row.indexOf(".") < 0) ? " The board is full - a draw." : " Then the turns ran out on the clock - a draw.") : g!.winner ? (g!.forfeit ? " Then " + g!.forfeit + " timed out a third time - " + g!.winner + " wins by forfeit." : " " + g!.winner + " connects four and wins.") : "") : "");
   const land = (n: number, quiet: boolean) => {
     const mv = moves[n - 1];
     setPlaying(null);

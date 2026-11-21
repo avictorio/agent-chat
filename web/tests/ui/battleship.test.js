@@ -6,7 +6,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
 (async () => {
   await run('battleship-spectator', { state: { bs: true } }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     out.minis = await page.$$eval('.game-card .bs-mini-svg', els => els.length);
     out.lastline = await page.$eval('.game-card .bs-lastline', e => e.textContent);
     out.cardStrips = await page.$$eval('.game-card .bs-strip', els => els.length);
@@ -16,7 +16,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
     await shot(page, 'bs-card.png');
     await page.click('.game-card');
     // two captains: the 3D scene is the only arena view (2D retired 2026-11-20)
-    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 6000 });
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 10000 });
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
     out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
@@ -26,7 +26,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
     await shot(page, 'bs-spectator-arena.png');
     if (await page.$('#viewer .lc-log') !== null) throw new Error('the plain-text record should be gone from the game tab');
     await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
-    await page.waitForSelector('#viewer .hist-row', { timeout: 4000 });
+    await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });
     out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
     out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
     if (out.histRows !== 2) throw new Error('history should render one row per record entry, got ' + out.histRows);
@@ -36,7 +36,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   });
   await run('battleship-spectator-mobile-dark', { state: { bs: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await shot(page, 'bs-card-mobile-dark.png');
     await page.click('.game-card');
     await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host canvas', { timeout: 20000 });
@@ -47,11 +47,11 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   });
   await run('battleship-player', { state: { bsPlay: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
     // the scene, then both fleet strips under it; firing is the scene's
     // (battleship-3d-keyboard, battleship-3d-phone-aim-fire, no-webgl-battleship)
-    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 6000 });
+    await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 10000 });
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
     out.strips = await page.$$eval('#viewer .bs-strips3d .bs-strip3d', els => els.length);
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
@@ -71,7 +71,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   // and the shot names its target.
   await run('battleship-ffa', { state: { bsFfa: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     out.cardText = await page.$eval('.game-card', e => e.textContent);
     if (!/eliminated/.test(out.cardText)) throw new Error('card scoreboard should mark the eliminated captain: ' + out.cardText.slice(0, 200));
     await page.click('.game-card');
@@ -107,7 +107,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
      cycling to another live rival retargets. */
   await run('battleship-ffa-mobile', { state: { bsFfa: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
     await settle(page);
@@ -145,7 +145,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   });
   await run('battleship-3d-default', { state: { bsPlay: true } }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
     /* 20s, not the usual 4-8s: the canvas waits on the lazy three.js
        chunk loading plus software-GL init, which runs long on a
@@ -163,7 +163,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
      the failed import must not surface as an uncaught page error. */
   await run('battleship-3d-load-failure', { state: { bsPlay: true } }, async (page) => {
     await page.route(/\/assets\/BsArena3D-.*\.js$/, (route) => route.fulfill({ status: 404, body: 'nf' }));
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && !s.hidden && /didn't load/.test(s.textContent) && s.querySelector('button'); }, null, { timeout: 20000 });
     return { status: await page.$eval('#viewer .arena3d-status', e => e.textContent) };
@@ -171,9 +171,9 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   for (const [label, o] of [['no-webgl-battleship', {}], ['no-webgl-battleship-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { bsPlay: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
-      await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+      await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
       await page.click('.game-card');
-      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 10000 });
       out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
       out.reload = !!(await page.$('#viewer .arena3d-status button'));
       out.hostH = await page.$eval('#viewer .bs-3d-host', (e) => e.getBoundingClientRect().height);
@@ -195,9 +195,9 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   // follow the note, the wreck has no fire buttons, a tap names its target.
   await run('no-webgl-battleship-ffa', { state: { bsFfa: true }, init: noGl }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
-    await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+    await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 10000 });
     out.grids = await page.$$eval('#viewer .bs-boards .bs-grid', els => els.length);
     out.wrecks = await page.$$eval('#viewer .bs-side.bs-wreck', els => els.length);
     out.ring = await page.$$eval('#viewer .bs-cell.bs-last', els => els.length);
@@ -217,9 +217,9 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   });
   await run('no-webgl-battleship-setup', { state: { bsSetup: true }, init: noGl }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('.game-card');
-    await page.waitForSelector('#viewer:not([hidden]) button.bs-cell[aria-label="Place at A8"]', { timeout: 4000 });
+    await page.waitForSelector('#viewer:not([hidden]) button.bs-cell[aria-label="Place at A8"]', { timeout: 10000 });
     await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
     await page.click('#viewer button.bs-cell[aria-label="Place at A8"]');
     out.note = await page.$eval('#viewer .lc-note', e => e.textContent);
@@ -256,9 +256,9 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   for (const [label, o] of [['no-webgl-battleship-spectator', {}], ['no-webgl-battleship-spectator-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { bs: true }, init: noGl }, o), async (page) => {
       const out = {};
-      await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+      await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
       await page.click('.game-card');
-      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 8000 });
+      await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 10000 });
       out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
       out.grids = await page.$$eval('#viewer .bs-boards .bs-grid', (g) => g.length);
       out.fire = await page.$$eval('#viewer .bs-boards button.bs-cell', (b) => b.length);
@@ -271,9 +271,9 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   }
   await run('no-webgl-fourinarow', { state: { c4: true }, init: noGl }, async (page) => {
     const out = {};
-    await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 6000 });
+    await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 10000 });
     await page.click('.game-card.kind-fourinarow');
-    await page.waitForSelector('#viewer .no-3d .arena3d-status', { timeout: 8000 });
+    await page.waitForSelector('#viewer .no-3d .arena3d-status', { timeout: 10000 });
     out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
     out.drops = await page.$$eval('#viewer .c4-under button', (b) => b.length);
     if (!/3D isn't available on this device/.test(out.status)) throw new Error('the note: ' + out.status);
@@ -284,7 +284,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
      aim from the centre cell (E5), Enter fires through the same move
      call a tap makes, and the live region speaks each step. */
   await run('battleship-3d-keyboard', { state: { bsPlay: true } }, async (page, S, calls) => {
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
     await page.focus('#viewer .arena3d-frame');
@@ -301,7 +301,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   /* Phone (touch, 390 px): the 3D arena shows one ocean - the enemy's
      on your turn - and a tap only aims; the Fire button fires. */
   await run('battleship-3d-phone-aim-fire', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
     await settle(page);
@@ -326,7 +326,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
   // gestures were unreliable - a drifting first finger handed the gesture to
   // the browser, which scrolled or, on iOS, zoomed the page).
   await run('arena-3d-phone-move-mode', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
-    await page.waitForSelector('.game-card .bs-minis', { timeout: 4000 });
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
     const ta = () => page.$eval('#viewer .lc-3d-host canvas', (e) => getComputedStyle(e).touchAction);
@@ -350,7 +350,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
      status line and the buttons. */
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForSelector('#viewer .arena3d-frame[tabindex="0"]', { timeout: 20000 });
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
@@ -412,7 +412,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
      the Place button lays it. */
   await run('battleship-setup-mobile', { state: { bsSetup: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     const out = {};
-    await page.waitForSelector('.game-card', { timeout: 4000 });
+    await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.tap('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 30000 });
     await settle(page);

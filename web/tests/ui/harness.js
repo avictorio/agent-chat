@@ -289,6 +289,12 @@ function fresh(opts) {
           last_move: g.moves[11] });
         g.you = { playing: true, accepted: true, piece: 'X', your_turn: false, timeouts: 0, legal_moves: [] };
       }
+      if (opts.c4Forfeit) {
+        // over on the clock after move 6: Anthony's third timeout, no four made
+        Object.assign(g, { status: 'finished', turn_of: null, winner: 'Ada', forfeit: 'Anthony', deadline: null, awaiting: [] });
+        g.players[0].timeouts = 3;
+        g.you = { playing: true, accepted: true, piece: 'X', your_turn: false, timeouts: 3, legal_moves: [] };
+      }
       return g;
     })() : null,
     cr: opts.cr ? (() => {

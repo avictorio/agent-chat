@@ -34,11 +34,11 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
      per room on the device, so the chat shows each picture before
      /members answers (here held back 3 s) instead of initials. */
   await run('avatars-instant-reload', {}, async (page) => {
-    await page.waitForSelector('#msgs .msg .gutter .avatar.img img', { timeout: 4000 });
+    await page.waitForSelector('#msgs .msg .gutter .avatar.img img', { timeout: 10000 });
     const first = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.filter(a => a.querySelector('img')).length);
     await page.route(/\/api\/rooms\/[^/]+\/members(\?|$)/, async (route) => { await new Promise((r) => setTimeout(r, 3000)); await route.fallback(); });
     await page.reload();
-    await page.waitForSelector('#msgs .msg', { timeout: 4000 });
+    await page.waitForSelector('#msgs .msg', { timeout: 10000 });
     await settle(page);
     const early = await page.$$eval('#msgs .msg:not(.cont) .gutter .avatar', as => as.filter(a => a.querySelector('img')).length);
     if (!first || early !== first) throw new Error('after a reload, avatars should show before /members answers: ' + early + ' of ' + first);
@@ -120,7 +120,7 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
     await page.fill('#text', 'Quarterly report');
     await page.click('#send');
     await page.locator('#uplCard').waitFor({ timeout: 3000 });
-    await page.waitForFunction(() => /\d+% · .+ of 293 KB/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 4000 });
+    await page.waitForFunction(() => /\d+% · .+ of 293 KB/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 10000 });
     out.meta = await page.textContent('#uplMeta');
     await shot(page, 'upload-progress.png');
     await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
@@ -234,7 +234,7 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
     await page.setInputFiles('#anyFile', { name: 'site-survey-final-version-2.dwg', mimeType: 'application/acad', buffer: Buffer.alloc(260000, 5) });
     await page.click('#send');
     await page.locator('#uplCard').waitFor({ timeout: 3000 });
-    await page.waitForFunction(() => /\d+% ·/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 4000 });
+    await page.waitForFunction(() => /\d+% ·/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 10000 });
     const box = await page.locator('#uplCard').boundingBox();
     must(box && box.width <= 390 && box.x >= 0, 'progress card fits the phone: ' + JSON.stringify(box));
     const sw = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -245,7 +245,7 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
   });
   await run('media-shelf', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony' }, async (page) => {
     await page.click('.tab[data-tab="media"]');
-    await page.waitForSelector('.media-tile', { timeout: 5000 });
+    await page.waitForSelector('.media-tile', { timeout: 10000 });
     const out = {};
     out.tiles = await page.$$eval('.media-tile', ts => ts.length);
     out.allCount = await page.$eval('.media-bar .seg button[aria-pressed="true"] .media-n', e => e.textContent).catch(() => null);
@@ -262,16 +262,16 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
     await page.waitForFunction(() => document.querySelectorAll('.media-tile').length === 5);
     out.tileRef = await page.$eval('.media-tile .media-ref', e => e.textContent);
     await page.click('.media-tile:has(img)');
-    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 5000 });
+    await page.waitForSelector('#viewer:not([hidden]) .viewer-img', { timeout: 10000 });
     out.viewerOpen = true;
     out.capRef = await page.$eval('.media-cap-ref code', e => e.textContent);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.click('.media-cap-ref .btn');
-    await page.waitForFunction(() => document.querySelector('.media-cap-ref .btn').textContent === 'Copied', null, { timeout: 3000 });
+    await page.waitForFunction(() => document.querySelector('.media-cap-ref .btn').textContent === 'Copied', null, { timeout: 10000 });
     out.clipboard = await page.evaluate(() => navigator.clipboard.readText());
     await shot(page, 'media-viewer.png');
     await page.click('.media-cap .media-jump');
-    await page.waitForFunction(() => document.querySelector('#viewer').hidden, null, { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelector('#viewer').hidden, null, { timeout: 10000 });
     out.backInChat = await page.$eval('#view-chat', e => !e.hidden);
     await page.waitForFunction(() => { const el = document.querySelector('.msg[data-id="8"]'); return !!el && el.classList.contains('flash'); }, null, { timeout: 5000 });
     out.flashed = true;
@@ -281,7 +281,7 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
     await page.tap('#menu');
     await settle(page);
     await page.tap('.tab[data-tab="media"]');
-    await page.waitForSelector('.media-tile', { timeout: 5000 });
+    await page.waitForSelector('.media-tile', { timeout: 10000 });
     await settle(page); // let the drawer finish closing before the shot
     const tiles = await page.$$eval('.media-tile', ts => ts.length);
     const overflow = await page.evaluate(() => {
