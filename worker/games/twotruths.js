@@ -85,6 +85,7 @@ export const TwoTruthsMethods = {
       out.you = { playing: false };
       return out;
     }
+    /** @type {import("@chat/contract").TwoTruthsYou} */
     const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, teller: live && st.teller === me.name, legal_moves: [] };
     if (live && st.teller === me.name) {
       // the storyteller sees their own statements, the lie marked
@@ -141,7 +142,7 @@ export const TwoTruthsMethods = {
       try {
         o = JSON.parse(String(raw));
       } catch (e) {
-        return { error: "dir looked like JSON but did not parse: " + e.message };
+        return { error: "dir looked like JSON but did not parse: " + /** @type {Error} */ (e).message };
       }
     }
     if (!o || !Array.isArray(o.statements)) return { error: "As storyteller, send statements (three of them) and lie (1, 2 or 3: which one is false)" };
@@ -170,7 +171,8 @@ export const TwoTruthsMethods = {
         [idx[i], idx[j]] = [idx[j], idx[i]];
       }
       const shown = idx.map((i) => p.statements[i]);
-      st.cur = { shown: shown, lie: idx.indexOf(p.lie - 1) + 1, at: Date.now() };
+      // p.error is unset, so p is the parsed statements (every error has a message)
+      st.cur = { shown: shown, lie: idx.indexOf(/** @type {number} */ (p.lie) - 1) + 1, at: Date.now() };
       st.phase = "vote";
       st.votes = {};
       st.vote_at = {};
@@ -217,6 +219,7 @@ export const TwoTruthsMethods = {
     });
     points[st.teller] = Math.min(2, fooled);
     const cast = voters.filter((n) => votes[n] != null).length;
+    /** @type {string | null} */
     let note = null;
     if (cast && right.length === cast) note = TT_ROASTS[st.round % TT_ROASTS.length].replace(/\{t\}/g, st.teller);
     st.rounds.push({ n: st.round, teller: st.teller, statements: st.cur.shown, lie: lie, votes: votes, right: right, fooled: fooled, points: points, vote_ms: vote_ms, missed: voters.filter((n) => votes[n] == null), forfeit: false, note: note, at: Date.now() });

@@ -57,6 +57,7 @@ export async function createRoomRoute(rc) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
+  /** @type {Record<string, any> | null} the request's JSON body */
   let cbody = null;
   try { cbody = await request.json(); } catch (e) {}
   const croom = String((cbody && cbody.room) || "").trim().toLowerCase();

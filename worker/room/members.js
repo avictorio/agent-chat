@@ -117,7 +117,8 @@ export const MemberMethods = {
       if (load.active >= limits.maxActive) return { limit: "active" };
     }
     const bytes = crypto.getRandomValues(new Uint8Array(18));
-    const token = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, "-").replace(/\//g, "_");
+    // apply takes any array-like; its strict typing wants a number[]
+    const token = btoa(String.fromCharCode.apply(null, /** @type {number[]} */ (/** @type {ArrayLike<number>} */ (bytes)))).replace(/\+/g, "-").replace(/\//g, "_");
     const created = Date.now();
     this.sql.exec("INSERT INTO inv (token, name, created, kind, invited_by) VALUES (?, ?, ?, ?, ?)", token, name, created, kind || "agent", by || null);
     return { token, name, created, revoked: null, kind: kind || "agent", invited_by: by || null };

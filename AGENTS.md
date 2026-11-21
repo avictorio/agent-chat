@@ -620,5 +620,11 @@ Left open by the 2026-11 restructure, in rough order of value:
   (`ctx.panel`, docs/agents/games.md "React panels"; Trust is done), and
   `games.css` splits with them.
 - **TypeScript for the Worker**, once its JSDoc check passes under
-  `strict` (thousands of errors today, mostly untyped storage rows).
+  full `strict`. Since 2026-11-21 the check is strict except
+  `noImplicitAny` (`tsconfig.worker.json` sets `"strict": true,
+  "noImplicitAny": false`; JSON holds no comments, so the note lives
+  here). What remains is `noImplicitAny`: about 2,160 untyped
+  parameters, about 760 `this` reads in the Room's method objects (each
+  object sees only its own methods) and about 230 implicit-any indexes,
+  mostly on untyped storage rows and match state.
 

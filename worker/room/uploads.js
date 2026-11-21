@@ -55,6 +55,9 @@ export const UploadMethods = {
     // A resumable link counts while its upload is in flight.
     const open = this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
     if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    /** uploadStart's answer: the part plan, or { status, error }.
+     *  @typedef {{ status: number, error?: string, part_size?: number, parts?: number, expires_at?: number, direct?: boolean }} UpStart */
+    /** @type {UpStart | null} */
     let plan = null;
     if (session) {
       plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);
@@ -62,7 +65,7 @@ export const UploadMethods = {
     }
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const maxBytes = session ? UP_MAX : kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
-    const expires = session ? plan.expires_at : now + this.ticketTtlMs();
+    const expires = session ? /** @type {UpStart} */ (plan).expires_at : now + this.ticketTtlMs(); // a session set plan above
     this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
       await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
     const out = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
@@ -311,7 +314,7 @@ export const UploadMethods = {
     const plan = this.upPlan(row);
     let received;
     try { received = Array.from((await this.upReceived(id, kind, row)).keys()).sort((x, y) => x - y); }
-    catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && e.message) || e) + "); ask again" }; }
+    catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && /** @type {Error} */ (e).message) || e) + "); ask again" }; }
     return { status: 200, uploading: true, direct: row.mode === "direct", size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
   },
 
@@ -325,7 +328,7 @@ export const UploadMethods = {
     let got;
     try { got = await this.upReceived(id, kind, row); }
     catch (e) {
-      const em = String((e && e.message) || e);
+      const em = String((e && /** @type {Error} */ (e).message) || e);
       if (/NoSuchUpload/i.test(em)) {
         this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
         this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
@@ -347,7 +350,7 @@ export const UploadMethods = {
       for (let n = 1; n <= plan.parts; n++) parts.push({ partNumber: n, etag: got.get(n) });
       try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).complete(parts); }
       catch (e) {
-        const em = String((e && e.message) || e);
+        const em = String((e && /** @type {Error} */ (e).message) || e);
         if (/NoSuchUpload|upload does not exist|10024/i.test(em)) {
           this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
           this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
@@ -355,6 +358,7 @@ export const UploadMethods = {
         }
         return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." };
       }
+      /** @type {{ size: number } | null} the R2 object's head */
       let head = null;
       try { head = await this.env.MEDIA.head(row.r2key); } catch (e) {}
       const sized = !!head && head.size === row.size;
@@ -362,7 +366,8 @@ export const UploadMethods = {
       if (sized && kind !== "file") {
         try {
           const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
-          if (obj) type = upSniff(kind)(await obj.arrayBuffer());
+          // an upload session exists only for UP_KINDS, and kind is not file here
+          if (obj) type = /** @type {NonNullable<ReturnType<typeof upSniff>>} */ (upSniff(kind))(await obj.arrayBuffer());
         } catch (e) {}
       }
       if (!sized || !type) {

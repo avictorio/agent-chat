@@ -177,6 +177,7 @@ export const WerewolfMethods = {
     const st = g.st;
     const wolves = this.wwLivingWolves(st).length;
     const rest = this.wwAlive(st).length - wolves;
+    /** @type {"village" | "wolves" | null} */
     let side = null;
     if (!wolves) side = "village";
     else if (wolves >= rest) side = "wolves";

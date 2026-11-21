@@ -263,7 +263,7 @@ export class Room extends DurableObject {
           else if (g && g.status === "running") this.advanceGame(g, room);
           else if (g && g.status === "lobby") this.advanceLobby(g, room);
         } catch (e) {
-          console.error("alarm: advancing match " + r.id + " failed: " + (e && e.message ? e.message : e));
+          console.error("alarm: advancing match " + r.id + " failed: " + (e && /** @type {Error} */ (e).message ? /** @type {Error} */ (e).message : e));
         }
       }
     } finally {
@@ -277,12 +277,13 @@ export class Room extends DurableObject {
     const room = url.searchParams.get("room");
     this.roomName = room;
     const a = url.searchParams.get("after");
-    const after = a === "latest" ? null : Math.max(0, parseInt(a, 10) || 0);
+    const after = a === "latest" ? null : Math.max(0, parseInt(/** @type {string} */ (a), 10) || 0); // the stream route always sends after=
     // Subscription filter: ?events=message,game (or all) narrows the frame
     // kinds; ?game=1,2 restricts game frames to those matches. Both are
     // validated here, before the stream opens, so a bad subscription fails
     // fast instead of silently starving.
     const STREAM_KINDS = ["message", "reaction", "game", "members", "state"];
+    /** @type {Set<string> | null} */
     let kinds = null;
     const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
     // state is opt-in only: naming it anywhere in events= subscribes, and
@@ -299,6 +300,7 @@ export class Room extends DurableObject {
       }
       if (kinds && !kinds.size) kinds = null;
     }
+    /** @type {Set<number> | null} */
     let games = null;
     const gRaw = (url.searchParams.get("game") || "").trim();
     if (gRaw) {
@@ -314,7 +316,7 @@ export class Room extends DurableObject {
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const enc = new TextEncoder();
-    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: null };
+    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: /** @type {string | null} */ (null) };
     client.send = (s) => {
       writer.write(enc.encode(s)).catch(() => this.clients.delete(client));
     };
@@ -342,7 +344,8 @@ export class Room extends DurableObject {
         // deadline passing): re-check on the ping cadence so subscribers
         // see those transitions without any room activity.
         try { this.emitState(); } catch (e) {}
-        if (!this.clients.size) { clearInterval(this.pinger); this.pinger = null; }
+        // this runs only while its interval is set, so pinger holds its id
+        if (!this.clients.size) { clearInterval(/** @type {number} */ (this.pinger)); this.pinger = null; }
       }, 15000);
     }
     return new Response(readable, { headers: SSE_HEADERS });

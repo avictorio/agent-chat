@@ -29,7 +29,7 @@ export async function webFetch(target) {
     for (let hop = 0; hop < 4; hop++) {
       const res = await fetch(u.toString(), { method: "GET", redirect: "manual", signal: ctl.signal, headers: { "user-agent": "chat.victorio.cloud room tools (+https://chat.victorio.cloud/api)", "accept": "text/html,text/plain,application/json;q=0.9,*/*;q=0.5" } });
       if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-        const next = fetchTarget(new URL(res.headers.get("location"), u).toString());
+        const next = fetchTarget(new URL(/** @type {string} */ (res.headers.get("location")), u).toString()); // checked just above
         if (!next) return { url: u.toString(), status: res.status, error: "Redirected to an address the tool won't fetch" };
         u = next;
         continue;
@@ -56,7 +56,7 @@ export async function webFetch(target) {
     }
     return { url: u.toString(), error: "Too many redirects" };
   } catch (e) {
-    return { url: u.toString(), error: ctl.signal.aborted ? "The page took too long to respond" : "Couldn't fetch the page: " + String((e && e.message) || e) };
+    return { url: u.toString(), error: ctl.signal.aborted ? "The page took too long to respond" : "Couldn't fetch the page: " + String((e && /** @type {Error} */ (e).message) || e) };
   } finally {
     clearTimeout(timer);
   }

@@ -7,6 +7,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 // worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
 // first use. lgHasPrefix is a binary search on the sorted list, so a grid
 // can be searched without building a trie.
+/** @type {{ list: string[], set: Set<string> } | null} */
 export let lgDictCache = null;
 export function lgDict() {
   if (lgDictCache) return lgDictCache;
@@ -260,6 +261,8 @@ export const LetterGridMethods = {
     const minLen = clamp(opts.min_length !== undefined ? opts.min_length : opts.min_len, 3, 5, 3);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     // the richest of a few draws
+    /** @typedef {{ grid: string[], words: Set<string> }} LgDraw */
+    /** @type {LgDraw | null} */
     let best = null;
     for (let i = 0; i < 6; i++) {
       const grid = this.lgDraw(size);
@@ -274,7 +277,8 @@ export const LetterGridMethods = {
     const st = {
       type: "lettergrid", size: size, min_len: minLen, rounds_total: rounds, round_seconds: roundSeconds, round: 1,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
-      grid: best.grid, claims: new Array(size * size).fill(null), word_count: best.words.size, top_words: this.lgTop(best.words),
+      // best is set: the draw loop above always runs
+      grid: /** @type {LgDraw} */ (best).grid, claims: new Array(size * size).fill(null), word_count: /** @type {LgDraw} */ (best).words.size, top_words: this.lgTop(/** @type {LgDraw} */ (best).words),
       rounds: [], pending: {}, pending_at: {}, places: null,
       log: [{ tick: 0, text: "Letter Grid created by " + creator + " - " + names.join(", ") + ", a " + size + "x" + size + " grid, " + rounds + " rounds. The clock starts when everyone accepts." }],
       winner: null, draw: false, announced: false,
@@ -309,6 +313,7 @@ export const LetterGridMethods = {
     const at = Date.now();
     const N = st.size;
     const active = this.lgActive(st);
+    /** @type {import("@chat/contract").LetterGridRound} */
     const entry = { n: n, at: at, words: {}, missed: [], dropped: [], points: {}, totals: {} };
     const count = {};
     for (const p of active) { const mv = st.pending[p.name]; if (mv) count[mv.word] = (count[mv.word] || 0) + 1; }
@@ -381,6 +386,7 @@ export const LetterGridMethods = {
     const st = g.st;
     if (!st.places) this.lgStanding(st);
     const scores = st.places.map((nm) => nm + " " + st.prog[nm].score + " (" + st.prog[nm].cells + (st.prog[nm].cells === 1 ? " cell)" : " cells)")).join(", ");
+    /** @type {{ w: string, nm: string } | null} */
     let longest = null;
     for (const nm of st.places) { const w = st.prog[nm].longest; if (w && (!longest || w.length > longest.w.length)) longest = { w: w, nm: nm }; }
     const R = st.rounds.length;

@@ -28,6 +28,9 @@ export const GameMachineryMethods = {
   gameRow(id) {
     const r = this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray()[0];
     if (!r) return null;
+    // the match state (untyped JSON); null only if a stored row did not parse,
+    // and every write is JSON.stringify of the state
+    /** @type {any} */
     let st = null;
     try { st = JSON.parse(r.state || "{}"); } catch (e) {}
     return { id: r.id, status: r.status, created: r.created, created_by: r.created_by, card_msg: r.card_msg, st: st };
@@ -459,6 +462,7 @@ export const GameMachineryMethods = {
           const type = GAME_ENGINES[r.t] ? r.t : "lightcycles";
           const table = byType[type] || (byType[type] = {});
           const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
+          /** @type {string[] | null} */
           let ws = null;
           if (r.ws) { try { ws = JSON.parse(r.ws); } catch (e) { ws = null; } }
           if (ws ? ws.indexOf(r.name) >= 0 : r.name === r.w) row.w++;

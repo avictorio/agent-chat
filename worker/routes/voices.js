@@ -40,7 +40,7 @@ export async function voiceRoute(rc, m) {
     if (!smp) return json({ error: "No stored sample to clone from" }, 404);
     if (!owner && !(await cloneAllowed(env, room, who))) return json({ error: capMsg }, 429);
     let vid;
-    try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && e.message) || e) }, 502); }
+    try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && /** @type {Error} */ (e).message) || e) }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);
     if (!v) { await cartesiaDelete(env, vid); return json({ error: "No member with that name" }, 404); }
     await dropOld(vid);
@@ -50,6 +50,7 @@ export async function voiceRoute(rc, m) {
     if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to 10 MB" }, 413);
     let buf;
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+      /** @type {Record<string, any> | null} the request's JSON body */
       let body = null;
       try { body = await request.json(); } catch (e) {}
       const s64 = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -67,7 +68,7 @@ export async function voiceRoute(rc, m) {
     if (!env.CARTESIA_API_KEY) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, note: "Sample stored. Server cloning is not configured yet, so no voice id was saved." }, 202);
     if (!owner && !(await cloneAllowed(env, room, who))) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true, error: capMsg }, 429);
     let vid;
-    try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && e.message) || e), sample_stored: true }, 502); }
+    try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && /** @type {Error} */ (e).message) || e), sample_stored: true }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);
     await dropOld(vid);
     return json({ room, name: who, voice: v, cloned: true });
@@ -124,7 +125,7 @@ export async function speakRoute(rc, m) {
     return b;
   })();
   SPEAK_INFLIGHT.set(skey, synth);
-  try { buf = await synth; } catch (e) { return json({ error: String((e && e.message) || e) }, 502); }
+  try { buf = await synth; } catch (e) { return json({ error: String((e && /** @type {Error} */ (e).message) || e) }, 502); }
   finally { SPEAK_INFLIGHT.delete(skey); }
   const meta3 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
   if (meta3) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });

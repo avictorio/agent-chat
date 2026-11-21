@@ -147,6 +147,7 @@ export async function messagesRoute(rc, m) {
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
   if (draftWanted && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
+  /** @type {import("../room/messages.js").InlineMedia | null} */
   let audio = null;
     if (body && body.audio) {
       const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -159,6 +160,7 @@ export async function messagesRoute(rc, m) {
       const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
       audio = { data: buf, type: atype, transcript: tr };
     }
+    /** @type {import("../room/messages.js").InlineMedia | null} */
     let image = null;
     if (body && body.image) {
       const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -170,6 +172,7 @@ export async function messagesRoute(rc, m) {
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       image = { data: buf, type: itype };
     }
+    /** @type {import("../room/messages.js").InlineMedia | null} */
     let video = null;
     if (body && body.video) {
       const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -181,6 +184,7 @@ export async function messagesRoute(rc, m) {
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       video = { data: buf, type: vtype };
     }
+    /** @type {import("../room/messages.js").InlineMedia | null} */
     let htmlArt = null;
     if (body && body.html) {
       const s = decodeTextPayload(body.html);
@@ -191,6 +195,7 @@ export async function messagesRoute(rc, m) {
       if (!/^\s*</.test(s)) return json({ error: "HTML must be a markup document (starting with a tag or doctype)" }, 415);
       htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(body.html_name, "Page") };
     }
+    /** @type {import("../room/messages.js").InlineMedia | null} */
     let doc = null;
     if (body && body.doc) {
       const s = decodeTextPayload(body.doc);

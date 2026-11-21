@@ -48,6 +48,7 @@ export const BattleshipMethods = {
   // names could) is still reachable; a split whose remainder parses as a
   // cell wins.
   bsTargetOf(st, entry) {
+    /** @type {{ target: any, cellPart: string } | null} */
     let best = null;
     for (let ci = entry.indexOf(":"); ci >= 0; ci = entry.indexOf(":", ci + 1)) {
       const tName = entry.slice(0, ci).trim().toLowerCase();
@@ -81,7 +82,7 @@ export const BattleshipMethods = {
     for (let i = 0; i < sizes.length; i++) {
       const m = /^([a-j](?:10|[1-9]))([hv])$/.exec(parts[i].toLowerCase());
       if (!m) return { error: "bad placement entry '" + parts[i] + "' - a start cell plus H or V, e.g. A1H" };
-      const at = this.bsParseCell(m[1]);
+      const at = /** @type {number[]} */ (this.bsParseCell(m[1])); // m[1] already matched the cell pattern
       const horiz = m[2] === "h";
       const cells = [];
       for (let k = 0; k < sizes[i]; k++) {
@@ -251,6 +252,7 @@ export const BattleshipMethods = {
     const living = this.bsLiving(st);
     if (!living.some((p) => this.bsAfloat(p) === 1)) return;
     if (st.own_turns[shooter.name] % 6 !== 0) return;
+    /** @type {any} a player from the (untyped) match state */
     let leader = null;
     for (const p of living) {
       if (p.name === shooter.name) continue;
@@ -327,8 +329,8 @@ export const BattleshipMethods = {
       your_turn: g.status === "running" && st.phase === "play" && st.turn_of === me.name,
       eliminated: !!me.eliminated,
       fleet: me.fleet ? me.fleet.map((s) => ({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)), hits: s.hits.map((c) => this.bsLabel(c)), sunk: s.hits.length >= s.size })) : null,
-      shots: {}, incoming: {}, sunk_ships: [], opponent_afloat: ffa ? null : this.bsAfloat(opp),
-      legal_moves: [],
+      shots: {}, incoming: {}, sunk_ships: /** @type {import("@chat/contract").BattleshipSunkShip[]} */ ([]), opponent_afloat: ffa ? null : this.bsAfloat(opp),
+      legal_moves: /** @type {string[]} */ ([]),
     };
     if (ffa) {
       // FFA: your record is per target - one entry per rival with
@@ -466,6 +468,7 @@ export const BattleshipMethods = {
       let spec = s;
       if (spec.indexOf("place:") === 0) spec = spec.slice(6).trim();
       if (spec.indexOf("place ") === 0) spec = spec.slice(6).trim();
+      /** @type {Array<{ size: number, cells: string[], hits: string[] }> | null | undefined} */
       let fleet = null;
       if (spec === "random" || spec === "auto" || spec === "") {
         fleet = this.bsRandomFleet(st);
@@ -552,6 +555,7 @@ export const BattleshipMethods = {
     // (sweep, 2026-11-19). st.salvo_turn keeps the turn's targets and
     // shells so far; rivals is the count afloat when the turn began
     // (a rival sunk mid-turn was a target, so still counts as one).
+    /** @type {{ turn: number, rivals: number, targets: string[], fired: number } | null} */
     let salvoTurn = null;
     if (ffa && st.variant === "salvo") {
       const prevTurn = st.salvo_turn && st.salvo_turn.turn === st.turn ? st.salvo_turn : null;

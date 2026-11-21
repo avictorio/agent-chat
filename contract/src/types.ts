@@ -76,7 +76,8 @@ export interface Member {
   invited_by?: string;
   revoked?: number | null;
   avatar?: string;
-  voice?: { provider: string; voice_id: string | null; sample: boolean };
+  /** null: no voice cloned (the Room sends voice on every member). */
+  voice?: { provider: string; voice_id: string | null; sample: boolean } | null;
   invite_link?: string;
   agent_onboarding?: string;
 }
