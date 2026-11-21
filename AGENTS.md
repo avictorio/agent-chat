@@ -1212,9 +1212,10 @@ Before pushing:
    check of the Worker's plain JS - `tsconfig.worker.json`, with the
    runtime's modules and the Room's installed method objects declared in
    `types/`; JSDoc fixes what inference can't), `npm test` (the `web/` Playwright suite against a
-   fake API), `npm run lint` (oxlint over `web/`: the React hooks rules
-   and `no-explicit-any`; errors fail it, and a disable comment needs a
-   reason and is reported once it no longer suppresses anything),
+   fake API), `npm run lint` (oxlint over `web/` and `contract/`: the
+   React hooks rules and `no-explicit-any`; any finding fails it, a
+   disable comment says why after `--`, and one that no longer
+   suppresses anything is reported),
    `npm run test:unit` (the pure game logic, seconds) and
    `npm run test:api` (the server, against a local `wrangler dev` that
    serves the build as static assets).
