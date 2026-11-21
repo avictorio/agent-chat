@@ -7,6 +7,7 @@ import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
 import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
 import type { MediaBytes } from "../lib/media.js";
+import { warn } from "../lib/log.js";
 
 export type DraftCols = Pick<MsgRow, "sender" | "draft">;
 /** Who is asking for a message's media: drafts are their sender's (and
@@ -27,7 +28,14 @@ export const MediaMethods = {
     if (this._sigBytes) return this._sigBytes;
     const row = (this.sql.exec("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray() as Pick<CfgRow, "v">[])[0];
     if (row && row.v) {
-      try { const b = b64urlDecode(row.v); if (b.length === 32) { this._sigBytes = b; return b; } } catch (e) {}
+      try {
+        const b = b64urlDecode(row.v);
+        if (b.length === 32) { this._sigBytes = b; return b; }
+      } catch {
+        // not base64url: replaced below, like a key of the wrong length
+      }
+      // a new key stops every media link signed with the old one
+      warn("media.sigkey", "the stored signing key is unreadable; replacing it", { room: this.roomName });
     }
     const b = crypto.getRandomValues(new Uint8Array(32));
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('media_sig_key', ?)", b64urlEncode(b));
@@ -57,7 +65,7 @@ export const MediaMethods = {
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { throw storeError(); }
     // A single-shot attach replaces any upload in flight for the same kind.
     const prev = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray() as Pick<MdRow, "r2key" | "upload_id">[])[0];
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch (e) {} }
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength);
     return key;
@@ -88,7 +96,9 @@ export const MediaMethods = {
           const buf = await obj.arrayBuffer();
           return { data: buf, type: row.type, size: row.size, name: row.name || null, partial: !!rr, start: rr ? rr.start : 0, end: rr ? rr.start + buf.byteLength - 1 : row.size - 1 };
         }
-      } catch (e) {}
+      } catch (e) {
+        warn("media.read", e, { room: this.roomName, id, kind });
+      }
     }
     // No legacy fallback any more (phase B): media lives in R2 or nowhere.
     return null;

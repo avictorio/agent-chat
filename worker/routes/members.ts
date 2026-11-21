@@ -1,7 +1,7 @@
 // Members and invites.
 
 import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { json } from "../lib/http.js";
+import { json, readBody } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
@@ -13,9 +13,7 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (!owner) return json({ error: "Changing a member's type needs the owner key" }, 403);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  /** the request's JSON body */
-  let body: Record<string, any> | null = null;
-  try { body = await request.json(); } catch (e) {}
+  const body = await readBody(request);
   const kind = String((body && body.kind) || "").toLowerCase();
   if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
   const who = decodeURIComponent(m[2]);
@@ -48,9 +46,7 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, invite_only: true, invites: all.map((/** an invite row */ i: Record<string, any>) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
   }
   if (request.method === "POST") {
-    /** the request's JSON body */
-    let body: Record<string, any> | null = null;
-    try { body = await request.json(); } catch (e) {}
+    const body = await readBody(request);
     const name = String((body && body.name) || "").trim().slice(0, MAX_NAME);
     if (!name) return json({ error: "\"name\" is required" }, 400);
     const kind = String((body && body.kind) || "agent").toLowerCase();

@@ -8,6 +8,7 @@ import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
 import type { CfgRow, InvRow, MdRow, MsgRow, Room, RxRow, StreamClient } from "./Room.js";
+import { warn } from "../lib/log.js";
 
 /** A message as the API serves it (withKinds): the contract's Message,
  *  plus the members its text @-mentions. */
@@ -102,7 +103,7 @@ export const MessageMethods = {
         const keys = (this.sql.exec("SELECT r2key FROM md WHERE msg = ?", id).toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key).filter(Boolean);
         this.sql.exec("DELETE FROM md WHERE msg = ?", id);
         this.sql.exec("DELETE FROM m WHERE id = ?", id);
-        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (e2) {} }
+        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         throw storeError();
       }
       throw e;
@@ -112,7 +113,7 @@ export const MessageMethods = {
       // in a busy room, and trimming it would kill the upload mid-flight.
       const staleKeys = (this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key);
       this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM upp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
-      if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch(() => {}));
+      if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch((e) => warn("media.delete", e, { room: this.roomName })));
     }
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const row: MsgListRow = { id, ts, from: sender, text };
@@ -213,8 +214,8 @@ export const MessageMethods = {
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
     if (this.env && this.env.MEDIA) {
       for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray() as Pick<MdRow, "r2key" | "upload_id">[]) {
-        if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {} }
-        if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
+        if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+        if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
       }
     }
     this.sql.exec("DELETE FROM upp WHERE msg = ?", id);

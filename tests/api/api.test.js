@@ -252,6 +252,21 @@ async function waitUp() {
     r = await req('GET', R + '/avatars/%E0%A4%A', { token: TA });
     check('malformed %-escape -> 400', r.status === 400, r.status);
 
+    // A body that is there but is not JSON is a 400 that says so (lib/http.ts
+    // readBody); an empty body still reads as no body, so the route answers
+    // about its own fields.
+    const notJson = { 'Content-Type': 'application/json' };
+    r = await req('POST', R + '/invites', { owner: true, headers: notJson, body: '{"name": "Half' });
+    check('invite POST with broken JSON -> 400 naming it', r.status === 400 && /not valid JSON/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('PUT', R + '/constitution', { token: TA, headers: notJson, body: 'text=hello' });
+    check('constitution PUT with a form body -> 400 naming it', r.status === 400 && /not valid JSON/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R + '/members/ApiB', { owner: true, headers: notJson, body: "{kind: 'agent'}" });
+    check('a converted inline parse answers broken JSON with 400 too', r.status === 400 && /not valid JSON/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R + '/invites', { owner: true, headers: notJson });
+    check('invite POST with no body -> the field error, not a JSON one', r.status === 400 && /"name" is required/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R + '/invites', { owner: true, headers: notJson, body: '  \n' });
+    check('a whitespace-only body reads as no body', r.status === 400 && /"name" is required/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
+
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
     const did = draft.json.id;

@@ -4,6 +4,10 @@
 // resolving it. The Worker's modules are TypeScript: a stray .js (or any
 // other script) in worker/ fails - wrangler's bundler would take a stray
 // x.js over the x.ts its "./x.js" imports mean.
+//
+// It also refuses an empty catch that does not say why it is empty: log the
+// failure with warn() (worker/lib/log.ts), or write catch { /* reason */ }.
+// The ALTER TABLE migrations are the one exception (Room.ts ensureSchema).
 "use strict";
 
 const fs = require("fs");
@@ -37,11 +41,23 @@ for (const f of files.sort()) {
     continue;
   }
   modules++;
-  const r = transformSync(f, fs.readFileSync(f, "utf8"), { lang: "ts" });
+  const src = fs.readFileSync(f, "utf8");
+  const r = transformSync(f, src, { lang: "ts" });
   if (r.errors && r.errors.length) {
     bad++;
     console.error(rel + " does not parse:\n" + r.errors.map((e) => e.message).join("\n"));
   }
+  const lines = src.split("\n");
+  lines.forEach((line, i) => {
+    const prev = i > 0 ? lines[i - 1] : "";
+    const silent = /catch\s*\(\s*\w+\s*\)\s*\{\s*\}/.test(line)
+      || (/catch\s*\{\s*\}/.test(line) && !/ALTER TABLE/.test(line))
+      || (/\.catch\(\s*\(\s*\w*\s*\)\s*=>\s*\{\s*\}\s*\)/.test(line) && !/\/\/|\/\*/.test(line) && !/^\s*\/\//.test(prev));
+    if (silent) {
+      bad++;
+      console.error(rel + ":" + (i + 1) + ": an empty catch - log it with warn() (lib/log.ts) or say why: catch { /* reason */ }");
+    }
+  });
 }
 if (bad) {
   console.error("check-worker: " + bad + " problem(s)");

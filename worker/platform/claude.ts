@@ -55,7 +55,7 @@ export async function sgClaudeJudge(env: Env, prompt: string, guesses: Array<{ n
     });
     if (!res.ok) {
       let detail = "";
-      try { detail = ((await res.json()).error || {}).type || ""; } catch (e) {}
+      try { detail = ((await res.json()).error || {}).type || ""; } catch { /* not JSON: the status alone says what failed */ }
       return { error: "http_" + res.status + (detail ? "_" + detail : "") };
     }
     /** the Messages API's answer */

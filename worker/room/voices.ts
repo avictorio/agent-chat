@@ -4,6 +4,7 @@
 import { nameFold } from "../lib/text.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
 import type { MsgRow, MvRow, Room } from "./Room.js";
+import { warn } from "../lib/log.js";
 
 /** speak syntheses in flight, by "room:message id" */
 export const SPEAK_INFLIGHT: Map<string, Promise<ArrayBuffer>> = new Map();
@@ -49,7 +50,7 @@ export const VoiceMethods = {
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { return "STORE_FAIL"; }
     const prev = this.voiceRow(name);
-    if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) {} }
+    if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
       String(name).toLowerCase(), (prev && prev.provider) || "cartesia", (prev && prev.voice_id) || null, key, type, Date.now(), (prev && prev.ts) || null);
     this.notifyMembers(name);
@@ -83,7 +84,7 @@ export const VoiceMethods = {
     for (const r of ids) {
       const meta = this.mediaMeta(r.id, "speak");
       if (!meta) continue;
-      if (meta.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(meta.r2key); } catch (e) {} }
+      if (meta.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(meta.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
       this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'speak'", r.id);
     }
   },
@@ -91,7 +92,7 @@ export const VoiceMethods = {
   async clearVoice(name: string) {
     const r = this.voiceRow(name);
     if (!r) return false;
-    if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) {} }
+    if (r.sample_key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(r.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.sql.exec("DELETE FROM mv WHERE name = ?", String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);

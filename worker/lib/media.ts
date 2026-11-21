@@ -3,6 +3,7 @@
 import { b64urlDecode, b64urlEncode, hmacSha256 } from "./crypto.js";
 import { CORS, json, parseRange } from "./http.js";
 import type { MediaViewer } from "../room/media.js";
+import { warn } from "./log.js";
 
 // Signed media URLs (media plan phase E): media reads accept a
 // short-lived signature instead of a credential:
@@ -130,7 +131,10 @@ export async function serveMedia(request: Request, env: Env, stub: DurableObject
           return new Response(obj.body, { headers: headers });
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      // the Room's own buffered read below is the second try
+      warn("media.read", e, { room, id, kind });
+    }
   }
   const a = await stub.getMedia(id, kind, request.headers.get("Range"), viewer);
   if (!a) return json({ error: "No " + kind + " on that message" }, 404);

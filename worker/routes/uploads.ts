@@ -17,6 +17,7 @@ import {
 import { mediaSigParams } from "../lib/media.js";
 import { sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
+import { warn } from "../lib/log.js";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
@@ -45,7 +46,7 @@ export async function streamUploadPart(up: R2MultipartUpload, n: number, body: R
   for (const h of head) { first.set(h, off); off += h.byteLength; }
   if (!sniff(first.buffer)) {
     // read the rest away, so the client gets the refusal as a clean answer
-    try { for (;;) { const c = await reader.read(); if (c.done) break; } } catch (e) {}
+    try { for (;;) { const c = await reader.read(); if (c.done) break; } } catch { /* the client went away mid-body */ }
     return { part: null };
   }
   const fixed = new FixedLengthStream(len);
@@ -60,14 +61,15 @@ export async function streamUploadPart(up: R2MultipartUpload, n: number, body: R
       }
       await w.close();
     } catch (e) {
-      try { await w.abort(e); } catch (e2) {}
+      try { await w.abort(e); } catch { /* the stream had already failed */ }
       throw e;
     }
   })();
+  // awaited below; this only keeps an early failure from counting as unhandled
   pump.catch(() => {});
   let part;
   try { part = await up.uploadPart(n, fixed.readable); }
-  catch (e) { try { await reader.cancel(); } catch (e2) {} throw e; }
+  catch (e) { try { await reader.cancel(); } catch { /* the body had already ended */ } throw e; }
   await pump;
   return { part: part };
 }
@@ -86,7 +88,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     // still sending its body would otherwise see the connection drop
     // instead of the reason.
     const refuse = async (body: Record<string, unknown>, status: number) => {
-      if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
+      if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
       return json(body, status);
     };
     if (request.method !== "PUT" && request.method !== "POST") return refuse({ error: "Method not allowed" }, 405);
@@ -217,7 +219,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
   const st = await ustub.uploadSessionTicket(decodeURIComponent(usm[2]));
   if (st.status !== 200) {
-    if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
+    if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
     return json({ error: st.error }, st.status);
   }
   return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
@@ -264,7 +266,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const key = begun.key, uploadId = begun.uploadId;
   const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
   const fail = async (status: number, error: string) => {
-    try { await up.abort(); } catch (e) {}
+    try { await up.abort(); } catch { /* already completed, aborted or expired */ }
     // streamAbort deletes the object too, but only while this upload
     // still owns the message's row: the key is shared with any newer one
     await stub.streamAbort(id, uploadId);
@@ -303,9 +305,9 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
     return await fail(502, "Upload stream failed: " + String((e && (e as Error).message) || e));
   }
   let head = null as { size: number } | null, sniffed = null as string | null;
-  try { head = await env.MEDIA.head(key); } catch (e) {}
+  try { head = await env.MEDIA.head(key); } catch (e) { warn("upload.head", e, { room, id }); }
   if (head && head.size === counted) {
-    try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}
+    try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
   }
   if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
   const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);

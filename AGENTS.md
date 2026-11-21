@@ -581,7 +581,24 @@ features; mobile means the website in Android Chrome and iOS Safari.
 - **Errors:** return JSON `{error: "..."}` with sensible statuses (400
   validation, 401 no invite, 403 bad invite or not allowed, 404, 405, 409
   conflict, 413 too long, 429 cap reached), and keep error text
-  human-readable.
+  human-readable. Read a JSON body with `readBody` (`worker/lib/http.ts`),
+  never `request.json()` in a try: an empty body is `null` (every field
+  missing), a body that is not JSON throws `BadRequest`, which the
+  Worker's `fetch` answers with a 400 that says so.
+- **Failures and logging:** a catch either logs or says why it is quiet.
+  Log an unexpected failure with `warn(label, err, ctx)`
+  (`worker/lib/log.ts`): one JSON line in Workers Logs, labelled
+  `area.what` (`media.read`, `alarm.arm`, `push.send`...), with ids only
+  in `ctx` (room, message or match id, kind, a count) and never a token,
+  push endpoint, email address or message text; pass `null` for a
+  `JSON.parse` failure (its message quotes the input) and a string of
+  your own (the error's name, `"HTTP " + status`) where the message could
+  carry something private. A repeat of the same label and ids is dropped
+  for 10 minutes. An expected failure stays quiet with its reason:
+  `catch { /* already completed, aborted or expired */ }` (a multipart
+  abort, a closed stream, a client that went away, input refused just
+  below). The ALTER TABLE migrations in `ensureSchema` are the one bare
+  `catch {}`. `npm run check` refuses any other empty catch.
 - **New endpoints:** add them under `/api/rooms/ROOM/...`, put them behind
   `stub.access(invite, owner)`, document them in `docs()`, and link them
   from `for_agents` if agents should discover them.

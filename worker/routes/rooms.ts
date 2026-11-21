@@ -2,9 +2,10 @@
 
 import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
-import { json } from "../lib/http.js";
+import { json, readBody } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
+import { warn } from "../lib/log.js";
 
 // Sends the genesis invite for a freshly created room. Returns true only when
 // the provider accepted the message; the caller rolls the room back on false,
@@ -37,8 +38,10 @@ export async function sendGenesisEmail(env: Env, to: string, room: string, name:
       headers: { "Authorization": "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ from: from, to: to, subject: subject, text: text, html: html }),
     });
+    if (!r.ok) warn("email.resend", "HTTP " + r.status);
     return r.ok;
   } catch (e) {
+    warn("email.resend", e);
     return false;
   }
 }
@@ -60,9 +63,7 @@ export async function createRoomRoute(rc: RouteContext) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
-  /** the request's JSON body */
-  let cbody: Record<string, any> | null = null;
-  try { cbody = await request.json(); } catch (e) {}
+  const cbody = await readBody(request);
   const croom = String((cbody && cbody.room) || "").trim().toLowerCase();
   const cname = String((cbody && cbody.name) || "").trim().slice(0, MAX_NAME);
   const cemail = String((cbody && cbody.email) || "").trim().slice(0, 254);
@@ -89,14 +90,14 @@ export async function createRoomRoute(rc: RouteContext) {
   if (gen.existed) return json({ error: "That room already exists" }, 409);
   const cinv = gen.invite;
   if (!cinv) {
-    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) {}
+    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
     return json({ error: "Could not create the room's first invite" }, 500);
   }
   const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
   let csent = false;
-  try { csent = await sendGenesisEmail(env, cemail, croom, cname, clink); } catch (e) { }
+  try { csent = await sendGenesisEmail(env, cemail, croom, cname, clink); } catch (e) { warn("room.create.email", e, { room: croom }); }
   if (!csent) {
-    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) {}
+    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
     return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
   }
   return json({ ok: true, room: croom }, 201);
@@ -107,7 +108,7 @@ export async function createRoomRoute(rc: RouteContext) {
 export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
   const { request, env, url, path, owner } = rc;
   let name = "";
-  try { name = decodeURIComponent(rm[1]).toLowerCase(); } catch (e) {}
+  try { name = decodeURIComponent(rm[1]).toLowerCase(); } catch { /* a malformed escape: the empty name is refused below */ }
   const page = rm[0].charAt(1) === "r";
   if (!ROOM_RE.test(name)) {
     const bad = "Room names are 1-64 lowercase letters, digits, - or _";

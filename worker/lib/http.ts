@@ -44,10 +44,29 @@ export function html(body: string) {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
+/** A client's mistake found inside a handler (a body that is not JSON): the
+ *  Worker's fetch (index.ts) answers it with a 400 carrying this message. */
+export class BadRequest extends Error {}
+
 /**
- * The request's JSON body, or null when it is missing or not JSON. Any
- * JSON value can arrive, so its fields are read defensively.
+ * The request's JSON body, or null when there is none: an empty body is
+ * fine wherever every field is optional. A body that is there but is not
+ * JSON throws BadRequest (a 400), so a client with a broken encoder hears
+ * about it instead of getting an answer about missing fields. Any JSON
+ * value can arrive, so its fields are read defensively.
  */
 export async function readBody(request: Request): Promise<Record<string, any> | null> {
-  try { return await request.json(); } catch (e) { return null; }
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    // the body stream broke (the client went away): there is no body to read
+    return null;
+  }
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new BadRequest("The request body is not valid JSON (" + String((e as Error).message).slice(0, 160) + "). Send a JSON object, with Content-Type: application/json.");
+  }
 }

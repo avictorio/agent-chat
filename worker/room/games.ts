@@ -8,6 +8,7 @@ import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
 import type { GameStatus } from "@chat/contract";
 import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub } from "../games/engine.js";
+import { warn } from "../lib/log.js";
 
 /** The engine of a game on the simultaneous-rounds machinery, which
  *  supplies resolveRound and standing. */
@@ -45,7 +46,7 @@ export const GameMachineryMethods = {
     // the match state (untyped JSON); null only if a stored row did not parse,
     // and every write is JSON.stringify of the state
     let st: any = null;
-    try { st = JSON.parse(r.state || "{}"); } catch (e) {}
+    try { st = JSON.parse(r.state || "{}"); } catch { warn("game.state.parse", null, { room: this.roomName, id }); }
     return { id: r.id, status: r.status, created: r.created, created_by: r.created_by, card_msg: r.card_msg, st: st };
   },
 
@@ -227,11 +228,11 @@ export const GameMachineryMethods = {
   // armed time already matches, so hot read paths stay cheap.
   async armGameAlarm() {
     try {
-      const rows = this.sql.exec("SELECT status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "status" | "state">[];
+      const rows = this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "id" | "status" | "state">[];
       /** the nearest deadline */
       let next: number | null = null;
       for (const r of rows) {
-        try { const st = JSON.parse(r.state || "{}"); const dl = r.status === "lobby" ? st.lobby_deadline : st.deadline; if (dl && (next === null || dl < next)) next = dl; } catch (e) {}
+        try { const st = JSON.parse(r.state || "{}"); const dl = r.status === "lobby" ? st.lobby_deadline : st.deadline; if (dl && (next === null || dl < next)) next = dl; } catch { warn("game.state.parse", null, { room: this.roomName, id: r.id }); }
       }
       const cur = await this.ctx.storage.getAlarm();
       if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
@@ -240,7 +241,10 @@ export const GameMachineryMethods = {
       // posts and their pushes still link to the room.
       if (this.roomName) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('room_name', ?)", this.roomName);
       if (cur !== next) await this.ctx.storage.setAlarm(next);
-    } catch (e) {}
+    } catch (e) {
+      // a match may now miss its deadline until the next read or move re-arms
+      warn("alarm.arm", e, { room: this.roomName });
+    }
   },
 
   afterGameChange(g: GameRow, room: string, actor: string | null | undefined) {
@@ -263,7 +267,7 @@ export const GameMachineryMethods = {
     const pub = this.gameSummary(g);
     if (g.st.trails) pub.trails = g.st.trails;
     const frame = "event: game\ndata: " + JSON.stringify({ type: "game", room: room, from: actor || null, kind: this.memberKind(actor), targets: this.gameTargets(g, pub), game: pub }) + "\n\n";
-    for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch (e) {} }
+    for (const c of this.clients) { if (!streamWants(c, "game", g.id)) continue; try { c.send(frame); } catch { /* a subscriber that already went away */ } }
     this.emitState(room);
   },
 
@@ -497,9 +501,11 @@ export const GameMachineryMethods = {
           if (r.ws) { try { ws = JSON.parse(r.ws); } catch (e) { ws = null; } }
           if (ws ? ws.indexOf(r.name) >= 0 : r.name === r.w) row.w++;
           else row.l++;
-          if (r.places) { try { placed(row, JSON.parse(r.places), r.name); } catch (e) {} }
+          if (r.places) { try { placed(row, JSON.parse(r.places), r.name); } catch { warn("standings.places", null, { room: this.roomName }); } }
         }
-      } catch (e) {}
+      } catch (e) {
+        warn("standings.scan", e, { room: this.roomName });
+      }
     }
     /** by game type, best first */
     const record: Record<string, RecordRow[]> = {};

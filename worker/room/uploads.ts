@@ -34,6 +34,7 @@ import {
 } from "../uploads/plan.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
+import { warn } from "../lib/log.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
@@ -155,8 +156,8 @@ export const UploadMethods = {
     for (const d of stale) {
       if (this.env && this.env.MEDIA) {
         for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>) {
-          if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {} }
-          if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) {} }
+          if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+          if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         }
       }
       this.sql.exec("DELETE FROM upp WHERE msg = ?", d.id);
@@ -252,11 +253,11 @@ export const UploadMethods = {
       // session began with.
       const plan = this.upPlan(prev);
       let received: number[] = [];
-      try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); } catch (e) {}
+      try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); } catch (e) { warn("upload.received", e, { room, id, kind }); }
       return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: prev.mode === "direct" };
     }
     if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch (e) {} }
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     const key = this.mediaKey(room, id, kind);
     const declared = cleanMediaType(type);
@@ -382,7 +383,7 @@ export const UploadMethods = {
       }
       /** the R2 object's head */
       let head: { size: number } | null = null;
-      try { head = await this.env.MEDIA.head(row.r2key); } catch (e) {}
+      try { head = await this.env.MEDIA.head(row.r2key); } catch (e) { warn("upload.head", e, { room, id, kind }); }
       const sized = !!head && head.size === row.size;
       let type = kind === "file" ? (row.type || "application/octet-stream") : null;
       if (sized && kind !== "file") {
@@ -390,10 +391,12 @@ export const UploadMethods = {
           const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
           // an upload session exists only for UP_KINDS, and kind is not file here
           if (obj) type = (upSniff(kind) as NonNullable<ReturnType<typeof upSniff>>)(await obj.arrayBuffer());
-        } catch (e) {}
+        } catch (e) {
+          warn("upload.sniff", e, { room, id, kind });
+        }
       }
       if (!sized || !type) {
-        try { await this.env.MEDIA.delete(row.r2key); } catch (e) {}
+        try { await this.env.MEDIA.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
         this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
         this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ?", id, kind);
         return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
@@ -420,7 +423,7 @@ export const UploadMethods = {
     if (a.status !== 200) return a;
     const row = this.upSession(id, kind);
     if (!row || !row.upload_id) return { status: 200, aborted: false };
-    if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
+    if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
     return { status: 200, aborted: true };
@@ -456,7 +459,7 @@ export const UploadMethods = {
     const key = this.mediaKey(room, id, "video");
     const prev = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>)[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
-    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch (e) {} }
+    if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, fp, part_size, began) VALUES (?, 'video', ?, ?, ?, ?, NULL, ?, ?)", id, type, key, size, up.uploadId, STREAM_PART, Date.now());
@@ -482,9 +485,9 @@ export const UploadMethods = {
     // so a caller that trusted this method alone would orphan the session.
     const row = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>)[0];
     if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
-    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch (e) {} }
+    if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     // a stream that completed in R2 but failed the size/type check left an object
-    if (row && row.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(row.r2key); } catch (e) {} }
+    if (row && row.r2key && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
     return { status: 200 };

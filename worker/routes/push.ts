@@ -35,14 +35,14 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
     const auth = String(keysIn.auth || "");
     if (!/^https:\/\//.test(endpoint)) return json({ error: "subscription.endpoint must be an https URL" }, 400);
     let pushHost = "";
-    try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch (e) {}
+    try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch { /* not a URL: refused below */ }
     if (!PUSH_HOST_RE.test(pushHost)) return json({ error: "subscription.endpoint must be a browser push service URL" }, 400);
     // b64urlDecode throws on malformed input (bad characters, impossible
     // lengths): validate like every other base64 input and
     // answer 400, not an unhandled 500.
     let pLen = -1, aLen = -1;
-    try { pLen = b64urlDecode(p256dh).length; } catch (e) {}
-    try { aLen = b64urlDecode(auth).length; } catch (e) {}
+    try { pLen = b64urlDecode(p256dh).length; } catch { /* refused below */ }
+    try { aLen = b64urlDecode(auth).length; } catch { /* refused below */ }
     if (pLen !== 65) return json({ error: "subscription.keys.p256dh is not a 65-byte public key" }, 400);
     if (aLen < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
     // a missing body has no endpoint, refused above

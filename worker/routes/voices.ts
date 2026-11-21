@@ -1,13 +1,14 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
 import { ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
-import { json } from "../lib/http.js";
+import { json, readBody } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
 import { sniffAudio } from "../lib/sniff.js";
 import { mediaSigState, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
+import { warn } from "../lib/log.js";
 
 // Voices. A member uploads a voice sample (invite token); the server stores it in R2,
 // clones it with Cartesia and saves the voice id on the member record. The owner can
@@ -52,9 +53,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to 10 MB" }, 413);
     let buf;
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-      /** the request's JSON body */
-      let body: Record<string, any> | null = null;
-      try { body = await request.json(); } catch (e) {}
+      const body = await readBody(request);
       const s64 = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       try { buf = Uint8Array.from(atob(s64), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
     } else {
@@ -109,7 +108,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   // Concurrent first plays of the same message share one synthesis.
   const skey = room + ":" + id;
   if (SPEAK_INFLIGHT.has(skey)) {
-    try { await SPEAK_INFLIGHT.get(skey); } catch (e) {}
+    try { await SPEAK_INFLIGHT.get(skey); } catch { /* the first play failed (and says so); this one tries again */ }
     const meta2 = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
     if (meta2) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });
   }
@@ -124,7 +123,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
     // The speak cache is best-effort: a storage failure (phase A makes
     // putMedia throw) must not fail playback - this play is served from
     // the buffer below and the next play simply re-synthesizes.
-    if (v2 && v2.voice_id === v.voice_id) { try { await stub.putMedia(id, "speak", b, "audio/mpeg", room); } catch (e) {} }
+    if (v2 && v2.voice_id === v.voice_id) { try { await stub.putMedia(id, "speak", b, "audio/mpeg", room); } catch (e) { warn("speak.cache", e, { room, id }); } }
     return b;
   })();
   SPEAK_INFLIGHT.set(skey, synth);

@@ -1,6 +1,7 @@
 // Gmail API sending through a Workspace service account (domain-wide delegation).
 
 import { b64urlEncode, pemToDer } from "../lib/crypto.js";
+import { warn } from "../lib/log.js";
 
 // The service-account JSON arrives via a dashboard paste, and a
 // viewer along the way may turn the key's escaped line breaks into
@@ -10,7 +11,7 @@ import { b64urlEncode, pemToDer } from "../lib/crypto.js";
 // still fails, just without throwing.
 /** @param raw the GMAIL_SA secret */
 export function parseServiceAccount(raw: string | null | undefined): { client_email?: string, private_key?: string } | null {
-  try { return JSON.parse(raw || "null"); } catch (e) { }
+  try { return JSON.parse(raw || "null"); } catch { /* raw line breaks, most likely: the lenient pass below */ }
   try {
     let out = "";
     let inStr = false;
@@ -26,7 +27,11 @@ export function parseServiceAccount(raw: string | null | undefined): { client_em
       out += ch;
     }
     return JSON.parse(out);
-  } catch (e) { return null; }
+  } catch {
+    // never the parse error itself: its message would quote the key
+    warn("gmail.config", "the GMAIL_SA secret is not service-account JSON");
+    return null;
+  }
 }
 
 // Gmail sending through a Google Workspace service account with domain-wide
@@ -37,7 +42,7 @@ export function parseServiceAccount(raw: string | null | undefined): { client_em
 export const gmailCache: { email: string | null, sender: string | null, key: CryptoKey | null, token: string | null, exp: number } = { email: null, sender: null, key: null, token: null, exp: 0 };
 
 export async function gmailAccessToken(env: Env) {
-  try { return await gmailAccessTokenInner(env); } catch (e) { return null; }
+  try { return await gmailAccessTokenInner(env); } catch (e) { warn("gmail.token", e); return null; }
 }
 
 export async function gmailAccessTokenInner(env: Env) {
@@ -57,7 +62,7 @@ export async function gmailAccessTokenInner(env: Env) {
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", gmailCache.key, enc.encode(head + "." + claims));
   const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
   const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
-  if (!res.ok) return null;
+  if (!res.ok) { warn("gmail.token", "HTTP " + res.status); return null; }
   /** the token endpoint's answer */
   const j: { access_token: string, expires_in?: number } = await res.json();
   gmailCache.token = j.access_token; gmailCache.exp = now + (j.expires_in || 3600);
@@ -73,8 +78,8 @@ export function mimePart(text: string) {
 }
 
 export async function sendViaGmail(env: Env, to: string, subject: string, text: string, html: string) {
-  let token: string | null = null;
-  try { token = await gmailAccessToken(env); } catch (e) { }
+  // gmailAccessToken never throws: null (logged) when there is no token
+  const token = await gmailAccessToken(env);
   if (!token) return false;
   const sender = String(env.GMAIL_SENDER || "").trim();
   const boundary = "acgenesis" + Date.now().toString(36);
@@ -104,8 +109,10 @@ export async function sendViaGmail(env: Env, to: string, subject: string, text: 
       headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
       body: JSON.stringify({ raw: b64urlEncode(new TextEncoder().encode(mime)) }),
     });
+    if (!res.ok) warn("gmail.send", "HTTP " + res.status);
     return res.ok;
   } catch (e) {
+    warn("gmail.send", e);
     return false;
   }
 }

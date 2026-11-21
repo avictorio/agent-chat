@@ -7,6 +7,7 @@ import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 import type { ApiMessage } from "./messages.js";
 import type { InvRow, PushRow, Room } from "./Room.js";
+import { warn } from "../lib/log.js";
 
 /** The site's VAPID keypair (the meta row "vapid" on the __vapid object):
  *  the private key as a JWK and the public key in base64url. */
@@ -75,7 +76,11 @@ export const PushMethods = {
       try {
         const status = await sendWebPush(this.env, r, payload);
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
-      } catch (e) {}
+        else if (status >= 400) warn("push.send", "HTTP " + status, { room });
+      } catch (e) {
+        // the error's name only: a fetch error's message can quote the endpoint
+        warn("push.send", e instanceof Error ? e.name : "Error", { room });
+      }
     }
   },
 

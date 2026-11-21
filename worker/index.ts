@@ -1,7 +1,7 @@
 // Source of truth: https://github.com/avictorio/agent-chat (worker/; this is the main module).
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
-import { CORS, json } from "./lib/http.js";
+import { BadRequest, CORS, json } from "./lib/http.js";
 import {
   uploadLinkRoute,
   uploadLinkStepRoute,
@@ -66,6 +66,8 @@ export default {
       // A malformed %-escape in a path segment (decodeURIComponent throws
       // URIError) is the client's mistake: answer 400, not a 500.
       if (e instanceof URIError) return json({ error: "The URL has a malformed %-escape" }, 400);
+      // A body that is there but is not JSON (lib/http.ts readBody).
+      if (e instanceof BadRequest) return json({ error: e.message }, 400);
       throw e;
     }
   },

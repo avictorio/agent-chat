@@ -36,6 +36,7 @@ import { GameMachineryMethods } from "./games.js";
 import { TestHookMethods } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
+import { warn } from "../lib/log.js";
 
 /* ---------- storage rows ----------
    One type per table: the columns ensureSchema creates. A column is
@@ -121,7 +122,10 @@ export class Room extends DurableObject {
     if (this.ready) this.ensureSchema();
   }
 
-  // Creates the room's tables, and adds columns introduced since it was created.
+  // Creates the room's tables, and adds columns introduced since it was
+  // created. Each ALTER TABLE runs on every start and throws once its
+  // column exists (or, for a DROP, is gone): that throw is the migration
+  // working, so those catches are empty on purpose.
   ensureSchema() {
     this.sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS rx (msg INTEGER NOT NULL, emoji TEXT NOT NULL, who TEXT NOT NULL, ts INTEGER NOT NULL)");
@@ -131,26 +135,26 @@ export class Room extends DurableObject {
     this.sql.exec("DROP TABLE IF EXISTS b");
     this.sql.exec("CREATE TABLE IF NOT EXISTS inv (token TEXT PRIMARY KEY, name TEXT NOT NULL, created INTEGER NOT NULL, revoked INTEGER)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN seen INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN kind TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN invited_by TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN seen INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN kind TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN invited_by TEXT"); } catch {}
     // Avatars live in R2 only (phase D, finished 2026-11-19: every room was
     // checked and held no blob), so the blob-era column goes wherever it
     // still exists.
-    try { this.sql.exec("ALTER TABLE inv DROP COLUMN avatar"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_ver INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_key TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE inv DROP COLUMN avatar"); } catch {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_ver INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_key TEXT"); } catch {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
-    try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch {}
     // The legacy in-DB media stores are gone (media plan phase B, 2026-11-11):
     // every room was drained to R2 through the owner migrate/purge runs before
     // this shipped, so the tables are dropped wherever they still exist.
     this.sql.exec("DROP TABLE IF EXISTS au");
     this.sql.exec("DROP TABLE IF EXISTS im");
     this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch {}
     // Upload receipts: one row per part R2 has acknowledged, for every
     // kind (the upload engine). It replaces mdp, the video-only table,
     // whose rows move over the first time a room wakes on this code.
@@ -166,43 +170,43 @@ export class Room extends DurableObject {
     // begin_upload response and the PUT URL it authorizes.
     this.sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
     // owner: minted with the owner key, for a draft posted under any name
-    try { this.sql.exec("ALTER TABLE ut ADD COLUMN owner INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE ut ADD COLUMN owner INTEGER"); } catch {}
     // sess: a resumable upload link (the engine), good for the whole upload
-    try { this.sql.exec("ALTER TABLE ut ADD COLUMN sess INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE ut ADD COLUMN sess INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch {}
     // owntrust records whether a post carried the owner key. Nothing reads it
     // since the in-room bot was retired; it stays as provenance.
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN owntrust INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN owntrust INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch {}
     // The upload engine: the file's name (a file's download name) and when
     // its upload began (R2 keeps an unfinished upload 7 days from then).
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN name TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN began INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN name TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN began INTEGER"); } catch {}
     // "direct": the session's parts go straight to R2 (Phase 2)
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN mode TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_name TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_name TEXT"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE md ADD COLUMN mode TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_name TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_name TEXT"); } catch {}
     // A general file of any type (the upload engine's kind "file").
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_type TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_size INTEGER"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_name TEXT"); } catch (e) {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN game_id INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_type TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_size INTEGER"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_name TEXT"); } catch {}
+    try { this.sql.exec("ALTER TABLE m ADD COLUMN game_id INTEGER"); } catch {}
     this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
-    try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch {}
     // The Android app's device-token table, dropped with the app (2026-11-20).
     this.sql.exec("DROP TABLE IF EXISTS pushdev");
     this.sql.exec("CREATE TABLE IF NOT EXISTS mv (name TEXT PRIMARY KEY, provider TEXT, voice_id TEXT, sample_key TEXT, sample_type TEXT, sample_ts INTEGER, ts INTEGER)");
@@ -214,12 +218,12 @@ export class Room extends DurableObject {
 
     this.sql.exec("CREATE TABLE IF NOT EXISTS dc (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, title TEXT NOT NULL, note TEXT, signers TEXT NOT NULL, updated INTEGER NOT NULL)");
     // When each invite was first used (added later; fails harmlessly once the column exists).
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN used INTEGER"); } catch (e) {}
+    try { this.sql.exec("ALTER TABLE inv ADD COLUMN used INTEGER"); } catch {}
     // When each member first posted as a member. Runs once per room, backfilling from the kept history.
     try {
       this.sql.exec("ALTER TABLE inv ADD COLUMN posted INTEGER");
       this.sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
-    } catch (e) {}
+    } catch { /* the column exists, so the backfill ran already */ }
   }
 
   exists() {
@@ -270,15 +274,21 @@ export class Room extends DurableObject {
         try {
           const st = JSON.parse(v.state || "{}");
           if (st.type === "sketch") for (const im of Object.values(st.images || {}) as Array<{ key?: string } | null>) if (im && im.key) keys.push(im.key);
-        } catch (e) {}
+        } catch {
+          // an unreadable match has no drawings to find (gameRow logs it)
+        }
       }
       // Abort any in-flight multipart sessions so their parts die too
       // (same pattern as deleteMessage: the md row carries key + upload id).
       for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray() as { r2key: string, upload_id: string }[]) {
-        try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {}
+        try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ }
       }
-      for (const k of keys) { try { await this.env.MEDIA.delete(k); } catch (e) {} }
-    } catch (e) {}
+      let failed = 0, first: unknown = null;
+      for (const k of keys) { try { await this.env.MEDIA.delete(k); } catch (e) { failed++; if (!first) first = e; } }
+      if (failed) warn("media.delete", first, { room, failed, of: keys.length });
+    } catch (e) {
+      warn("room.destroy.media", e, { room });
+    }
     await this.ctx.storage.deleteAll();
     // In-memory caches of what was just deleted: a room recreated under the
     // same name in this instance's lifetime must not sign with the old key
@@ -294,7 +304,9 @@ export class Room extends DurableObject {
     try {
       const key = "log:" + new Date().toISOString() + ":" + Math.random().toString(36).slice(2, 6);
       await this.env.REQUESTS.put(key, room + " | " + text, { expirationTtl: 604800 });
-    } catch (e) {}
+    } catch (e) {
+      warn("log.write", e, { room });
+    }
   }
 
   // Access: every room is invite-only (product decision, 2026-11-07):
@@ -317,7 +329,7 @@ export class Room extends DurableObject {
   // finish overnight with nobody reading it.
   async alarm() {
     let saved = "";
-    try { const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray() as Pick<CfgRow, "v">[])[0]; saved = r ? String(r.v || "") : ""; } catch (e) {}
+    try { const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray() as Pick<CfgRow, "v">[])[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
     if (room && !this.roomName) this.roomName = room;
     // One match's bad state must not stop every clock in the room:
@@ -396,7 +408,7 @@ export class Room extends DurableObject {
     };
     client.close = () => {
       this.clients.delete(client);
-      writer.close().catch(() => {});
+      writer.close().catch(() => {}); // the stream may have closed already
     };
     client.send("retry: 2000\n\n");
     if (after !== null && streamWants(client, "message")) {
@@ -417,7 +429,7 @@ export class Room extends DurableObject {
         // Time alone moves state (a stake entering its window, the digest
         // deadline passing): re-check on the ping cadence so subscribers
         // see those transitions without any room activity.
-        try { this.emitState(); } catch (e) {}
+        try { this.emitState(); } catch (e) { warn("state.emit", e, { room: this.roomName }); }
         // this runs only while its interval is set, so pinger holds its id
         if (!this.clients.size) { clearInterval(this.pinger as number); this.pinger = null; }
       }, 15000);

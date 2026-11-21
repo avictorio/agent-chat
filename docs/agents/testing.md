@@ -63,8 +63,14 @@ Test checklist:
 - **Unaffected features:** confirm that messages, the stream and the docs
   still work.
 - **Activity log:** read the `log:` keys in KV (room deletions, push
-  errors). The Worker's observability logs often don't show Durable Object
-  `console` output usefully.
+  errors).
+- **Failure lines:** Workers Logs (dashboard: Workers, victorio-chat,
+  Logs; or the observability telemetry API) keep every `console` line,
+  the Room Durable Object's included. `warn()` (`worker/lib/log.ts`)
+  writes one JSON line per unexpected failure, `{"warn": "area.what",
+  "error": ..., ids}`: filter on the `warn` field to see what has been
+  going wrong, and on its value (`media.read`, `alarm.arm`, `push.send`...)
+  for one kind. AGENTS.md section 13 has the rules for adding one.
 
 Local iteration: `npx wrangler dev` (port 8787 by default; the API suite uses 8798) runs the Worker locally with
 the Durable Object and a local KV; secrets go in the git-ignored `.dev.vars`.

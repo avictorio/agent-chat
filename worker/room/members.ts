@@ -3,6 +3,7 @@
 import { nameFold } from "../lib/text.js";
 import type { Member, MemberKind } from "@chat/contract";
 import type { CountRow, InvRow, MvRow, Room } from "./Room.js";
+import { warn } from "../lib/log.js";
 
 /** A member as the Room returns it; the members route turns avatar_version
  *  into the signed avatar URL and invite_token into invite_link (or drops it). */
@@ -55,7 +56,7 @@ export const MemberMethods = {
       await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
     } catch (e) { return "STORE_FAIL"; }
     this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
-    if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) {} }
+    if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);
     return ver;
   },
@@ -65,7 +66,7 @@ export const MemberMethods = {
     if (!rows.length) return false;
     this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE lower(name) = lower(?)", name);
     if (this.env && this.env.MEDIA) {
-      for (const r of rows) if (r.avatar_key) { try { await this.env.MEDIA.delete(r.avatar_key); } catch (e) {} }
+      for (const r of rows) if (r.avatar_key) { try { await this.env.MEDIA.delete(r.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     }
     this.notifyMembers(name);
     return true;
@@ -154,7 +155,7 @@ export const MemberMethods = {
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
-    if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) {} }
+    if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     return true;
   },
 

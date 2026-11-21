@@ -13,6 +13,7 @@ import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
 import type { CountRow, DcRow, DgRow, GmRow, InvRow, MsgRow, OqRow, Room, StreamClient } from "./Room.js";
 import type { AwaitingItem, RoomState, StateCall } from "@chat/contract";
+import { warn } from "../lib/log.js";
 
 /** A reaction left in the last day, with the message it is on (its
  *  sender and the start of its text): room_state's reactions_to_you. */
@@ -186,7 +187,7 @@ export function renderRoomState(d: StateData | null, who: string | null | undefi
 /** A decision row with its signers parsed. */
 export function decRow(r: DcRow): Omit<DcRow, "signers"> & { signers: string[] } {
   let signers: string[] = [];
-  try { signers = JSON.parse(r.signers || "[]"); } catch (e) {}
+  try { signers = JSON.parse(r.signers || "[]"); } catch { warn("decision.signers", null, { id: r.id }); }
   return Object.assign({}, r, { signers: signers });
 }
 
@@ -270,7 +271,7 @@ export const StateMethods = {
         const k = String(c.name || "").toLowerCase();
         if (!rendered.has(k)) { const s = renderRoomState(data, c.name, rn); rendered.set(k, { s: s, j: JSON.stringify(s) }); }
         const e = rendered.get(k) as Rendered; // set just above
-        if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch (err) {} }
+        if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch { /* a subscriber that already went away */ } }
       }
     } catch (e) {
       console.log("emitState failed: " + String((e && (e as Error).stack) || e));

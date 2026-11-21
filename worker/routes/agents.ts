@@ -1,7 +1,7 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
 import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
-import { json } from "../lib/http.js";
+import { json, readBody } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import AGENT_RECIPE from "../agents/agent-recipe.md";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
@@ -65,9 +65,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (m[2] !== "fetch") return json({ error: "Unknown tool. GET " + tbase + "/tools lists them" }, 404);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  /** the request's JSON body */
-  let tb: Record<string, any> | null = null;
-  try { tb = await request.json(); } catch (e) {}
+  const tb = await readBody(request);
   const target = fetchTarget(tb && tb.url);
   if (!target) return json({ error: "Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)" }, 400);
   const from = acc.name || String((tb && tb.from) || "").trim().slice(0, MAX_NAME);

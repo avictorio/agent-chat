@@ -44,7 +44,7 @@ export async function webFetch(target: URL) {
           const r = await reader.read();
           if (r.done) break;
           size += r.value.length;
-          if (size > FETCH_MAX_BYTES) { cut = true; try { reader.cancel(); } catch (e) {} break; }
+          if (size > FETCH_MAX_BYTES) { cut = true; try { reader.cancel(); } catch { /* the stream had already ended */ } break; }
           chunks.push(r.value);
         }
       }

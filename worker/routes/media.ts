@@ -10,10 +10,11 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { CORS, json } from "../lib/http.js";
+import { CORS, json, readBody } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
+import { warn } from "../lib/log.js";
 
 // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
 // reading takes the header or a signed URL (?invite= no longer authenticates media reads).
@@ -50,7 +51,9 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
           if (obj) { aheaders["Content-Length"] = String(obj.size); return new Response(obj.body, { headers: aheaders }); }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      warn("media.read", e, { room, kind: "avatar" });
+    }
     return json({ error: "No avatar" }, 404);
   }
   let who;
@@ -69,9 +72,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to 2 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** the request's JSON body */
-    let body: Record<string, any> | null = null;
-    try { body = await request.json(); } catch (e) {}
+    const body = await readBody(request);
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
   } else {
@@ -111,9 +112,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
   let buf, putTranscript;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** the request's JSON body */
-    let body: Record<string, any> | null = null;
-    try { body = await request.json(); } catch (e) {}
+    const body = await readBody(request);
     const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
     if (body && body.transcript !== undefined) putTranscript = body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
@@ -152,9 +151,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** the request's JSON body */
-    let body: Record<string, any> | null = null;
-    try { body = await request.json(); } catch (e) {}
+    const body = await readBody(request);
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
   } else {
@@ -192,9 +189,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** the request's JSON body */
-    let body: Record<string, any> | null = null;
-    try { body = await request.json(); } catch (e) {}
+    const body = await readBody(request);
     const s = String((body && (body.video || body.video_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
   } else {

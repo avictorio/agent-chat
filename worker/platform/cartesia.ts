@@ -27,7 +27,9 @@ export async function cartesiaDelete(env: Env, voiceId: string | null | undefine
       method: "DELETE",
       headers: { "X-API-Key": env.CARTESIA_API_KEY, "Cartesia-Version": "2025-04-16" },
     });
-  } catch (e) {}
+  } catch {
+    // best effort (above): a voice left behind at Cartesia breaks nothing here
+  }
 }
 
 // Synthesize text in a cloned voice with Cartesia; returns the MP3 bytes.
