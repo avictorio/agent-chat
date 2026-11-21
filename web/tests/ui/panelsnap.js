@@ -4,7 +4,9 @@
 // records the card board and the arena's Game and History tabs as a
 // normalised tree (attributes sorted; the turn banner, clock bars and 3D
 // scene left out, since they move with the clock). Writes one JSON file;
-// compare two runs with `node tests/ui/panelsnap.js diff a.json b.json`.
+// compare two runs with `node tests/ui/panelsnap.js diff a.json b.json`
+// (it compares the snapshots both files have). ONLY_GAMES=tr,au snapshots
+// just the states of those fixtures (the first key of each state).
 // Not part of the suite: run it before and after a change.
 const { chromium, fresh, setup, useClock, settle, noGl } = require('./harness');
 const fs = require('fs');
@@ -76,7 +78,8 @@ async function snapOne(browser, state, mode) {
 async function main() {
   const file = process.argv[2] || 'panelsnap.json';
   const jobs = [];
-  for (const s of STATES) for (const m of MODES) jobs.push([s, m]);
+  const only = process.env.ONLY_GAMES ? process.env.ONLY_GAMES.split(',') : null;
+  for (const s of STATES) if (!only || only.includes(s[0])) for (const m of MODES) jobs.push([s, m]);
   const result = {};
   const N = Math.max(1, +process.env.JOBS || 6);
   let next = 0;
@@ -99,7 +102,9 @@ function diff(a, b) {
   const A = JSON.parse(fs.readFileSync(a, 'utf8'));
   const B = JSON.parse(fs.readFileSync(b, 'utf8'));
   let n = 0;
-  for (const k of new Set([...Object.keys(A), ...Object.keys(B)])) {
+  const both = Object.keys(A).filter((k) => k in B);
+  console.log('panelsnap diff: comparing ' + both.length + ' snapshot(s) both files have');
+  for (const k of both) {
     for (const part of ['card', 'arena', 'history', 'error']) {
       const x = (A[k] || {})[part];
       const y = (B[k] || {})[part];
