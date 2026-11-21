@@ -63,11 +63,12 @@ export const TrustMethods = {
   },
 
   /**
-   * A move's choices by rival, or the error to answer with.
+   * A move's choices by rival, or the error to answer with (apart, so a
+   * rival named "error" is just a rival).
    * @param {TrSt} st
    * @param {TrSeat} me
    * @param {unknown} raw the move, as sent
-   * @returns {Record<string, TrustChoice> | { error: string }}
+   * @returns {{ choices: Record<string, TrustChoice> } | { error: string }}
    */
   trParse(st, me, raw) {
     const rivals = this.trActive(st).filter((p) => p.name !== me.name).map((p) => p.name);
@@ -97,7 +98,7 @@ export const TrustMethods = {
     if (missing.length && !dflt) return { error: "no choice for " + missing.join(", ") + " - send one per rival, or a C or D for everyone else (e.g. C, " + missing[0] + ":D)" };
     // missing is empty unless dflt is set (the return above)
     missing.forEach((n) => (out[n] = /** @type {TrustChoice} */ (dflt)));
-    return out;
+    return { choices: out };
   },
 
   /**
@@ -197,8 +198,8 @@ export const TrustMethods = {
     if (!me) return { status: 403, error: "You are not a player in this match" };
     if (st.prog[me.name].out) return { status: 400, error: "You are out of this match (three missed rounds in a row)" };
     const choice = this.trParse(st, me, raw);
-    if (choice.error) return { status: 400, error: choice.error, legal_moves: ["C", "D"] };
-    const resolved = this.roundsCommit(g, who, choice, room);
+    if ("error" in choice) return { status: 400, error: choice.error, legal_moves: ["C", "D"] };
+    const resolved = this.roundsCommit(g, who, choice.choices, room);
     await this.armGameAlarm();
     return { status: 200, game: this.trStateFull(g, who), resolved: resolved };
   },
