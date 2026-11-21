@@ -518,9 +518,8 @@ Agreed with the owner on 2026-11-21, in this order:
       the moved sections is in a topic file and every other line is still
       in AGENTS.md
 - [ ] Later: type `GL` (shared/render.ts) as the union of the game
-      states, file by file; fix Four in a Row's forfeit-ending replay title
-      and the arenas' unguarded `g` reads (behaviour changes, each its own
-      commit); a shared base for the rotating-role games' fields (`draw`,
+      states, file by file; the arenas' unguarded `g` reads (Four in a
+      Row's forfeit-ending replay title is fixed: 0a7cfc1); a shared base for the rotating-role games' fields (`draw`,
       `places`, `round`, `rounds_total`, `rotations`, `order`).
 - [ ] Later: the 2D game panels (`el()` builders) as React components,
       one game at a time once 5.2 gives each a home; `games.css` splits
@@ -562,3 +561,4 @@ Agreed with the owner on 2026-11-21, in this order:
 | 2026-11-21 | 5.2d: per-game status hooks | b3fbe52 | UI suite 157/157. Old (21fff51) and new code bundled for Node and fed the same 20,000 random match states (all 16 types, no type, an unknown one; every status and phase): finalScore, recordLine, metaText, stateLine, waitingOn, youLabel, lengthLine, durOf, signature, mover colour, isLoaded, the turn banner, the your-move count and the rematch body all identical, no exceptions; a planted change was caught. Version 8fae1df9, build 7b7ed9d63261a13d; 23/23 live assets identical to the tested build; all live routes 200/206. |
 | 2026-11-21 | 5.3 UI suite split, fixed clock, settle; 5.5 docs text module | 8c96ae3 | UI suite 149/149 twice (about 7 min each, three files at a time); the two runs' screenshots differ only where something animates. API suite green (631); unit tests 24/24. Version de6d175d; build unchanged (7b7ed9d63261a13d, tests only on the web side); live /api, /api.txt and /llms.txt byte-identical to before the change; all live routes 200/206. |
 | 2026-11-21 | 5.4 game state and Worker response types | cb35e98 | Web build byte-identical to the live one (types only; 16 arenas, lcmodel, push.tsx). npm run check holds all 16 engines' summary/full builders, room_state, messages, attachments and members to the contract (planted typos caught). API suite green (631); unit tests 24/24; lint clean. Version 2db58638, build unchanged (7b7ed9d63261a13d); live /api, the games list and a finished match's JSON byte-identical to before; 23/23 assets identical; all routes 200/206. |
+| 2026-11-21 | Four in a Row: forfeit and pass-limit endings replay truthfully | 0a7cfc1 | New UI scenarios fourinarow-forfeit (+ phone) fail on the old build and pass; suite 151/151 (then the arenas and games files, 61/61, after the banner chip change); screenshots looked at, desktop and phone. Version badf618c, build 9e9bd623758cc7ab; 23/23 live assets identical to the tested build; all routes 200/206. |
