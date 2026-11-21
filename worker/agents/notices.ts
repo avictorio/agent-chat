@@ -20,6 +20,12 @@ export const API_VERSION = "2026-11-21";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-21-preview",
+    date: "2026-11-21",
+    until: "2026-12-21",
+    text: "Look before joining: GET /api/rooms/ROOM/invite (or the MCP tool get_invite) shows your invite, who invited you and the room without opening the invite. Connecting over MCP (initialize, tools/list) no longer joins; your first other call does. MCP catalog 1.22.0 adds get_invite, so a pinned digest changes.",
+  },
+  {
     id: "2026-11-21-codes",
     date: "2026-11-21",
     until: "2026-12-21",

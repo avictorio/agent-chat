@@ -115,9 +115,93 @@ async function changesFeed(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+async function preview(ctx) {
+  const { req, check, SUF } = ctx;
+  const room = 'apitest-preview-' + SUF;
+  const R = '/api/rooms/' + room;
+  const rpc = (token, body) => req('POST', R + '/mcp', { token, json: body });
+  await req('POST', R, { owner: true });
+  const mk = async (name, kind) => (await req('POST', R + '/invites', { owner: true, json: { name, kind } })).json.token;
+  const H = await mk('PrevH', 'human');
+  await req('GET', R + '/messages?limit=1', { token: H }); // H joins
+  await req('PUT', R + '/constitution', { token: H, json: { text: 'We plan the Lima trip here. Be kind.' } });
+  const statusOf = async (name) => {
+    const r = await req('GET', R + '/members', { token: H });
+    const row = ((r.json && r.json.members) || []).find((m) => m.name === name);
+    return row ? { status: row.status, last_seen: row.last_seen || null } : null;
+  };
+
+  // REST preview: a fresh agent invite stays unused
+  const P = await mk('PrevP', 'agent');
+  let r = await req('GET', R + '/invite', { token: P });
+  const j = r.json || {};
+  check('preview: answers with the invite, unopened', r.status === 200 && j.invite && j.invite.name === 'PrevP' && j.invite.kind === 'agent' && j.invite.status === 'unused' && j.opened === false && j.invite.invited_by === null, r.status + ' ' + JSON.stringify(j.invite));
+  check('preview: purpose is the start of the constitution', j.purpose === 'We plan the Lima trip here. Be kind.', JSON.stringify(j.purpose));
+  check('preview: members lists who joined (name and kind)', Array.isArray(j.members) && j.members.length === 1 && j.members[0].name === 'PrevH' && j.members[0].kind === 'human' && Object.keys(j.members[0]).length === 2, JSON.stringify(j.members));
+  check('preview: an agent invite carries its onboarding block', typeof j.agent_onboarding === 'string' && j.agent_onboarding.includes(P), String(j.agent_onboarding).slice(0, 60));
+  check('preview: next points at the docs, MCP and messages', j.next && /\/llms\.txt$/.test(j.next.docs) && /\/mcp$/.test(j.next.mcp), JSON.stringify(j.next));
+  let st = await statusOf('PrevP');
+  check('preview: the member stays unused, never seen', st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));
+  r = await req('GET', R + '/invite', { headers: { Authorization: 'Bearer ' + P } });
+  check('preview: takes the Bearer header', r.status === 200 && r.json.invite.name === 'PrevP', r.status);
+
+  // refusals: the same status, sentence and code as a read
+  for (const [label, opts] of [['no token', {}], ['unknown token', { token: 'prev-bogus' }]]) {
+    const a = await req('GET', R + '/invite', opts);
+    const b = await req('GET', R + '/messages?limit=1', opts);
+    check('preview: ' + label + ' refuses like a read', a.status === b.status && a.json.error === b.json.error && a.json.code === b.json.code && !!a.json.code, a.status + ' ' + a.json.code + ' vs ' + b.status + ' ' + b.json.code);
+  }
+  const V = await mk('PrevGone', 'agent');
+  await req('DELETE', R + '/invites/' + V, { owner: true });
+  r = await req('GET', R + '/invite', { token: V });
+  check('preview: a revoked token gets 403 invite_revoked', r.status === 403 && r.json.code === 'invite_revoked', r.status + ' ' + r.json.code);
+  r = await req('GET', R + '/invite', { owner: true });
+  check('preview: the owner key alone has no invite (401 invite_missing)', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + r.json.code);
+  r = await req('GET', '/api/rooms/apitest-nope-' + SUF + '/invite', { token: P });
+  check('preview: a missing room is 404', r.status === 404, r.status);
+  r = await req('POST', R + '/invite', { token: P, json: {} });
+  check('preview: only GET', r.status === 405, r.status);
+
+  // MCP: connecting does not join
+  const Q = await mk('PrevQ', 'agent');
+  r = await rpc(Q, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+  await rpc(Q, { jsonrpc: '2.0', method: 'notifications/initialized' });
+  r = await rpc(Q, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  const tools = (r.json && r.json.result && r.json.result.tools) || [];
+  const gi = tools.find((t) => t.name === 'get_invite');
+  check('mcp: catalog 1.22.0 lists get_invite, read-only', r.json.result.catalog.version === '1.22.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
+  r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
+  const gr = r.json && r.json.result && r.json.result.structuredContent;
+  check('mcp: get_invite returns the preview', !!gr && gr.invite && gr.invite.name === 'PrevQ' && gr.invite.status === 'unused', JSON.stringify(r.json).slice(0, 200));
+  st = await statusOf('PrevQ');
+  check('mcp: initialize, notifications, tools/list, a batch and get_invite leave the invite unused', st && st.status === 'unused' && st.last_seen === null, JSON.stringify(st));
+  r = await rpc(Q, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'whoami', arguments: {} } });
+  st = await statusOf('PrevQ');
+  check('mcp: the first other tool call opens it', st && st.status === 'active', JSON.stringify(st));
+  const B = await mk('PrevB', 'agent');
+  r = await rpc(B, [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } }, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_room_state', arguments: {} } }]);
+  st = await statusOf('PrevB');
+  check('mcp: a batch with tool calls opens it', Array.isArray(r.json) && r.json.length === 3 && st && st.status === 'active', JSON.stringify(st));
+  r = await rpc(V, { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
+  check('mcp: get_invite refuses a revoked token with -32001 invite_revoked', r.json.error && r.json.error.code === -32001 && r.json.error.data.code === 'invite_revoked', JSON.stringify(r.json.error));
+  r = await rpc('prev-bogus', { jsonrpc: '2.0', id: 9, method: 'no/such' });
+  check('mcp: an unknown method with a bad token still gets -32001', r.json.error && r.json.error.code === -32001, JSON.stringify(r.json.error));
+
+  // REST: the first write opens an unused invite too
+  const W = await mk('PrevW', 'agent');
+  await req('POST', R + '/messages', { token: W, json: { text: 'first a write' } });
+  st = await statusOf('PrevW');
+  check('preview: a first write opens the invite', st && st.status === 'active', JSON.stringify(st));
+
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
   await codes(ctx);
   await changesFeed(ctx);
+  await preview(ctx);
 }
 
 module.exports = { inviteApi };

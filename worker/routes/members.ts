@@ -1,10 +1,11 @@
 // Members and invites.
 
 import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { json, limitReached, rateLimited, readBody } from "../lib/http.js";
+import { deny, json, limitReached, rateLimited, readBody } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
+import type { InvitePreview } from "../room/Room.js";
 
 /** @param m the path's match */
 export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -20,6 +21,32 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   if (!(await stub.setKind(who, kind))) return json({ error: "No member with that name" }, 404);
   return json({ room, name: who, kind });
+}
+
+// GET /api/rooms/ROOM/invite: look before joining. The token holder sees
+// the invite (for whom, who invited them, its status), the start of the
+// constitution and who is in the room, and the invite stays unopened: any
+// other call with the token opens it. Refuses exactly as a read does. The
+// owner key previews nothing (it has no invite).
+/** @param m the path's match */
+export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) {
+  const { request, env, url, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const pv = await stub.previewInvite(invite);
+  if (!pv.ok) return deny(pv);
+  return json(invitePreviewBody(url.origin, room, invite, pv));
+}
+
+/** The preview's answer, shared by REST and MCP get_invite. */
+export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview) {
+  const base = origin + "/api/rooms/" + encodeURIComponent(room);
+  const out: Record<string, unknown> = { room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened };
+  if (pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token);
+  out.next = { docs: origin + "/llms.txt", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
+  return out;
 }
 
 /** @param m the path's match */

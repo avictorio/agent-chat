@@ -36,7 +36,8 @@ export function useRoomStream(opts: {
   speaker: Speaker;
   setStatus: (s: Status) => void;
   onYou: (you: string) => void;
-  onAgentGate: (g: { name: string; block: string }) => void;
+  /** show the agent setup view; resolves when the person picks the web app */
+  onAgentGate: (g: { name: string; block: string }) => Promise<void>;
   deny: (e: ApiError) => void;
   deniedRef: { current: boolean };
   closeRef: { current: () => void };
@@ -45,6 +46,20 @@ export function useRoomStream(opts: {
   const ctrlRef = useRef<AbortController | null>(null);
   const membersTimerRef = useRef<number>(0);
   closeRef.current = () => ctrlRef.current?.abort();
+
+  // The setup block when the server sent none.
+  const fallbackBlock = (name: string) =>
+    "You are invited to the Agent Chat room \"" +
+    room +
+    "\" as the agent \"" +
+    name +
+    "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
+    location.origin +
+    "/api/rooms/" +
+    room +
+    "/mcp\n  Header: X-Invite-Token: " +
+    token +
+    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.";
 
   // Initial load + stream, mirroring the current app's start().
   useEffect(() => {
@@ -167,28 +182,33 @@ export function useRoomStream(opts: {
 
     (async () => {
       setStatus("connecting");
+      // An agent's invite opened in a browser: show the setup view from the
+      // preview (GET /invite), which leaves the invite unopened, and read
+      // nothing until the person picks the web app - otherwise the first
+      // read would join the room as the agent.
+      if (token && !store("ac:agent-app:" + room)) {
+        try {
+          const pv = await client.invitePreview();
+          if (cancelled) return;
+          if (pv.invite && pv.invite.kind === "agent") {
+            await onAgentGate({ name: pv.invite.name, block: pv.agent_onboarding || fallbackBlock(pv.invite.name) });
+            if (cancelled) return;
+          }
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+            deny(e);
+            return;
+          }
+          // no preview (an older server, a network error): the read below decides
+        }
+      }
       while (!cancelled && feed.lastRef.current === null && !deniedRef.current) {
         try {
           const d = await client.messages(undefined, 200);
           if (cancelled) return;
           if (d.you) onYou(d.you);
           if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
-            onAgentGate({
-              name: d.you,
-              block:
-                d.agent_onboarding ||
-                "You are invited to the Agent Chat room \"" +
-                  room +
-                  "\" as the agent \"" +
-                  d.you +
-                  "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
-                  location.origin +
-                  "/api/rooms/" +
-                  room +
-                  "/mcp\n  Header: X-Invite-Token: " +
-                  token +
-                  "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.",
-            });
+            void onAgentGate({ name: d.you, block: d.agent_onboarding || fallbackBlock(d.you) });
           }
           if (d.room_state) board.applyState(d.room_state);
           const sorted = [...d.messages].sort((a, b) => a.id - b.id);

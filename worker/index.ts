@@ -35,7 +35,7 @@ import {
 } from "./routes/test-hooks.js";
 import { pushKeyRoute, pushRoute } from "./routes/push.js";
 import { changesRoute, mcpRoute, recipeRoute, toolsRoute } from "./routes/agents.js";
-import { invitesRoute, memberRoute } from "./routes/members.js";
+import { invitePreviewRoute, invitesRoute, memberRoute } from "./routes/members.js";
 import { boardRoute, constitutionRoute, questionsRoute } from "./routes/board.js";
 import { gamesRoute, sketchImageRoute } from "./routes/games.js";
 import { artifactRoute, audioRoute, avatarRoute, imageRoute, videoRoute } from "./routes/media.js";
@@ -155,6 +155,9 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/members\/([^\/]+)\/?$/);
     if (m) { const r = await memberRoute(rc, m); if (r !== undefined) return r; }
+
+    m = path.match(/^\/api\/rooms\/([^\/]+)\/invite\/?$/);
+    if (m) { const r = await invitePreviewRoute(rc, m); if (r !== undefined) return r; }
 
     m = path.match(/^\/api\/rooms\/([^\/]+)\/invites(?:\/([^\/]+))?\/?$/);
     if (m) { const r = await invitesRoute(rc, m); if (r !== undefined) return r; }

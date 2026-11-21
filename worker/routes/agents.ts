@@ -17,6 +17,8 @@ import {
 } from "../agents/mcp.js";
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
+import { invitePreviewBody } from "./members.js";
+import type { InviteLookup, Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document, plus the watcher
 // script it installs, served from single sources in worker/ with the room,
@@ -107,7 +109,14 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  const acc = await stub.access(invite, owner);
+  // Connecting is not joining (Phase A): ping, initialize and notifications
+  // touch no invite; tools/list, an unknown method and get_invite check the
+  // token without opening it; any other tools/call runs access(), which
+  // opens it. Each runs at most once per HTTP request, batches included.
+  let accP: ReturnType<typeof stub.access> | null = null;
+  const getAcc = () => accP || (accP = stub.access(invite, owner));
+  let checkP: Promise<{ ok: true } | Refusal> | null = null;
+  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: Record<string, any> | null = null;
   try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
@@ -124,12 +133,22 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       const cat = mcpCatalog();
       return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, changes: changesBody(url.origin), instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates real files (any type, any size, resumable) to upload URLs that need no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token or as Authorization: Bearer TOKEN, and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again. Site changes (deprecations with dates, new features) are listed in this result's changes block and at GET /api/changes." });
     }
-    if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
+    if (req.method !== "tools/call") {
+      const c = await checkToken();
+      if (!c.ok) return fail(-32001, c.error, { code: c.code });
+    }
     if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
     if (req.method === "tools/call") {
       const tname = req.params && req.params.name ? String(req.params.name) : "";
       const targs = (req.params && req.params.arguments) || {};
       if (!tname) return fail(-32602, "tools/call needs params.name");
+      if (tname === "get_invite") {
+        const pv = await stub.previewInvite(invite);
+        if (!pv.ok) return fail(-32001, pv.error, { code: pv.code });
+        return ok(mcpOk(invitePreviewBody(url.origin, room, invite, pv)));
+      }
+      const acc = await getAcc();
+      if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
       const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
       try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
       catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return ok(mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined)); }

@@ -61,6 +61,17 @@ export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "ki
 /** A refused credential: the status, its code and its sentence. */
 export type Refusal = { ok: false, status: number, code: string, error: string };
 export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
+/** An invite seen without opening it. status is an open set: unused and
+ *  active today, more later. */
+export type InvitePreview = {
+  ok: true,
+  invite: { name: string, kind: "human" | "agent", status: string, invited_by: string | null, invited: number, joined: number | null },
+  /** the start of the room's constitution, or null */
+  purpose: string | null,
+  /** the members who have opened their invites */
+  members: { name: string, kind: "human" | "agent" }[],
+  opened: boolean,
+};
 export type CfgRow = { k: string, v: string };
 /** tf: one tool fetch. */
 export type TfRow = { ts: number, url: string | null };
@@ -324,6 +335,25 @@ export class Room extends DurableObject {
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };
     return { ok: true, row: row };
+  }
+
+  // Look at an invite without opening it (GET /invite, MCP get_invite):
+  // the same lookup and refusals as access(), but nothing is marked used or
+  // seen - previewing is not joining, and it never counts as presence.
+  previewInvite(token: string | null | undefined): Refusal | InvitePreview {
+    const l = this.lookupInvite(token);
+    if (!l.ok) return l;
+    const r = l.row;
+    const con = (this.sql.exec("SELECT text FROM con ORDER BY v DESC LIMIT 1").toArray() as { text: string }[])[0];
+    const members = (this.sql.exec("SELECT name, kind FROM inv WHERE revoked IS NULL AND used IS NOT NULL ORDER BY created").toArray() as Pick<InvRow, "name" | "kind">[])
+      .map((m) => ({ name: m.name, kind: (m.kind === "human" ? "human" : "agent") as "human" | "agent" }));
+    return {
+      ok: true,
+      invite: { name: r.name, kind: (r.kind === "human" ? "human" : "agent") as "human" | "agent", status: r.used ? "active" : "unused", invited_by: r.invited_by || null, invited: r.created, joined: r.used || null },
+      purpose: con && con.text ? con.text.slice(0, 280) : null,
+      members: members,
+      opened: !!r.used,
+    };
   }
 
   // Access: every room is invite-only (product decision, 2026-11-07):

@@ -41,6 +41,16 @@ export async function fetchBuild(): Promise<string | null> {
   }
 }
 
+/** GET /api/rooms/ROOM/invite: an invite seen without opening it. */
+export type InvitePreviewResponse = {
+  room: string;
+  invite: { name: string; kind: "human" | "agent"; status: string; invited_by: string | null; invited: number; joined: number | null };
+  purpose: string | null;
+  members: { name: string; kind: "human" | "agent" }[];
+  opened: boolean;
+  agent_onboarding?: string;
+};
+
 /** A site notice from GET /api/changes. */
 export type SiteNotice = { id: string; date: string; text: string; until: string };
 export type ChangesFeed = { api_version: string; catalog_version: string; url: string; notices: SiteNotice[] };
@@ -81,6 +91,11 @@ export class RoomClient {
       throw new ApiError(res.status, data.error || "Request failed: " + res.status);
     }
     return data;
+  }
+
+  /** Look at this client's invite without opening it (GET /invite). */
+  invitePreview(): Promise<InvitePreviewResponse> {
+    return this.call<InvitePreviewResponse>("/invite");
   }
 
   messages(after?: number, limit?: number): Promise<MessagesResponse> {

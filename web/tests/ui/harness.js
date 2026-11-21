@@ -486,6 +486,12 @@ async function setup(page, S, calls) {
     if (p === '/api/build') return J({ build: S.behind ? 'uitestbuild2' : 'uitestbuild1' });
     if (p === '/api/changes') return J({ api_version: '2026-11-21', catalog_version: '1.21.0', url: 'https://chat.victorio.cloud/api/changes', notices: S.notices || [] });
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
+    if (p.endsWith('/invite') && m === 'GET') {
+      (S.hits = S.hits || []).push('GET /invite');
+      return J(S.agentYou
+        ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list. Call whoami and get_room_state first.' }
+        : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
+    }
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\nevent: state\ndata: ' + JSON.stringify({ type: 'state', room: 'demo', room_state: roomState(S) }) + '\n\n' });
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
     if (/\/messages\/\d+\/doc$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Probe doc\n\nRendered **body** here.' });
@@ -528,6 +534,7 @@ async function setup(page, S, calls) {
     if ((am = p.match(/\/messages\/(\d+)$/)) && m === 'DELETE') { S.drafts = (S.drafts || []).filter((x) => x.id !== +am[1]); S.msgs = S.msgs.filter((x) => x.id !== +am[1]); return J({ room: 'demo', deleted: +am[1] }); }
     if (p.endsWith('/messages') && m === 'POST' && body.draft) { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; (S.drafts = S.drafts || []).push(x); return J(Object.assign({ draft: true }, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
+    if (p.endsWith('/messages') && m === 'GET') (S.hits = S.hits || []).push('GET /messages');
     if (p.endsWith('/messages')) return J(S.agentYou
       ? { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
       : { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });

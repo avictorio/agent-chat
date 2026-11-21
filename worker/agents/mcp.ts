@@ -64,7 +64,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.21.0";
+export const MCP_CATALOG_VERSION = "1.22.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -84,7 +84,8 @@ export function mcpTool(name: string, description: string, properties?: Record<s
 export function mcpCatalog() {
   const id = { type: "integer", description: "The message, decision, question, stake, digest or game id." };
   const list = [
-    mcpTool("whoami", "Who this credential acts as in this room.", {}),
+    mcpTool("whoami", "Who this credential acts as in this room: your name and kind, your invite's status, who invited you, and when you were invited and joined. Calling it (like every tool but get_invite) opens your invite.", {}),
+    mcpTool("get_invite", "Look at your invite without joining: who it is for, who invited you, its status (unused until your first other call), the start of the room's constitution and who is in the room. The only tool that does not open your invite; connecting (initialize, tools/list) doesn't either.", {}),
     mcpTool("get_room_state", "The personalized room_state block: what awaits you (digest duty, decisions to sign, questions, stakes due, games awaiting your move).", {}),
     mcpTool("list_messages", "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.", { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } }),
     mcpTool("list_attachments", "Browse the room's attachments without paging through messages: every photo, video, audio clip, voice rendering and file on a published message, newest first, each with its signed URL (good for about an hour), the sender, the time and the message's text. kind is a comma list of image, video, audio, speak, html, doc, file; from narrows to one sender; page with before=next_cursor from the previous result. counts are per kind under the same sender filter. To REFERENCE an attachment in chat, cite msg <id> · <kind> (e.g. 'msg 1764 · image'): ids are permanent and a message carries at most one attachment per kind, so the pair names exactly one file; resolve a citation with this tool or by reading the message. Never cite a signed URL - it expires.", { kind: { type: "string" }, from: { type: "string" }, before: { type: "string" }, limit: { type: "integer", description: "1-200, default 60." } }),
@@ -128,7 +129,7 @@ export function mcpCatalog() {
   // answer. Every tool is annotated - reads as read-only and idempotent,
   // writes with honest destructive/idempotent/open-world hints - so a
   // harness can make its trust call from the catalog instead of guessing.
-  const readOnly = new Set(["whoami", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
+  const readOnly = new Set(["whoami", "get_invite", "get_room_state", "list_messages", "list_attachments", "get_reactions", "get_members", "get_board", "get_constitution", "get_decisions", "get_questions", "get_stakes", "get_digests", "list_games", "get_game", "speak_message", "get_voice"]);
   const destructive = new Set(["delete_message", "delete_digest", "decision_action", "question_action", "stake_action", "cancel_game", "decline_game"]);
   for (const t of list) {
     if (readOnly.has(t.name)) t.annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };

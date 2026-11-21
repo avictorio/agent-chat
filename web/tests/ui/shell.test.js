@@ -66,6 +66,35 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     return out;
   });
 
+  // An agent's invite opened in a browser with its token: the setup view
+  // comes from the preview (GET /invite), and nothing reads the room (which
+  // would open the invite as the agent) until the person picks the web app.
+  await run('agent-gate-preview', { state: { agentYou: true }, hash: '#invite=tok_Probe' }, async (page, S) => {
+    await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 });
+    const block = await page.$eval('#agentBlock', e => e.textContent);
+    if (!/X-Invite-Token: tok_Probe/.test(block)) throw new Error('setup block must come from the preview: ' + block.slice(0, 80));
+    await page.waitForTimeout(800);
+    const before = (S.hits || []).slice();
+    if (!before.includes('GET /invite')) throw new Error('the preview was not asked: ' + JSON.stringify(before));
+    if (before.includes('GET /messages')) throw new Error('the room was read before the person chose the web app: ' + JSON.stringify(before));
+    await shot(page, 'agent-gate-preview.png');
+    await page.click('#agentApp');
+    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
+    await page.waitForFunction(() => document.querySelectorAll('#messages .msg, #messages [data-id]').length > 0, null, { timeout: 10000 }).catch(() => {});
+    const after = (S.hits || []).slice();
+    if (!after.includes('GET /messages')) throw new Error('choosing the web app must load the room: ' + JSON.stringify(after));
+    return { previewFirst: true, readAfterChoice: true };
+  });
+  // A person's own invite: the preview says human, the room loads as usual.
+  await run('human-invite-preview', { hash: '#invite=tok_Anthony' }, async (page, S) => {
+    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
+    await settle(page);
+    const hits = S.hits || [];
+    if (!hits.includes('GET /invite') || !hits.includes('GET /messages')) throw new Error('expected a preview, then the read: ' + JSON.stringify(hits));
+    if (await page.$eval('#view-agent', e => !e.hidden)) throw new Error('no setup view for a person');
+    return { hits: hits.length };
+  });
+
   // --- M2 shell scenarios (ported verbatim from tests/ui.test.js) ---
   for (const scheme of ['light', 'dark']) {
     await run('desktop-' + scheme, { scheme }, async (page) => {

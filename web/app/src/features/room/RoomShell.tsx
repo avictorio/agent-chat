@@ -86,6 +86,8 @@ export function RoomShell({ room }: { room: string }) {
   const [lockedText, setLockedText] = useState<string | null>(null);
   const [avatarName, setAvatarName] = useState<string | null>(null);
   const [gate, setGate] = useState<{ name: string; block: string } | null>(null);
+  // resolves the stream's wait on the agent setup view (useRoomStream)
+  const gateDoneRef = useRef<(() => void) | null>(null);
   const [copied, setCopied] = useState(false);
   const inst = useInstall();
   usePullToRefresh();
@@ -286,7 +288,11 @@ export function RoomShell({ room }: { room: string }) {
       setNameState({ value: you, locked: true });
       store("chat-you:" + room, you);
     },
-    onAgentGate: (g) => setGate(g),
+    onAgentGate: (g) =>
+      new Promise<void>((resolve) => {
+        gateDoneRef.current = resolve;
+        setGate(g);
+      }),
     deny,
     deniedRef,
     closeRef: streamCloseRef,
@@ -491,6 +497,8 @@ export function RoomShell({ room }: { room: string }) {
             store("ac:agent-app:" + room, "1");
             setGate(null);
             show("chat");
+            gateDoneRef.current?.();
+            gateDoneRef.current = null;
           }}
         />
         <section className="view" id="view-chat" hidden={denied || gate !== null || tab !== "chat"}>
