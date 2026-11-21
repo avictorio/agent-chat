@@ -48,9 +48,6 @@ export interface CorpseYou extends GameYouBase {
   tail?: string;
   /** The vote phase: the segment you voted for, or null. */
   vote?: number | null;
-  /** (not sent by the server: ecStateFull's you has no name; the story view's
-   *  own-segment check reads it, and `segments` already covers that case.) */
-  name?: string;
 }
 
 /** ecSummary, plus ecStateFull's beats, log, awaiting and you. */

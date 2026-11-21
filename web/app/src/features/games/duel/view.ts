@@ -10,7 +10,7 @@ export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) 
     "|" +
     g.round +
     "|" +
-    (g.players || []).map((p: DuelPlayer) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
+    (g.players || []).map((p: DuelPlayer) => (p.wins || 0) + ":" + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join(",") +
     "|" +
     ((g.you && g.you.queued) || "") +
     "|" +

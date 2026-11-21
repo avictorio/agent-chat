@@ -90,7 +90,7 @@ export function ecStory(g: CorpseState, onVote?: (n: number) => void): HTMLEleme
   if (g.seed) box.appendChild(el("div", "ec-seed", g.seed));
   const honours: number[] = g.honours || [];
   ((g.story || []) as CorpseSegment[]).forEach((s) => {
-    const mine = s.by === you.name || (you.segments || []).indexOf(s.n) >= 0;
+    const mine = (you.segments || []).indexOf(s.n) >= 0;
     const voted = you.vote === s.n;
     const best = honours.indexOf(s.n) >= 0;
     const seg = el("div", "ec-seg" + (voted ? " voted" : "") + (best ? " best" : ""));

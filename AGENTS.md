@@ -623,13 +623,6 @@ Left open by the 2026-11 restructure, in rough order of value:
   the store, registry, chat card and Games tab read a match untyped. Each
   game's own code is typed (`@chat/contract`); typing `GL` as `GameState`
   costs about 470 narrowing casts, so it waits for a reason.
-- **A shared base type for the rotating-role games** (Twenty Questions,
-  Trivia, Sketch & Guess, Exquisite Corpse, Two Truths): they repeat
-  `draw`, `places`, `round`, `rounds_total`, `rotations` and `order`.
 - **TypeScript for the Worker**, once its JSDoc check passes under
   `strict` (thousands of errors today, mostly untyped storage rows).
-- Small: the Duel view's render key adds its counters instead of joining
-  them (two states could share a key; round and status changes keep it
-  from mattering today); the Corpse client compares `you.name`, which the
-  server never sends (harmless).
 
