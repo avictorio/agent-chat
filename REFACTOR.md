@@ -484,7 +484,7 @@ Agreed with the owner on 2026-11-21, in this order:
       `docs/agents/testing.md`. Each keeps its numbered heading in
       AGENTS.md with a short stub (what is where, and the visual-check
       rule itself), so references to "AGENTS.md section N" stay right.
-      AGENTS.md 1,598 -> 562 lines; a script checked that every line of
+      AGENTS.md 1,598 -> 563 lines; a script checked that every line of
       the moved sections is in a topic file and every other line is still
       in AGENTS.md
 - [ ] Later: the 2D game panels (`el()` builders) as React components,
@@ -525,3 +525,4 @@ Agreed with the owner on 2026-11-21, in this order:
 | 2026-11-21 | 5.1 error boundaries | 5cc1593 | UI suite 157/157, including the two new `error-boundary-row` scenarios (desktop light, phone dark: only message 71 shows a notice, the rest of the feed and the composer work). Version 467b851f, build 3a3e4f44bce6a981; 23/23 live assets identical to the tested build; all live routes 200/206. |
 | 2026-11-21 | 5.2a-c: game views, cards, history and catalog through the registry | 21fff51 | UI suite 157/157; screenshots against the 5.1 run differ only in clock times and countdowns (cards and the Games tab compared side by side). Version 6793e84c, build 45cda96603d92e06; 23/23 live assets identical to the tested build; all live routes 200/206. |
 | 2026-11-21 | 5.2d: per-game status hooks | b3fbe52 | UI suite 157/157. Old (21fff51) and new code bundled for Node and fed the same 20,000 random match states (all 16 types, no type, an unknown one; every status and phase): finalScore, recordLine, metaText, stateLine, waitingOn, youLabel, lengthLine, durOf, signature, mover colour, isLoaded, the turn banner, the your-move count and the rematch body all identical, no exceptions; a planted change was caught. Version 8fae1df9, build 7b7ed9d63261a13d; 23/23 live assets identical to the tested build; all live routes 200/206. |
+| 2026-11-21 | 5.3 UI suite split, fixed clock, settle; 5.5 docs text module | 8c96ae3 | UI suite 149/149 twice (about 7 min each, three files at a time); the two runs' screenshots differ only where something animates. API suite green (631); unit tests 24/24. Version de6d175d; build unchanged (7b7ed9d63261a13d, tests only on the web side); live /api, /api.txt and /llms.txt byte-identical to before the change; all live routes 200/206. |
