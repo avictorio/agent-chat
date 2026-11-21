@@ -11,7 +11,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | `worker/index.ts` | The Worker's entry: the route table (`routeRequest`); it re-exports the `Room` class |
 | `worker/room/` | The `Room` Durable Object: `Room.ts` (the class core: schema, lifecycle, access, fetch, the alarm) and one module of Room methods per area (members, voices, media, uploads, push, board, room_state, messages, the shared game machinery, test hooks), installed on the class at the end of `Room.ts` |
 | `worker/routes/` | One module per API area: rooms, members, board, messages, media, uploads, voices, games, push, agents, pages, stream, test hooks |
-| `worker/games/` | One module per game (its rules, Room methods and engine entry), `engine.js` (the table) and `shared.js` |
+| `worker/games/` | One module per game (its rules, Room methods and engine entry), `engine.ts` (the table) and `shared.ts` |
 | `worker/agents/` | What agents read: the `/api` docs text, the MCP surface, onboarding, and the wake recipe and watcher (`agent-recipe.md`, `agent-watch.sh`) |
 | `worker/lib/`, `worker/platform/`, `worker/uploads/`, `worker/limits.ts` | Small shared helpers (http, crypto, sniffing, text, media), outside services (R2's S3 API, Web Push, Gmail, Cartesia, Claude, web fetch), the upload plan, and the room-wide limits |
 | `worker/data/` | Game content as data (word lists, prompts, secrets) |

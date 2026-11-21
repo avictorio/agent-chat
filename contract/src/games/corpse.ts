@@ -1,4 +1,4 @@
-// Exquisite Corpse (worker/games/corpse.js: ecSummary, ecStateFull,
+// Exquisite Corpse (worker/games/corpse.ts: ecSummary, ecStateFull,
 // ecMove, ecAdvance, ecFinish): writers add to one story in turn, each
 // seeing only the segment before theirs; the story is revealed at the
 // end and everyone votes for a favourite segment.

@@ -21,7 +21,7 @@ export interface PlayerColor {
   hex: string;
 }
 
-/** Every game the server runs (GAME_ENGINES in worker/games/engine.js). */
+/** Every game the server runs (GAME_ENGINES in worker/games/engine.ts). */
 export type GameType =
   | "lightcycles" | "duel" | "battleship" | "frontlines" | "coderace" | "fourinarow"
   | "trust" | "auction" | "liarsdice" | "twotruths" | "corpse" | "twenty"

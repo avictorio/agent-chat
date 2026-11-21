@@ -1,4 +1,4 @@
-// Auction (worker/games/auction.js: auSummary, auStateFull,
+// Auction (worker/games/auction.ts: auSummary, auStateFull,
 // auResolveRound, auStanding): a season of lots, one sealed first-price
 // bid each per lot; most lots wins.
 

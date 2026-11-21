@@ -1,30 +1,30 @@
 // Two Truths and a Lie: a rotating teller, everyone else votes.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
-/** @typedef {import("@chat/contract").TwoTruthsRound} TwoTruthsRound */
-/** A seat as createTwoTruths stores it (st.players).
- *  @typedef {{ name: string, color: string, hex: string }} TtSeat */
-/** The statements up for the vote: as shown (shuffled), and which (1-3) is the lie.
- *  @typedef {{ shown: string[], lie: number, at: number }} TtCur */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type GameLogLine = import("@chat/contract").GameLogLine;
+export type TwoTruthsRound = import("@chat/contract").TwoTruthsRound;
+/** A seat as createTwoTruths stores it (st.players). */
+export type TtSeat = { name: string, color: string, hex: string };
+/** The statements up for the vote: as shown (shuffled), and which (1-3) is the lie. */
+export type TtCur = { shown: string[], lie: number, at: number };
 /** Two Truths and a Lie's stored match state (g.st): what createTwoTruths
  *  builds and the moves and the clock change. ttSummary and ttStateFull
  *  turn it into the contract's TwoTruthsState. teller and phase are null
  *  once the match is over; cur is set from the storyteller's move until
  *  the reveal (the vote phase), and phase_at once the first statements
  *  are up; votes and vote_at are the vote in progress, rounds the settled
- *  ones (stored as the API shows them).
- *  @typedef {{
- *    type: "twotruths", round_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
- *    teller: string | null, phase: "write" | "vote" | null, cur: TtCur | null, votes: Record<string, number>,
- *    vote_at: Record<string, number>, phase_at: number | null, rounds: TwoTruthsRound[], quiet: number,
- *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: TtSeat[], log: GameLogLine[],
- *    winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
- *  }} TtStored */
-/** A Two Truths and a Lie match: its row, with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: TtStored }} TtGame */
+ *  ones (stored as the API shows them). */
+export type TtStored = {
+  type: "twotruths", round_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
+  teller: string | null, phase: "write" | "vote" | null, cur: TtCur | null, votes: Record<string, number>,
+  vote_at: Record<string, number>, phase_at: number | null, rounds: TwoTruthsRound[], quiet: number,
+  deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: TtSeat[], log: GameLogLine[],
+  winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
+};
+/** A Two Truths and a Lie match: its row, with the state typed. */
+export type TtGame = Omit<GameRow, "st"> & { st: TtStored };
 
 // Two Truths and a Lie: a statement's length cap, and the line a round
 // gets when every vote found the lie ({t} = the storyteller).
@@ -37,16 +37,13 @@ export const TT_ROASTS = [
 ];
 
 // Two Truths and a Lie's points per player, for the chat card (no Room to hand).
-/** @param {TtStored} st */
-export function room_ttTally(st) {
-  /** @type {Record<string, number>} */
-  const out = {};
+export function room_ttTally(st: TtStored) {
+  const out: Record<string, number> = {};
   for (const p of st.players || []) out[p.name] = 0;
   for (const r of st.rounds || []) for (const n of Object.keys(r.points || {})) out[n] = (out[n] || 0) + r.points[n];
   return out;
 }
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const TwoTruthsMethods = {
   /* ---------- games: Two Truths and a Lie (2026-11-19) ----------
      Henry's spec: 3 to 6 players, one round per player as storyteller
@@ -65,10 +62,8 @@ export const TwoTruthsMethods = {
      called off if nothing was ever played. Highest total wins; ties go
      to more lies spotted, then to quicker right votes. The Referee posts
      only the result; the reveal lives in the card and the arena. */
-  /** @param {TtStored} st */
-  ttTally(st) {
-    /** @type {Record<string, { score: number, spots: number, ms: number }>} */
-    const out = {};
+  ttTally(st: TtStored) {
+    const out: Record<string, { score: number, spots: number, ms: number }> = {};
     for (const p of st.players) out[p.name] = { score: 0, spots: 0, ms: 0 };
     for (const r of st.rounds) {
       for (const n of Object.keys(r.points || {})) out[n].score += r.points[n];
@@ -80,16 +75,11 @@ export const TwoTruthsMethods = {
     return out;
   },
 
-  /** @param {TtStored} st */
-  ttVoters(st) {
+  ttVoters(st: TtStored) {
     return st.players.filter((p) => p.name !== st.teller);
   },
 
-  /**
-   * @param {TtGame} g
-   * @returns {import("@chat/contract").TwoTruthsState}
-   */
-  ttSummary(g) {
+  ttSummary(g: TtGame): import("@chat/contract").TwoTruthsState {
     const st = g.st;
     const t = this.ttTally(st);
     const live = g.status === "running";
@@ -104,26 +94,20 @@ export const TwoTruthsMethods = {
     };
   },
 
-  /**
-   * @param {TtGame} g
-   * @param {string | null | undefined} who
-   * @returns {import("@chat/contract").TwoTruthsState}
-   */
-  ttStateFull(g, who) {
+  ttStateFull(g: TtGame, who: string | null | undefined): import("@chat/contract").TwoTruthsState {
     const out = this.ttSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
     out.log = st.log.slice(-24);
     const live = g.status === "running";
-    out.awaiting = !live ? [] : st.phase === "write" ? [/** @type {string} */ (st.teller)] : this.ttVoters(st).filter((p) => st.votes[p.name] === undefined).map((p) => p.name);
+    out.awaiting = !live ? [] : st.phase === "write" ? [st.teller as string] : this.ttVoters(st).filter((p) => st.votes[p.name] === undefined).map((p) => p.name);
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) {
       out.you = { playing: false };
       return out;
     }
-    /** @type {import("@chat/contract").TwoTruthsYou} */
-    const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, teller: live && st.teller === me.name, legal_moves: [] };
+    const you: import("@chat/contract").TwoTruthsYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, teller: live && st.teller === me.name, legal_moves: [] };
     if (live && st.teller === me.name) {
       // the storyteller sees their own statements, the lie marked
       if (st.cur) {
@@ -138,37 +122,30 @@ export const TwoTruthsMethods = {
     return out;
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, unknown>} opts the create's options (request JSON)
-   * @param {string} room
-   */
-  async createTwoTruths(creator, playersIn, opts, room) {
+  /** @param opts the create's options (request JSON) */
+  async createTwoTruths(creator: string, playersIn: unknown[], opts: Record<string, unknown>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Two Truths and a Lie needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
+    const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
     }
-    /** @type {(v: unknown, lo: number, hi: number, def: number) => number} */
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const rotations = clamp(opts.rotations, 1, 3, 1);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     const colors = this.gameColors();
-    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {TtStored} */
-    const st = {
+    const players = (resolved.names as string[]).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const st: TtStored = {
       type: "twotruths", round_seconds: roundSeconds, rotations: rotations, rounds_total: names.length * rotations, round: 1, order: names, teller: names[0], phase: "write",
       cur: null, votes: {}, vote_at: {}, phase_at: null, rounds: [], quiet: 0,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, resolved.names), players: players,
       log: [{ tick: 0, text: "Two Truths and a Lie created by " + creator + " - storytellers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Two Truths and a Lie #" + g.id + " - " + label + ". Each round a storyteller writes two truths and a lie about themselves; everyone else votes for the lie. " + names[0] + " tells first. Clock: " + clockWords(roundSeconds) + " to write, the same to vote. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -181,17 +158,13 @@ export const TwoTruthsMethods = {
 
   // The storyteller's statements: fields {statements, lie}, or the same as
   // a JSON string in dir.
-  /**
-   * @param {unknown} raw
-   * @param {Record<string, unknown> | null | undefined} fields
-   */
-  ttParseStatements(raw, fields) {
+  ttParseStatements(raw: unknown, fields: Record<string, unknown> | null | undefined) {
     let o = fields && fields.statements ? fields : null;
     if (!o && /^\s*\{/.test(String(raw || ""))) {
       try {
         o = JSON.parse(String(raw));
       } catch (e) {
-        return { error: "dir looked like JSON but did not parse: " + /** @type {Error} */ (e).message };
+        return { error: "dir looked like JSON but did not parse: " + (e as Error).message };
       }
     }
     if (!o || !Array.isArray(o.statements)) return { error: "As storyteller, send statements (three of them) and lie (1, 2 or 3: which one is false)" };
@@ -205,14 +178,7 @@ export const TwoTruthsMethods = {
     return { statements: ss, lie: lie };
   },
 
-  /**
-   * @param {TtGame} g
-   * @param {string} who
-   * @param {unknown} raw
-   * @param {string} room
-   * @param {Record<string, unknown> | null | undefined} fields
-   */
-  async ttMove(g, who, raw, room, fields) {
+  async ttMove(g: TtGame, who: string, raw: unknown, room: string, fields: Record<string, unknown> | null | undefined) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this game" };
@@ -226,9 +192,9 @@ export const TwoTruthsMethods = {
         const j = Math.floor(Math.random() * (i + 1));
         [idx[i], idx[j]] = [idx[j], idx[i]];
       }
-      const shown = idx.map((i) => /** @type {string[]} */ (p.statements)[i]);
+      const shown = idx.map((i) => (p.statements as string[])[i]);
       // p.error is unset, so p is the parsed statements (every error has a message)
-      st.cur = { shown: shown, lie: idx.indexOf(/** @type {number} */ (p.lie) - 1) + 1, at: Date.now() };
+      st.cur = { shown: shown, lie: idx.indexOf((p.lie as number) - 1) + 1, at: Date.now() };
       st.phase = "vote";
       st.votes = {};
       st.vote_at = {};
@@ -255,21 +221,16 @@ export const TwoTruthsMethods = {
   },
 
   // The reveal: score the round, then deal the next or finish.
-  /** @param {TtGame} g */
-  ttResolve(g) {
+  ttResolve(g: TtGame) {
     // it runs in the vote phase: the statements are up (cur, phase_at) and
     // the storyteller set (teller)
-    const st = /** @type {TtStored & { cur: TtCur, phase_at: number, teller: string }} */ (g.st);
+    const st = g.st as TtStored & { cur: TtCur, phase_at: number, teller: string };
     const lie = st.cur.lie;
     const voters = this.ttVoters(st).map((p) => p.name);
-    /** @type {Record<string, number | null>} */
-    const votes = {};
-    /** @type {Record<string, number>} */
-    const vote_ms = {};
-    /** @type {string[]} */
-    const right = [];
-    /** @type {Record<string, number>} */
-    const points = {};
+    const votes: Record<string, number | null> = {};
+    const vote_ms: Record<string, number> = {};
+    const right: string[] = [];
+    const points: Record<string, number> = {};
     let fooled = 0;
     voters.forEach((n) => {
       const v = st.votes[n] === undefined ? null : st.votes[n];
@@ -282,8 +243,7 @@ export const TwoTruthsMethods = {
     });
     points[st.teller] = Math.min(2, fooled);
     const cast = voters.filter((n) => votes[n] != null).length;
-    /** @type {string | null} */
-    let note = null;
+    let note: string | null = null;
     if (cast && right.length === cast) note = TT_ROASTS[st.round % TT_ROASTS.length].replace(/\{t\}/g, st.teller);
     st.rounds.push({ n: st.round, teller: st.teller, statements: st.cur.shown, lie: lie, votes: votes, right: right, fooled: fooled, points: points, vote_ms: vote_ms, missed: voters.filter((n) => votes[n] == null), forfeit: false, note: note, at: Date.now() });
     st.log.push({ tick: st.round, text: "Round " + st.round + ": " + st.teller + "'s lie was #" + lie + ". " + (right.length ? right.join(", ") + " spotted it" : "Nobody spotted it") + "; " + st.teller + " fooled " + fooled + "." });
@@ -291,8 +251,7 @@ export const TwoTruthsMethods = {
     this.ttNext(g);
   },
 
-  /** @param {TtGame} g */
-  ttNext(g) {
+  ttNext(g: TtGame) {
     const st = g.st;
     st.cur = null;
     st.votes = {};
@@ -319,27 +278,22 @@ export const TwoTruthsMethods = {
     st.deadline = Date.now() + st.round_seconds * 1000;
   },
 
-  /**
-   * @param {TtGame | null} g
-   * @param {string} room
-   */
-  ttAdvance(g, room) {
-    if (!g || g.status !== "running" || Date.now() < /** @type {number} */ (g.st.deadline)) return; // a running match's clock is set
+  ttAdvance(g: TtGame | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline as number)) return; // a running match's clock is set
     const st = g.st;
     if (st.phase === "write") {
-      st.rounds.push({ n: st.round, teller: /** @type {string} */ (st.teller), statements: null, lie: null, votes: {}, right: [], fooled: 0, points: {}, vote_ms: {}, missed: [], forfeit: true, note: null, at: Date.now() });
+      st.rounds.push({ n: st.round, teller: st.teller as string, statements: null, lie: null, votes: {}, right: [], fooled: 0, points: {}, vote_ms: {}, missed: [], forfeit: true, note: null, at: Date.now() });
       st.log.push({ tick: st.round, text: st.teller + " ran out of time to write - round " + st.round + " is forfeit." });
       st.quiet += 1;
       this.ttNext(g);
     } else this.ttResolve(g);
     this.saveGame(g);
     // ttNext/ttResolve may have ended it (the check above narrowed status to running)
-    if (/** @type {import("@chat/contract").GameStatus} */ (g.status) === "cancelled") this.postSystem("Two Truths and a Lie #" + g.id + " is off - two quiet rounds and nothing played.", room);
+    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Two Truths and a Lie #" + g.id + " is off - two quiet rounds and nothing played.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
-  /** @param {TtStored} st */
-  ttStanding(st) {
+  ttStanding(st: TtStored) {
     const t = this.ttTally(st);
     st.places = st.players.map((p) => p.name).sort((a, b) => t[b].score - t[a].score || t[b].spots - t[a].spots || t[a].ms - t[b].ms || (a < b ? -1 : 1));
     const [x, y] = st.places;
@@ -348,41 +302,39 @@ export const TwoTruthsMethods = {
     return tied ? null : x;
   },
 
-  /** @param {TtGame} g */
-  ttResultText(g) {
+  ttResultText(g: TtGame) {
     const st = g.st;
     if (!st.places) st.winner = this.ttStanding(st);
     const t = this.ttTally(st);
-    const lines = /** @type {string[]} */ (st.places).map((n) => n + " " + t[n].score).join(", "); // ttStanding sets places
+    const lines = (st.places as string[]).map((n) => n + " " + t[n].score).join(", "); // ttStanding sets places
     const best = st.rounds.filter((r) => !r.forfeit).sort((a, b) => b.fooled - a.fooled)[0];
     return "Two Truths and a Lie #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner].score + " points." : "a tie at the top, no winner.") + " " + lines + "." + (best && best.fooled ? " Best lie: " + best.teller + " fooled " + best.fooled + "." : "");
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const twotruthsEngine = {
   name: "Two Truths and a Lie",
   turnWord: "round",
-  logTick: (/** @type {TtStored} */ st) => st.round,
-  clockSeconds: (/** @type {TtStored} */ st) => st.round_seconds,
+  logTick: (st: TtStored) => st.round,
+  clockSeconds: (st: TtStored) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createTwoTruths(creator, players, opts, roomName),
   summary: (room, g) => room.ttSummary(g),
   full: (room, g, who) => room.ttStateFull(g, who),
   move: (room, g, who, dir, roomName, fields) => room.ttMove(g, who, dir, roomName, fields),
   advance: (room, g, roomName) => room.ttAdvance(g, roomName),
   // pub is ttSummary's state; a running match has a teller
-  targets: (/** @type {import("@chat/contract").TwoTruthsState} */ pub) => (pub.status !== "running" ? [] : pub.phase === "write" ? [/** @type {string} */ (pub.teller)] : (pub.players || []).filter((p) => p.name !== pub.teller && !p.committed).map((p) => p.name)),
-  card: (/** @type {TtGame} */ g) => {
+  targets: (pub: import("@chat/contract").TwoTruthsState) => (pub.status !== "running" ? [] : pub.phase === "write" ? [pub.teller as string] : (pub.players || []).filter((p) => p.name !== pub.teller && !p.committed).map((p) => p.name)),
+  card: (g: TtGame) => {
     const t = room_ttTally(g.st);
     return { id: g.id, type: "twotruths", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, teller: g.status === "running" ? g.st.teller : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
-  stateItem: (r, /** @type {TtStored} */ st) => ({ id: r.id, type: "twotruths", status: r.status, round: st.round, phase: st.phase, teller: st.teller, turn: st.round * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.teller : p.name === st.teller || (st.votes || {})[p.name] !== undefined), accepted: seatAccepted(st, p) })) }),
+  stateItem: (r, st: TtStored) => ({ id: r.id, type: "twotruths", status: r.status, round: st.round, phase: st.phase, teller: st.teller, turn: st.round * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.teller : p.name === st.teller || (st.votes || {})[p.name] !== undefined), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: (gm, name) => (gm.phase === "write" && gm.teller === name ? '{"statements": ["<a truth>", "<a truth>", "<a lie>"], "lie": 3}' : "<1, 2 or 3: the statement you think is the lie>"),
   result: (room, g) => room.ttResultText(g),
-  rules: (/** @type {TtStored} */ st) =>
+  rules: (st: TtStored) =>
     "Two Truths and a Lie: each round one player is the storyteller (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds). " +
     "The storyteller writes three statements about themselves - two true, one a lie - and says which is the lie: send statements (an array of three) and lie (1, 2 or 3), or the same JSON as dir. The statements are published shuffled; the lie stays secret. " +
     "Everyone else votes for the statement they think is the lie: send dir 1, 2 or 3. Votes are sealed until all are in. A right vote scores 2; the storyteller scores 1 for each player fooled, at most 2. Truth is on the storyteller's honour. " +
     "Each phase has " + clockWords(st.round_seconds || 3600) + ": a storyteller who runs out forfeits the round, a voter who runs out scores nothing; two quiet rounds in a row end the game. Highest total wins; ties go to more lies spotted, then quicker right votes.",
-};
+} satisfies GameEngine;

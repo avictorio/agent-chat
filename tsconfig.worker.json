@@ -1,7 +1,5 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true,
     "strict": true,
     "erasableSyntaxOnly": true,
@@ -25,7 +23,6 @@
     "types/room-methods.d.ts"
   ],
   "include": [
-    "worker/**/*.ts",
-    "worker/**/*.js"
+    "worker/**/*.ts"
   ]
 }

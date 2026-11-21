@@ -1,11 +1,10 @@
 // Helpers the game engines share: seats, clocks in words, data files, fuzzy answer matching (Trivia, Sketch & Guess).
-export const dataLines = (/** @type {string} */ txt) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+export const dataLines = (txt: string) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
 
 export const TV_NUMS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
 // An answer folded for matching: case, accents, punctuation and articles
 // dropped, number words as digits.
-/** @param {unknown} s */
-export function tvNorm(s) {
+export function tvNorm(s: unknown) {
   return String(s == null ? "" : s)
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
@@ -17,11 +16,7 @@ export function tvNorm(s) {
     .join(" ");
 }
 // At most one letter added, dropped or changed.
-/**
- * @param {string} a
- * @param {string} b
- */
-export function tvNear(a, b) {
+export function tvNear(a: string, b: string) {
   if (a === b) return true;
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0;
@@ -32,11 +27,8 @@ export function tvNear(a, b) {
 
 // The lenient match: equal once folded, or one letter off in an answer of
 // five letters or more.
-/**
- * @param {unknown} given
- * @param {unknown[]} keys the answer and its accepted variants
- */
-export function tvMatch(given, keys) {
+/** @param keys the answer and its accepted variants */
+export function tvMatch(given: unknown, keys: unknown[]) {
   const g = tvNorm(given);
   if (!g) return false;
   return keys.some((k) => {
@@ -45,6 +37,6 @@ export function tvMatch(given, keys) {
   });
 }
 
-export const seatAccepted = (/** @type {{ accepted?: Record<string, boolean> | null }} */ st, /** @type {{ name: string }} */ p) => (st.accepted ? !!st.accepted[p.name] : true);
+export const seatAccepted = (st: { accepted?: Record<string, boolean> | null }, p: { name: string }) => (st.accepted ? !!st.accepted[p.name] : true);
 // "90 s", "3 min", "1 h": a clock in words, for the rules texts.
-export const clockWords = (/** @type {number} */ sec) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");
+export const clockWords = (sec: number) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");

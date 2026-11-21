@@ -53,9 +53,11 @@ guide and the code disagree, the code wins. The live API reference is
    asked for until Anthony approves it.
 7. **Check UI changes visually before calling them done** (section 10).
    Logic or computed-style checks alone have missed real bugs.
-8. **House style:** the hand-written files in `worker/` (`index.js` and
-   its modules, the recipe and watcher) are plain JS with no build step and no template
-   literals (backticks). The front end is React + TypeScript in `web/`
+8. **House style:** the hand-written files in `worker/` (`index.ts` and
+   its modules, the recipe and watcher) use no template literals
+   (backticks); the modules are TypeScript with erasable syntax only (no
+   enums, namespaces or parameter properties), which wrangler bundles at
+   deploy. The front end is React + TypeScript in `web/`
    with its own conventions (`web/README.md`).
 
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
@@ -118,7 +120,7 @@ agent-chat/
 │  │                   storage) and its method groups, installed with
 │  │                   Object.assign (messages, members, board, games, state,
 │  │                   media, uploads, voices, push, ...)
-│  ├─ games/           engine.js (GAME_ENGINES, the plug-in contract), shared.js,
+│  ├─ games/           engine.ts (GAME_ENGINES, the plug-in contract), shared.ts,
 │  │                   one module per game; content in worker/data/
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
@@ -348,10 +350,12 @@ Before pushing:
 1. `npm run build` (the web app, into `web/app/dist`; `npm i` at the
    root and in `web/` once), `npm run check` (the syntax of every Worker
    module, the page shell's inline script and markup, and a TypeScript
-   check of the Worker's plain JS - `tsconfig.worker.json`, with the
-   runtime's modules and the Room's installed method objects declared in
-   `types/`; JSDoc fixes what inference can't, and the objects the Worker
-   builds - each game's summary and full state, room_state, the messages
+   check of the Worker - `tsconfig.worker.json`, full `strict`, zero
+   errors, with the runtime's modules and the Room's installed method
+   objects declared in `types/` (a Room method object ends `satisfies
+   ThisType<Room>`, a game engine `satisfies GameEngine`, and a storage
+   table has its row type next to `ensureSchema`: give a new one the
+   same); the objects the Worker builds - each game's summary and full state, room_state, the messages
    read, attachments, members - are checked against the `@chat/contract`
    types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
    fake API), `npm run lint` (oxlint over `web/` and `contract/`: the
@@ -545,8 +549,9 @@ features; mobile means the website in Android Chrome and iOS Safari.
 
 ## 13. Design conventions
 
-- **Code style:** the Worker and the other hand-written `worker/` files are
-  plain JS with no build step and no template literals. The front end is
+- **Code style:** the Worker's modules are TypeScript (erasable syntax
+  only; wrangler bundles them at deploy), and they and the other
+  hand-written `worker/` files use no template literals. The front end is
   React + TypeScript in `web/`, built by Vite and served as Workers
   Static Assets: no external scripts or CDNs, everything is served from
   the site's own origin.
@@ -611,17 +616,6 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 
 ## 15. Open work
 
-Left open by the 2026-11 restructure, in rough order of value:
-
-- **TypeScript for the Worker?** Since 2026-11-21 its JSDoc check
-  (`npm run check`, `tsconfig.worker.json`) passes under full `strict`:
-  every parameter is typed, storage rows have row types (next to
-  `ensureSchema` in `room/Room.ts`), each game has typedefs for its
-  stored state (`<X>St`/`<X>Stored`, `<X>Game`) and its engine
-  `@satisfies {GameEngine}`, and the Room's method objects carry
-  `/** @satisfies {ThisType<import("./Room.js").Room>} */` (a new one
-  needs it too; so does a new engine or table). Keep new Worker code at
-  zero errors. Converting the modules to `.ts` would need a compile
-  step before deploy and lose the property that the live modules are
-  the repo's files byte for byte; it is the owner's call.
+There is no open work. The last item the 2026-11 restructure left, the
+Worker in TypeScript, was done on 2026-11-21 (the owner's call).
 

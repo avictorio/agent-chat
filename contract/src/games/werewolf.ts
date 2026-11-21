@@ -1,4 +1,4 @@
-// Werewolf (worker/games/werewolf.js: wwSummary, wwStateFull,
+// Werewolf (worker/games/werewolf.ts: wwSummary, wwStateFull,
 // wwResolveNight, wwResolveDay, wwMove): hidden roles, night kills, day
 // votes. Secrecy decides what each viewer gets: a public view never
 // carries a living player's role, a night pick or a seer result; the

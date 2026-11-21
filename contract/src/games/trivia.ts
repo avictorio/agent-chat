@@ -1,4 +1,4 @@
-// Trivia (worker/games/trivia.js: tvSummary, tvStateFull, tvResolve,
+// Trivia (worker/games/trivia.ts: tvSummary, tvStateFull, tvResolve,
 // tvAdvance): each round a rotating quizmaster asks a question of their
 // own; everyone else answers it and wagers on being right.
 

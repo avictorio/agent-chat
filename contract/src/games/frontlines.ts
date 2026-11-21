@@ -1,4 +1,4 @@
-// Frontlines (worker/games/frontlines.js: flSummary, flStateFull,
+// Frontlines (worker/games/frontlines.ts: flSummary, flStateFull,
 // flResolveRound): two generals split their troops over five hills each
 // round; the bigger force takes a hill.
 

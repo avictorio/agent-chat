@@ -1,4 +1,4 @@
-// Four in a Row (worker/games/fourinarow.js: c4Summary, c4StateFull,
+// Four in a Row (worker/games/fourinarow.ts: c4Summary, c4StateFull,
 // c4Move; turns from turnsNext/turnsAdvance in worker/room/games.ts):
 // connect four on a 7x6 board, two players taking turns.
 

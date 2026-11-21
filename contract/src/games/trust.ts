@@ -1,4 +1,4 @@
-// Trust (worker/games/trust.js: trSummary, trStateFull, trResolveRound,
+// Trust (worker/games/trust.ts: trSummary, trStateFull, trResolveRound,
 // trStanding; rounds from roundsCommit/roundsAdvance in
 // worker/room/games.ts): the iterated prisoner's dilemma, everyone
 // against everyone, each round's choices made in secret.

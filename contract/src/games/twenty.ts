@@ -1,4 +1,4 @@
-// Twenty Questions (worker/games/twenty.js: tqSummary, tqStateFull,
+// Twenty Questions (worker/games/twenty.ts: tqSummary, tqStateFull,
 // tqMove, tqEndRound): each round a rotating answerer holds a secret and
 // the others get twenty yes-or-no questions to name it.
 

@@ -2,46 +2,43 @@
 
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
-/** @typedef {import("@chat/contract").TwentyQuestion} TwentyQuestion */
-/** @typedef {import("@chat/contract").TwentyRound} TwentyRound */
-/** A seat as createTwenty stores it (st.players).
- *  @typedef {{ name: string, color: string, hex: string }} TqSeat */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type GameLogLine = import("@chat/contract").GameLogLine;
+export type TwentyQuestion = import("@chat/contract").TwentyQuestion;
+export type TwentyRound = import("@chat/contract").TwentyRound;
+/** A seat as createTwenty stores it (st.players). */
+export type TqSeat = { name: string, color: string, hex: string };
 /** Twenty Questions' stored match state (g.st): what createTwenty builds
  *  and the moves and the clock change. tqSummary and tqStateFull turn it
  *  into the contract's TwentyState. answerer stays the last one once the
  *  match is over (phase is null then); secret is null until chosen or
  *  drawn; qa is this round's log (stored as the API shows it) and pending
- *  the number of the question waiting on an answer (see tqPending).
- *  @typedef {{
- *    type: "twenty", round_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
- *    answerer: string, phase: "secret" | "ask" | "answer" | null, secret: string | null, drawn: boolean, qa: TwentyQuestion[],
- *    pending: { n: number } | null, asked: number, idle: number, rounds: TwentyRound[],
- *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: TqSeat[], log: GameLogLine[],
- *    winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
- *  }} TqStored */
-/** A Twenty Questions match: its row, with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: TqStored }} TqGame */
+ *  the number of the question waiting on an answer (see tqPending). */
+export type TqStored = {
+  type: "twenty", round_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
+  answerer: string, phase: "secret" | "ask" | "answer" | null, secret: string | null, drawn: boolean, qa: TwentyQuestion[],
+  pending: { n: number } | null, asked: number, idle: number, rounds: TwentyRound[],
+  deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: TqSeat[], log: GameLogLine[],
+  winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
+};
+/** A Twenty Questions match: its row, with the state typed. */
+export type TqGame = Omit<GameRow, "st"> & { st: TqStored };
 
 // Twenty Questions: the drawn secrets (a data file), the budget and caps.
 export const TQ_BUDGET = 20;
 export const TQ_Q_MAX = 160;
 export const TQ_SECRET_MAX = 60;
-/** @type {string[] | null} */
-export let tqSecretsCache = null;
+export let tqSecretsCache: string[] | null = null;
 export function tqSecrets() {
   if (!tqSecretsCache) tqSecretsCache = dataLines(TQ_SECRETS_TXT);
   return tqSecretsCache;
 }
 // "A Lighthouse!" and "lighthouse" name the same secret.
-/** @param {unknown} s */
-export function tqNorm(s) {
+export function tqNorm(s: unknown) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(a|an|the|it|is|its)\b/g, " ").replace(/\s+/g, " ").trim();
 }
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const TwentyMethods = {
   /* ---------- games: Twenty Questions (2026-11-20) ----------
      SHA's spec, on the rotating role: 2 to 6 players, one round per
@@ -61,25 +58,18 @@ export const TwentyMethods = {
      had guessed); a table that asks nothing for three clocks in a row
      hands the round to the answerer; a secret not chosen in time is drawn.
      Highest total after the last round wins. */
-  /** @param {TqStored} st */
-  tqQuestioners(st) {
+  tqQuestioners(st: TqStored) {
     return st.players.filter((p) => p.name !== st.answerer).map((p) => p.name);
   },
 
-  /** @param {TqStored} st */
-  tqTotals(st) {
-    /** @type {Record<string, number>} */
-    const t = {};
+  tqTotals(st: TqStored) {
+    const t: Record<string, number> = {};
     for (const p of st.players) t[p.name] = 0;
     for (const r of st.rounds) for (const n of Object.keys(r.points || {})) t[n] += r.points[n];
     return t;
   },
 
-  /**
-   * @param {TqGame} g
-   * @returns {import("@chat/contract").TwentyState}
-   */
-  tqSummary(g) {
+  tqSummary(g: TqGame): import("@chat/contract").TwentyState {
     const st = g.st;
     const live = g.status === "running";
     const t = this.tqTotals(st);
@@ -95,12 +85,7 @@ export const TwentyMethods = {
     };
   },
 
-  /**
-   * @param {TqGame} g
-   * @param {string | null | undefined} who
-   * @returns {import("@chat/contract").TwentyState}
-   */
-  tqStateFull(g, who) {
+  tqStateFull(g: TqGame, who: string | null | undefined): import("@chat/contract").TwentyState {
     const out = this.tqSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -113,8 +98,7 @@ export const TwentyMethods = {
       out.you = { playing: false };
       return out;
     }
-    /** @type {import("@chat/contract").TwentyYou} */
-    const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, answerer: live && st.answerer === me.name, legal_moves: [] };
+    const you: import("@chat/contract").TwentyYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, answerer: live && st.answerer === me.name, legal_moves: [] };
     if (you.answerer) {
       you.secret = st.secret || null;
       const pend = this.tqPending(st);
@@ -124,37 +108,30 @@ export const TwentyMethods = {
     return out;
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, unknown>} opts the create's options (request JSON)
-   * @param {string} room
-   */
-  async createTwenty(creator, playersIn, opts, room) {
+  /** @param opts the create's options (request JSON) */
+  async createTwenty(creator: string, playersIn: unknown[], opts: Record<string, unknown>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Twenty Questions needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
+    const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
     }
-    /** @type {(v: unknown, lo: number, hi: number, def: number) => number} */
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const rotations = clamp(opts.rotations, 1, 3, 1);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 3600);
     const colors = this.gameColors();
-    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {TqStored} */
-    const st = {
+    const players = (resolved.names as string[]).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const st: TqStored = {
       type: "twenty", round_seconds: roundSeconds, rotations: rotations, rounds_total: names.length * rotations, round: 1, order: names, answerer: names[0], phase: "secret",
       secret: null, drawn: false, qa: [], pending: null, asked: 0, idle: 0, rounds: [],
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, resolved.names), players: players,
       log: [{ tick: 0, text: "Twenty Questions created by " + creator + " - answerers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Twenty Questions #" + g.id + " - " + label + ". Each round one player holds a secret and " + (names.length === 2 ? "the other" : "the rest of the table") + " gets twenty yes-or-no questions to name it. " + names[0] + " answers first. Clock: " + clockWords(roundSeconds) + " a move. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -168,39 +145,30 @@ export const TwentyMethods = {
   // the question waiting on an answer (st.pending keeps only its number:
   // a saved state reloads as fresh objects, so a second reference would
   // drift from the log)
-  /** @param {TqStored} st */
-  tqPending(st) {
-    return st.pending ? st.qa.find((x) => x.n === /** @type {{ n: number }} */ (st.pending).n) || null : null;
+  tqPending(st: TqStored) {
+    return st.pending ? st.qa.find((x) => x.n === (st.pending as { n: number }).n) || null : null;
   },
 
-  /** @param {TqStored} st */
-  tqDraw(st) {
+  tqDraw(st: TqStored) {
     const pool = tqSecrets();
     st.secret = pool[Math.floor(Math.random() * pool.length)];
     st.drawn = true;
   },
 
   // the ask phase opens (again): a fresh clock for the table
-  /** @param {TqStored} st */
-  tqOpen(st) {
+  tqOpen(st: TqStored) {
     st.phase = "ask";
     st.pending = null;
     st.deadline = Date.now() + st.round_seconds * 1000;
   },
 
   // Close the round: score it, then the next answerer or the end.
-  /**
-   * @param {TqGame} g
-   * @param {TwentyRound["how"]} how
-   * @param {string} [guessedBy] who named it (guessed)
-   */
-  tqEndRound(g, how, guessedBy) {
+  /** @param guessedBy who named it (guessed) */
+  tqEndRound(g: TqGame, how: TwentyRound["how"], guessedBy?: string) {
     const st = g.st;
     const qs = this.tqQuestioners(st);
-    /** @type {Record<string, number>} */
-    const points = {};
-    /** @type {TwentyRound["side"]} */
-    let side = "answerer";
+    const points: Record<string, number> = {};
+    let side: TwentyRound["side"] = "answerer";
     if (how === "guessed" || how === "forfeit") {
       side = "questioners";
       const left = Math.max(0, TQ_BUDGET - st.asked);
@@ -208,7 +176,7 @@ export const TwentyMethods = {
       qs.forEach((n) => (points[n] = each));
     } else points[st.answerer] = 10;
     // a round ends only after its secret is chosen or drawn
-    st.rounds.push({ n: st.round, answerer: st.answerer, secret: /** @type {string} */ (st.secret), drawn: !!st.drawn, qa: st.qa, asked: st.asked, side: side, how: how, guessed_by: guessedBy || null, points: points, at: Date.now() });
+    st.rounds.push({ n: st.round, answerer: st.answerer, secret: st.secret as string, drawn: !!st.drawn, qa: st.qa, asked: st.asked, side: side, how: how, guessed_by: guessedBy || null, points: points, at: Date.now() });
     st.log.push({ tick: st.round, text: "Round " + st.round + ": the secret was \"" + st.secret + "\" - " + (how === "guessed" ? guessedBy + " named it with " + (TQ_BUDGET - st.asked) + " questions left" : how === "forfeit" ? st.answerer + " went silent and forfeits the round" : how === "idle" ? "the table stopped asking; " + st.answerer + " takes it" : "twenty questions spent; " + st.answerer + " takes it") + "." });
     if (st.round >= st.rounds_total) {
       g.status = "finished";
@@ -231,8 +199,7 @@ export const TwentyMethods = {
     st.deadline = Date.now() + st.round_seconds * 1000;
   },
 
-  /** @param {TqStored} st */
-  tqStanding(st) {
+  tqStanding(st: TqStored) {
     const t = this.tqTotals(st);
     st.places = st.players.map((p) => p.name).sort((a, b) => t[b] - t[a] || (a < b ? -1 : 1));
     const [x, y] = st.places;
@@ -240,18 +207,12 @@ export const TwentyMethods = {
     return st.draw ? null : x;
   },
 
-  /**
-   * @param {TqGame} g
-   * @param {string} who
-   * @param {unknown} raw
-   * @param {string} room
-   */
-  async tqMove(g, who, raw, room) {
+  async tqMove(g: TqGame, who: string, raw: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this game" };
     const text = String(raw || "").replace(/\s+/g, " ").trim();
-    const done = async (/** @type {boolean} */ resolved) => {
+    const done = async (resolved: boolean) => {
       this.saveGame(g);
       this.afterGameChange(g, room, me.name);
       await this.armGameAlarm();
@@ -311,8 +272,7 @@ export const TwentyMethods = {
     const body = gm ? gm[1].trim() : text.replace(/^(ask|question)\s*[:-]\s*/i, "");
     if (!body) return { status: 400, error: "Ask a yes/no question, or guess: <your answer>", legal_moves: ["<a yes/no question>", "guess: <your answer>"] };
     if (body.length > TQ_Q_MAX) return { status: 400, error: "A question can be up to " + TQ_Q_MAX + " characters" };
-    /** @type {import("@chat/contract").TwentyQuestion} */
-    const entry = { n: st.qa.length + 1, by: me.name, kind: isGuess ? "guess" : "q", q: body, a: null, note: null, flagged: false, at: Date.now() };
+    const entry: import("@chat/contract").TwentyQuestion = { n: st.qa.length + 1, by: me.name, kind: isGuess ? "guess" : "q", q: body, a: null, note: null, flagged: false, at: Date.now() };
     st.qa.push(entry);
     // an exact guess is right on its own
     if (isGuess && tqNorm(body) && tqNorm(body) === tqNorm(st.secret)) {
@@ -329,12 +289,8 @@ export const TwentyMethods = {
     return done(false);
   },
 
-  /**
-   * @param {TqGame | null} g
-   * @param {string} room
-   */
-  tqAdvance(g, room) {
-    if (!g || g.status !== "running" || Date.now() < /** @type {number} */ (g.st.deadline)) return; // a running match's clock is set
+  tqAdvance(g: TqGame | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline as number)) return; // a running match's clock is set
     const st = g.st;
     if (st.phase === "secret") {
       this.tqDraw(st);
@@ -355,43 +311,40 @@ export const TwentyMethods = {
     this.afterGameChange(g, room, "Referee");
   },
 
-  /** @param {TqGame} g */
-  tqResultText(g) {
+  tqResultText(g: TqGame) {
     const st = g.st;
     if (!st.places) st.winner = this.tqStanding(st);
     const t = this.tqTotals(st);
-    const lines = /** @type {string[]} */ (st.places).map((n) => n + " " + t[n]).join(", "); // tqStanding sets places
+    const lines = (st.places as string[]).map((n) => n + " " + t[n]).join(", "); // tqStanding sets places
     const quick = st.rounds.filter((r) => r.how === "guessed").sort((a, b) => a.asked - b.asked)[0];
     return "Twenty Questions #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner] + " points." : "a tie at the top, no winner.") + " " + lines + "." + (quick ? " Quickest: \"" + quick.secret + "\" named by " + quick.guessed_by + " in " + quick.asked + "." : "");
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const twentyEngine = {
   name: "Twenty Questions",
   turnWord: "round",
-  logTick: (/** @type {TqStored} */ st) => st.round,
-  clockSeconds: (/** @type {TqStored} */ st) => st.round_seconds,
+  logTick: (st: TqStored) => st.round,
+  clockSeconds: (st: TqStored) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createTwenty(creator, players, opts, roomName),
   summary: (room, g) => room.tqSummary(g),
   full: (room, g, who) => room.tqStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.tqMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.tqAdvance(g, roomName),
   targets: (pub) => (pub.status !== "running" ? [] : pub.phase === "ask" ? (pub.players || []).filter((p) => p.name !== pub.answerer).map((p) => p.name) : pub.answerer ? [pub.answerer] : []),
-  card: (/** @type {TqGame} */ g) => {
-    /** @type {Record<string, number>} */
-    const t = {};
+  card: (g: TqGame) => {
+    const t: Record<string, number> = {};
     for (const p of g.st.players) t[p.name] = 0;
     for (const r of g.st.rounds) for (const n of Object.keys(r.points || {})) t[n] += r.points[n];
     return { id: g.id, type: "twenty", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, answerer: g.status === "running" ? g.st.answerer : null, asked: g.st.asked, budget: TQ_BUDGET, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
-  stateItem: (r, /** @type {TqStored} */ st) => ({ id: r.id, type: "twenty", status: r.status, phase: st.phase, answerer: st.answerer, turn: (st.round || 0) * 100 + (st.asked || 0) * 2 + (st.phase === "answer" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "ask" ? p.name === st.answerer : p.name !== st.answerer), accepted: seatAccepted(st, p) })) }),
+  stateItem: (r, st: TqStored) => ({ id: r.id, type: "twenty", status: r.status, phase: st.phase, answerer: st.answerer, turn: (st.round || 0) * 100 + (st.asked || 0) * 2 + (st.phase === "answer" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "ask" ? p.name === st.answerer : p.name !== st.answerer), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: (gm, name) => (gm.answerer === name ? (gm.phase === "secret" ? "<your secret: a noun phrase, or random>" : "<yes or no; a guess: right or wrong; or unanswerable>") : "<a yes/no question, or guess: your answer>"),
   result: (room, g) => room.tqResultText(g),
-  rules: (/** @type {TqStored} */ st) =>
+  rules: (st: TqStored) =>
     "Twenty Questions: each round one player is the answerer (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ") and holds a secret - a noun phrase they choose, or random to draw one - hidden until the round ends. " +
     (st.players.length === 2 ? "The other player questions. " : "Everyone else questions together: any of you may ask when no question is waiting. ") +
     "Send a yes/no question as dir, or guess: <answer>. The answerer replies yes or no (a guess: right or wrong; an exact guess is right on its own), with an optional note after a dash, or unanswerable - which costs nothing. Twenty questions a round, guesses included; the whole Q/A log is public. " +
     "A right guess scores the questions left for the questioners, split evenly; twenty spent scores 10 for the answerer. Each move has " + clockWords(st.round_seconds || 3600) + ": an answerer who goes silent forfeits the round, a secret not chosen in time is drawn, and three clocks with no question hand the round to the answerer. Highest total wins.",
-};
+} satisfies GameEngine;

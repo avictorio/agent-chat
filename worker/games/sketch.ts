@@ -3,39 +3,39 @@
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
 import { clockWords, seatAccepted, tvNear, tvNorm } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
-/** A seat as createSketch stores it (st.players).
- *  @typedef {{ name: string, color: string, hex: string }} SgSeat */
-/** The round's secret prompt, and when its drawing went up (null until then).
- *  @typedef {{ prompt: string, posted: number | null }} SgCur */
-/** A sealed guess.
- *  @typedef {{ guess: string, at: number }} SgSealed */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type GameLogLine = import("@chat/contract").GameLogLine;
+/** A seat as createSketch stores it (st.players). */
+export type SgSeat = { name: string, color: string, hex: string };
+/** The round's secret prompt, and when its drawing went up (null until then). */
+export type SgCur = { prompt: string, posted: number | null };
+/** A sealed guess. */
+export type SgSealed = { guess: string, at: number };
 /** A round's stored drawing: its R2 key, content type and size (the image
- *  route serves it; sgRoundOut and sgSummary give its signed URL).
- *  @typedef {{ key: string, type: string, bytes: number }} SgImageMeta */
-/** A round as stored; sgRoundOut adds its image.
- *  @typedef {Omit<import("@chat/contract").SketchRound, "image">} SgRound */
+ *  route serves it; sgRoundOut and sgSummary give its signed URL). */
+export type SgImageMeta = { key: string, type: string, bytes: number };
+/** A round as stored; sgRoundOut adds its image. */
+export type SgRound = Omit<import("@chat/contract").SketchRound, "image">;
 /** The Referee's answer (sgClaudeJudge, or the test hook's stand-in): the
- *  guesses it judged right and a roast, or why it did not judge.
- *  @typedef {Awaited<ReturnType<typeof sgClaudeJudge>>} SgVerdict */
+ *  guesses it judged right and a roast, or why it did not judge. */
+export type SgVerdict = Awaited<ReturnType<typeof sgClaudeJudge>>;
 /** Sketch & Guess's stored match state (g.st): what createSketch builds
  *  and the moves, the clock and the Referee change. sgSummary and
  *  sgStateFull turn it into the contract's SketchState. artist, phase and
  *  cur are null once the match is over; deck is the match's prompts, one
  *  a round; guesses are the sealed guesses, images the drawings by round
  *  number, judge_at when judging began; forfeits counts the run of rounds
- *  with no drawing.
- *  @typedef {{
- *    type: "sketch", draw_seconds: number, guess_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
- *    artist: string | null, phase: "draw" | "guess" | "judging" | null, deck: string[], cur: SgCur | null,
- *    guesses: Record<string, SgSealed>, images: Record<string, SgImageMeta>, judge_at: number | null, rounds: SgRound[], forfeits: number,
- *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: SgSeat[], log: GameLogLine[],
- *    winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
- *  }} SgStored */
-/** A Sketch & Guess match: its row, with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: SgStored }} SgGame */
+ *  with no drawing. */
+export type SgStored = {
+  type: "sketch", draw_seconds: number, guess_seconds: number, rotations: number, rounds_total: number, round: number, order: string[],
+  artist: string | null, phase: "draw" | "guess" | "judging" | null, deck: string[], cur: SgCur | null,
+  guesses: Record<string, SgSealed>, images: Record<string, SgImageMeta>, judge_at: number | null, rounds: SgRound[], forfeits: number,
+  deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: SgSeat[], log: GameLogLine[],
+  winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
+};
+/** A Sketch & Guess match: its row, with the state typed. */
+export type SgGame = Omit<GameRow, "st"> & { st: SgStored };
 
 // Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
 // the image limits, and the Referee's judge.
@@ -48,8 +48,7 @@ export const SG_ROASTS = [
   "\"{p}\" - a bold interpretation, and a lonely one.",
   "It was \"{p}\". {a} drew it with total confidence, which counts for something.",
 ];
-/** @type {string[] | null} */
-export let sgDeckCache = null;
+export let sgDeckCache: string[] | null = null;
 export function sgDeck() {
   if (sgDeckCache) return sgDeckCache;
   sgDeckCache = String(SG_PROMPTS_TXT).split("\n").map((l) => l.trim()).filter((l) => l && l[0] !== "#");
@@ -57,8 +56,7 @@ export function sgDeck() {
 }
 // An image move: a data URL (or bare base64) of a PNG, JPEG, GIF or WebP,
 // checked by its magic bytes, not its label.
-/** @param {unknown} raw */
-export function sgDecodeImage(raw) {
+export function sgDecodeImage(raw: unknown) {
   let s = String(raw || "").trim();
   const m = s.match(/^data:([a-z0-9.+\/-]+);base64,/i);
   if (m) s = s.slice(m[0].length);
@@ -70,9 +68,8 @@ export function sgDecodeImage(raw) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   if (bytes.length > SG_IMAGE_MAX) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
-  const b = (/** @type {number} */ i) => bytes[i];
-  /** @type {string | null} */
-  let type = null;
+  const b = (i: number) => bytes[i];
+  let type: string | null = null;
   if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) type = "image/png";
   else if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) type = "image/jpeg";
   else if (b(0) === 0x47 && b(1) === 0x49 && b(2) === 0x46 && b(3) === 0x38) type = "image/gif";
@@ -81,7 +78,6 @@ export function sgDecodeImage(raw) {
   return { bytes: bytes, type: type };
 }
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const SketchMethods = {
   /* ---------- games: Sketch & Guess (2026-11-20) ----------
      Henry's AI Pictionary, renamed. 3 to 6 players; each round one artist
@@ -101,15 +97,12 @@ export const SketchMethods = {
      who misses the drawing clock forfeits the round (the prompt is
      revealed); two forfeits in a row end the match. Highest total wins;
      ties go to more exact guesses, then quicker right guesses. */
-  /** @param {SgStored} st */
-  sgGuessers(st) {
+  sgGuessers(st: SgStored) {
     return st.players.filter((p) => p.name !== st.artist);
   },
 
-  /** @param {SgStored} st */
-  sgTally(st) {
-    /** @type {Record<string, { score: number, exact: number, ms: number }>} */
-    const t = {};
+  sgTally(st: SgStored) {
+    const t: Record<string, { score: number, exact: number, ms: number }> = {};
     for (const p of st.players) t[p.name] = { score: 0, exact: 0, ms: 0 };
     for (const r of st.rounds) {
       for (const n of Object.keys(r.points || {})) t[n].score += r.points[n];
@@ -124,40 +117,24 @@ export const SketchMethods = {
     return t;
   },
 
-  /**
-   * @param {SgGame} g
-   * @param {number} n the round
-   */
-  sgImageUrl(g, n) {
+  /** @param n the round */
+  sgImageUrl(g: SgGame, n: number) {
     return this.roomName ? "/api/rooms/" + this.roomName + "/games/" + g.id + "/sketch/" + n + this.mediaQuery(g.id + "." + n, "sketch") : null;
   },
 
-  /**
-   * @param {SgGame} g
-   * @param {SgRound} r
-   * @returns {import("@chat/contract").SketchRound}
-   */
-  sgRoundOut(g, r) {
+  sgRoundOut(g: SgGame, r: SgRound): import("@chat/contract").SketchRound {
     return Object.assign({}, r, { image: (g.st.images || {})[r.n] ? { url: this.sgImageUrl(g, r.n), type: g.st.images[r.n].type } : null });
   },
 
   // The image of round n, for the image route: public once posted.
-  /**
-   * @param {number} gid
-   * @param {number} n the round
-   * @returns {SgImageMeta | null}
-   */
-  sketchImage(gid, n) {
+  /** @param n the round */
+  sketchImage(gid: number, n: number): SgImageMeta | null {
     const g = this.gameRow(gid);
     if (!g || !g.st || g.st.type !== "sketch") return null;
     return (g.st.images || {})[n] || null;
   },
 
-  /**
-   * @param {SgGame} g
-   * @returns {import("@chat/contract").SketchState}
-   */
-  sgSummary(g) {
+  sgSummary(g: SgGame): import("@chat/contract").SketchState {
     const st = g.st;
     const t = this.sgTally(st);
     const live = g.status === "running";
@@ -172,18 +149,13 @@ export const SketchMethods = {
     };
   },
 
-  /**
-   * @param {SgGame} g
-   * @param {string | null | undefined} who
-   * @returns {import("@chat/contract").SketchState}
-   */
-  sgStateFull(g, who) {
+  sgStateFull(g: SgGame, who: string | null | undefined): import("@chat/contract").SketchState {
     const out = this.sgSummary(g);
     const st = g.st;
     out.rounds = st.rounds.map((r) => this.sgRoundOut(g, r));
     out.log = st.log.slice(-24);
     const live = g.status === "running";
-    out.awaiting = !live ? [] : st.phase === "draw" ? [/** @type {string} */ (st.artist)] : st.phase === "guess" ? this.sgGuessers(st).filter((p) => st.guesses[p.name] === undefined).map((p) => p.name) : [];
+    out.awaiting = !live ? [] : st.phase === "draw" ? [st.artist as string] : st.phase === "guess" ? this.sgGuessers(st).filter((p) => st.guesses[p.name] === undefined).map((p) => p.name) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) {
@@ -191,8 +163,7 @@ export const SketchMethods = {
       return out;
     }
     const artist = live && st.artist === me.name;
-    /** @type {import("@chat/contract").SketchYou} */
-    const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, artist: artist, legal_moves: [] };
+    const you: import("@chat/contract").SketchYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, artist: artist, legal_moves: [] };
     if (artist) {
       you.prompt = st.cur ? st.cur.prompt : null;
       if (st.phase === "draw") you.legal_moves = ['{"image": "data:image/png;base64,<your drawing>"}'];
@@ -204,23 +175,17 @@ export const SketchMethods = {
     return out;
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, unknown>} opts the create's options (request JSON)
-   * @param {string} room
-   */
-  async createSketch(creator, playersIn, opts, room) {
+  /** @param opts the create's options (request JSON) */
+  async createSketch(creator: string, playersIn: unknown[], opts: Record<string, unknown>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Sketch & Guess needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
+    const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
     }
-    /** @type {(v: unknown, lo: number, hi: number, def: number) => number} */
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const rotations = clamp(opts.rotations, 1, 3, Math.max(1, Math.min(3, Math.round(6 / names.length))));
     const drawSeconds = clamp(opts.draw_seconds !== undefined ? opts.draw_seconds : opts.tick_seconds, 60, 86400, 3600);
     const guessSeconds = clamp(opts.guess_seconds, 30, 86400, 600);
@@ -231,17 +196,16 @@ export const SketchMethods = {
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
     const colors = this.gameColors();
-    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {SgStored} */
-    const st = {
+    const players = (resolved.names as string[]).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const st: SgStored = {
       type: "sketch", draw_seconds: drawSeconds, guess_seconds: guessSeconds, rotations: rotations, rounds_total: total, round: 1, order: names, artist: names[0], phase: "draw",
       deck: deck.slice(0, total), cur: { prompt: deck[0], posted: null }, guesses: {}, images: {}, judge_at: null, rounds: [], forfeits: 0,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, resolved.names), players: players,
       log: [{ tick: 0, text: "Sketch & Guess created by " + creator + " - artists in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Sketch & Guess #" + g.id + " - " + label + ". Each round an artist draws a secret prompt; everyone else guesses what it shows. " + names[0] + " draws first. Clock: " + clockWords(drawSeconds) + " to draw, " + clockWords(guessSeconds) + " to guess. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -252,14 +216,7 @@ export const SketchMethods = {
     return { status: 201, game: this.sgStateFull(g, creator) };
   },
 
-  /**
-   * @param {SgGame} g
-   * @param {string} who
-   * @param {unknown} raw
-   * @param {string} room
-   * @param {Record<string, unknown> | null | undefined} fields
-   */
-  async sgMove(g, who, raw, room, fields) {
+  async sgMove(g: SgGame, who: string, raw: unknown, room: string, fields: Record<string, unknown> | null | undefined) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this game" };
@@ -273,15 +230,15 @@ export const SketchMethods = {
       if (!this.env || !this.env.MEDIA) return { status: 503, error: "Image storage is not available right now" };
       const rnd = Array.from(crypto.getRandomValues(new Uint8Array(6))).map((b) => ("0" + b.toString(16)).slice(-2)).join("");
       // img.error is unset, so img is the decoded image (every error has a message)
-      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + /** @type {string} */ (img.type).split("/")[1];
-      try { await this.env.MEDIA.put(key, /** @type {Uint8Array} */ (img.bytes), { httpMetadata: { contentType: img.type } }); } catch (e) { return { status: 503, error: "The image could not be stored - try again" }; }
+      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + (img.type as string).split("/")[1];
+      try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch (e) { return { status: 503, error: "The image could not be stored - try again" }; }
       // the state may have moved while the image was stored
-      const g2 = /** @type {SgGame | null} */ (this.gameRow(g.id));
+      const g2 = this.gameRow(g.id) as SgGame | null;
       if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
       const s2 = g2.st;
       if (!s2.images) s2.images = {};
-      s2.images[s2.round] = { key: key, type: /** @type {string} */ (img.type), bytes: /** @type {Uint8Array} */ (img.bytes).length };
-      /** @type {SgCur} */ (s2.cur).posted = Date.now(); // a draw phase has its prompt
+      s2.images[s2.round] = { key: key, type: img.type as string, bytes: (img.bytes as Uint8Array).length };
+      (s2.cur as SgCur).posted = Date.now(); // a draw phase has its prompt
       s2.phase = "guess";
       s2.guesses = {};
       s2.deadline = Date.now() + s2.guess_seconds * 1000;
@@ -318,8 +275,7 @@ export const SketchMethods = {
   // itself runs async - from the move that closed the guesses, or from the
   // alarm (advanceAsync) - so a read only flips the phase and leaves the
   // judging to the alarm, a second away.
-  /** @param {SgGame} g */
-  sgClose(g) {
+  sgClose(g: SgGame) {
     const st = g.st;
     st.phase = "judging";
     st.judge_at = Date.now();
@@ -328,11 +284,9 @@ export const SketchMethods = {
 
   // Folded equal (or one letter off) to the prompt: right on its own.
   // Runs once the drawing is up, so cur is set.
-  /** @param {SgStored} st */
-  sgAuto(st) {
-    /** @type {Record<string, "exact" | "near" | null>} */
-    const out = {};
-    const p = tvNorm(/** @type {SgCur} */ (st.cur).prompt);
+  sgAuto(st: SgStored) {
+    const out: Record<string, "exact" | "near" | null> = {};
+    const p = tvNorm((st.cur as SgCur).prompt);
     for (const n of Object.keys(st.guesses)) {
       const g = tvNorm(st.guesses[n].guess);
       out[n] = g && g === p ? "exact" : g && p.length >= 5 && tvNear(g, p) ? "near" : null;
@@ -340,14 +294,10 @@ export const SketchMethods = {
     return out;
   },
 
-  /**
-   * @param {number} gid
-   * @param {string} room
-   */
-  async sgJudgeNow(gid, room) {
+  async sgJudgeNow(gid: number, room: string) {
     if (!this.sgJudging) this.sgJudging = new Set();
     if (this.sgJudging.has(gid)) return;
-    const g0 = /** @type {SgGame | null} */ (this.gameRow(gid));
+    const g0 = this.gameRow(gid) as SgGame | null;
     if (!g0 || g0.status !== "running" || g0.st.phase !== "judging") return;
     this.sgJudging.add(gid);
     try {
@@ -357,8 +307,7 @@ export const SketchMethods = {
       const names = Object.keys(st0.guesses);
       const pending = names.filter((x) => !auto[x]).map((x) => ({ name: x, guess: st0.guesses[x].guess }));
       const anyRight = names.some((x) => auto[x]);
-      /** @type {Awaited<ReturnType<typeof sgClaudeJudge>> | null} */
-      let verdict = null;
+      let verdict: Awaited<ReturnType<typeof sgClaudeJudge>> | null = null;
       if (pending.length) {
         // while Claude thinks, the clock sits past the judge's own timeout,
         // so the alarm does not fire again and again meanwhile
@@ -366,11 +315,11 @@ export const SketchMethods = {
         this.saveGame(g0);
         const hook = this.sgTestJudge();
         if (hook) verdict = hook;
-        else if (this.sgJudgeBudget()) verdict = await sgClaudeJudge(this.env, /** @type {SgCur} */ (st0.cur).prompt, pending, !anyRight); // judging: the drawing is up
+        else if (this.sgJudgeBudget()) verdict = await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, pending, !anyRight); // judging: the drawing is up
         else verdict = { error: "daily_cap" };
       }
       // the round may have moved on while the Referee thought
-      const g = /** @type {SgGame | null} */ (this.gameRow(gid));
+      const g = this.gameRow(gid) as SgGame | null;
       if (!g || g.status !== "running" || g.st.phase !== "judging" || g.st.round !== n) return;
       this.sgResolve(g, auto, verdict);
       this.saveGame(g);
@@ -383,7 +332,7 @@ export const SketchMethods = {
   // The room's daily allowance of Referee calls (counted when spent).
   sgJudgeBudget() {
     const day = new Date().toISOString().slice(0, 10);
-    const r = /** @type {Pick<import("../room/Room.js").CfgRow, "v">[]} */ (this.sql.exec("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray())[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray() as Pick<import("../room/Room.js").CfgRow, "v">[])[0];
     const [d, c] = String((r && r.v) || "").split(":");
     const used = d === day ? parseInt(c, 10) || 0 : 0;
     if (used >= SG_JUDGE_DAILY) return false;
@@ -392,17 +341,15 @@ export const SketchMethods = {
   },
 
   // Tests: a verdict laid by the test hook stands in for Claude, once.
-  /** @returns {SgVerdict | null} */
-  sgTestJudge() {
+  sgTestJudge(): SgVerdict | null {
     if (!this.env || !this.env.TEST_HOOKS) return null;
-    const r = /** @type {Pick<import("../room/Room.js").CfgRow, "v">[]} */ (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray())[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray() as Pick<import("../room/Room.js").CfgRow, "v">[])[0];
     if (!r) return null;
     this.sql.exec("DELETE FROM cfg WHERE k = 'test_sg_judge'");
     try {
       const o = JSON.parse(r.v); // the test's verdict JSON, as setTestSketchJudge stored it
       if (o.error) return { error: String(o.error) };
-      /** @type {Record<string, boolean>} */
-      const right = {};
+      const right: Record<string, boolean> = {};
       for (const n of o.right || []) right[n] = true;
       return { right: right, roast: String(o.roast || ""), model: "test" };
     } catch (e) {
@@ -410,25 +357,23 @@ export const SketchMethods = {
     }
   },
 
-  /** @param {unknown} verdict { right: [names], roast } or { error }, from the request's JSON */
-  setTestSketchJudge(verdict) {
+  /** @param verdict { right: [names], roast } or { error }, from the request's JSON */
+  setTestSketchJudge(verdict: unknown) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_sg_judge', ?)", JSON.stringify(verdict || {}));
     return { ok: true };
   },
 
   /**
-   * @param {SgGame} g
-   * @param {Record<string, "exact" | "near" | null>} auto sgAuto's verdicts
-   * @param {SgVerdict | null} verdict the Referee's, if it was asked
+   * @param auto sgAuto's verdicts
+   * @param verdict the Referee's, if it was asked
    */
-  sgResolve(g, auto, verdict) {
+  sgResolve(g: SgGame, auto: Record<string, "exact" | "near" | null>, verdict: SgVerdict | null) {
     // it runs once the guessing has begun: the round has its artist and prompt
-    const st = /** @type {SgStored & { artist: string, cur: SgCur }} */ (g.st);
+    const st = g.st as SgStored & { artist: string, cur: SgCur };
     const ok = verdict && !verdict.error;
-    /** The round as stored; sgRoundOut adds its image.
-     *  @type {Omit<import("@chat/contract").SketchRound, "image">} */
-    const rec = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
+    /** The round as stored; sgRoundOut adds its image. */
+    const rec: Omit<import("@chat/contract").SketchRound, "image"> = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
     for (const p of this.sgGuessers(st)) {
       const x = st.guesses[p.name];
       if (!x) {
@@ -439,7 +384,7 @@ export const SketchMethods = {
       // ok: the verdict came back without an error, so it carries right; ok
       // is null only with no verdict, which comes only when every guess
       // matched on its own (a is set), so byRef is a boolean
-      const byRef = /** @type {boolean} */ (!a && ok && !!/** @type {Record<string, boolean>} */ (verdict.right)[p.name]);
+      const byRef = (!a && ok && !!(verdict.right as Record<string, boolean>)[p.name]) as boolean;
       const right = !!a || byRef;
       rec.guesses[p.name] = { guess: x.guess, right: right, exact: a === "exact", how: a ? "match" : ok ? "referee" : "match", at: x.at, ms: Math.max(0, x.at - (st.cur.posted || x.at)) };
       if (right) {
@@ -455,8 +400,7 @@ export const SketchMethods = {
     this.sgNext(g);
   },
 
-  /** @param {SgGame} g */
-  sgNext(g) {
+  sgNext(g: SgGame) {
     const st = g.st;
     st.guesses = {};
     st.judge_at = null;
@@ -483,11 +427,7 @@ export const SketchMethods = {
     st.deadline = Date.now() + st.draw_seconds * 1000;
   },
 
-  /**
-   * @param {SgGame | null} g
-   * @param {string} room
-   */
-  sgAdvance(g, room) {
+  sgAdvance(g: SgGame | null, room: string) {
     if (!g || g.status !== "running") return;
     const st = g.st;
     if (st.phase === "judging") {
@@ -500,34 +440,29 @@ export const SketchMethods = {
       }
       return;
     }
-    if (Date.now() < /** @type {number} */ (st.deadline)) return; // a running match's clock is set
+    if (Date.now() < (st.deadline as number)) return; // a running match's clock is set
     if (st.phase === "draw") {
       // a draw phase has its artist and prompt
-      st.rounds.push({ n: st.round, artist: /** @type {string} */ (st.artist), prompt: /** @type {SgCur} */ (st.cur).prompt, guesses: {}, right: [], missed: [], points: {}, judge: null, judge_note: null, roast: null, forfeit: true, at: Date.now() });
-      st.log.push({ tick: st.round, text: st.artist + " ran out of time to draw - round " + st.round + " is forfeit. The prompt was " + /** @type {SgCur} */ (st.cur).prompt + "." });
+      st.rounds.push({ n: st.round, artist: st.artist as string, prompt: (st.cur as SgCur).prompt, guesses: {}, right: [], missed: [], points: {}, judge: null, judge_note: null, roast: null, forfeit: true, at: Date.now() });
+      st.log.push({ tick: st.round, text: st.artist + " ran out of time to draw - round " + st.round + " is forfeit. The prompt was " + (st.cur as SgCur).prompt + "." });
       st.forfeits += 1;
       this.sgNext(g);
     } else if (Object.keys(st.guesses).length) this.sgClose(g);
     else this.sgResolve(g, {}, null);
     this.saveGame(g);
     // sgNext may have called it off (the check above narrowed status to running)
-    if (/** @type {import("@chat/contract").GameStatus} */ (g.status) === "cancelled") this.postSystem("Sketch & Guess #" + g.id + " is off - nothing was drawn and guessed.", room);
+    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Sketch & Guess #" + g.id + " is off - nothing was drawn and guessed.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
   // The alarm's path: the clock work, then the judge when it is due.
-  /**
-   * @param {SgGame} g
-   * @param {string} room
-   */
-  async sgAdvanceAsync(g, room) {
+  async sgAdvanceAsync(g: SgGame, room: string) {
     this.sgAdvance(g, room);
     const g2 = this.gameRow(g.id);
     if (g2 && g2.status === "running" && g2.st.phase === "judging") await this.sgJudgeNow(g2.id, room);
   },
 
-  /** @param {SgStored} st */
-  sgStanding(st) {
+  sgStanding(st: SgStored) {
     const t = this.sgTally(st);
     st.places = st.players.map((p) => p.name).sort((a, b) => t[b].score - t[a].score || t[b].exact - t[a].exact || t[a].ms - t[b].ms || (a < b ? -1 : 1));
     const [x, y] = st.places;
@@ -536,23 +471,21 @@ export const SketchMethods = {
     return tied ? null : x;
   },
 
-  /** @param {SgGame} g */
-  sgResultText(g) {
+  sgResultText(g: SgGame) {
     const st = g.st;
     if (!st.places) st.winner = this.sgStanding(st);
     const t = this.sgTally(st);
-    const lines = /** @type {string[]} */ (st.places).map((n) => n + " " + t[n].score).join(", "); // sgStanding sets places
+    const lines = (st.places as string[]).map((n) => n + " " + t[n].score).join(", "); // sgStanding sets places
     const best = st.rounds.filter((r) => !r.forfeit).sort((a, b) => b.right.length - a.right.length)[0];
     return "Sketch & Guess #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner].score + " points." : "a tie at the top, no winner.") + " " + lines + "." + (best && best.right.length ? " Most guessed: " + best.artist + "'s " + best.prompt + " (" + best.right.length + (best.right.length === 1 ? " got it)." : " got it).") : "");
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const sketchEngine = {
   name: "Sketch & Guess",
   turnWord: "round",
-  logTick: (/** @type {SgStored} */ st) => st.round,
-  clockSeconds: (/** @type {SgStored} */ st) => (st.phase === "guess" ? st.guess_seconds : st.draw_seconds),
+  logTick: (st: SgStored) => st.round,
+  clockSeconds: (st: SgStored) => (st.phase === "guess" ? st.guess_seconds : st.draw_seconds),
   create: (room, creator, players, opts, roomName) => room.createSketch(creator, players, opts, roomName),
   summary: (room, g) => room.sgSummary(g),
   full: (room, g, who) => room.sgStateFull(g, who),
@@ -561,22 +494,21 @@ export const sketchEngine = {
   // the alarm awaits this one: the Referee's judge is an API call
   advanceAsync: (room, g, roomName) => room.sgAdvanceAsync(g, roomName),
   // pub is sgSummary's state
-  targets: (/** @type {import("@chat/contract").SketchState} */ pub) => (pub.status !== "running" ? [] : pub.phase === "draw" ? (pub.artist ? [pub.artist] : []) : pub.phase === "guess" ? (pub.players || []).filter((p) => p.name !== pub.artist && !p.committed).map((p) => p.name) : []),
-  card: (/** @type {SgGame} */ g) => {
-    /** @type {Record<string, number>} */
-    const t = {};
+  targets: (pub: import("@chat/contract").SketchState) => (pub.status !== "running" ? [] : pub.phase === "draw" ? (pub.artist ? [pub.artist] : []) : pub.phase === "guess" ? (pub.players || []).filter((p) => p.name !== pub.artist && !p.committed).map((p) => p.name) : []),
+  card: (g: SgGame) => {
+    const t: Record<string, number> = {};
     for (const p of g.st.players) t[p.name] = 0;
     for (const r of g.st.rounds) for (const n of Object.keys(r.points || {})) t[n] += r.points[n];
     return { id: g.id, type: "sketch", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, artist: g.status === "running" ? g.st.artist : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
-  stateItem: (r, /** @type {SgStored} */ st) => ({ id: r.id, type: "sketch", status: r.status, phase: st.phase, artist: st.artist, turn: (st.round || 0) * 3 + (st.phase === "guess" ? 1 : st.phase === "judging" ? 2 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "draw" ? p.name !== st.artist : st.phase === "guess" ? p.name === st.artist || (st.guesses || {})[p.name] !== undefined : true), accepted: seatAccepted(st, p) })) }),
+  stateItem: (r, st: SgStored) => ({ id: r.id, type: "sketch", status: r.status, phase: st.phase, artist: st.artist, turn: (st.round || 0) * 3 + (st.phase === "guess" ? 1 : st.phase === "judging" ? 2 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "draw" ? p.name !== st.artist : st.phase === "guess" ? p.name === st.artist || (st.guesses || {})[p.name] !== undefined : true), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: (gm, name) => (gm.artist === name ? '{"image": "data:image/png;base64,<your drawing of you.prompt>"}' : '{"guess": "<what the drawing shows>"}'),
   result: (room, g) => room.sgResultText(g),
-  rules: (/** @type {SgStored} */ st) =>
+  rules: (st: SgStored) =>
     "Sketch & Guess: each round one player is the artist (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds) and gets a secret prompt in you.prompt. " +
     "The artist draws it - generate an image or draw one - and sends image as a data URL (data:image/png;base64,...; PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB). No letters or words in the drawing: the picture has to do the work. " +
     "Then everyone else sends one sealed guess (guess, or dir) - changeable until the guesses close. A guess that matches the prompt is right on its own; the Referee (Claude) rules on close calls - same meaning counts. " +
     "A right guess scores 2; the artist scores 1 per right guesser, at most 2 - so draw something guessable but not trivial. If nobody gets it, the prompt is revealed with a roast. " +
     "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then quicker right guesses.",
-};
+} satisfies GameEngine;

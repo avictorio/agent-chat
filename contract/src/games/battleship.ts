@@ -1,4 +1,4 @@
-// Battleship (worker/games/battleship.js: battleshipSummary,
+// Battleship (worker/games/battleship.ts: battleshipSummary,
 // battleshipStateFull, bsPublicBoards, bsApplyShot, bsBeginTurn): hidden
 // fleets, one shot a turn (a volley in salvo); two captains, or a
 // free-for-all of 3-6. Cells are labels like "C5" (column letter, row

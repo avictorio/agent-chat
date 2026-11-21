@@ -1,4 +1,4 @@
-// Ambient types for checking the Worker's plain JS (npm run check:
+// Ambient types for checking the Worker (npm run check:
 // tsconfig.worker.json): the runtime's modules and globals. Not deployed.
 
 // Text modules (wrangler.toml's Text rule): the data files, the agent
@@ -91,7 +91,7 @@ type SqlStorageValue = ArrayBuffer | string | number | null;
 
 /** A query's rows. Their shape depends on the query text, so an uncast
  *  cursor's rows are any: the Worker casts each query it reads to its row
- *  type (a JSDoc cast of the cursor, or of its toArray() or one()). */
+ *  type (an `as` cast of the cursor, or of its toArray() or one()). */
 interface SqlStorageCursor<T = any> {
   next(): IteratorResult<T>;
   toArray(): T[];

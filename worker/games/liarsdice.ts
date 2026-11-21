@@ -1,39 +1,34 @@
 // Liar's Dice: hidden dice, rising bids, call liar; ones are wild.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
-/** @typedef {import("@chat/contract").LiarsDiceBid} LiarsDiceBid */
-/** @typedef {import("@chat/contract").LiarsDiceRound} LiarsDiceRound */
-/** A seat as createLiarsDice stores it (st.players).
- *  @typedef {{ name: string, color: string, hex: string }} LdSeat */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type GameLogLine = import("@chat/contract").GameLogLine;
+export type LiarsDiceBid = import("@chat/contract").LiarsDiceBid;
+export type LiarsDiceRound = import("@chat/contract").LiarsDiceRound;
+/** A seat as createLiarsDice stores it (st.players). */
+export type LdSeat = { name: string, color: string, hex: string };
 /** Liar's Dice's stored match state (g.st): what createLiarsDice builds and
  *  the moves and the clock change. ldSummary and ldStateFull turn it into
  *  the contract's LiarsDiceState. order is the seats still in, count and
  *  cups every seat's dice (an empty cup once out), bid and bids the round
- *  in play, rounds the closed ones (stored as the API shows them).
- *  @typedef {{
- *    type: "liarsdice", turn_seconds: number, turn: number, round: number, order: string[], turn_of: string | null,
- *    dice_each: number, ones_wild: boolean, count: Record<string, number>, cups: Record<string, number[]>,
- *    bid: LiarsDiceBid | null, bids: LiarsDiceBid[], rounds: LiarsDiceRound[], out: string[], timeouts: Record<string, number>,
- *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: LdSeat[], log: GameLogLine[],
- *    winner: string | null, places: string[] | null, forfeit: string | null, announced: boolean,
- *    declined_by?: string, ended?: number
- *  }} LdStored */
-/** A Liar's Dice match: its row, with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: LdStored }} LdGame */
+ *  in play, rounds the closed ones (stored as the API shows them). */
+export type LdStored = {
+  type: "liarsdice", turn_seconds: number, turn: number, round: number, order: string[], turn_of: string | null,
+  dice_each: number, ones_wild: boolean, count: Record<string, number>, cups: Record<string, number[]>,
+  bid: LiarsDiceBid | null, bids: LiarsDiceBid[], rounds: LiarsDiceRound[], out: string[], timeouts: Record<string, number>,
+  deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: LdSeat[], log: GameLogLine[],
+  winner: string | null, places: string[] | null, forfeit: string | null, announced: boolean,
+  declined_by?: string, ended?: number
+};
+/** A Liar's Dice match: its row, with the state typed. */
+export type LdGame = Omit<GameRow, "st"> & { st: LdStored };
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LiarsDiceMethods = {
   // Liar's Dice in tests: set the cups (each must keep its die count) and/or
   // expire the turn clock so the next read runs the timeout.
-  /**
-   * @param {number} id
-   * @param {Record<string, unknown> | null | undefined} cups name -> faces, from the request's JSON
-   * @param {boolean} expire
-   */
-  setTestLiarsDice(id, cups, expire) {
+  /** @param cups name -> faces, from the request's JSON */
+  setTestLiarsDice(id: number, cups: Record<string, unknown> | null | undefined, expire: boolean) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     const g = this.gameRow(id);
     if (!g || !g.st || g.st.type !== "liarsdice") return { error: "No Liar's Dice match with that id" };
@@ -64,8 +59,7 @@ export const LiarsDiceMethods = {
      match always ends. Cups are secret: a view shows only your own cup
      and the cups of rounds already opened. st.order holds the seats still
      in, so turnsNext skips the eliminated. */
-  /** @param {number} n */
-  ldRoll(n) {
+  ldRoll(n: number) {
     const out = [];
     while (out.length < n) {
       const a = new Uint8Array(n * 2);
@@ -75,39 +69,28 @@ export const LiarsDiceMethods = {
     return out;
   },
 
-  /** @param {LdStored} st */
-  ldTotal(st) {
+  ldTotal(st: LdStored) {
     return st.order.reduce((s, n) => s + (st.count[n] || 0), 0);
   },
 
-  /**
-   * @param {number} f
-   * @param {boolean} plural
-   */
-  ldFaceWord(f, plural) {
+  ldFaceWord(f: number, plural: boolean) {
     const w = ["", "one", "two", "three", "four", "five", "six"][f] || String(f);
     return plural ? (f === 6 ? "sixes" : w + "s") : w;
   },
 
-  /** @param {Pick<LiarsDiceBid, "qty" | "face">} b */
-  ldBidText(b) {
+  ldBidText(b: Pick<LiarsDiceBid, "qty" | "face">) {
     return b.qty + " " + this.ldFaceWord(b.face, b.qty !== 1);
   },
 
   // How many dice on the table show face (ones count too when wild).
-  /**
-   * @param {LdStored} st
-   * @param {number} face
-   */
-  ldCount(st, face) {
+  ldCount(st: LdStored, face: number) {
     let n = 0;
     for (const nm of st.order) for (const d of st.cups[nm] || []) if (d === face || (st.ones_wild && d === 1 && face !== 1)) n++;
     return n;
   },
 
   // The lowest legal raise for each face, then liar when there is a bid.
-  /** @param {LdStored} st */
-  ldLegal(st) {
+  ldLegal(st: LdStored) {
     const total = this.ldTotal(st);
     const out = [];
     const b = st.bid;
@@ -120,17 +103,11 @@ export const LiarsDiceMethods = {
   },
 
   // dir: "liar" (or call / challenge), or a bid: 3x4, 3 4, "3 fours".
-  /**
-   * @param {unknown} raw
-   * @returns {{ call: true } | { call?: undefined, qty: number, face: number } | null}
-   */
-  ldParse(raw) {
+  ldParse(raw: unknown): { call: true } | { call?: undefined, qty: number, face: number } | null {
     const s = String(raw || "").trim().toLowerCase().replace(/^bid\s*:?\s*/, "");
     if (/^(liar|call|challenge|call liar)!?$/.test(s)) return { call: true };
-    /** @type {Record<string, number>} */
-    const words = { ones: 1, one: 1, twos: 2, two: 2, threes: 3, three: 3, fours: 4, four: 4, fives: 5, five: 5, sixes: 6, six: 6 };
-    /** @type {Record<string, number>} */
-    const nums = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+    const words: Record<string, number> = { ones: 1, one: 1, twos: 2, two: 2, threes: 3, three: 3, fours: 4, four: 4, fives: 5, five: 5, sixes: 6, six: 6 };
+    const nums: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
     let m = s.match(/^(\d{1,2})\s*(?:x|×|\*)\s*([1-6])s?$/);
     if (m) return { qty: Number(m[1]), face: Number(m[2]) };
     // 3 4s, 3 fours, three 4s, three fours
@@ -143,19 +120,11 @@ export const LiarsDiceMethods = {
     return null;
   },
 
-  /**
-   * @param {LdStored} st
-   * @param {string} nm
-   */
-  ldShow(st, nm) {
+  ldShow(st: LdStored, nm: string) {
     return (st.cups[nm] || []).slice().sort((a, b) => a - b);
   },
 
-  /**
-   * @param {LdGame} g
-   * @returns {import("@chat/contract").LiarsDiceState}
-   */
-  ldSummary(g) {
+  ldSummary(g: LdGame): import("@chat/contract").LiarsDiceState {
     const st = g.st;
     const last = st.rounds.length ? st.rounds[st.rounds.length - 1] : null;
     return {
@@ -167,12 +136,7 @@ export const LiarsDiceMethods = {
     };
   },
 
-  /**
-   * @param {LdGame} g
-   * @param {string | null | undefined} who
-   * @returns {import("@chat/contract").LiarsDiceState}
-   */
-  ldStateFull(g, who) {
+  ldStateFull(g: LdGame, who: string | null | undefined): import("@chat/contract").LiarsDiceState {
     const out = this.ldSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -187,18 +151,13 @@ export const LiarsDiceMethods = {
     return out;
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, unknown>} opts the create's options (request JSON)
-   * @param {string} room
-   */
-  async createLiarsDice(creator, playersIn, opts, room) {
+  /** @param opts the create's options (request JSON) */
+  async createLiarsDice(creator: string, playersIn: unknown[], opts: Record<string, unknown>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Liar's Dice needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     // seats in a random order; the first seat opens
-    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
+    const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -209,25 +168,22 @@ export const LiarsDiceMethods = {
     const each = Math.min(6, Math.max(2, Math.floor(Number(opts.dice) || 5)));
     const wild = opts.ones_wild === undefined || opts.ones_wild === null ? true : !(opts.ones_wild === false || opts.ones_wild === "false" || opts.ones_wild === 0);
     const colors = this.gameColors();
-    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {Record<string, number>} */
-    const count = {};
-    /** @type {Record<string, number[]>} */
-    const cups = {};
+    const players = (resolved.names as string[]).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const count: Record<string, number> = {};
+    const cups: Record<string, number[]> = {};
     names.forEach((n) => {
       count[n] = each;
       cups[n] = this.ldRoll(each);
     });
-    /** @type {LdStored} */
-    const st = {
+    const st: LdStored = {
       type: "liarsdice", turn_seconds: turnSeconds, turn: 1, round: 1, order: names.slice(), turn_of: names[0],
       dice_each: each, ones_wild: wild, count: count, cups: cups, bid: null, bids: [], rounds: [], out: [], timeouts: {},
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, resolved.names), players: players,
       log: [{ tick: 0, text: "Liar's Dice created by " + creator + " - " + names.join(", ") + " in seat order, " + each + " dice each, ones " + (wild ? "wild" : "not wild") + "; " + names[0] + " opens. The clock starts when everyone accepts." }],
       winner: null, places: null, forfeit: null, announced: false,
     };
-    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Liar's Dice #" + g.id + " - " + label + ". " + each + " hidden dice each" + (wild ? ", ones wild" : "") + ": raise the bid or call liar; the last one with dice wins. " + names[0] + " opens. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -239,11 +195,7 @@ export const LiarsDiceMethods = {
   },
 
   // A player leaves the table: out of order, onto the out list.
-  /**
-   * @param {LdStored} st
-   * @param {string} nm
-   */
-  ldEliminate(st, nm) {
+  ldEliminate(st: LdStored, nm: string) {
     const i = st.order.indexOf(nm);
     if (i < 0) return;
     st.order.splice(i, 1);
@@ -253,16 +205,10 @@ export const LiarsDiceMethods = {
 
   // Close the round: record it (every cup opened), take the loser's die
   // (or their seat), then finish or deal the next round.
-  /**
-   * @param {LdGame} g
-   * @param {Pick<LiarsDiceRound, "reason" | "call" | "face" | "count" | "stands">} rec how the round closed
-   * @param {string} loser
-   * @param {boolean} eliminate
-   */
-  ldEndRound(g, rec, loser, eliminate) {
+  /** @param rec how the round closed */
+  ldEndRound(g: LdGame, rec: Pick<LiarsDiceRound, "reason" | "call" | "face" | "count" | "stands">, loser: string, eliminate: boolean) {
     const st = g.st;
-    /** @type {Record<string, number[]>} */
-    const cups = {};
+    const cups: Record<string, number[]> = {};
     st.order.forEach((n) => (cups[n] = this.ldShow(st, n)));
     const seat = st.order.indexOf(loser);
     if (eliminate) this.ldEliminate(st, loser);
@@ -294,13 +240,7 @@ export const LiarsDiceMethods = {
     st.deadline = Date.now() + st.turn_seconds * 1000;
   },
 
-  /**
-   * @param {LdGame} g
-   * @param {string} who
-   * @param {unknown} raw
-   * @param {string} room
-   */
-  async ldMove(g, who, raw, room) {
+  async ldMove(g: LdGame, who: string, raw: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
@@ -336,14 +276,10 @@ export const LiarsDiceMethods = {
 
   // An expired turn costs that player a die and starts a new round; the
   // third in a row puts them out.
-  /**
-   * @param {LdGame | null} g
-   * @param {string} room
-   */
-  ldAdvance(g, room) {
-    if (!g || g.status !== "running" || Date.now() < /** @type {number} */ (g.st.deadline)) return; // a running match's clock is set
+  ldAdvance(g: LdGame | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline as number)) return; // a running match's clock is set
     const st = g.st;
-    const who = /** @type {string} */ (st.turn_of); // a running match always has a turn
+    const who = st.turn_of as string; // a running match always has a turn
     st.timeouts[who] = (st.timeouts[who] || 0) + 1;
     const gone = st.timeouts[who] >= 3;
     st.log.push({ tick: st.turn, text: gone ? who + "'s turn timed out a third time in a row - " + who + " is out." : who + "'s turn timed out - " + who + " loses a die (" + st.timeouts[who] + " of 3 in a row)." });
@@ -353,37 +289,35 @@ export const LiarsDiceMethods = {
     this.afterGameChange(g, room, "Referee");
   },
 
-  /** @param {LdGame} g */
-  ldResultText(g) {
+  ldResultText(g: LdGame) {
     const st = g.st;
-    const w = /** @type {string} */ (st.winner); // a finished match always has one (the last seat with dice)
+    const w = st.winner as string; // a finished match always has one (the last seat with dice)
     const rest = (st.places || []).slice(1);
     const how = st.rounds.filter((r) => r.out).map((r) => r.loser + " (round " + r.n + (r.reason === "forfeit" ? ", timed out" : "") + ")");
     return "Liar's Dice #" + g.id + " is over - " + w + " wins with " + (st.count[w] || 0) + (st.count[w] === 1 ? " die" : " dice") + " left after " + st.rounds.length + " rounds." + (rest.length ? " Out in order: " + how.join(", ") + "." : "");
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const liarsdiceEngine = {
   name: "Liar's Dice",
   turnWord: "turn",
-  logTick: (/** @type {LdStored} */ st) => st.turn,
-  clockSeconds: (/** @type {LdStored} */ st) => st.turn_seconds,
+  logTick: (st: LdStored) => st.turn,
+  clockSeconds: (st: LdStored) => st.turn_seconds,
   create: (room, creator, players, opts, roomName) => room.createLiarsDice(creator, players, opts, roomName),
   summary: (room, g) => room.ldSummary(g),
   full: (room, g, who) => room.ldStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.ldMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.ldAdvance(g, roomName),
   targets: (pub) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
-  card: (/** @type {LdGame} */ g) => ({ id: g.id, type: "liarsdice", status: g.status, round: g.st.round, turn_of: g.status === "running" ? g.st.turn_of : null, bid: g.st.bid || null, winner: g.st.winner || null, draw: false, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dice: (g.st.count || {})[p.name] || 0 })) }),
-  stateItem: (r, /** @type {LdStored} */ st) => ({ id: r.id, type: "liarsdice", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: ((st.count || {})[p.name] || 0) > 0, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
+  card: (g: LdGame) => ({ id: g.id, type: "liarsdice", status: g.status, round: g.st.round, turn_of: g.status === "running" ? g.st.turn_of : null, bid: g.st.bid || null, winner: g.st.winner || null, draw: false, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dice: (g.st.count || {})[p.name] || 0 })) }),
+  stateItem: (r, st: LdStored) => ({ id: r.id, type: "liarsdice", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: ((st.count || {})[p.name] || 0) > 0, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: () => "<a bid like 3x4 (at least three 4s on the table), or liar>",
   result: (room, g) => room.ldResultText(g),
-  rules: (/** @type {LdStored} */ st) =>
+  rules: (st: LdStored) =>
     "Liar's Dice: everyone has a cup of dice (" + st.dice_each + " each to start) that only they can see - your own are in you.dice. Turns go round the table (" + st.order.join(", ") + "). " +
     "On your turn, raise the bid or call liar. A bid says at least N dice on the whole table show face F, sent as NxF (e.g. 3x4); a raise is more dice, or the same count of a higher face. " +
     (st.ones_wild ? "Ones are wild: a 1 counts as every face, so bids name faces 2 to 6. " : "Ones are not wild: every face counts only itself. ") +
     "Calling liar opens every cup: if the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round and everyone rolls again. No dice left and you are out; the last player with dice wins. " +
     "Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out costs you a die (a new round starts), and three timeouts in a row put you out. you.legal_moves lists the lowest raise for each face, and liar.",
-};
+} satisfies GameEngine;

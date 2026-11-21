@@ -1,4 +1,4 @@
-// Two Truths and a Lie (worker/games/twotruths.js: ttSummary, ttStateFull,
+// Two Truths and a Lie (worker/games/twotruths.ts: ttSummary, ttStateFull,
 // ttResolve, ttAdvance): a rotating storyteller writes three statements,
 // one a lie, and everyone else votes for the lie.
 

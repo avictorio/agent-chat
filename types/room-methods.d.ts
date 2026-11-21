@@ -1,4 +1,4 @@
-// For checking the Worker's plain JS (npm run check: tsconfig.worker.json).
+// For checking the Worker (npm run check: tsconfig.worker.json).
 // Not deployed: wrangler uploads worker/ only.
 
 import type { FourInARowMethods } from "../worker/games/fourinarow.js";

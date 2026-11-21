@@ -1,40 +1,39 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
-/** @typedef {import("@chat/contract").WerewolfRole} WerewolfRole */
-/** @typedef {import("@chat/contract").WerewolfEvent} WerewolfEvent */
-/** @typedef {import("@chat/contract").WerewolfTalk} WerewolfTalk */
-/** @typedef {import("@chat/contract").WerewolfCheck} WerewolfCheck */
-/** A seat as createWerewolf stores it (st.players).
- *  @typedef {{ name: string, color: string, hex: string }} WwSeat */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type GameLogLine = import("@chat/contract").GameLogLine;
+export type WerewolfRole = import("@chat/contract").WerewolfRole;
+export type WerewolfEvent = import("@chat/contract").WerewolfEvent;
+export type WerewolfTalk = import("@chat/contract").WerewolfTalk;
+export type WerewolfCheck = import("@chat/contract").WerewolfCheck;
+/** A seat as createWerewolf stores it (st.players). */
+export type WwSeat = { name: string, color: string, hex: string };
 /** Werewolf's stored match state (g.st): what createWerewolf builds and
  *  the moves and the clock change. wwSummary and wwStateFull turn it into
  *  the contract's WerewolfState, keeping the secrets (roles, acts, checks,
  *  the den) to the viewers they belong to. roles and alive are per
  *  player; acts is tonight's picks (actor -> target), votes today's
  *  (voter -> target); phase is null once the match is over; winner stays
- *  null (a side wins: side and winners).
- *  @typedef {{
- *    type: "werewolf", phase_seconds: number, order: string[], roles: Record<string, WerewolfRole>, alive: Record<string, boolean>,
- *    phase: "night" | "day" | null, night: number, day: number, acts: Record<string, string>, last_guard: string | null,
- *    checks: WerewolfCheck[], votes: Record<string, string>, talk: WerewolfTalk[], events: WerewolfEvent[], quiet: number, said: number,
- *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: WwSeat[], log: GameLogLine[],
- *    winner: null, winners: string[] | null, side: "village" | "wolves" | null, places: string[] | null, draw: boolean, announced: boolean,
- *    declined_by?: string, ended?: number
- *  }} WwStored */
-/** A Werewolf match: its row, with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: WwStored }} WwGame */
+ *  null (a side wins: side and winners). */
+export type WwStored = {
+  type: "werewolf", phase_seconds: number, order: string[], roles: Record<string, WerewolfRole>, alive: Record<string, boolean>,
+  phase: "night" | "day" | null, night: number, day: number, acts: Record<string, string>, last_guard: string | null,
+  checks: WerewolfCheck[], votes: Record<string, string>, talk: WerewolfTalk[], events: WerewolfEvent[], quiet: number, said: number,
+  deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: WwSeat[], log: GameLogLine[],
+  winner: null, winners: string[] | null, side: "village" | "wolves" | null, places: string[] | null, draw: boolean, announced: boolean,
+  declined_by?: string, ended?: number
+};
+/** A Werewolf match: its row, with the state typed. */
+export type WwGame = Omit<GameRow, "st"> & { st: WwStored };
 /** A seat in Werewolf's room_state item (stateItem): the shared fields,
- *  plus the action it owes now.
- *  @typedef {{ name: string, alive: boolean, moved: boolean, accepted: boolean, act: "kill" | "check" | "guard" | "vote" | null }} WwItemSeat */
+ *  plus the action it owes now. */
+export type WwItemSeat = { name: string, alive: boolean, moved: boolean, accepted: boolean, act: "kill" | "check" | "guard" | "vote" | null };
 
 // Werewolf: a line of talk's cap.
 export const WW_TALK_MAX = 400;
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const WerewolfMethods = {
   /* ---------- games: Werewolf (2026-11-20) ----------
      SHA's spec (with Claude's Night shift folded in): 5 to 9 players,
@@ -58,11 +57,9 @@ export const WerewolfMethods = {
      full silent cycles call the match off. Each phase has
      phase_seconds (default a day). Wolves can also talk in their own
      den channel. */
-  /** @param {number} n */
-  wwDeal(n) {
+  wwDeal(n: number) {
     const wolves = n >= 7 ? 2 : 1;
-    /** @type {WerewolfRole[]} */
-    const deck = [];
+    const deck: WerewolfRole[] = [];
     for (let i = 0; i < wolves; i++) deck.push("werewolf");
     deck.push("seer");
     if (n >= 9) deck.push("guardian");
@@ -70,43 +67,31 @@ export const WerewolfMethods = {
     return deck;
   },
 
-  /** @param {WwStored} st */
-  wwAlive(st) {
+  wwAlive(st: WwStored) {
     return st.order.filter((n) => st.alive[n]);
   },
 
-  /** @param {WwStored} st */
-  wwLivingWolves(st) {
+  wwLivingWolves(st: WwStored) {
     return this.wwAlive(st).filter((n) => st.roles[n] === "werewolf");
   },
 
   // the living players with a night action, and its verb
-  /**
-   * @param {WwStored} st
-   * @param {string} name
-   */
-  wwVerb(st, name) {
+  wwVerb(st: WwStored, name: string) {
     const r = st.roles[name];
     return r === "werewolf" ? "kill" : r === "seer" ? "check" : r === "guardian" ? "guard" : null;
   },
 
-  /** @param {WwStored} st */
-  wwNightActors(st) {
+  wwNightActors(st: WwStored) {
     return this.wwAlive(st).filter((n) => this.wwVerb(st, n));
   },
 
-  /** @param {WwStored} st */
-  wwRolesInPlay(st) {
+  wwRolesInPlay(st: WwStored) {
     const out = { werewolf: 0, seer: 0, guardian: 0, villager: 0 };
     for (const n of st.order) out[st.roles[n]] = (out[st.roles[n]] || 0) + 1;
     return out;
   },
 
-  /**
-   * @param {WwGame} g
-   * @returns {import("@chat/contract").WerewolfState}
-   */
-  wwSummary(g) {
+  wwSummary(g: WwGame): import("@chat/contract").WerewolfState {
     const st = g.st;
     const live = g.status === "running";
     const over = g.status === "finished" || g.status === "cancelled";
@@ -121,12 +106,7 @@ export const WerewolfMethods = {
     };
   },
 
-  /**
-   * @param {WwGame} g
-   * @param {string | null | undefined} who
-   * @returns {import("@chat/contract").WerewolfState}
-   */
-  wwStateFull(g, who) {
+  wwStateFull(g: WwGame, who: string | null | undefined): import("@chat/contract").WerewolfState {
     const out = this.wwSummary(g);
     const st = g.st;
     out.log = st.log.slice(-30);
@@ -142,8 +122,7 @@ export const WerewolfMethods = {
     }
     const role = st.roles[me.name];
     const alive = !!st.alive[me.name];
-    /** @type {import("@chat/contract").WerewolfYou} */
-    const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
+    const you: import("@chat/contract").WerewolfYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
     if (role === "werewolf") {
       you.pack = st.order.filter((n) => st.roles[n] === "werewolf" && n !== me.name);
       if (!over) out.den = st.talk.filter((t) => t.ch === "den").slice(-120);
@@ -166,11 +145,7 @@ export const WerewolfMethods = {
   },
 
   // who a night action may name
-  /**
-   * @param {WwStored} st
-   * @param {string} name
-   */
-  wwNightTargets(st, name) {
+  wwNightTargets(st: WwStored, name: string) {
     const verb = this.wwVerb(st, name);
     const alive = this.wwAlive(st);
     if (verb === "kill") return alive.filter((n) => st.roles[n] !== "werewolf");
@@ -179,45 +154,36 @@ export const WerewolfMethods = {
     return [];
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, unknown>} opts the create's options (request JSON)
-   * @param {string} room
-   */
-  async createWerewolf(creator, playersIn, opts, room) {
+  /** @param opts the create's options (request JSON) */
+  async createWerewolf(creator: string, playersIn: unknown[], opts: Record<string, unknown>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 5 || playersIn.length > 9) return { status: 400, error: "Werewolf needs 5 to 9 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
+    const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     const deck = this.wwDeal(names.length);
     for (let i = deck.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
-    /** @type {(v: unknown, lo: number, hi: number, def: number) => number} */
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const phaseSeconds = clamp(opts.tick_seconds, 60, 86400 * 2, 86400);
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {Record<string, WerewolfRole>} */
-    const roles = {};
-    /** @type {Record<string, boolean>} */
-    const alive = {};
+    const roles: Record<string, WerewolfRole> = {};
+    const alive: Record<string, boolean> = {};
     names.forEach((n, i) => {
       roles[n] = deck[i];
       alive[n] = true;
     });
-    /** @type {WwStored} */
-    const st = {
+    const st: WwStored = {
       type: "werewolf", phase_seconds: phaseSeconds, order: names.slice(), roles: roles, alive: alive, phase: "night", night: 1, day: 0,
       acts: {}, last_guard: null, checks: [], votes: {}, talk: [], events: [], quiet: 0, said: 0,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       log: [{ tick: 0, text: "Werewolf created by " + creator + " - " + names.length + " players; roles are dealt in secret. The first night falls when everyone accepts." }],
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
     };
-    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const rip = this.wwRolesInPlay(st);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Werewolf #" + g.id + " - " + label + ". " + rip.werewolf + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + " and " + rip.villager + " villagers, dealt in secret. Nights the wolves hunt; days the village talks it out in the game and votes. Each phase: " + clockWords(phaseSeconds) + ". Lobby open - the first night falls when everyone accepts; tap the card to take your seat.";
@@ -229,32 +195,25 @@ export const WerewolfMethods = {
     return { status: 201, game: this.wwStateFull(g, creator) };
   },
 
-  /**
-   * @param {WwStored} st
-   * @param {unknown} raw
-   */
-  wwName(st, raw) {
+  wwName(st: WwStored, raw: unknown) {
     const s = String(raw || "").trim().toLowerCase();
     return st.order.find((n) => n.toLowerCase() === s) || null;
   },
 
   // The village wins with no wolf alive; the wolves win at parity.
-  /** @param {WwGame} g */
-  wwCheckWin(g) {
+  wwCheckWin(g: WwGame) {
     const st = g.st;
     const wolves = this.wwLivingWolves(st).length;
     const rest = this.wwAlive(st).length - wolves;
-    /** @type {"village" | "wolves" | null} */
-    let side = null;
+    let side: "village" | "wolves" | null = null;
     if (!wolves) side = "village";
     else if (wolves >= rest) side = "wolves";
     if (!side) return false;
     g.status = "finished";
     st.side = side;
     st.winners = st.order.filter((n) => (side === "wolves") === (st.roles[n] === "werewolf"));
-    const losers = st.order.filter((n) => /** @type {string[]} */ (st.winners).indexOf(n) < 0); // set just above
-    /** @type {(a: string, b: string) => number} */
-    const byAlive = (a, b) => (st.alive[b] ? 1 : 0) - (st.alive[a] ? 1 : 0);
+    const losers = st.order.filter((n) => (st.winners as string[]).indexOf(n) < 0); // set just above
+    const byAlive: (a: string, b: string) => number = (a, b): number => (st.alive[b] ? 1 : 0) - (st.alive[a] ? 1 : 0);
     st.places = st.winners.slice().sort(byAlive).concat(losers.slice().sort(byAlive));
     st.phase = null;
     st.deadline = null;
@@ -262,29 +221,28 @@ export const WerewolfMethods = {
     return true;
   },
 
-  /** @param {WwGame} g */
-  wwResolveNight(g) {
+  wwResolveNight(g: WwGame) {
     const st = g.st;
     const acted = this.wwNightActors(st).filter((n) => st.acts[n]).length;
     const guardian = this.wwAlive(st).find((n) => st.roles[n] === "guardian");
     const guard = guardian && st.acts[guardian] ? st.acts[guardian] : null;
-    /** @type {Record<string, number>} kills per target */
-    const tally = {};
+    /** kills per target */
+    const tally: Record<string, number> = {};
     for (const w of this.wwLivingWolves(st)) if (st.acts[w]) tally[st.acts[w]] = (tally[st.acts[w]] || 0) + 1;
     const top = Math.max(0, ...Object.values(tally));
     const picks = Object.keys(tally).filter((n) => tally[n] === top);
     const victim = top && picks.length === 1 ? picks[0] : null;
     const seer = this.wwAlive(st).find((n) => st.roles[n] === "seer");
     if (seer && st.acts[seer]) st.checks.push({ night: st.night, target: st.acts[seer], wolf: st.roles[st.acts[seer]] === "werewolf" });
-    /** @type {Omit<WerewolfEvent, "at"> & { at?: number }} the dawn's event, stamped below */
-    let ev;
+    /** the dawn's event, stamped below */
+    let ev: Omit<WerewolfEvent, "at"> & { at?: number };
     if (victim && victim === guard) ev = { night: st.night, kind: "saved" };
     else if (victim) {
       st.alive[victim] = false;
       ev = { night: st.night, kind: "death", who: victim, role: st.roles[victim] };
     } else ev = { night: st.night, kind: "quiet" };
     ev.at = Date.now();
-    st.events.push(/** @type {WerewolfEvent} */ (ev));
+    st.events.push(ev as WerewolfEvent);
     st.last_guard = guard;
     st.acts = {};
     st.log.push({ tick: st.night, text: "Dawn of day " + st.night + ": " + (ev.kind === "death" ? ev.who + " was killed in the night - a " + ev.role + "." : ev.kind === "saved" ? "someone was attacked in the night and survived." : "the night passed quietly.") });
@@ -298,20 +256,19 @@ export const WerewolfMethods = {
     st.deadline = Date.now() + st.phase_seconds * 1000;
   },
 
-  /** @param {WwGame} g */
-  wwResolveDay(g) {
+  wwResolveDay(g: WwGame) {
     const st = g.st;
     const alive = this.wwAlive(st);
-    /** @type {Record<string, number>} votes per target */
-    const tally = {};
+    /** votes per target */
+    const tally: Record<string, number> = {};
     for (const n of alive) {
       const t = st.votes[n];
       if (t && st.alive[t]) tally[t] = (tally[t] || 0) + 1;
     }
     const top = Math.max(0, ...Object.values(tally));
     const tops = Object.keys(tally).filter((n) => tally[n] === top);
-    /** @type {Omit<WerewolfEvent, "at"> & { at?: number }} the day's event, stamped below */
-    let ev;
+    /** the day's event, stamped below */
+    let ev: Omit<WerewolfEvent, "at"> & { at?: number };
     if (!top) ev = { day: st.day, kind: "novote" };
     else if (tops.length > 1) ev = { day: st.day, kind: "tie", votes: Object.assign({}, st.votes) };
     else {
@@ -319,7 +276,7 @@ export const WerewolfMethods = {
       ev = { day: st.day, kind: "eliminated", who: tops[0], role: st.roles[tops[0]], count: top, votes: Object.assign({}, st.votes) };
     }
     ev.at = Date.now();
-    st.events.push(/** @type {WerewolfEvent} */ (ev));
+    st.events.push(ev as WerewolfEvent);
     st.log.push({ tick: st.day, text: "Day " + st.day + " closes: " + (ev.kind === "eliminated" ? "the village votes out " + ev.who + " (" + top + " votes) - a " + ev.role + "." : ev.kind === "tie" ? "a tied vote - nobody is eliminated." : "nobody voted.") });
     st.quiet = top || st.said ? 0 : st.quiet + 1;
     st.votes = {};
@@ -331,8 +288,7 @@ export const WerewolfMethods = {
     st.deadline = Date.now() + st.phase_seconds * 1000;
   },
 
-  /** @param {WwGame} g */
-  wwCallOff(g) {
+  wwCallOff(g: WwGame) {
     const st = g.st;
     g.status = "cancelled";
     st.phase = null;
@@ -340,13 +296,7 @@ export const WerewolfMethods = {
     st.log.push({ tick: st.night, text: "Two full days and nights went by in silence - the match is called off." });
   },
 
-  /**
-   * @param {WwGame} g
-   * @param {string} who
-   * @param {unknown} raw
-   * @param {string} room
-   */
-  async wwMove(g, who, raw, room) {
+  async wwMove(g: WwGame, who: string, raw: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
@@ -360,7 +310,7 @@ export const WerewolfMethods = {
       if (den && !isWolf) return { status: 409, error: st.phase === "night" ? "The village sleeps - talk resumes at dawn" : "Only the wolves have a den" };
       const body = talk[2].slice(0, WW_TALK_MAX);
       // a running match is always in a phase
-      st.talk.push({ n: st.talk.length + 1, by: me.name, text: body, ch: den ? "den" : "town", phase: /** @type {"night" | "day"} */ (st.phase), day: st.phase === "day" ? st.day : st.night, at: Date.now() });
+      st.talk.push({ n: st.talk.length + 1, by: me.name, text: body, ch: den ? "den" : "town", phase: st.phase as "night" | "day", day: st.phase === "day" ? st.day : st.night, at: Date.now() });
       if (st.talk.length > 600) st.talk = st.talk.slice(-600);
       if (!den) st.said += 1;
       this.saveGame(g);
@@ -398,22 +348,17 @@ export const WerewolfMethods = {
     return { status: 200, game: this.wwStateFull(g, who), resolved: all };
   },
 
-  /**
-   * @param {WwGame | null} g
-   * @param {string} room
-   */
-  wwAdvance(g, room) {
-    if (!g || g.status !== "running" || Date.now() < /** @type {number} */ (g.st.deadline)) return; // a running match's clock is set
+  wwAdvance(g: WwGame | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline as number)) return; // a running match's clock is set
     if (g.st.phase === "night") this.wwResolveNight(g);
     else this.wwResolveDay(g);
     this.saveGame(g);
     // the resolution may have called it off (the check above narrowed status to running)
-    if (/** @type {import("@chat/contract").GameStatus} */ (g.status) === "cancelled") this.postSystem("Werewolf #" + g.id + " is off - two full days and nights went by in silence.", room);
+    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Werewolf #" + g.id + " is off - two full days and nights went by in silence.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
-  /** @param {WwGame} g */
-  wwResultText(g) {
+  wwResultText(g: WwGame) {
     const st = g.st;
     const wolves = st.order.filter((n) => st.roles[n] === "werewolf");
     const others = st.order.filter((n) => st.roles[n] === "seer" || st.roles[n] === "guardian").map((n) => n + " the " + st.roles[n]);
@@ -421,14 +366,13 @@ export const WerewolfMethods = {
     const at = when ? (when.night ? "dawn of day " + when.night : "day " + when.day) : "the end";
     return "Werewolf #" + g.id + " is over - " + (st.side === "village" ? "the village wins at " + at + ": the " + (wolves.length === 1 ? "werewolf was " : "werewolves were ") + wolves.join(" and ") + "." : "the wolves win at " + at + ": " + wolves.join(" and ") + " outnumber the village.") + (others.length ? " " + others.join(", ") + "." : "");
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const werewolfEngine = {
   name: "Werewolf",
   turnWord: "phase",
-  logTick: (/** @type {WwStored} */ st) => st.night,
-  clockSeconds: (/** @type {WwStored} */ st) => st.phase_seconds,
+  logTick: (st: WwStored) => st.night,
+  clockSeconds: (st: WwStored) => st.phase_seconds,
   create: (room, creator, players, opts, roomName) => room.createWerewolf(creator, players, opts, roomName),
   summary: (room, g) => room.wwSummary(g),
   full: (room, g, who) => room.wwStateFull(g, who),
@@ -437,14 +381,14 @@ export const werewolfEngine = {
   // public frames never say who is awaited at night (that would point at
   // the role holders); they are nudged privately through room_state
   // pub is wwSummary's state
-  targets: (/** @type {import("@chat/contract").WerewolfState} */ pub) => (pub.status === "running" && pub.phase === "day" ? (pub.players || []).filter((p) => p.alive && !p.voted).map((p) => p.name) : []),
-  card: (/** @type {WwGame} */ g) => {
+  targets: (pub: import("@chat/contract").WerewolfState) => (pub.status === "running" && pub.phase === "day" ? (pub.players || []).filter((p) => p.alive && !p.voted).map((p) => p.name) : []),
+  card: (g: WwGame) => {
     const st = g.st;
     const over = g.status === "finished" || g.status === "cancelled";
     return { id: g.id, type: "werewolf", status: g.status, phase: g.status === "running" ? st.phase : null, night: st.night, day: st.day, side: st.side || null, winners: st.winners || null, winner: null, draw: false, players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: !!st.alive[p.name], role: over || !st.alive[p.name] ? st.roles[p.name] : null })) };
   },
   // private: only ever rendered into each member's own awaiting_you
-  stateItem: (r, /** @type {WwStored} */ st) => ({ id: r.id, type: "werewolf", status: r.status, phase: st.phase, turn: (st.night || 0) * 2 + (st.phase === "day" ? 1 : 0), players: (st.players || []).map((p) => {
+  stateItem: (r, st: WwStored) => ({ id: r.id, type: "werewolf", status: r.status, phase: st.phase, turn: (st.night || 0) * 2 + (st.phase === "day" ? 1 : 0), players: (st.players || []).map((p) => {
     const role = (st.roles || {})[p.name];
     const verb = role === "werewolf" ? "kill" : role === "seer" ? "check" : role === "guardian" ? "guard" : null;
     const alive = !!(st.alive || {})[p.name];
@@ -454,11 +398,11 @@ export const werewolfEngine = {
   turnOf: (gm) => gm.turn,
   moveHint: (gm, name) => {
     // a seat of this game's stateItem, which carries act
-    const me = /** @type {Partial<WwItemSeat>} */ ((gm.players || []).find((p) => p.name === name) || {});
+    const me = ((gm.players || []).find((p) => p.name === name) || {}) as Partial<WwItemSeat>;
     return "<" + (me.act || "vote") + " NAME - " + (me.act === "kill" ? "your kill for tonight" : me.act === "check" ? "whose side to see" : me.act === "guard" ? "who to protect tonight" : "who the village should vote out") + ">";
   },
   result: (room, g) => room.wwResultText(g),
-  rules: (/** @type {WwStored} */ st) => {
+  rules: (st: WwStored) => {
     const rip = { werewolf: 0, seer: 0, guardian: 0, villager: 0 };
     for (const n of st.order) rip[st.roles[n]] += 1;
     return "Werewolf: " + st.order.length + " players with secret roles - " + rip.werewolf + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + " and " + rip.villager + " villagers; your own is you.role, and werewolves see their pack in you.pack. " +
@@ -466,4 +410,4 @@ export const werewolfEngine = {
       "Day: talk it out in the game - send say: TEXT (werewolves also have den: TEXT, their private channel, and say: at night goes to the den) - and vote NAME (public, changeable until the day closes; yourself included). The most votes is out, role revealed; a tie removes nobody. " +
       "The village wins when no werewolf lives; the wolves win when they match everyone else. Lying is part of the game. Each phase has " + clockWords(st.phase_seconds || 86400) + "; a night ends early once every role has acted, a day once everyone living has voted. The dead watch but do not speak.";
   },
-};
+} satisfies GameEngine;

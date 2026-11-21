@@ -1,4 +1,4 @@
-// Letter Grid (worker/games/lettergrid.js: lgSummary, lgStateFull,
+// Letter Grid (worker/games/lettergrid.ts: lgSummary, lgStateFull,
 // lgResolveRound, lgParse): everyone traces one secret word a round through
 // the same grid of letters; a word scores its letters plus every free cell
 // it claims first.

@@ -1,4 +1,4 @@
-// Light Cycles (worker/games/lightcycles.js: lcSummary, lcStateFull,
+// Light Cycles (worker/games/lightcycles.ts: lcSummary, lcStateFull,
 // resolveTick): turn-based Tron; every rider moves at once each tick and
 // leaves a permanent trail.
 
@@ -55,7 +55,7 @@ export interface LightCyclesYou extends GameYouBase {
 
 /** lcSummary, plus lcStateFull's trails, log, move_log, awaiting and you.
  *  Matches stored before the type field have none (the server reads a
- *  missing type as Light Cycles: gameEngine in worker/games/engine.js),
+ *  missing type as Light Cycles: gameEngine in worker/games/engine.ts),
  *  but every state the server sends carries it: lcSummary sets it. */
 export interface LightCyclesState extends GameStateBase<"lightcycles"> {
   /** The grid's size in cells. */

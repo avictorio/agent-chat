@@ -1,38 +1,38 @@
 // Duel: rock-paper-scissors, first to N, simultaneous throws.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").DuelThrow} DuelThrow */
-/** A duellist's seat. @typedef {{ name: string, color: string, hex: string }} DuelSeat */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type DuelThrow = import("@chat/contract").DuelThrow;
+/** A duellist's seat. */
+export type DuelSeat = { name: string, color: string, hex: string };
 /** The Duel's stored match state (g.st; the API's DuelState is built from
  *  it). pending holds the round's secret throws and pending_at when each
  *  came in (missing on duels from before it was kept); rounds are the
- *  resolved rounds, as the API sends them.
- *  @typedef {{
- *    type: "duel",
- *    best_of: number,
- *    target: number,
- *    round_seconds: number,
- *    round: number,
- *    deadline: number | null,
- *    lobby_deadline: number,
- *    accepted: Record<string, boolean>,
- *    players: DuelSeat[],
- *    score: Record<string, number>,
- *    rounds: import("@chat/contract").DuelRound[],
- *    pending: Record<string, DuelThrow>,
- *    pending_at?: Record<string, number>,
- *    log: import("@chat/contract").GameLogLine[],
- *    winner: string | null,
- *    announced: boolean,
- *    declined_by?: string,
- *    ended?: number,
- *  }} DuelSt */
-/** A duel: its gm row with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: DuelSt }} DuelGame */
+ *  resolved rounds, as the API sends them. */
+export type DuelSt = {
+  type: "duel",
+  best_of: number,
+  target: number,
+  round_seconds: number,
+  round: number,
+  deadline: number | null,
+  lobby_deadline: number,
+  accepted: Record<string, boolean>,
+  players: DuelSeat[],
+  score: Record<string, number>,
+  rounds: import("@chat/contract").DuelRound[],
+  pending: Record<string, DuelThrow>,
+  pending_at?: Record<string, number>,
+  log: import("@chat/contract").GameLogLine[],
+  winner: string | null,
+  announced: boolean,
+  declined_by?: string,
+  ended?: number,
+};
+/** A duel: its gm row with the state typed. */
+export type DuelGame = Omit<GameRow, "st"> & { st: DuelSt };
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const DuelMethods = {
   /* ---------- games: Duel (rock-paper-scissors) ----------
      The latency-tolerant sibling of Light Cycles, added 2026-11-09 after a
@@ -45,19 +45,11 @@ export const DuelMethods = {
      round-wins takes the duel; best_of sets the target. A throw is secret
      until its round resolves: no view of the state - summary, full state,
      stream frame - ever carries a pending throw, only that it exists. */
-  /**
-   * @param {DuelThrow} a
-   * @param {DuelThrow} b
-   */
-  duelBeats(a, b) {
+  duelBeats(a: DuelThrow, b: DuelThrow) {
     return (a === "rock" && b === "scissors") || (a === "scissors" && b === "paper") || (a === "paper" && b === "rock");
   },
 
-  /**
-   * @param {DuelGame} g
-   * @returns {import("@chat/contract").DuelState}
-   */
-  duelSummary(g) {
+  duelSummary(g: DuelGame): import("@chat/contract").DuelState {
     const st = g.st;
     return {
       id: g.id, type: "duel", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -69,21 +61,16 @@ export const DuelMethods = {
 
   // The pair's finished-duel record in this room, this match included
   // when it is over: the result means more next to the rivalry.
-  /**
-   * @param {DuelSt} st
-   * @returns {import("@chat/contract").DuelH2H | null}
-   */
-  duelH2H(st) {
+  duelH2H(st: DuelSt): import("@chat/contract").DuelH2H | null {
     const pair = st.players.map((p) => p.name).sort().join("|");
-    /** @type {Record<string, number>} */
-    const tally = {};
+    const tally: Record<string, number> = {};
     let total = 0;
-    for (const r of /** @type {Pick<import("../room/Room.js").GmRow, "state">[]} */ (this.sql.exec("SELECT state FROM gm WHERE status = 'finished'").toArray())) {
+    for (const r of this.sql.exec("SELECT state FROM gm WHERE status = 'finished'").toArray() as Pick<import("../room/Room.js").GmRow, "state">[]) {
       try {
         // any finished match's state, of any game, until the checks below
         const s = JSON.parse(r.state || "{}");
         if (s.type !== "duel" || !s.winner || !Array.isArray(s.players)) continue;
-        if (s.players.map((/** @type {DuelSeat} */ p) => p.name).sort().join("|") !== pair) continue;
+        if (s.players.map((p: DuelSeat) => p.name).sort().join("|") !== pair) continue;
         tally[s.winner] = (tally[s.winner] || 0) + 1;
         total++;
       } catch (e) { /* a row that does not parse is not a duel */ }
@@ -91,12 +78,8 @@ export const DuelMethods = {
     return total ? { tally: tally, total: total } : null;
   },
 
-  /**
-   * @param {DuelGame} g
-   * @param {string | null | undefined} who the viewer
-   * @returns {import("@chat/contract").DuelState}
-   */
-  duelStateFull(g, who) {
+  /** @param who the viewer */
+  duelStateFull(g: DuelGame, who: string | null | undefined): import("@chat/contract").DuelState {
     const out = this.duelSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -112,15 +95,13 @@ export const DuelMethods = {
 
   // One round's resolution: both throws in (played), or a deadline forfeit
   // for the player who never threw. Ties score nobody and play moves on.
-  /** @param {DuelGame} g */
-  resolveDuelRound(g) {
+  resolveDuelRound(g: DuelGame) {
     const st = g.st;
     const n = st.round;
     const at = Date.now();
     const a = st.players[0], b = st.players[1];
     const ta = st.pending[a.name], tb = st.pending[b.name];
-    /** @type {string | null} */
-    let winner = null;
+    let winner: string | null = null;
     let note = "";
     if (ta && tb) {
       if (ta !== tb) winner = this.duelBeats(ta, tb) ? a.name : b.name;
@@ -129,8 +110,7 @@ export const DuelMethods = {
       winner = ta ? a.name : b.name;
       note = winner + " takes the round by forfeit - " + (ta ? b.name : a.name) + " never threw.";
     }
-    /** @type {import("@chat/contract").DuelRound} */
-    const entry = { n: n, throws: {}, winner: winner, at: at, throws_at: {} };
+    const entry: import("@chat/contract").DuelRound = { n: n, throws: {}, winner: winner, at: at, throws_at: {} };
     if (ta) { entry.throws[a.name] = ta; entry.throws_at[a.name] = (st.pending_at || {})[a.name] || null; }
     if (tb) { entry.throws[b.name] = tb; entry.throws_at[b.name] = (st.pending_at || {})[b.name] || null; }
     st.rounds.push(entry);
@@ -151,14 +131,10 @@ export const DuelMethods = {
   // The duel's clock: at the deadline, a lone throw wins its round by
   // forfeit; a round with no throws at all ends the match where it stands
   // (the score leader, if any, takes it) - a duel never ticks forever.
-  /**
-   * @param {DuelGame | null} g
-   * @param {string} room
-   */
-  advanceDuel(g, room) {
+  advanceDuel(g: DuelGame | null, room: string) {
     if (!g || g.status !== "running") return;
     // a running duel always has its round deadline
-    if (Date.now() < /** @type {number} */ (g.st.deadline)) return;
+    if (Date.now() < (g.st.deadline as number)) return;
     const st = g.st;
     const thrown = st.players.filter((p) => st.pending[p.name]).length;
     if (thrown === 0) {
@@ -190,25 +166,19 @@ export const DuelMethods = {
   },
 
   // The Referee's result post for a duel (duelEngine.result).
-  /** @param {DuelGame} g */
-  duelResultText(g) {
+  duelResultText(g: DuelGame) {
     const a = g.st.players[0], b = g.st.players[1];
     const sa = g.st.score[a.name] || 0, sb = g.st.score[b.name] || 0;
     const forfeits = g.st.rounds.filter((rd) => g.st.players.some((p) => !(rd.throws || {})[p.name])).length;
     return "Duel match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the duel " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (g.st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + g.st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ".";
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, any>} opts the create's options (best_of, tick_seconds, lobby_seconds)
-   * @param {string} room
-   */
-  async createDuel(creator, playersIn, opts, room) {
+  /** @param opts the create's options (best_of, tick_seconds, lobby_seconds) */
+  async createDuel(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "a duel needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
+    const names = resolved.names as string[]; // gamePlayers sets names whenever it sets no error
     let bestOf = Math.floor(Number(opts && opts.best_of) || 5);
     bestOf = Math.min(9, Math.max(1, bestOf));
     const target = Math.floor(bestOf / 2) + 1;
@@ -223,11 +193,9 @@ export const DuelMethods = {
     roundSeconds = Math.min(86400, Math.max(30, roundSeconds));
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {Record<string, number>} */
-    const score = {};
+    const score: Record<string, number> = {};
     for (const n of names) score[n] = 0;
-    /** @type {DuelSt} */
-    const st = {
+    const st: DuelSt = {
       type: "duel", best_of: bestOf, target: target, round_seconds: roundSeconds, round: 1,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, score: score,
       rounds: [], pending: {}, pending_at: {},
@@ -235,7 +203,7 @@ export const DuelMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Duel match #" + g.id + " - " + label + ". Rock-paper-scissors, first to " + target + ". Round clock: " + (roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -249,19 +217,14 @@ export const DuelMethods = {
   // A duel throw (the moves endpoint's dir carries it: rock, paper or
   // scissors). You may change your throw until the round resolves; the
   // rival sees only that you have thrown, never what.
-  /**
-   * @param {DuelGame} g
-   * @param {string} who
-   * @param {unknown} thr the throw, as sent
-   * @param {string} room
-   */
-  async duelMove(g, who, thr, room) {
+  /** @param thr the throw, as sent */
+  async duelMove(g: DuelGame, who: string, thr: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this duel" };
     const t = String(thr || "").toLowerCase();
     if (["rock", "paper", "scissors"].indexOf(t) < 0) return { status: 400, error: "throw must be one of rock, paper, scissors", legal_moves: ["rock", "paper", "scissors"] };
-    st.pending[me.name] = /** @type {DuelThrow} */ (t); // one of the three, checked above
+    st.pending[me.name] = (t as DuelThrow); // one of the three, checked above
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();
     let resolved = false;
@@ -278,26 +241,25 @@ export const DuelMethods = {
     await this.armGameAlarm();
     return { status: 200, game: this.duelStateFull(g, who), resolved: resolved };
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const duelEngine = {
   name: "Duel",
   turnWord: "round",
-  logTick: (/** @type {DuelSt} */ st) => st.round,
-  clockSeconds: (/** @type {DuelSt} */ st) => st.round_seconds,
+  logTick: (st: DuelSt) => st.round,
+  clockSeconds: (st: DuelSt) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createDuel(creator, players, opts, roomName),
   summary: (room, g) => room.duelSummary(g),
   full: (room, g, who) => room.duelStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.duelMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.advanceDuel(g, roomName),
-  targets: (/** @type {import("@chat/contract").DuelState} */ pub) => pub.players.filter((p) => !p.thrown).map((p) => p.name),
-  card: (/** @type {DuelGame} */ g) => ({ id: g.id, type: "duel", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
-  stateItem: (r, /** @type {DuelSt} */ st) => ({ id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
+  targets: (pub: import("@chat/contract").DuelState) => pub.players.filter((p) => !p.thrown).map((p) => p.name),
+  card: (g: DuelGame) => ({ id: g.id, type: "duel", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
+  stateItem: (r, st: DuelSt) => ({ id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.round,
   moveHint: () => "<rock|paper|scissors>",
   result: (room, g) => room.duelResultText(g),
-  rules: (/** @type {DuelSt} */ st) =>
+  rules: (st: DuelSt) =>
     "Duel: rock-paper-scissors. Each round both players throw in secret; rock blunts scissors, scissors cut paper, paper wraps rock, and a tie scores nobody. First to " + st.target + " round wins takes the duel (best of " + st.best_of + "). " +
     "A round resolves the moment both throws are in; you can change yours until then. At the " + clockWords(st.round_seconds || 180) + " deadline a lone throw wins the round, and a round with no throws ends the match where it stands. Send dir rock, paper or scissors.",
-};
+} satisfies GameEngine;

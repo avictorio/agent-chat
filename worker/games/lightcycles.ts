@@ -6,67 +6,57 @@
 // machinery in room/games.ts.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** @typedef {import("@chat/contract").LightCyclesDir} LightCyclesDir */
-/** A rider: seat, heading and bike cell (x right, y down, from 0).
- *  @typedef {{ name: string, color: string, hex: string, dir: LightCyclesDir, alive: boolean, x: number, y: number }} LcRider */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+export type LightCyclesDir = import("@chat/contract").LightCyclesDir;
+/** A rider: seat, heading and bike cell (x right, y down, from 0). */
+export type LcRider = { name: string, color: string, hex: string, dir: LightCyclesDir, alive: boolean, x: number, y: number };
 /** Light Cycles' stored match state (g.st; the API's LightCyclesState is
  *  built from it). pending holds the coming tick's moves and pending_at
  *  when each came in. The optional fields are missing on older matches
  *  (the oldest have no type, mode, lobby or accept map either), and
  *  resolveTick adds move_stats, move_log, first_out_decided and
- *  absent_streak where they are.
- *  @typedef {{
- *    type?: "lightcycles",
- *    w: number,
- *    h: number,
- *    tick_seconds: number,
- *    mode?: "live" | "async",
- *    tick: number,
- *    deadline: number | null,
- *    lobby_deadline?: number,
- *    accepted?: Record<string, boolean>,
- *    players: LcRider[],
- *    trails: import("@chat/contract").LightCyclesTrail[],
- *    pending: Record<string, LightCyclesDir>,
- *    pending_at?: Record<string, number>,
- *    move_stats?: Record<string, import("@chat/contract").LightCyclesMoveStats>,
- *    move_log?: import("@chat/contract").LightCyclesMove[],
- *    log: import("@chat/contract").GameLogLine[],
- *    record_keeper?: string | null,
- *    first_out_decided?: boolean,
- *    absent_streak?: Record<string, number>,
- *    winner: string | null,
- *    announced: boolean,
- *    declined_by?: string,
- *    ended?: number,
- *  }} LcSt */
-/** A Light Cycles match: its gm row with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: LcSt }} LcGame */
+ *  absent_streak where they are. */
+export type LcSt = {
+  type?: "lightcycles",
+  w: number,
+  h: number,
+  tick_seconds: number,
+  mode?: "live" | "async",
+  tick: number,
+  deadline: number | null,
+  lobby_deadline?: number,
+  accepted?: Record<string, boolean>,
+  players: LcRider[],
+  trails: import("@chat/contract").LightCyclesTrail[],
+  pending: Record<string, LightCyclesDir>,
+  pending_at?: Record<string, number>,
+  move_stats?: Record<string, import("@chat/contract").LightCyclesMoveStats>,
+  move_log?: import("@chat/contract").LightCyclesMove[],
+  log: import("@chat/contract").GameLogLine[],
+  record_keeper?: string | null,
+  first_out_decided?: boolean,
+  absent_streak?: Record<string, number>,
+  winner: string | null,
+  announced: boolean,
+  declined_by?: string,
+  ended?: number,
+};
+/** A Light Cycles match: its gm row with the state typed. */
+export type LcGame = Omit<GameRow, "st"> & { st: LcSt };
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
-  /**
-   * @param {LcRider} p
-   * @returns {import("@chat/contract").LightCyclesDir[]}
-   */
-  legalMoves(p) {
+  legalMoves(p: LcRider): import("@chat/contract").LightCyclesDir[] {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
-    return /** @type {import("@chat/contract").LightCyclesDir[]} */ (["up", "down", "left", "right"]).filter((d) => d !== rev[p.dir]);
+    return (["up", "down", "left", "right"] as import("@chat/contract").LightCyclesDir[]).filter((d) => d !== rev[p.dir]);
   },
 
   // The subset of legal moves that does not crash on this tick as the
   // board stands: the target cell is in bounds and holds no trail and
   // no rider's head. (Another rider steering into the same cell can
   // still kill you - that is the game, not a wall.)
-  /**
-   * @param {LcSt} st
-   * @param {LcRider} p
-   * @returns {import("@chat/contract").LightCyclesDir[]}
-   */
-  safeMoves(st, p) {
+  safeMoves(st: LcSt, p: LcRider): import("@chat/contract").LightCyclesDir[] {
     const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
     for (const q of st.players) if (q.alive) occ.add(q.x + "," + q.y);
@@ -77,11 +67,7 @@ export const LightCyclesMethods = {
     });
   },
 
-  /**
-   * @param {LcGame} g
-   * @returns {import("@chat/contract").LightCyclesState}
-   */
-  lcSummary(g) {
+  lcSummary(g: LcGame): import("@chat/contract").LightCyclesState {
     const st = g.st;
     return {
       id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -91,12 +77,8 @@ export const LightCyclesMethods = {
     };
   },
 
-  /**
-   * @param {LcGame} g
-   * @param {string | null | undefined} who the viewer
-   * @returns {import("@chat/contract").LightCyclesState}
-   */
-  lcStateFull(g, who) {
+  /** @param who the viewer */
+  lcStateFull(g: LcGame, who: string | null | undefined): import("@chat/contract").LightCyclesState {
     const out = this.lcSummary(g);
     const st = g.st;
     out.trails = st.trails;
@@ -109,19 +91,15 @@ export const LightCyclesMethods = {
     return out;
   },
 
-  /**
-   * @param {LcGame} g
-   * @param {string} room
-   */
-  advanceLightCycles(g, room) {
+  advanceLightCycles(g: LcGame, room: string) {
     let changed = false;
     let guard = 0;
     // a running match always has its tick deadline
-    while (g.status === "running" && Date.now() >= /** @type {number} */ (g.st.deadline) && guard < 500) {
+    while (g.status === "running" && Date.now() >= (g.st.deadline as number) && guard < 500) {
       guard++;
       this.resolveTick(g);
       changed = true;
-      if (g.status === "running") /** @type {number} */ (g.st.deadline) += g.st.tick_seconds * 1000;
+      if (g.status === "running") (g.st.deadline as number) += g.st.tick_seconds * 1000;
     }
     if (changed) {
       this.saveGame(g);
@@ -129,24 +107,18 @@ export const LightCyclesMethods = {
     }
   },
 
-  /** @param {LcGame} g */
-  lcResultText(g) {
+  lcResultText(g: LcGame) {
     const ms = g.st.move_stats || {};
     const mparts = g.st.players.map((p) => { const s = ms[p.name]; return s ? p.name + " " + s.submitted + "/" + (s.submitted + s.defaulted) : null; }).filter(Boolean);
     return "Light Cycles match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the grid." : "no survivors; the grid keeps itself.") + (g.st.record_keeper ? " " + g.st.record_keeper + " kept the record." : "") + (mparts.length ? " Moves submitted: " + mparts.join(", ") + "." : "");
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, any>} opts the create's options (mode, tick_seconds, w, h, lobby_seconds)
-   * @param {string} room
-   */
-  async createLightCycles(creator, playersIn, opts, room) {
+  /** @param opts the create's options (mode, tick_seconds, w, h, lobby_seconds) */
+  async createLightCycles(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 4) return { status: 400, error: "players must list 2 to 4 room members" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
+    const names = resolved.names as string[]; // gamePlayers sets names whenever it sets no error
     // Async mode (2026-11-11, the design review's headline fix): the tick
     // resolves the moment every living rider has submitted - lcMove
     // already resolves on the last rider in - and tick_seconds is only the
@@ -166,16 +138,14 @@ export const LightCyclesMethods = {
     const w = Math.min(40, Math.max(12, Math.floor(Number(opts && opts.w) || gridDef.w)));
     const h = Math.min(30, Math.max(10, Math.floor(Number(opts && opts.h) || gridDef.h)));
     const colors = this.gameColors();
-    /** @type {Array<{ x: number, y: number, dir: LightCyclesDir }>} */
-    const spawns = [
+    const spawns: Array<{ x: number, y: number, dir: LightCyclesDir }> = [
       { x: Math.floor(w * 0.25), y: Math.floor(h * 0.5), dir: "right" },
       { x: Math.floor(w * 0.75), y: Math.floor(h * 0.5), dir: "left" },
       { x: Math.floor(w * 0.5), y: Math.floor(h * 0.25), dir: "down" },
       { x: Math.floor(w * 0.5), y: Math.floor(h * 0.75), dir: "up" },
     ];
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex, dir: spawns[i].dir, alive: true, x: spawns[i].x, y: spawns[i].y }));
-    /** @type {LcSt} */
-    const st = {
+    const st: LcSt = {
       type: "lightcycles", w: w, h: h, tick_seconds: tickSeconds, mode: mode, tick: 0,
       deadline: null, lobby_deadline: Date.now() + lobbySecs * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       trails: players.map((p, i) => [p.x, p.y, i]), pending: {}, pending_at: {}, move_stats: {}, move_log: [],
@@ -183,7 +153,7 @@ export const LightCyclesMethods = {
       record_keeper: null, winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Light Cycles match #" + g.id + " - " + label + ". " + (mode === "async" ? "Async: ticks resolve the moment every rider has moved; stall cap " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + "." : "Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ".") + " Lobby open - the match starts when every player accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -195,13 +165,8 @@ export const LightCyclesMethods = {
   },
 
   // A Light Cycles move: queue a direction for the coming tick.
-  /**
-   * @param {LcGame} g
-   * @param {string} who
-   * @param {unknown} dir the direction, as sent
-   * @param {string} room
-   */
-  async lcMove(g, who, dir, room) {
+  /** @param dir the direction, as sent */
+  async lcMove(g: LcGame, who: string, dir: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
@@ -210,7 +175,7 @@ export const LightCyclesMethods = {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
     if (["up", "down", "left", "right"].indexOf(d) < 0) return { status: 400, error: "dir must be one of up, down, left, right", legal_moves: this.legalMoves(me) };
     if (d === rev[me.dir]) return { status: 400, error: "You cannot reverse (" + me.dir + " -> " + d + ")", legal_moves: this.legalMoves(me) };
-    st.pending[me.name] = /** @type {LightCyclesDir} */ (d); // one of the four, checked above
+    st.pending[me.name] = (d as LightCyclesDir); // one of the four, checked above
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();
     let resolved = false;
@@ -232,47 +197,44 @@ export const LightCyclesMethods = {
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const lightcyclesEngine = {
   name: "Light Cycles",
   turnWord: "tick",
-  logTick: (/** @type {LcSt} */ st) => st.tick,
-  clockSeconds: (/** @type {LcSt} */ st) => st.tick_seconds,
+  logTick: (st: LcSt) => st.tick,
+  clockSeconds: (st: LcSt) => st.tick_seconds,
   create: (room, creator, players, opts, roomName) => room.createLightCycles(creator, players, opts, roomName),
   summary: (room, g) => room.lcSummary(g),
   full: (room, g, who) => room.lcStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.lcMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.advanceLightCycles(g, roomName),
-  targets: (/** @type {import("@chat/contract").LightCyclesState} */ pub) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
-  card: (/** @type {LcGame} */ g) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
-  stateItem: (r, /** @type {LcSt} */ st) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
+  targets: (pub: import("@chat/contract").LightCyclesState) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
+  card: (g: LcGame) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
+  stateItem: (r, st: LcSt) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.tick,
   moveHint: () => "<up|down|left|right>",
   result: (room, g) => room.lcResultText(g),
-  rules: (/** @type {LcSt} */ st) =>
+  rules: (st: LcSt) =>
     "Light Cycles: every rider moves at once each tick - up, down, left or right, never straight back. Bikes leave permanent trails; hitting a wall, any trail or another bike head-on takes you out. The last rider on the grid wins. " +
     (st.mode === "async"
       ? "A tick resolves the moment every living rider has moved (the " + clockWords(st.tick_seconds || 3600) + " clock is only a cap). "
       : "Each tick lasts " + clockWords(st.tick_seconds || 120) + " (it resolves early once every living rider has moved); a rider who hasn't moved rides straight on. ") +
     "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
-};
+} satisfies GameEngine;
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LightCyclesTickMethods = {
   // One simultaneous resolution. Deaths: wall, any occupied cell (trails and
   // current heads alike - heads become trail), or a shared target cell.
-  /** @param {LcGame} g */
-  resolveTick(g) {
+  resolveTick(g: LcGame) {
     const st = g.st;
     const resolvedAt = Date.now();
     const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const rev = { up: "down", down: "up", left: "right", right: "left" };
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
     for (const p of st.players) if (p.alive) occ.add(p.x + "," + p.y);
-    /** @type {Map<string, [number, number]>} each living rider's next cell */
-    const nexts = new Map();
+    /** each living rider's next cell */
+    const nexts: Map<string, [number, number]> = new Map();
     const attribution = [];
     for (const p of st.players) {
       if (!p.alive) continue;
@@ -285,19 +247,19 @@ export const LightCyclesTickMethods = {
       // resolved tick cannot be told apart from a played one after the fact.
       attribution.push({ name: p.name, dir: p.dir, submitted: !!want, at: want ? (st.pending_at || {})[p.name] || null : null });
     }
-    /** @type {Map<string, number>} riders heading into each cell */
-    const targets = new Map();
+    /** riders heading into each cell */
+    const targets: Map<string, number> = new Map();
     for (const cell of nexts.values()) { const k = cell[0] + "," + cell[1]; targets.set(k, (targets.get(k) || 0) + 1); }
     const deaths = [];
     for (const p of st.players) {
       if (!p.alive) continue;
-      const cell = /** @type {[number, number]} */ (nexts.get(p.name)); // set for every living rider above
+      const cell = nexts.get(p.name) as [number, number]; // set for every living rider above
       const k = cell[0] + "," + cell[1];
-      if (cell[0] < 0 || cell[1] < 0 || cell[0] >= st.w || cell[1] >= st.h || occ.has(k) || /** @type {number} */ (targets.get(k)) > 1) deaths.push(p);
+      if (cell[0] < 0 || cell[1] < 0 || cell[0] >= st.w || cell[1] >= st.h || occ.has(k) || (targets.get(k) as number) > 1) deaths.push(p);
     }
     for (const p of st.players) {
       if (!p.alive || deaths.indexOf(p) >= 0) continue;
-      const cell = /** @type {[number, number]} */ (nexts.get(p.name));
+      const cell = nexts.get(p.name) as [number, number];
       p.x = cell[0];
       p.y = cell[1];
       st.trails.push([p.x, p.y, st.players.indexOf(p)]);
@@ -355,4 +317,4 @@ export const LightCyclesTickMethods = {
       st.log.push({ tick: st.tick, text: alive.length ? alive[0].name + " takes the grid." : "No survivors - the grid keeps itself." });
     }
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;

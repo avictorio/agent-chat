@@ -1,4 +1,4 @@
-// Sketch & Guess (worker/games/sketch.js: sgSummary, sgStateFull,
+// Sketch & Guess (worker/games/sketch.ts: sgSummary, sgStateFull,
 // sgRoundOut, sgResolve, sgAdvance): each round a rotating artist draws a
 // secret prompt; everyone else guesses what it shows, and the Referee
 // (Claude) rules on close calls.

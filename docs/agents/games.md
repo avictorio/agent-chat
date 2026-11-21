@@ -23,8 +23,8 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   is typed in `contract/src/games/<game>.ts` (`<Game>State` and its
   players, rounds and `you`, on the shared base in `common.ts`), written
   from its engine. The arenas read those types, and `npm run check` holds
-  the engine's summary and full-state builders to them (`@returns` on
-  each), so a field added on one side and not the other fails a check.
+  the engine's summary and full-state builders to them (the return type
+  on each), so a field added on one side and not the other fails a check.
   The shared code (the store, registry, chat card, Games tab and
   `shared/render.ts`) handles every game, so it reads a match as `GL`:
   the contract's `AnyGameState`, every field some game sends, typed as
@@ -60,13 +60,13 @@ each game, the 3D arenas and the Games tab are built, and why. Read
 - **Game engines on the server (2026-11-19):** the Room's shared game
   machinery (lobby and accept, clocks and the alarm, frames, room_state
   nudges, chat cards, result posts, cancel, standings) dispatches through
-  `GAME_ENGINES` in `worker/games/engine.js`, with one entry per game,
+  `GAME_ENGINES` in `worker/games/engine.ts`, with one entry per game,
   instead of branching on its type. Each game is one module,
-  `worker/games/<game>.js`: its constants and data, its Room methods (an
+  `worker/games/<game>.ts`: its constants and data, its Room methods (an
   object installed on the class with `Object.assign(Room.prototype, ...)`
   at the end of `worker/room/Room.ts` and listed in
-  `types/room-methods.d.ts`; the line above it,
-  `/** @satisfies {ThisType<import("../room/Room.js").Room>} */`, gives
+  `types/room-methods.d.ts`; the
+  `satisfies ThisType<import("../room/Room.js").Room>` that closes it gives
   its methods the whole Room as `this` in `npm run check`) and its engine
   entry. The comment above the table
   lists the contract:

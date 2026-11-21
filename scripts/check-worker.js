@@ -1,17 +1,13 @@
 // Syntax check for every Worker module (worker/**/*.ts): each must parse,
 // through the same oxc TypeScript transform the web build uses (rolldown,
 // from web/node_modules: `npm i --prefix web` once), without running or
-// resolving it. The Worker is moving from JS to TypeScript: a .js module
-// is allowed only in a folder not converted yet (JS_LEFT; node --check
-// parses it), and never next to a .ts of the same name - wrangler's
-// bundler would pick the stray .js.
+// resolving it. The Worker's modules are TypeScript: a stray .js (or any
+// other script) in worker/ fails - wrangler's bundler would take a stray
+// x.js over the x.ts its "./x.js" imports mean.
 "use strict";
 
-const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-
-const JS_LEFT = ["games"];
 
 let transformSync;
 try {
@@ -27,41 +23,28 @@ const files = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walk(p);
-    else if (/\.(ts|js|mjs|cjs|mts|cts)$/.test(e.name)) files.push(p);
+    else if (/\.(ts|js|mjs|cjs|mts|cts|tsx|jsx)$/.test(e.name)) files.push(p);
   }
 })(ROOT);
 
 let bad = 0;
+let modules = 0;
 for (const f of files.sort()) {
   const rel = path.relative(process.cwd(), f);
-  if (f.endsWith(".ts")) {
-    const r = transformSync(f, fs.readFileSync(f, "utf8"), { lang: "ts" });
-    if (r.errors && r.errors.length) {
-      bad++;
-      console.error(rel + " does not parse:\n" + r.errors.map((e) => e.message).join("\n"));
-    }
+  if (!f.endsWith(".ts")) {
+    bad++;
+    console.error(rel + ": the Worker's modules are TypeScript (.ts); no " + path.extname(f) + " in worker/");
     continue;
   }
-  const dir = path.relative(ROOT, path.dirname(f)).split(path.sep)[0];
-  if (!f.endsWith(".js") || !JS_LEFT.includes(dir)) {
+  modules++;
+  const r = transformSync(f, fs.readFileSync(f, "utf8"), { lang: "ts" });
+  if (r.errors && r.errors.length) {
     bad++;
-    console.error(rel + ": the Worker's modules are TypeScript (.ts); no " + path.extname(f) + " here");
-    continue;
-  }
-  if (fs.existsSync(f.replace(/\.js$/, ".ts"))) {
-    bad++;
-    console.error(rel + ": a stray .js next to its .ts (the bundler would take the .js)");
-    continue;
-  }
-  try {
-    execFileSync(process.execPath, ["--check", f], { stdio: "pipe" });
-  } catch (e) {
-    bad++;
-    console.error(rel + " does not parse:\n" + e.stderr);
+    console.error(rel + " does not parse:\n" + r.errors.map((e) => e.message).join("\n"));
   }
 }
 if (bad) {
-  console.error("check-worker: " + bad + " module(s) failed");
+  console.error("check-worker: " + bad + " problem(s)");
   process.exit(1);
 }
-console.log("check-worker: " + files.length + " module(s) parse");
+console.log("check-worker: " + modules + " module(s) parse");

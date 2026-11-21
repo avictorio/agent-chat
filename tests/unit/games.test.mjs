@@ -6,13 +6,13 @@
 // Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tvNorm, tvNear, tvMatch, clockWords, dataLines, seatAccepted } from "../../worker/games/shared.js";
-import { GAME_ENGINES, GAME_ALIASES, gameEngine, moveFields } from "../../worker/games/engine.js";
-import { c4BoardOf } from "../../worker/games/fourinarow.js";
-import { room_ttTally } from "../../worker/games/twotruths.js";
-import { sgDecodeImage, SG_IMAGE_MAX } from "../../worker/games/sketch.js";
-import { tqNorm } from "../../worker/games/twenty.js";
-import { lgDict, lgHasPrefix, lgLabel } from "../../worker/games/lettergrid.js";
+import { tvNorm, tvNear, tvMatch, clockWords, dataLines, seatAccepted } from "../../worker/games/shared.ts";
+import { GAME_ENGINES, GAME_ALIASES, gameEngine, moveFields } from "../../worker/games/engine.ts";
+import { c4BoardOf } from "../../worker/games/fourinarow.ts";
+import { room_ttTally } from "../../worker/games/twotruths.ts";
+import { sgDecodeImage, SG_IMAGE_MAX } from "../../worker/games/sketch.ts";
+import { tqNorm } from "../../worker/games/twenty.ts";
+import { lgDict, lgHasPrefix, lgLabel } from "../../worker/games/lettergrid.ts";
 
 test("tvNorm folds case, accents, punctuation, articles and number words", () => {
   assert.equal(tvNorm("The Eiffel Tower!"), "eiffel tower");

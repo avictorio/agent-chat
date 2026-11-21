@@ -1,4 +1,4 @@
-// Duel (worker/games/duel.js: duelSummary, duelStateFull, duelH2H,
+// Duel (worker/games/duel.ts: duelSummary, duelStateFull, duelH2H,
 // resolveDuelRound): rock-paper-scissors between two players, throws
 // thrown in secret, first to `target` round wins takes the duel.
 

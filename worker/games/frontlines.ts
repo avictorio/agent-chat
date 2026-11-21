@@ -1,44 +1,44 @@
 // Frontlines: split troops across hills, simultaneous rounds.
 
 import { clockWords, seatAccepted } from "./shared.js";
-/** @typedef {import("../room/games.js").GameRow} GameRow */
-/** @typedef {import("./engine.js").GameEngine} GameEngine */
-/** A commander's seat. @typedef {{ name: string, color: string, hex: string }} FlSeat */
+export type GameRow = import("../room/games.js").GameRow;
+export type GameEngine = import("./engine.js").GameEngine;
+/** A commander's seat. */
+export type FlSeat = { name: string, color: string, hex: string };
 /** Frontlines' stored match state (g.st; the API's FrontlinesState is
  *  built from it). values are this round's hill values (valued variant
  *  only); pending holds each commander's split for the round and
  *  pending_at when it came in (roundsCommit in room/games.ts); rounds are
- *  the resolved rounds, as the API sends them.
- *  @typedef {{
- *    type: "frontlines",
- *    best_of: number,
- *    target: number,
- *    round_seconds: number,
- *    round: number,
- *    variant: "classic" | "valued",
- *    values: number[] | null,
- *    deadline: number | null,
- *    lobby_deadline: number,
- *    accepted: Record<string, boolean>,
- *    players: FlSeat[],
- *    score: Record<string, number>,
- *    rounds: import("@chat/contract").FrontlinesRound[],
- *    pending: Record<string, number[]>,
- *    pending_at: Record<string, number>,
- *    log: import("@chat/contract").GameLogLine[],
- *    winner: string | null,
- *    announced: boolean,
- *    declined_by?: string,
- *    ended?: number,
- *  }} FlSt */
-/** A Frontlines match: its gm row with the state typed.
- *  @typedef {Omit<GameRow, "st"> & { st: FlSt }} FlGame */
+ *  the resolved rounds, as the API sends them. */
+export type FlSt = {
+  type: "frontlines",
+  best_of: number,
+  target: number,
+  round_seconds: number,
+  round: number,
+  variant: "classic" | "valued",
+  values: number[] | null,
+  deadline: number | null,
+  lobby_deadline: number,
+  accepted: Record<string, boolean>,
+  players: FlSeat[],
+  score: Record<string, number>,
+  rounds: import("@chat/contract").FrontlinesRound[],
+  pending: Record<string, number[]>,
+  pending_at: Record<string, number>,
+  log: import("@chat/contract").GameLogLine[],
+  winner: string | null,
+  announced: boolean,
+  declined_by?: string,
+  ended?: number,
+};
+/** A Frontlines match: its gm row with the state typed. */
+export type FlGame = Omit<GameRow, "st"> & { st: FlSt };
 
 // Frontlines: the hills on the field and the troops each round.
 export const FL_HILLS = 5;
 export const FL_TROOPS = 100;
 
-/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const FrontlinesMethods = {
   /* ---------- games: Frontlines (2026-11-19) ----------
      Two commanders, five hills, a hundred troops each round. Both split
@@ -52,10 +52,9 @@ export const FrontlinesMethods = {
      lone commitment at the deadline wins its round by forfeit. */
   /**
    * A move's troops per hill, or the error to answer with.
-   * @param {unknown} raw the split, as sent
-   * @returns {number[] | { error: string }}
+   * @param raw the split, as sent
    */
-  flParse(raw) {
+  flParse(raw: unknown): number[] | { error: string } {
     const s = String(raw || "").trim().toLowerCase();
     if (s === "random") return this.flRandom();
     if (s === "even") return [20, 20, 20, 20, 20];
@@ -83,11 +82,7 @@ export const FrontlinesMethods = {
     return v;
   },
 
-  /**
-   * @param {FlGame} g
-   * @returns {import("@chat/contract").FrontlinesState}
-   */
-  flSummary(g) {
+  flSummary(g: FlGame): import("@chat/contract").FrontlinesState {
     const st = g.st;
     return {
       id: g.id, type: "frontlines", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -98,12 +93,8 @@ export const FrontlinesMethods = {
     };
   },
 
-  /**
-   * @param {FlGame} g
-   * @param {string | null | undefined} who the viewer
-   * @returns {import("@chat/contract").FrontlinesState}
-   */
-  flStateFull(g, who) {
+  /** @param who the viewer */
+  flStateFull(g: FlGame, who: string | null | undefined): import("@chat/contract").FrontlinesState {
     const out = this.flSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -118,17 +109,12 @@ export const FrontlinesMethods = {
     return out;
   },
 
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, any>} opts the create's options (best_of, variant, tick_seconds, lobby_seconds)
-   * @param {string} room
-   */
-  async createFrontlines(creator, playersIn, opts, room) {
+  /** @param opts the create's options (best_of, variant, tick_seconds, lobby_seconds) */
+  async createFrontlines(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Frontlines needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
+    const names = resolved.names as string[]; // gamePlayers sets names whenever it sets no error
     const bestOf = Math.min(9, Math.max(1, Math.floor(Number(opts.best_of) || 5)));
     const target = Math.floor(bestOf / 2) + 1;
     const variant = String(opts.variant || "classic").toLowerCase() === "valued" ? "valued" : "classic";
@@ -137,11 +123,9 @@ export const FrontlinesMethods = {
     roundSeconds = Math.min(86400, Math.max(30, roundSeconds));
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    /** @type {Record<string, number>} */
-    const score = {};
+    const score: Record<string, number> = {};
     for (const n of names) score[n] = 0;
-    /** @type {FlSt} */
-    const st = {
+    const st: FlSt = {
       type: "frontlines", best_of: bestOf, target: target, round_seconds: roundSeconds, round: 1, variant: variant,
       values: variant === "valued" ? this.flValues() : null,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, score: score,
@@ -150,7 +134,7 @@ export const FrontlinesMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
+    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
     const cardText = "Frontlines match #" + g.id + " - " + label + ". Split " + FL_TROOPS + " troops across " + FL_HILLS + " hills in secret, first to " + target + (variant === "valued" ? " (valued hills)" : "") + ". Round clock: " + clock + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
@@ -162,17 +146,12 @@ export const FrontlinesMethods = {
     return { status: 201, game: this.flStateFull(g, creator) };
   },
 
-  /**
-   * @param {FlGame} g
-   * @param {string} who
-   * @param {unknown} raw the split, as sent
-   * @param {string} room
-   */
-  async flMove(g, who, raw, room) {
+  /** @param raw the split, as sent */
+  async flMove(g: FlGame, who: string, raw: unknown, room: string) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
-    const alloc = /** @type {(number[] & { error?: undefined }) | { error: string }} */ (this.flParse(raw)); // the troops per hill, or { error } (an array has no error)
+    const alloc = this.flParse(raw) as (number[] & { error?: undefined }) | { error: string }; // the troops per hill, or { error } (an array has no error)
     if (alloc.error) return { status: 400, error: alloc.error, legal_moves: ["30,20,20,15,15", "even", "random"] };
     const resolved = this.roundsCommit(g, who, alloc, room);
     await this.armGameAlarm();
@@ -182,20 +161,18 @@ export const FrontlinesMethods = {
   // One round: hill by hill, the bigger army takes it; the round goes to
   // more hills held (classic) or more hill points (valued). A lone
   // commitment (the deadline came) wins the round by forfeit.
-  /** @param {FlGame} g */
-  flResolveRound(g) {
+  flResolveRound(g: FlGame) {
     const st = g.st;
     const n = st.round;
     const at = Date.now();
     const [a, b] = st.players;
     const xa = st.pending[a.name], xb = st.pending[b.name];
-    /** @type {import("@chat/contract").FrontlinesRound} */
-    const entry = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
+    const entry: import("@chat/contract").FrontlinesRound = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
     if (xa) { entry.alloc[a.name] = xa; entry.alloc_at[a.name] = (st.pending_at || {})[a.name] || null; }
     if (xb) { entry.alloc[b.name] = xb; entry.alloc_at[b.name] = (st.pending_at || {})[b.name] || null; }
     let note;
     if (xa && xb) {
-      entry.hills = /** @type {Array<string | null>} */ (xa.map((ta, i) => (ta > xb[i] ? a.name : xb[i] > ta ? b.name : null)));
+      entry.hills = (xa.map((ta, i) => (ta > xb[i] ? a.name : xb[i] > ta ? b.name : null)) as Array<string | null>);
       for (const p of [a, b]) {
         entry.held[p.name] = entry.hills.filter((h) => h === p.name).length;
         entry.points[p.name] = entry.hills.reduce((s, h, i) => s + (h === p.name ? (st.values ? st.values[i] : 1) : 0), 0);
@@ -224,30 +201,27 @@ export const FrontlinesMethods = {
     }
   },
 
-  /** @param {FlSt} st */
-  flStanding(st) {
+  flStanding(st: FlSt) {
     const [a, b] = st.players;
     const sa = st.score[a.name] || 0, sb = st.score[b.name] || 0;
     return sa === sb ? null : sa > sb ? a.name : b.name;
   },
 
-  /** @param {FlGame} g */
-  flResultText(g) {
+  flResultText(g: FlGame) {
     const st = g.st;
     const [a, b] = st.players;
     const sa = st.score[a.name] || 0, sb = st.score[b.name] || 0;
     const forfeits = st.rounds.filter((r) => r.forfeit).length;
-    const hillsOf = (/** @type {FlSeat} */ p) => st.rounds.reduce((s, r) => s + ((r.held || {})[p.name] || 0), 0);
+    const hillsOf = (p: FlSeat) => st.rounds.reduce((s, r) => s + ((r.held || {})[p.name] || 0), 0);
     return "Frontlines match #" + g.id + " is over - " + (st.winner ? st.winner + " takes the field " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ". Hills taken: " + a.name + " " + hillsOf(a) + ", " + b.name + " " + hillsOf(b) + ".";
   },
-};
+} satisfies ThisType<import("../room/Room.js").Room>;
 
-/** @satisfies {GameEngine} */
 export const frontlinesEngine = {
   name: "Frontlines",
   turnWord: "round",
-  logTick: (/** @type {FlSt} */ st) => st.round,
-  clockSeconds: (/** @type {FlSt} */ st) => st.round_seconds,
+  logTick: (st: FlSt) => st.round,
+  clockSeconds: (st: FlSt) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createFrontlines(creator, players, opts, roomName),
   summary: (room, g) => room.flSummary(g),
   full: (room, g, who) => room.flStateFull(g, who),
@@ -255,15 +229,15 @@ export const frontlinesEngine = {
   advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
   // the simultaneous-rounds hooks
   resolveRound: (room, g) => room.flResolveRound(g),
-  standing: (room, /** @type {FlSt} */ st) => room.flStanding(st),
-  targets: (/** @type {import("@chat/contract").FrontlinesState} */ pub) => pub.players.filter((p) => !p.committed).map((p) => p.name),
-  card: (/** @type {FlGame} */ g) => ({ id: g.id, type: "frontlines", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, variant: g.st.variant, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
-  stateItem: (r, /** @type {FlSt} */ st) => ({ id: r.id, type: "frontlines", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: (st.pending || {})[p.name] !== undefined, accepted: seatAccepted(st, p) })) }),
+  standing: (room, st: FlSt) => room.flStanding(st),
+  targets: (pub: import("@chat/contract").FrontlinesState) => pub.players.filter((p) => !p.committed).map((p) => p.name),
+  card: (g: FlGame) => ({ id: g.id, type: "frontlines", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, variant: g.st.variant, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
+  stateItem: (r, st: FlSt) => ({ id: r.id, type: "frontlines", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: (st.pending || {})[p.name] !== undefined, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.round,
   moveHint: () => "<" + FL_HILLS + " whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15>",
   result: (room, g) => room.flResultText(g),
-  rules: (/** @type {FlSt} */ st) =>
+  rules: (st: FlSt) =>
     "Frontlines: each round both commanders secretly split " + FL_TROOPS + " troops across " + FL_HILLS + " hills, A to E. When both splits are in, each hill goes to the bigger army (a tie on a hill takes nobody) and the round to whoever holds " +
     (st.variant === "valued" ? "more hill points - the hills carry point values, public each round (this round: " + (st.values || []).join(", ") + " for A-E)" : "more hills") +
     "; a level round scores nobody. First to " + st.target + " rounds wins (best of " + st.best_of + "). You can change your split until the round resolves; at the " + clockWords(st.round_seconds || 180) + " deadline a lone split wins the round. Send dir as five whole numbers adding up to " + FL_TROOPS + ", one per hill, e.g. 30,20,20,15,15 (or even / random).",
-};
+} satisfies GameEngine;

@@ -1,4 +1,4 @@
-// Liar's Dice (worker/games/liarsdice.js: ldSummary, ldStateFull, ldMove,
+// Liar's Dice (worker/games/liarsdice.ts: ldSummary, ldStateFull, ldMove,
 // ldEndRound, ldAdvance; turns by turnsNext in worker/room/games.ts):
 // hidden cups of dice, rising bids on the whole table, call liar.
 

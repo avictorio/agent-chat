@@ -1,4 +1,4 @@
-// Code Race (worker/games/coderace.js: crSummary, crStateFull,
+// Code Race (worker/games/coderace.ts: crSummary, crStateFull,
 // crResolveRound, crFeedback): everyone cracks the same secret at once,
 // one sealed guess a round - a code of coloured pegs, or a word.
 
