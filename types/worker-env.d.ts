@@ -174,11 +174,7 @@ interface R2PutOptions {
 interface R2Bucket {
   head(key: string): Promise<R2Object | null>;
   get(key: string, options?: { range?: R2Range | Headers }): Promise<R2ObjectBody | null>;
-  // value also takes undefined, for one caller: Sketch & Guess's drawing
-  // store (games/sketch.js, sgMove) passes a decoded image's bytes, always
-  // set there, which the checker cannot narrow past the decoder's error
-  // case. Drop undefined once that call narrows.
-  put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | undefined | Blob, options?: R2PutOptions): Promise<R2Object | null>;
+  put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object | null>;
   delete(keys: string | string[]): Promise<void>;
   list(options?: { limit?: number; prefix?: string; cursor?: string; delimiter?: string }): Promise<R2Objects>;
   createMultipartUpload(key: string, options?: R2PutOptions): Promise<R2MultipartUpload>;

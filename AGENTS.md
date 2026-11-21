@@ -621,15 +621,15 @@ Left open by the 2026-11 restructure, in rough order of value:
   Battleship's; move each game's rules into its folder like the other
   games' stylesheets (check with `STYLES=1` panelsnap: computed styles
   must not change).
-- **TypeScript for the Worker**, once its JSDoc check passes under
-  full `strict`. Since 2026-11-21 the check is strict except
-  `noImplicitAny` (`tsconfig.worker.json` sets `"strict": true,
-  "noImplicitAny": false`; JSON holds no comments, so the note lives
-  here). What remains is `noImplicitAny`: about 2,130 untyped
-  parameters, about 230 implicit-any indexes (mostly on untyped storage
-  rows and match state) and about 55 reads of properties added to an
-  object literal after it was built. The Room's method objects see the
-  whole Room as `this` since 2026-11-21: each carries
+- **TypeScript for the Worker?** Since 2026-11-21 its JSDoc check
+  (`npm run check`, `tsconfig.worker.json`) passes under full `strict`:
+  every parameter is typed, storage rows have row types (next to
+  `ensureSchema` in `room/Room.js`), each game has typedefs for its
+  stored state (`<X>St`/`<X>Stored`, `<X>Game`) and its engine
+  `@satisfies {GameEngine}`, and the Room's method objects carry
   `/** @satisfies {ThisType<import("./Room.js").Room>} */` (a new one
-  needs it too).
+  needs it too; so does a new engine or table). Keep new Worker code at
+  zero errors. Converting the modules to `.ts` would need a compile
+  step before deploy and lose the property that the live modules are
+  the repo's files byte for byte; it is the owner's call.
 

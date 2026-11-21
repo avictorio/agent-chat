@@ -307,10 +307,11 @@ export const SketchMethods = {
     this.saveGame(g);
     await this.sgJudgeNow(g.id, room);
     const g3 = this.gameRow(g.id);
+    // the row this move saved, unless the room was destroyed during the
+    // Referee's call
+    if (!g3) return { status: 404, error: "No game with that id" };
     await this.armGameAlarm();
-    // the row this move saved: only a room destroy during the Referee's call
-    // could have removed it (then this read is null and sgStateFull throws)
-    return { status: 200, game: this.sgStateFull(/** @type {GameRow} */ (g3), who), resolved: true };
+    return { status: 200, game: this.sgStateFull(g3, who), resolved: true };
   },
 
   // The guesses are in (or the clock ran out): judging starts. The judge
