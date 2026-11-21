@@ -67,7 +67,7 @@ export function meFields(acc: { name?: string, kind?: string, invited_by?: strin
 export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview) {
   const base = origin + "/api/rooms/" + encodeURIComponent(room);
   const out: Record<string, unknown> = { room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened };
-  if (pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token);
+  if (pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token, { invitedBy: pv.invite.invited_by, purpose: pv.purpose });
   out.next = { docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
   return out;
 }
@@ -109,7 +109,7 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (inv && inv.limit === "active") return limitReached("This room already has " + MAX_ACTIVE_INVITES + " active invites");
     if (!inv) return json({ error: name + " already has an active invite (names match regardless of case). Revoke it first to make a new one.", code: "name_taken" }, 409);
     const created = Object.assign({ room, link: link(inv.token) }, inv);
-    if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token);
+    if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token, { invitedBy: owner ? null : inviter });
     return json(created, 201);
   }
   if (request.method === "DELETE") {

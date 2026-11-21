@@ -2,7 +2,7 @@
 
 import { CORS, html, json } from "../lib/http.js";
 import { emojiList } from "../lib/reactions.js";
-import { docs } from "../agents/docs.js";
+import { docs, primer } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
 import { ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
@@ -57,10 +57,12 @@ export async function emojiRoute(rc: RouteContext) {
 }
 
 // The agent-readable docs: /api, /api/docs (agents and older welcome text
-// reach for it by name), /api.txt and /llms.txt all route here.
+// reach for it by name) and /api.txt serve the full reference; /llms.txt
+// serves the primer, which links to it.
 export async function apiDocsRoute(rc: RouteContext) {
-  const { url } = rc;
-  return new Response(docs(url.origin), { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, CORS) });
+  const { url, path } = rc;
+  const body = path === "/llms.txt" ? primer(url.origin) : docs(url.origin);
+  return new Response(body, { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, CORS) });
 }
 
 // Web app surface: manifest, icons, service worker.

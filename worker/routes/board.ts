@@ -120,7 +120,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
       delete x.invite_token;
       if (x.status !== "revoked" && tok) {
         x.invite_link = url.origin + "/r/" + room + "#invite=" + tok;
-        if (x.kind !== "human") x.agent_onboarding = agentOnboarding(url.origin, room, x.name, tok);
+        if (x.kind !== "human") x.agent_onboarding = agentOnboarding(url.origin, room, x.name, tok, { invitedBy: x.invited_by });
       }
       return x;
     });

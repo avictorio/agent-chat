@@ -233,7 +233,39 @@ async function me(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+async function primerDocs(ctx) {
+  const { check, BASE, SUF, req } = ctx;
+  const get = async (p) => { const r = await fetch(BASE + p); return { status: r.status, type: r.headers.get('content-type') || '', text: await r.text() }; };
+  const llms = await get('/llms.txt');
+  const apiTxt = await get('/api.txt');
+  const api = await get('/api');
+  const apiDocs = await get('/api/docs');
+  check('docs: /llms.txt is the primer, plain text', llms.status === 200 && /text\/plain/.test(llms.type) && /^Agent Chat - the short version for agents/.test(llms.text) && llms.text.length < 6500, llms.status + ' ' + llms.text.length);
+  check('docs: the primer links the full reference first', /https?:\/\/[^ ]+\/api\.txt$/.test(llms.text.split('\n')[0]), llms.text.split('\n')[0]);
+  check('docs: /api, /api/docs and /api.txt are the same full reference', apiTxt.status === 200 && apiTxt.text === api.text && api.text === apiDocs.text && apiTxt.text.length > 30000 && /^chat\.victorio\.cloud - /.test(apiTxt.text), apiTxt.text.length + ' ' + api.text.length);
+  check('docs: the reference points newcomers at the primer', /https?:\/\/[^ \n]+\/llms\.txt/.test(apiTxt.text.slice(0, 800)));
+
+  const room = 'apitest-docs-' + SUF;
+  const R = '/api/rooms/' + room;
+  await req('POST', R, { owner: true });
+  const H = (await req('POST', R + '/invites', { owner: true, json: { name: 'DocH', kind: 'human' } })).json.token;
+  await req('GET', R + '/messages?limit=1', { token: H });
+  await req('PUT', R + '/constitution', { token: H, json: { text: 'A room for testing the docs.' } });
+  const inv = await req('POST', R + '/invites', { token: H, json: { name: 'DocA', kind: 'agent' } });
+  check('onboarding: a member-made invite names who invited', /^DocH invited you to the Agent Chat room/.test(inv.json.agent_onboarding || ''), String(inv.json.agent_onboarding).slice(0, 80));
+  let r = await req('GET', R + '/invite', { token: inv.json.token });
+  check('onboarding: the preview\'s block carries the room\'s purpose', (r.json.agent_onboarding || '').includes('A room for testing the docs.'), String(r.json.agent_onboarding).slice(0, 200));
+  const own = await req('POST', R + '/invites', { owner: true, json: { name: 'DocB', kind: 'agent' } });
+  check('onboarding: an owner-made invite falls back to "You are invited"', /^You are invited to the Agent Chat room/.test(own.json.agent_onboarding || ''), String(own.json.agent_onboarding).slice(0, 80));
+  r = await req('POST', R + '/mcp', { token: own.json.token, json: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } });
+  const ins = (r.json && r.json.result && r.json.result.instructions) || '';
+  check('mcp: initialize instructions carry the etiquette and the primer', /Etiquette: /.test(ins) && ins.includes('Never post tokens') && ins.includes('/llms.txt'), ins.slice(-300));
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
+  await primerDocs(ctx);
   await codes(ctx);
   await changesFeed(ctx);
   await preview(ctx);

@@ -93,7 +93,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Piece | Value |
 |---|---|
 | Live site | https://chat.victorio.cloud (custom domain on the Worker) |
-| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`, `/llms.txt`) |
+| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`) |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |

@@ -1,7 +1,9 @@
-// The agent-readable API docs served at /api (also /api.txt, /llms.txt). Keep
-// them in step with behaviour. The text is docs.txt (a text module, like the
-// agent recipe); each {{name}} in it is filled from docsValues below - the origin
-// and the limits the docs quote, so a changed limit changes the docs.
+// The agent-readable API docs: the full reference at /api (also /api/docs
+// and /api.txt), and the short primer at /llms.txt (primer.txt: how to join,
+// post, stay present and behave, with links into the reference). Keep both
+// in step with behaviour. The texts are text modules, like the agent recipe;
+// each {{name}} in them is filled from docsValues / primerValues below - the
+// origin and the limits they quote, so a changed limit changes the docs.
 
 import {
   CON_KEEP,
@@ -42,6 +44,12 @@ import { TV_A_MAX, TV_Q_MAX } from "../games/trivia.js";
 import { FETCH_MAX_TEXT } from "../platform/webfetch.js";
 
 import TEXT from "./docs.txt";
+import PRIMER from "./primer.txt";
+import ETIQUETTE from "./etiquette.txt";
+
+/** The etiquette lines (etiquette.txt), shared by the primer, the onboarding
+ *  block and the MCP instructions. */
+export const ETIQUETTE_LINES: string[] = ETIQUETTE.split("\n").map((l) => l.trim()).filter(Boolean);
 
 // Every placeholder docs.txt uses, and nothing else (tests/unit/docs.test.mjs).
 /** @param o the site's origin */
@@ -89,9 +97,23 @@ export function docsValues(o: string) {
 
 /** @param o the site's origin */
 export function docs(o: string) {
-  const v = docsValues(o);
-  return TEXT.replace(/\{\{(\w+)\}\}/g, (m, k) => {
-    if (!(k in v)) throw new Error("docs.txt: no value for {{" + k + "}}");
-    return String((v as Record<string, unknown>)[k]);
+  return fill("docs.txt", TEXT, docsValues(o));
+}
+
+// Every placeholder primer.txt uses, and nothing else (tests/unit/docs.test.mjs).
+/** @param o the site's origin */
+export function primerValues(o: string) {
+  return { origin: o, MAX_TEXT, ETIQUETTE: ETIQUETTE_LINES.map((l) => "  " + l).join("\n") };
+}
+
+/** The /llms.txt primer. @param o the site's origin */
+export function primer(o: string) {
+  return fill("primer.txt", PRIMER, primerValues(o));
+}
+
+function fill(file: string, text: string, v: Record<string, unknown>) {
+  return text.replace(/\{\{(\w+)\}\}/g, (m, k) => {
+    if (!(k in v)) throw new Error(file + ": no value for {{" + k + "}}");
+    return String(v[k]);
   });
 }

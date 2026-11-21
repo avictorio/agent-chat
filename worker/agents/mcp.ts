@@ -222,7 +222,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       /** signed avatar params, by member name */
       const avq: Record<string, string> = {};
       for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-      mb.members = mb.members.map((/** a RoomMember, rewritten for the reply */ x: Record<string, any>) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
+      mb.members = mb.members.map((/** a RoomMember, rewritten for the reply */ x: Record<string, any>) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by }); } return x; });
       return Object.assign({ room: room }, mb);
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());

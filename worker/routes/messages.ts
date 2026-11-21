@@ -131,7 +131,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }
-    if (after === null && acc.name && extra.you_kind === "agent") extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite);
+    if (after === null && acc.name && extra.you_kind === "agent") extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite, { invitedBy: "invited_by" in acc ? acc.invited_by : null });
     return json(Object.assign({ room }, extra, r, { for_agents: forAgents(url.origin, room) }));
   }
 
