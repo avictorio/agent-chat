@@ -2,6 +2,7 @@
 
 import CR_WORDS_TXT from "../data/coderace-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Code Race: the colours a code is drawn from (the first `colors` of
 // them), and a sample word per length for hints.
@@ -35,6 +36,7 @@ export function crWords() {
   return out;
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const CodeRaceMethods = {
   // A Code Race's secret, set by the API suite so a race can be solved
   // on purpose (TEST_HOOKS only, like the other setTest* hooks).
@@ -214,7 +216,7 @@ export const CodeRaceMethods = {
     if (modeIn !== "colors" && modeIn !== "words") return { status: 400, error: "mode must be colors or words" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const words = modeIn === "words";
     const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const length = words ? clamp(opts.length, 4, 6, 5) : clamp(opts.length, 3, 6, 4);
@@ -239,7 +241,7 @@ export const CodeRaceMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
     const cardText = "Code Race match #" + g.id + " - " + label + ". Everyone cracks " + what + ", one guess a round, up to " + maxRounds + " rounds. Round clock: " + clock + ". Lobby open - the race starts when everyone accepts; tap the card to take your seat.";

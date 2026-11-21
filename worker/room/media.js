@@ -6,6 +6,7 @@ import { isStoreError, storeError } from "../lib/errors.js";
 import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const MediaMethods = {
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
   // md maps (msg, kind) to an R2 key. The legacy in-DB store (au/im) was

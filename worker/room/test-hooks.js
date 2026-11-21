@@ -2,6 +2,7 @@
 
 import { TICKET_TTL_MS } from "../limits.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const TestHookMethods = {
   // Test hooks (suite only): when the Worker runs with TEST_HOOKS set (the API
   // suite's .dev.vars - never wrangler.toml, and check:config fails if the name

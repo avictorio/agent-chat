@@ -34,6 +34,7 @@ import {
 } from "../uploads/plan.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const UploadMethods = {
   // ---- Upload tickets (phase C): a single-use credential for one PUT ----
   // Minted by begin_upload (MCP) or the REST upload-ticket route for a draft

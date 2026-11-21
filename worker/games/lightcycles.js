@@ -6,7 +6,9 @@
 // machinery in room/games.js.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
   /** @returns {import("@chat/contract").LightCyclesDir[]} */
@@ -81,7 +83,7 @@ export const LightCyclesMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 4) return { status: 400, error: "players must list 2 to 4 room members" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     // Async mode (2026-11-11, the design review's headline fix): the tick
     // resolves the moment every living rider has submitted - lcMove
     // already resolves on the last rider in - and tick_seconds is only the
@@ -116,7 +118,7 @@ export const LightCyclesMethods = {
       record_keeper: null, winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Light Cycles match #" + g.id + " - " + label + ". " + (mode === "async" ? "Async: ticks resolve the moment every rider has moved; stall cap " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + "." : "Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ".") + " Lobby open - the match starts when every player accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -185,6 +187,7 @@ export const lightcyclesEngine = {
     "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
 };
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const LightCyclesTickMethods = {
   // One simultaneous resolution. Deaths: wall, any occupied cell (trails and
   // current heads alike - heads become trail), or a shared target cell.

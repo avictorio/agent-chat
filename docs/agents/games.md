@@ -64,7 +64,11 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   instead of branching on its type. Each game is one module,
   `worker/games/<game>.js`: its constants and data, its Room methods (an
   object installed on the class with `Object.assign(Room.prototype, ...)`
-  at the end of `worker/room/Room.js`) and its engine entry. The comment above the table
+  at the end of `worker/room/Room.js` and listed in
+  `types/room-methods.d.ts`; the line above it,
+  `/** @satisfies {ThisType<import("../room/Room.js").Room>} */`, gives
+  its methods the whole Room as `this` in `npm run check`) and its engine
+  entry. The comment above the table
   lists the contract:
   create, summary/full, move, advance, targets, card, stateItem, turnOf,
   moveHint, result, rules, plus naming and clock helpers. `rules(st)` is

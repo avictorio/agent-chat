@@ -1,11 +1,13 @@
 // Frontlines: split troops across hills, simultaneous rounds.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Frontlines: the hills on the field and the troops each round.
 export const FL_HILLS = 5;
 export const FL_TROOPS = 100;
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const FrontlinesMethods = {
   /* ---------- games: Frontlines (2026-11-19) ----------
      Two commanders, five hills, a hundred troops each round. Both split
@@ -77,7 +79,7 @@ export const FrontlinesMethods = {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Frontlines needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const bestOf = Math.min(9, Math.max(1, Math.floor(Number(opts.best_of) || 5)));
     const target = Math.floor(bestOf / 2) + 1;
     const variant = String(opts.variant || "classic").toLowerCase() === "valued" ? "valued" : "classic";
@@ -97,7 +99,7 @@ export const FrontlinesMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
     const cardText = "Frontlines match #" + g.id + " - " + label + ". Split " + FL_TROOPS + " troops across " + FL_HILLS + " hills in secret, first to " + target + (variant === "valued" ? " (valued hills)" : "") + ". Round clock: " + clock + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";

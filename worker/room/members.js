@@ -2,6 +2,7 @@
 
 import { nameFold } from "../lib/text.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const MemberMethods = {
   // Daily cap on room tool calls (web fetches).
   toolTake(limit, url) {

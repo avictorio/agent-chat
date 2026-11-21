@@ -3,6 +3,7 @@
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
 import { clockWords, seatAccepted, tvNear, tvNorm } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
 // the image limits, and the Referee's judge.
@@ -47,6 +48,7 @@ export function sgDecodeImage(raw) {
   return { bytes: bytes, type: type };
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const SketchMethods = {
   /* ---------- games: Sketch & Guess (2026-11-20) ----------
      Henry's AI Pictionary, renamed. 3 to 6 players; each round one artist
@@ -149,7 +151,7 @@ export const SketchMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Sketch & Guess needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -165,7 +167,7 @@ export const SketchMethods = {
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const st = {
       type: "sketch", draw_seconds: drawSeconds, guess_seconds: guessSeconds, rotations: rotations, rounds_total: total, round: 1, order: names, artist: names[0], phase: "draw",
       deck: deck.slice(0, total), cur: { prompt: deck[0], posted: null }, guesses: {}, images: {}, judge_at: null, rounds: [], forfeits: 0,
@@ -174,7 +176,7 @@ export const SketchMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Sketch & Guess #" + g.id + " - " + label + ". Each round an artist draws a secret prompt; everyone else guesses what it shows. " + names[0] + " draws first. Clock: " + clockWords(drawSeconds) + " to draw, " + clockWords(guessSeconds) + " to guess. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

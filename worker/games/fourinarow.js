@@ -2,6 +2,7 @@
 // game shares is gameLadder in room/games.js).
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Four in a Row: the classic board.
 export const C4_COLS = 7;
@@ -22,6 +23,7 @@ export function c4BoardOf(st) {
   return rows;
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const FourInARowMethods = {
   /* ---------- games: Four in a Row (2026-11-19) ----------
      SHA's spec, on the turn-order helper: two players, a 7x6 board, a
@@ -91,7 +93,7 @@ export const FourInARowMethods = {
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     // who moves first is drawn now; the first seat plays X
-    const names = Math.random() < 0.5 ? resolved.names : resolved.names.slice().reverse();
+    const names = Math.random() < 0.5 ? /** @type {string[]} */ (resolved.names) : /** @type {string[]} */ (resolved.names).slice().reverse(); // gamePlayers sets names whenever it sets no error
     let turnSeconds = Math.floor(Number(opts.tick_seconds) || 0);
     if (!turnSeconds) turnSeconds = 3600;
     turnSeconds = Math.min(86400, Math.max(30, turnSeconds));
@@ -105,7 +107,7 @@ export const FourInARowMethods = {
       winner: null, draw: false, forfeit: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Four in a Row match #" + g.id + " - " + label + ". Drop discs on a 7x6 board; four in a line wins. " + names[0] + " moves first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);

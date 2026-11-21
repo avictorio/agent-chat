@@ -1,6 +1,7 @@
 // Battleship: hidden fleets, one shot a turn on a slow clock; duels or free-for-all.
 
 import { clockWords, seatAccepted } from "./shared.js";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 /* ---------- games: Battleship ----------
    The slow game, added 2026-11-10 from the room's latency debate:
@@ -27,6 +28,7 @@ import { clockWords, seatAccepted } from "./shared.js";
    instead of the last ship (see bsBeginTurn). Everything below
    branches on st.players.length > 2 only where FFA truly differs;
    the two-player paths keep their exact behavior. */
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const BattleshipMethods = {
   bsKey(x, y) { return x + "," + y; },
 
@@ -380,7 +382,7 @@ export const BattleshipMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "battleship needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names;
+    const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const ffa = names.length > 2;
     // tick_seconds is the per-turn clock here, and the setup clock.
     // An hour by default: this game is built for players who wake on
@@ -411,7 +413,7 @@ export const BattleshipMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(ffa ? ", " : " vs ");
     const boardText = variant === "skirmish" ? "Skirmish: 8x8, fleets of four (4, 3, 3, 2)" : variant === "salvo" ? "Salvo: 10x10, fleets of five (5, 4, 3, 3, 2) - each turn fires one shot per ship you still have afloat" : "10x10, fleets of five (5, 4, 3, 3, 2)";
     const cardText = ffa

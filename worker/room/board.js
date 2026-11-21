@@ -11,6 +11,7 @@ import {
 } from "../limits.js";
 import { decRow } from "./state.js";
 
+/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const BoardMethods = {
   // Room constitution: a pinned, versioned text. The last CON_KEEP versions are kept.
   constitution(history) {

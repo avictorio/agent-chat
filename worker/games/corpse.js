@@ -4,6 +4,7 @@
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
+/** @typedef {import("../room/games.js").GameRow} GameRow */
 
 // Exquisite Corpse: the seed lines and constraint cards (data files), and
 // a segment's cap.
@@ -21,6 +22,7 @@ export function ecRules() {
   return ecRulesCache;
 }
 
+/** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const CorpseMethods = {
   /* ---------- games: Exquisite Corpse (2026-11-20) ----------
      SHA's spec: 3 to 6 writers in a rotation drawn at creation add to one
@@ -113,7 +115,7 @@ export const CorpseMethods = {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Exquisite Corpse needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
-    const names = resolved.names.slice();
+    const names = /** @type {string[]} */ (resolved.names).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -140,7 +142,7 @@ export const CorpseMethods = {
       names.forEach((n, i) => (constraints[n] = deck[i % deck.length]));
     }
     const colors = this.gameColors();
-    const players = resolved.names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const st = {
       type: "corpse", turn_seconds: turnSeconds, rotations: rotations, turns_total: names.length * rotations, turn: 1, order: names, active: names.slice(), writer: names[0], phase: "write",
       seed: seed, segments: [], beats: [], skips: {}, variant: variant, genre: genre, constraints: constraints, votes: {}, honours: [],
@@ -149,7 +151,7 @@ export const CorpseMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id);
+    const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Exquisite Corpse #" + g.id + " - " + label + ". One story, " + st.turns_total + " turns of 1 to 3 sentences; each writer sees only the segment before theirs, and the whole thing is revealed at the end" + (genre ? " (genre: " + genre + ")" : variant === "constraints" ? " (everyone holds a secret constraint card)" : "") + ". " + names[0] + " writes first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the story starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
