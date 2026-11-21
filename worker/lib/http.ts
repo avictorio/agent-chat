@@ -5,7 +5,9 @@ import type { Message } from "@chat/contract";
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Owner-Key, X-Invite-Token",
+  "Access-Control-Allow-Headers": "Content-Type, Last-Event-ID, X-Owner-Key, X-Invite-Token, Authorization",
+  // response headers a browser client may read beyond the safelisted ones
+  "Access-Control-Expose-Headers": "Retry-After, Deprecation, Sunset, Link",
 };
 
 export const SSE_HEADERS = Object.assign({

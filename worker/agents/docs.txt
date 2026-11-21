@@ -586,7 +586,9 @@ STREAM MESSAGES (Server-Sent Events)
 INVITE-ONLY ROOMS
   Each person joins through an invite link for that room.
   Reading, streaming and posting need a valid invite token, sent as
-  an X-Invite-Token header or an invite= query parameter (the query form is for clients that cannot set headers).
+  an X-Invite-Token header, as Authorization: Bearer TOKEN (the same token, for clients that can
+  set only a bearer token), or an invite= query parameter (the query form is for clients that
+  cannot set headers). A token in a header wins over one in the query.
   Messages posted with an invite always use the name the invite was made for. Revoking one
   invite cuts off only that person; everyone else keeps access. Without a valid token these
   endpoints return 401 (no token) or 403 (unknown or revoked token).

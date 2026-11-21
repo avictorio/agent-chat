@@ -271,6 +271,30 @@ async function waitUp() {
     r = await req('POST', R + '/invites', { owner: true, headers: notJson, body: '  \n' });
     check('a whitespace-only body reads as no body', r.status === 400 && /"name" is required/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
 
+    // Authorization: Bearer is an alias for X-Invite-Token (Phase A of the
+    // agent invite link design); a token in X-Invite-Token wins, other
+    // schemes are not a token, and browsers may send and read the headers.
+    const bearer = (t) => ({ Authorization: 'Bearer ' + t });
+    r = await req('GET', R + '/messages?limit=1', { headers: bearer(TA) });
+    check('Bearer token reads', r.status === 200 && r.json && r.json.you === 'ApiA', r.status + ' ' + (r.json && r.json.you));
+    r = await req('POST', R + '/messages', { headers: bearer(TA), json: { text: 'posted with a bearer token' } });
+    check('Bearer token posts under the invite name', r.status === 201 && r.json && r.json.from === 'ApiA', r.status + ' ' + (r.json && r.json.from));
+    r = await req('POST', R + '/mcp', { headers: bearer(TB), json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
+    check('Bearer token lists MCP tools', r.status === 200 && r.json && r.json.result && Array.isArray(r.json.result.tools), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R + '/messages?limit=1', { token: TA, headers: bearer('bogus-token') });
+    check('X-Invite-Token wins over a bad Bearer', r.status === 200 && r.json.you === 'ApiA', r.status);
+    r = await req('GET', R + '/messages?limit=1', { token: 'bogus-token', headers: bearer(TA) });
+    check('a bad X-Invite-Token is not rescued by Bearer', r.status === 403, r.status);
+    r = await req('GET', R + '/messages?limit=1', { headers: { Authorization: 'Basic ' + Buffer.from('ApiA:' + TA).toString('base64') } });
+    check('Authorization: Basic is not a token', r.status === 401, r.status);
+    r = await req('GET', R + '/messages?limit=1&invite=bogus-token', { headers: bearer(TA) });
+    check('Bearer wins over the query token', r.status === 200, r.status);
+    {
+      const pf = await fetch(BASE + R + '/messages', { method: 'OPTIONS', headers: { Origin: 'https://example.test', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' } });
+      check('CORS preflight allows Authorization', pf.status === 204 && /Authorization/i.test(pf.headers.get('access-control-allow-headers') || ''), pf.headers.get('access-control-allow-headers'));
+      check('CORS exposes Retry-After and Deprecation', /Retry-After/.test(pf.headers.get('access-control-expose-headers') || '') && /Deprecation/.test(pf.headers.get('access-control-expose-headers') || ''), pf.headers.get('access-control-expose-headers'));
+    }
+
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
     const did = draft.json.id;
@@ -280,6 +304,8 @@ async function waitUp() {
     check('other member cannot read draft media', r.status === 404, r.status);
     r = await req('GET', R + '/messages/' + did + '/image', { token: TA });
     check('sender reads own draft media', r.status === 200, r.status);
+    r = await req('GET', R + '/messages/' + did + '/image', { headers: { Authorization: 'Bearer ' + TA } });
+    check('a media read takes the Bearer header', r.status === 200, r.status);
     r = await req('GET', R + '/messages/' + did + '/image', { owner: true });
     check('owner reads draft media', r.status === 200, r.status);
     r = await req('POST', R + '/messages/' + did + '/publish', { token: TA, json: {} });
