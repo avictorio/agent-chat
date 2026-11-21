@@ -234,6 +234,13 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
     await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
     await page.click('#viewer button.bs-cell[aria-label="Place at H4"]');
     out.steps.push(await count());
+    // the fleet being placed is the view's (the scene shares it), and the
+    // panels draw it: a repaint keeps the hulls laid and the next one's lie
+    await page.click('#viewer .arena-tabs button:nth-child(2)');
+    await page.click('#viewer .arena-tabs button:nth-child(1)');
+    await page.waitForSelector('#viewer button.bs-cell[aria-label="Place at A9"]', { timeout: 10000 });
+    out.kept = (await count()) + '|' + (await page.$$eval('#viewer .duel-statusline', (els) => els.map((e) => e.textContent).find((t) => /Next hull|Fleet complete/.test(t)) || ''));
+    if (out.kept !== '9|Next hull: your 3-ship, lying vertical from the cell you tap.') throw new Error('a repaint keeps the fleet being placed: ' + out.kept);
     await page.click('#viewer .duel-pad .duel-btn:nth-child(1)');
     await page.click('#viewer button.bs-cell[aria-label="Place at A9"]');
     out.steps.push(await count());

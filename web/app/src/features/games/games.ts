@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { el, toast } from "../../lib/index";
 import { gameDef, matchTitle } from "./shared/catalog";
-import { clockSeconds, fleetStrip, formatLeft, setClockBar, setTurnClock, type GL, type GLPlayer, type GLYou } from "./shared/render";
+import { clockSeconds, formatLeft, setClockBar, setTurnClock, type GL, type GLPlayer, type GLYou } from "./shared/render";
 import type { Arena3dProps, GameStoreOptions, GameView, GameViewCtx, Host3d, Kind3d } from "./shared/viewctx";
 import { GAMES } from "./registry";
 import type { HistPlayer } from "./shared/history";
@@ -69,7 +69,6 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     arenaHint,
     arenaTabs,
     bsScene,
-    bsStrips3d,
     dropBs3d,
     dropLc3d,
     paintLc3d,
@@ -664,17 +663,6 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         if (current()) fail3d(h, err);
       }
     );
-  }
-  /* The fleet strips under the scene: each captain's sizes still afloat. */
-  function bsStrips3d(g: BattleshipState, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement {
-    const strips = el("div", "bs-strips3d");
-    fleets.forEach((f) => {
-      const item = el("div", "bs-strip3d");
-      item.appendChild(el("span", "bs-strip3d-label", f.label));
-      item.appendChild(fleetStrip(f.hex, f.sunk, undefined, g.fleet_sizes));
-      strips.appendChild(item);
-    });
-    return strips;
   }
   // Battleship: remember the focused element inside the scene before the
   // wrap is emptied (bsScene hands focus back to it).

@@ -2,9 +2,12 @@ import { el } from "../../../lib/index";
 import type { LightCyclesDir, LightCyclesPlayer, LightCyclesState } from "@chat/contract";
 import { gameMetaText, winnerBanner } from "../shared/render";
 import type { GameViewCtx } from "../shared/viewctx";
+import { LcPad, LcRecordKeeper, LcRiders } from "./LightCyclesPanels";
 
 /* Light Cycles: the board (3D), the riders, the steering pad on your
-   move. */
+   move. The panels are React (LightCyclesPanels.tsx, mounted with
+   ctx.panel); a tap on the pad, like a tap on a heading marker in the
+   scene, sends the move. */
 export function renderLightCyclesView(ctx: GameViewCtx, g: LightCyclesState, force?: boolean) {
   if (!ctx.gameView) return;
   const key =
@@ -38,52 +41,17 @@ export function renderLightCyclesView(ctx: GameViewCtx, g: LightCyclesState, for
   if (!ctx.gameView.lc3d) ctx.gameView.lc3d = ctx.makeHost3d("lc-board-big lc-3d-host");
   wrap.appendChild(ctx.gameView.lc3d.host);
   ctx.paintLc3d(g, ctx.gameView.lc3d);
-  const chips = el("div", "lc-players");
-  (g.players || []).forEach((p: LightCyclesPlayer) => {
-    const chip = el("span", "lc-chip" + (p.alive ? "" : " out"));
-    const dot = el("span", "lc-dot");
-    dot.style.background = p.hex;
-    chip.appendChild(dot);
-    const state =
-      g.status === "lobby"
-        ? p.accepted
-          ? " · in ✓"
-          : " · invited…"
-        : g.status === "running"
-          ? p.moved
-            ? " · moved ✓"
-            : " · deciding…"
-          : "";
-    chip.appendChild(document.createTextNode(p.name + (p.alive ? state : " · out")));
-    chips.appendChild(chip);
-  });
-  wrap.appendChild(chips);
+  wrap.appendChild(ctx.panel("riders", <LcRiders g={g} />));
   const note = el("div", "lc-note", "");
   if (g.status === "lobby") {
     wrap.appendChild(ctx.lobbyPanel(g, note));
     wrap.appendChild(note);
   }
   if (g.you && g.you.playing && g.status === "running" && g.you.alive) {
-    const pad = el("div", "lc-pad");
-    const dirs: [LightCyclesDir, string, number, number][] = [
-      ["up", "↑", 1, 0],
-      ["left", "←", 0, 1],
-      ["right", "→", 2, 1],
-      ["down", "↓", 1, 2],
-    ];
-    dirs.forEach((dd) => {
-      const b = el("button", "lc-btn" + (g.you!.queued === dd[0] ? " queued" : ""), dd[1]);
-      b.type = "button";
-      b.style.gridColumn = String(dd[2] + 1);
-      b.style.gridRow = String(dd[3] + 1);
-      b.setAttribute("aria-label", "Steer " + dd[0]);
-      if ((g.you!.legal_moves || []).indexOf(dd[0]) < 0) b.disabled = true;
-      b.addEventListener("click", () => {
-        void ctx.sendMove(g.id, dd[0], note);
-      });
-      pad.appendChild(b);
-    });
-    wrap.appendChild(pad);
+    const steer = (dir: LightCyclesDir) => {
+      void ctx.sendMove(g.id, dir, note);
+    };
+    wrap.appendChild(ctx.panel("pad", <LcPad g={g} onSteer={steer} />));
     const onBoard = " (or tap a marker on the board)";
     note.textContent = g.you.queued
       ? "Queued: " + g.you.queued + " - tap another direction" + onBoard + " to change it before the tick resolves."
@@ -98,5 +66,5 @@ export function renderLightCyclesView(ctx: GameViewCtx, g: LightCyclesState, for
     note.textContent = "Spectating - the riders steer by API and by pad.";
     wrap.appendChild(note);
   }
-  if (g.record_keeper) wrap.appendChild(el("div", "lc-note", "Record keeper: " + g.record_keeper));
+  if (g.record_keeper) wrap.appendChild(ctx.panel("keeper", <LcRecordKeeper name={g.record_keeper} />));
 }
