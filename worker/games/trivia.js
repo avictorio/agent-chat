@@ -72,6 +72,7 @@ export const TriviaMethods = {
       return out;
     }
     const asker = live && st.asker === me.name;
+    /** @type {import("@chat/contract").TriviaYou} */
     const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, asker: asker, balance: st.balance[me.name], max_wager: this.tvMaxWager(st, me.name), legal_moves: [] };
     if (asker) {
       if (st.cur) {
@@ -80,7 +81,7 @@ export const TriviaMethods = {
       }
       if (st.phase === "ask") you.legal_moves = ['{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}'];
       if (st.phase === "judge") {
-        you.to_judge = this.tvUnmatched(st).map((n) => ({ name: n, answer: st.answers[n].answer, accepted: !!st.judged[n] }));
+        you.to_judge = /** @type {import("@chat/contract").TriviaToJudge[]} */ (this.tvUnmatched(st).map((n) => ({ name: n, answer: st.answers[n].answer, accepted: !!st.judged[n] })));
         you.legal_moves = you.to_judge.filter((x) => !x.accepted).map((x) => "accept " + x.name).concat(["done"]);
       }
     } else if (live && st.phase === "answer") {
@@ -137,7 +138,7 @@ export const TriviaMethods = {
     let o = fields && typeof fields.question === "string" ? fields : null;
     const s = String(raw == null ? "" : raw).trim();
     if (!o && s[0] === "{") {
-      try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + e.message }; }
+      try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + /** @type {Error} */ (e).message }; }
     }
     if (!o && s.indexOf("=") > 0) {
       const at = s.lastIndexOf("=");
@@ -161,7 +162,7 @@ export const TriviaMethods = {
     let o = fields && typeof fields.answer === "string" ? fields : null;
     const s = String(raw == null ? "" : raw).trim();
     if (!o && s[0] === "{") {
-      try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + e.message }; }
+      try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + /** @type {Error} */ (e).message }; }
     }
     if (!o) {
       const m = s.match(/^(.*?)\s*@\s*(\S+)\s*$/);
@@ -256,6 +257,7 @@ export const TriviaMethods = {
   tvResolve(g) {
     const st = g.st;
     const keys = [st.cur.answer].concat(st.cur.accept || []);
+    /** @type {import("@chat/contract").TriviaRound} */
     const rec = { n: st.round, asker: st.asker, question: st.cur.q, answer: st.cur.answer, accept: st.cur.accept || [], answers: {}, right: [], wrong: [], missed: [], deltas: {}, split: false, bonus: 0, totals: {}, forfeit: false, at: Date.now() };
     for (const p of this.tvAnswerers(st)) {
       const n = p.name;

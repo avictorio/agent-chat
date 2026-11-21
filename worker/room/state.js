@@ -142,13 +142,15 @@ export function gamesLobby(d, me) {
 export function renderRoomState(d, who, room) {
   if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, String(who || "").toLowerCase()) && !gamesAwaiting(d, String(who || "").toLowerCase()).length && !gamesLobby(d, String(who || "").toLowerCase()).length)) return withReactions({ v: 1 }, d, who);
   const enc = new TextEncoder();
+  /** @type {import("@chat/contract").RoomState | null} */
   let s = null;
   for (const step of STATE_STEPS) {
     s = stateAttempt(d, who, room, step[0], step[1], step[2], step[3]);
     // Measured as compact JSON, as streams send it. Pretty-printed HTTP responses add whitespace.
     if (enc.encode(JSON.stringify(s)).length <= STATE_MAX_BYTES) break;
   }
-  return withReactions(s, d, who);
+  // STATE_STEPS is not empty, so the loop has set s
+  return withReactions(/** @type {import("@chat/contract").RoomState} */ (s), d, who);
 }
 
 export function decRow(r) {
@@ -204,7 +206,7 @@ export const StateMethods = {
         }).filter(Boolean),
       };
     } catch (e) {
-      console.log("room_state failed: " + String((e && e.stack) || e));
+      console.log("room_state failed: " + String((e && /** @type {Error} */ (e).stack) || e));
       return null;
     }
   },
@@ -237,7 +239,7 @@ export const StateMethods = {
         if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch (err) {} }
       }
     } catch (e) {
-      console.log("emitState failed: " + String((e && e.stack) || e));
+      console.log("emitState failed: " + String((e && /** @type {Error} */ (e).stack) || e));
     }
   },
 };

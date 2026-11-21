@@ -67,6 +67,7 @@ export async function avatarRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to 2 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+    /** @type {Record<string, any> | null} the request's JSON body */
     let body = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -107,6 +108,7 @@ export async function audioRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
   let buf, putTranscript;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+    /** @type {Record<string, any> | null} the request's JSON body */
     let body = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -146,6 +148,7 @@ export async function imageRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+    /** @type {Record<string, any> | null} the request's JSON body */
     let body = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
@@ -184,6 +187,7 @@ export async function videoRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
+    /** @type {Record<string, any> | null} the request's JSON body */
     let body = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.video || body.video_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");

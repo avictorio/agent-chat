@@ -129,12 +129,13 @@ export const FrontlinesMethods = {
     const at = Date.now();
     const [a, b] = st.players;
     const xa = st.pending[a.name], xb = st.pending[b.name];
+    /** @type {import("@chat/contract").FrontlinesRound} */
     const entry = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
     if (xa) { entry.alloc[a.name] = xa; entry.alloc_at[a.name] = (st.pending_at || {})[a.name] || null; }
     if (xb) { entry.alloc[b.name] = xb; entry.alloc_at[b.name] = (st.pending_at || {})[b.name] || null; }
     let note;
     if (xa && xb) {
-      entry.hills = xa.map((ta, i) => (ta > xb[i] ? a.name : xb[i] > ta ? b.name : null));
+      entry.hills = /** @type {Array<string | null>} */ (xa.map((ta, i) => (ta > xb[i] ? a.name : xb[i] > ta ? b.name : null)));
       for (const p of [a, b]) {
         entry.held[p.name] = entry.hills.filter((h) => h === p.name).length;
         entry.points[p.name] = entry.hills.reduce((s, h, i) => s + (h === p.name ? (st.values ? st.values[i] : 1) : 0), 0);

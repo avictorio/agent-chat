@@ -15,9 +15,12 @@ export const CR_EXAMPLE = { 4: "lamp", 5: "crane", 6: "planet" };
 // The word lists (content as data, worker/data/coderace-words.txt), parsed
 // on first use: answersN are the secrets, guessesN every word a guess
 // may be.
+/** @typedef {{ answers: string[], guesses: Set<string> }} CrWordList */
+/** @type {Record<number, CrWordList> | null} */
 export let crWordsCache = null;
 export function crWords() {
   if (crWordsCache) return crWordsCache;
+  /** @type {Record<number, CrWordList>} */
   const out = {};
   for (const line of String(CR_WORDS_TXT).split("\n")) {
     const m = line.match(/^(answers|guesses)(\d+) (.*)$/);
@@ -92,6 +95,7 @@ export const CodeRaceMethods = {
   },
 
   // Colors: [black, white]. Words: "GY..G".
+  /** @returns {import("@chat/contract").CodeRaceFeedback} */
   crFeedback(st, guess) {
     const sec = st.secret;
     if (st.mode === "words") {
@@ -265,6 +269,8 @@ export const CodeRaceMethods = {
     const st = g.st;
     const n = st.round;
     const at = Date.now();
+    /** The round as stored: each guess keeps its word as g (crStateFull renames it guess, for whoever may see it).
+     *  @type {Omit<import("@chat/contract").CodeRaceRound, "guesses"> & { guesses: Record<string, { g: string, fb: import("@chat/contract").CodeRaceFeedback, at: number }> }} */
     const entry = { n: n, at: at, guesses: {}, solved: [], missed: [], dropped: [] };
     for (const p of this.crActive(st)) {
       const pr = st.prog[p.name];

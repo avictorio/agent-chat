@@ -45,6 +45,9 @@ export const MessageMethods = {
     return { reactions: reactions, message_from: msg.sender };
   },
 
+  /** Inline media for post(): the bytes and their sniffed type, plus the
+   *  audio transcript or the page / document name those kinds carry.
+   *  @typedef {{ data: ArrayBuffer, type: string, transcript?: string | null, name?: string }} InlineMedia */
   async post(sender, text, room, trusted, audio, image, video, draft, pubauto, html, doc) {
     await this.sweepDrafts();
     this.roomName = room;
@@ -337,7 +340,7 @@ export const MessageMethods = {
     }
     const limit = Math.max(1, Math.min(200, parseInt(opts.limit, 10) || 60));
     const from = String(opts.from || "").trim();
-    let curMsg = null, curKind = null;
+    let curMsg = /** @type {number | null} */ (null), curKind = /** @type {string | null} */ (null);
     if (opts.before) {
       const m = String(opts.before).match(/^(\d+):([a-z]+)$/);
       if (!m) return { error: "before must be a cursor returned as next_cursor", status: 400 };
@@ -355,7 +358,8 @@ export const MessageMethods = {
     let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
     /** @type {Array<string | number>} */
     const args = from ? [from, ...kinds] : [...kinds];
-    if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind); }
+    // curKind is set together with curMsg
+    if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, /** @type {string} */ (curKind)); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
     args.push(limit + 1);
     const rows = this.sql.exec(sql, ...args).toArray();

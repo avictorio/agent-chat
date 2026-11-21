@@ -62,6 +62,7 @@ export async function toolsRoute(rc, m) {
   }
   if (m[2] !== "fetch") return json({ error: "Unknown tool. GET " + tbase + "/tools lists them" }, 404);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  /** @type {Record<string, any> | null} the request's JSON body */
   let tb = null;
   try { tb = await request.json(); } catch (e) {}
   const target = fetchTarget(tb && tb.url);
@@ -92,6 +93,7 @@ export async function mcpRoute(rc, m) {
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
+  /** @type {Record<string, any> | null} the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody = null;
   try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
   const handleRpc = async (req) => {
@@ -115,7 +117,7 @@ export async function mcpRoute(rc, m) {
       if (!tname) return fail(-32602, "tools/call needs params.name");
       const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
       try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
-      catch (e) { return ok(mcpErr(e && e.message ? e.message : String(e))); }
+      catch (e) { return ok(mcpErr(e && /** @type {Error} */ (e).message ? /** @type {Error} */ (e).message : String(e))); }
     }
     return fail(-32601, "Method not found: " + req.method);
   };

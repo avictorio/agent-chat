@@ -90,7 +90,7 @@ export async function uploadStep(request, env, url, stub, room, id, kind, step, 
     if (t.status !== 200) return refuse(t.expected ? { error: t.error, expected_bytes: t.expected } : { error: t.error }, t.status);
     let res;
     try { res = await streamUploadPart(env.MEDIA.resumeMultipartUpload(t.key, t.upload_id), n, request.body, len, t.sniff ? upSniff(kind) : null); }
-    catch (e) { return json({ error: "Part " + n + " did not reach storage (" + String((e && e.message) || e) + "); send it again" }, 502); }
+    catch (e) { return json({ error: "Part " + n + " did not reach storage (" + String((e && /** @type {Error} */ (e).message) || e) + "); send it again" }, 502); }
     if (!res.part) return json({ error: upTypeError(kind) + " (checked from the first bytes of part 1); nothing was stored" }, 415);
     const d = await stub.uploadPartDone(id, kind, t.upload_id, n, res.part.etag);
     if (d.status !== 200) return json({ error: d.error }, d.status);
@@ -279,9 +279,9 @@ export async function videoStreamRoute(rc, m) {
     if (!parts.length) return await fail(400, "Empty upload");
     await up.complete(parts);
   } catch (e) {
-    return await fail(502, "Upload stream failed: " + String((e && e.message) || e));
+    return await fail(502, "Upload stream failed: " + String((e && /** @type {Error} */ (e).message) || e));
   }
-  let head = null, sniffed = null;
+  let head = /** @type {{ size: number } | null} */ (null), sniffed = /** @type {string | null} */ (null);
   try { head = await env.MEDIA.head(key); } catch (e) {}
   if (head && head.size === counted) {
     try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) {}

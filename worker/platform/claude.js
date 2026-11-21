@@ -68,7 +68,7 @@ export async function sgClaudeJudge(env, prompt, guesses, wantRoast) {
     for (const v of out.verdicts) if (v && typeof v.name === "string" && v.right === true) right[v.name] = true;
     return { right: right, roast: typeof out.roast === "string" ? out.roast.slice(0, 200) : "", model: data.model || SG_JUDGE_MODEL };
   } catch (e) {
-    return { error: e && e.name === "AbortError" ? "timeout" : "fetch_failed" };
+    return { error: e && /** @type {Error} */ (e).name === "AbortError" ? "timeout" : "fetch_failed" };
   } finally {
     clearTimeout(timer);
   }

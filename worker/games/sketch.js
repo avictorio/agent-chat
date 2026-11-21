@@ -15,6 +15,7 @@ export const SG_ROASTS = [
   "\"{p}\" - a bold interpretation, and a lonely one.",
   "It was \"{p}\". {a} drew it with total confidence, which counts for something.",
 ];
+/** @type {string[] | null} */
 export let sgDeckCache = null;
 export function sgDeck() {
   if (sgDeckCache) return sgDeckCache;
@@ -36,6 +37,7 @@ export function sgDecodeImage(raw) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   if (bytes.length > SG_IMAGE_MAX) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
   const b = (i) => bytes[i];
+  /** @type {string | null} */
   let type = null;
   if (b(0) === 0x89 && b(1) === 0x50 && b(2) === 0x4e && b(3) === 0x47) type = "image/png";
   else if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) type = "image/jpeg";
@@ -130,6 +132,7 @@ export const SketchMethods = {
       return out;
     }
     const artist = live && st.artist === me.name;
+    /** @type {import("@chat/contract").SketchYou} */
     const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, artist: artist, legal_moves: [] };
     if (artist) {
       you.prompt = st.cur ? st.cur.prompt : null;
@@ -195,14 +198,15 @@ export const SketchMethods = {
       if (img.error) return { status: 400, error: img.error };
       if (!this.env || !this.env.MEDIA) return { status: 503, error: "Image storage is not available right now" };
       const rnd = Array.from(crypto.getRandomValues(new Uint8Array(6))).map((b) => ("0" + b.toString(16)).slice(-2)).join("");
-      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + img.type.split("/")[1];
+      // img.error is unset, so img is the decoded image (every error has a message)
+      const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + /** @type {string} */ (img.type).split("/")[1];
       try { await this.env.MEDIA.put(key, img.bytes, { httpMetadata: { contentType: img.type } }); } catch (e) { return { status: 503, error: "The image could not be stored - try again" }; }
       // the state may have moved while the image was stored
       const g2 = this.gameRow(g.id);
       if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
       const s2 = g2.st;
       if (!s2.images) s2.images = {};
-      s2.images[s2.round] = { key: key, type: img.type, bytes: img.bytes.length };
+      s2.images[s2.round] = { key: key, type: img.type, bytes: /** @type {Uint8Array} */ (img.bytes).length };
       s2.cur.posted = Date.now();
       s2.phase = "guess";
       s2.guesses = {};
@@ -268,6 +272,7 @@ export const SketchMethods = {
       const names = Object.keys(st0.guesses);
       const pending = names.filter((x) => !auto[x]).map((x) => ({ name: x, guess: st0.guesses[x].guess }));
       const anyRight = names.some((x) => auto[x]);
+      /** @type {Awaited<ReturnType<typeof sgClaudeJudge>> | null} */
       let verdict = null;
       if (pending.length) {
         // while Claude thinks, the clock sits past the judge's own timeout,
@@ -327,6 +332,8 @@ export const SketchMethods = {
   sgResolve(g, auto, verdict) {
     const st = g.st;
     const ok = verdict && !verdict.error;
+    /** The round as stored; sgRoundOut adds its image.
+     *  @type {Omit<import("@chat/contract").SketchRound, "image">} */
     const rec = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
     for (const p of this.sgGuessers(st)) {
       const x = st.guesses[p.name];

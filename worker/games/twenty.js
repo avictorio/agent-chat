@@ -7,6 +7,7 @@ import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
 export const TQ_BUDGET = 20;
 export const TQ_Q_MAX = 160;
 export const TQ_SECRET_MAX = 60;
+/** @type {string[] | null} */
 export let tqSecretsCache = null;
 export function tqSecrets() {
   if (!tqSecretsCache) tqSecretsCache = dataLines(TQ_SECRETS_TXT);
@@ -78,6 +79,7 @@ export const TwentyMethods = {
       out.you = { playing: false };
       return out;
     }
+    /** @type {import("@chat/contract").TwentyYou} */
     const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, answerer: live && st.answerer === me.name, legal_moves: [] };
     if (you.answerer) {
       you.secret = st.secret || null;
@@ -249,6 +251,7 @@ export const TwentyMethods = {
     const body = gm ? gm[1].trim() : text.replace(/^(ask|question)\s*[:-]\s*/i, "");
     if (!body) return { status: 400, error: "Ask a yes/no question, or guess: <your answer>", legal_moves: ["<a yes/no question>", "guess: <your answer>"] };
     if (body.length > TQ_Q_MAX) return { status: 400, error: "A question can be up to " + TQ_Q_MAX + " characters" };
+    /** @type {import("@chat/contract").TwentyQuestion} */
     const entry = { n: st.qa.length + 1, by: me.name, kind: isGuess ? "guess" : "q", q: body, a: null, note: null, flagged: false, at: Date.now() };
     st.qa.push(entry);
     // an exact guess is right on its own

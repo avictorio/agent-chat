@@ -33,6 +33,7 @@ export function parseServiceAccount(raw) {
 // domain) with only the gmail.send scope, signed with the lib/crypto helpers;
 // the service-account JSON is the GMAIL_SA secret. Mail then comes from the
 // domain itself, so no DNS changes are needed - Google already signs for it.
+/** @type {{ email: string | null, sender: string | null, key: CryptoKey | null, token: string | null, exp: number }} */
 export const gmailCache = { email: null, sender: null, key: null, token: null, exp: 0 };
 
 export async function gmailAccessToken(env) {
@@ -65,11 +66,13 @@ export async function gmailAccessTokenInner(env) {
 export function mimePart(text) {
   const bytes = new TextEncoder().encode(text);
   let bin = "";
-  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  // apply takes any array-like; its strict typing wants a number[]
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, /** @type {number[]} */ (/** @type {ArrayLike<number>} */ (bytes.subarray(i, i + 8192))));
   return btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
 }
 
 export async function sendViaGmail(env, to, subject, text, html) {
+  /** @type {string | null} */
   let token = null;
   try { token = await gmailAccessToken(env); } catch (e) { }
   if (!token) return false;

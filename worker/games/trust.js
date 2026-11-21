@@ -28,6 +28,7 @@ export const TrustMethods = {
     const rivals = this.trActive(st).filter((p) => p.name !== me.name).map((p) => p.name);
     const word = (w) => (/^(c|co+p(erate)?|trust)$/i.test(w) ? "C" : /^(d|defect|betray|cheat)$/i.test(w) ? "D" : null);
     const out = {};
+    /** @type {"C" | "D" | null} */
     let dflt = null;
     const toks = String(raw || "").trim().replace(/^(all|everyone)\s*[:=]?\s*/i, "").split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean);
     if (!toks.length) return { error: "send C or D for everyone, or one per rival, e.g. " + rivals.map((n, i) => n + ":" + (i % 2 ? "D" : "C")).join(", ") };
@@ -138,6 +139,7 @@ export const TrustMethods = {
     const n = st.round;
     const at = Date.now();
     const active = this.trActive(st);
+    /** @type {import("@chat/contract").TrustRound} */
     const entry = { n: n, at: at, moves: {}, missed: [], dropped: [], points: {}, totals: {} };
     for (const p of active) {
       const mv = st.pending[p.name];

@@ -24,10 +24,11 @@ export const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAABR8UlEQVR
 // are served with the id stamped over the build's "next-dev" placeholder,
 // and GET /api/build reports it, so a long-lived page can tell it is
 // behind the latest deploy and offer a refresh.
+/** @type {Promise<{ text: string, id: string }> | null} */
 export let shellPromise = null;
 export function appShell(env, origin) {
   if (!shellPromise) {
-    shellPromise = env.ASSETS.fetch(new Request(origin + "/index.html")).then(async function (r) {
+    shellPromise = /** @type {{ fetch(req: Request): Promise<Response> }} the ASSETS binding */ (env.ASSETS).fetch(new Request(origin + "/index.html")).then(async function (r) {
       if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
       const text = await r.text();
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

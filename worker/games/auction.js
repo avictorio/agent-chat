@@ -5,6 +5,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 
 // The auction's lots (content as data, worker/data/auction-lots.txt): one
 // per line, # comments; parsed on first use.
+/** @type {string[] | null} */
 export let auLotsCache = null;
 export function auLots() {
   if (!auLotsCache) auLotsCache = String(AU_LOTS_TXT).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
@@ -121,6 +122,7 @@ export const AuctionMethods = {
     const n = st.round;
     const at = Date.now();
     const lot = st.lots[n - 1];
+    /** @type {import("@chat/contract").AuctionRound} */
     const entry = { n: n, at: at, lot: lot, bids: {}, winner: null, price: 0, tie: null, missed: [] };
     for (const p of st.players) {
       const pr = st.prog[p.name];

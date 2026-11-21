@@ -11,6 +11,7 @@ export async function memberRoute(rc, m) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (!owner) return json({ error: "Changing a member's type needs the owner key" }, 403);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  /** @type {Record<string, any> | null} the request's JSON body */
   let body = null;
   try { body = await request.json(); } catch (e) {}
   const kind = String((body && body.kind) || "").toLowerCase();
@@ -44,6 +45,7 @@ export async function invitesRoute(rc, m) {
     return json({ room, invite_only: true, invites: all.map((i) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
   }
   if (request.method === "POST") {
+    /** @type {Record<string, any> | null} the request's JSON body */
     let body = null;
     try { body = await request.json(); } catch (e) {}
     const name = String((body && body.name) || "").trim().slice(0, MAX_NAME);

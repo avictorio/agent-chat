@@ -8,7 +8,9 @@ import EC_RULES_TXT from "../data/corpse-constraints.txt";
 // Exquisite Corpse: the seed lines and constraint cards (data files), and
 // a segment's cap.
 export const EC_MAX = 400;
+/** @type {string[] | null} */
 export let ecSeedsCache = null;
+/** @type {string[] | null} */
 export let ecRulesCache = null;
 export function ecSeeds() {
   if (!ecSeedsCache) ecSeedsCache = dataLines(EC_SEEDS_TXT);
@@ -87,6 +89,7 @@ export const CorpseMethods = {
       out.you = { playing: false };
       return out;
     }
+    /** @type {import("@chat/contract").CorpseYou} */
     const you = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, out: st.active.indexOf(me.name) < 0, writer: live && st.phase === "write" && st.writer === me.name, segments: st.segments.filter((s) => s.by === me.name).map((s) => s.n), legal_moves: [] };
     if (st.variant === "constraints") you.constraint = (st.constraints || {})[me.name] || null;
     if (you.writer) {
