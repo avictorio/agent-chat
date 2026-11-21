@@ -5,6 +5,31 @@ import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("./engine.js").GameEngine} GameEngine */
+/** @typedef {import("@chat/contract").GameLogLine} GameLogLine */
+/** @typedef {import("@chat/contract").CorpseBeat} CorpseBeat */
+/** A seat as createCorpse stores it (st.players).
+ *  @typedef {{ name: string, color: string, hex: string }} EcSeat */
+/** A stored segment: the revealed story's segment (CorpseSegment), plus
+ *  the turn it was written on and when.
+ *  @typedef {import("@chat/contract").CorpseSegment & { turn: number, at: number }} EcSegment */
+/** Exquisite Corpse's stored match state (g.st): what createCorpse builds
+ *  and the moves and the clock change. ecSummary and ecStateFull turn it
+ *  into the contract's CorpseState (which hides the story until the
+ *  reveal). writer is null outside the write phase, phase null once the
+ *  match is over; active is the rotation still writing, skips each
+ *  writer's run of silent beats, votes the reveal's votes (name ->
+ *  segment number), honours the winning segment numbers.
+ *  @typedef {{
+ *    type: "corpse", turn_seconds: number, rotations: number, turns_total: number, turn: number, order: string[], active: string[],
+ *    writer: string | null, phase: "write" | "vote" | null, seed: string, segments: EcSegment[], beats: CorpseBeat[],
+ *    skips: Record<string, number>, variant: "straight" | "genre" | "constraints", genre: string, constraints: Record<string, string>,
+ *    votes: Record<string, number>, honours: number[],
+ *    deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: EcSeat[], log: GameLogLine[],
+ *    winner: string | null, places: string[] | null, draw: boolean, announced: boolean, declined_by?: string, ended?: number
+ *  }} EcStored */
+/** An Exquisite Corpse match: its row, with the state typed.
+ *  @typedef {Omit<GameRow, "st"> & { st: EcStored }} EcGame */
 
 // Exquisite Corpse: the seed lines and constraint cards (data files), and
 // a segment's cap.
@@ -38,12 +63,16 @@ export const CorpseMethods = {
      constraints (each writer is dealt a secret constraint card, revealed
      with the story). Segments are never corrected - that is the game.
      The Referee posts only the result; the story lives in the arena. */
+  /** @param {EcStored} st */
   ecTail(st) {
     return st.segments.length ? st.segments[st.segments.length - 1].text : st.seed;
   },
 
+  /** @param {EcStored} st */
   ecTally(st) {
+    /** @type {Record<string, number>} votes per segment number */
     const bySeg = {};
+    /** @type {Record<string, number>} votes per author */
     const byName = {};
     for (const p of st.players) byName[p.name] = 0;
     for (const n of Object.keys(st.votes || {})) {
@@ -55,7 +84,10 @@ export const CorpseMethods = {
     return { bySeg, byName };
   },
 
-  /** @returns {import("@chat/contract").CorpseState} */
+  /**
+   * @param {EcGame} g
+   * @returns {import("@chat/contract").CorpseState}
+   */
   ecSummary(g) {
     const st = g.st;
     const live = g.status === "running";
@@ -77,14 +109,18 @@ export const CorpseMethods = {
     };
   },
 
-  /** @returns {import("@chat/contract").CorpseState} */
+  /**
+   * @param {EcGame} g
+   * @param {string | null | undefined} who
+   * @returns {import("@chat/contract").CorpseState}
+   */
   ecStateFull(g, who) {
     const out = this.ecSummary(g);
     const st = g.st;
     out.beats = st.beats;
     out.log = st.log.slice(-24);
     const live = g.status === "running";
-    out.awaiting = !live ? [] : st.phase === "write" ? [st.writer] : st.players.filter((p) => st.votes[p.name] === undefined && this.ecVotable(st, p.name).length).map((p) => p.name);
+    out.awaiting = !live ? [] : st.phase === "write" ? [/** @type {string} */ (st.writer)] : st.players.filter((p) => st.votes[p.name] === undefined && this.ecVotable(st, p.name).length).map((p) => p.name);
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) {
@@ -107,10 +143,20 @@ export const CorpseMethods = {
   },
 
   // the segments a player may vote for: every one but their own
+  /**
+   * @param {EcStored} st
+   * @param {string} name
+   */
   ecVotable(st, name) {
     return st.segments.filter((s) => s.by !== name).map((s) => s.n);
   },
 
+  /**
+   * @param {string} creator
+   * @param {unknown[]} playersIn
+   * @param {Record<string, unknown>} opts the create's options (request JSON)
+   * @param {string} room
+   */
   async createCorpse(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length < 3 || playersIn.length > 6) return { status: 400, error: "Exquisite Corpse needs 3 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
@@ -120,10 +166,12 @@ export const CorpseMethods = {
       const j = Math.floor(Math.random() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
     }
+    /** @type {(v: unknown, lo: number, hi: number, def: number) => number} */
     const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const rotations = clamp(opts.rotations, 1, 3, 3);
     const turnSeconds = clamp(opts.tick_seconds, 30, 86400 * 2, 86400);
-    const variant = ["straight", "genre", "constraints"].indexOf(String(opts.variant || "")) >= 0 ? String(opts.variant) : "straight";
+    // one of the three: the list check keeps it so
+    const variant = /** @type {EcStored["variant"]} */ (["straight", "genre", "constraints"].indexOf(String(opts.variant || "")) >= 0 ? String(opts.variant) : "straight");
     const genre = variant === "genre" ? String(opts.genre || "").replace(/\s+/g, " ").trim().slice(0, 40) : "";
     if (variant === "genre" && !genre) return { status: 400, error: "The genre variant needs a genre (e.g. noir, fairy tale, space opera)" };
     let seed = String(opts.seed || "").replace(/\s+/g, " ").trim();
@@ -132,6 +180,7 @@ export const CorpseMethods = {
       const pool = ecSeeds();
       seed = pool[Math.floor(Math.random() * pool.length)];
     }
+    /** @type {Record<string, string>} */
     const constraints = {};
     if (variant === "constraints") {
       const deck = ecRules().slice();
@@ -143,6 +192,7 @@ export const CorpseMethods = {
     }
     const colors = this.gameColors();
     const players = /** @type {string[]} */ (resolved.names).map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    /** @type {EcStored} */
     const st = {
       type: "corpse", turn_seconds: turnSeconds, rotations: rotations, turns_total: names.length * rotations, turn: 1, order: names, active: names.slice(), writer: names[0], phase: "write",
       seed: seed, segments: [], beats: [], skips: {}, variant: variant, genre: genre, constraints: constraints, votes: {}, honours: [],
@@ -150,7 +200,7 @@ export const CorpseMethods = {
       log: [{ tick: 0, text: "Exquisite Corpse created by " + creator + " - writers in this order: " + names.join(", ") + ", " + rotations + (rotations === 1 ? " time" : " times") + " round" + (genre ? "; genre: " + genre : "") + (variant === "constraints" ? "; everyone holds a secret constraint card" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = /** @type {Pick<import("../room/Room.js").GmRow, "id">} */ (this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one());
     const g = /** @type {GameRow} */ (this.gameRow(ins.id)); // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Exquisite Corpse #" + g.id + " - " + label + ". One story, " + st.turns_total + " turns of 1 to 3 sentences; each writer sees only the segment before theirs, and the whole thing is revealed at the end" + (genre ? " (genre: " + genre + ")" : variant === "constraints" ? " (everyone holds a secret constraint card)" : "") + ". " + names[0] + " writes first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the story starts when everyone accepts; tap the card to take your seat.";
@@ -163,11 +213,13 @@ export const CorpseMethods = {
   },
 
   // sentences: runs ending in . ! ? (or the end of the text)
+  /** @param {string} text */
   ecSentences(text) {
     return String(text).split(/(?<=[.!?…])["'”’)\]]*\s+/).filter((x) => /[A-Za-z0-9]/.test(x)).length;
   },
 
   // The next turn: the next writer still in the rotation, or the reveal.
+  /** @param {EcGame} g */
   ecNextTurn(g) {
     const st = g.st;
     st.turn += 1;
@@ -187,7 +239,7 @@ export const CorpseMethods = {
       st.log.push({ tick: st.turn, text: "The story is finished - " + st.segments.length + " segments. It is revealed: vote for your favourite segment." });
       return;
     }
-    const i = st.order.indexOf(st.writer);
+    const i = st.order.indexOf(/** @type {string} */ (st.writer)); // a write phase has a writer
     for (let k = 1; k <= st.order.length; k++) {
       const n = st.order[(i + k) % st.order.length];
       if (st.active.indexOf(n) >= 0) {
@@ -198,6 +250,12 @@ export const CorpseMethods = {
     st.deadline = Date.now() + st.turn_seconds * 1000;
   },
 
+  /**
+   * @param {EcGame} g
+   * @param {string} who
+   * @param {unknown} raw
+   * @param {string} room
+   */
   async ecMove(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -233,6 +291,7 @@ export const CorpseMethods = {
     return { status: 200, game: this.ecStateFull(g, who), resolved: all };
   },
 
+  /** @param {EcGame} g */
   ecFinish(g) {
     const st = g.st;
     const { bySeg, byName } = this.ecTally(st);
@@ -248,11 +307,15 @@ export const CorpseMethods = {
     st.log.push({ tick: st.turn, text: top ? "The honours: segment " + st.honours.join(" and ") + " (" + top + (top === 1 ? " vote" : " votes") + ")." : "Nobody voted - the story stands on its own." });
   },
 
+  /**
+   * @param {EcGame | null} g
+   * @param {string} room
+   */
   ecAdvance(g, room) {
-    if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
+    if (!g || g.status !== "running" || Date.now() < /** @type {number} */ (g.st.deadline)) return; // a running match's clock is set
     const st = g.st;
     if (st.phase === "write") {
-      const w = st.writer;
+      const w = /** @type {string} */ (st.writer); // a write phase has a writer
       st.skips[w] = (st.skips[w] || 0) + 1;
       st.beats.push({ turn: st.turn, by: w, wrote: false });
       if (st.skips[w] >= 2) {
@@ -262,15 +325,17 @@ export const CorpseMethods = {
       this.ecNextTurn(g);
     } else this.ecFinish(g);
     this.saveGame(g);
-    if (g.status === "cancelled") this.postSystem("Exquisite Corpse #" + g.id + " is off - nobody wrote a word.", room);
+    // ecNextTurn may have called it off (the check above narrowed status to running)
+    if (/** @type {import("@chat/contract").GameStatus} */ (g.status) === "cancelled") this.postSystem("Exquisite Corpse #" + g.id + " is off - nobody wrote a word.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
+  /** @param {EcGame} g */
   ecResultText(g) {
     const st = g.st;
     const { bySeg } = this.ecTally(st);
     const first = st.honours && st.honours.length ? st.segments[st.honours[0] - 1] : null;
-    const snip = (t) => (t.length > 90 ? t.slice(0, 87) + "..." : t);
+    const snip = (/** @type {string} */ t) => (t.length > 90 ? t.slice(0, 87) + "..." : t);
     const writers = [...new Set(st.segments.map((s) => s.by))].length;
     const head = "Exquisite Corpse #" + g.id + " is finished - " + st.segments.length + " segments by " + writers + (writers === 1 ? " writer" : " writers") + ", revealed in the arena.";
     if (!first) return head + " Nobody voted for a favourite.";
@@ -279,23 +344,25 @@ export const CorpseMethods = {
   },
 };
 
+/** @satisfies {GameEngine} */
 export const corpseEngine = {
   name: "Exquisite Corpse",
   turnWord: "turn",
-  logTick: (st) => st.turn,
-  clockSeconds: (st) => st.turn_seconds,
+  logTick: (/** @type {EcStored} */ st) => st.turn,
+  clockSeconds: (/** @type {EcStored} */ st) => st.turn_seconds,
   create: (room, creator, players, opts, roomName) => room.createCorpse(creator, players, opts, roomName),
   summary: (room, g) => room.ecSummary(g),
   full: (room, g, who) => room.ecStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.ecMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.ecAdvance(g, roomName),
-  targets: (pub) => (pub.status !== "running" ? [] : pub.phase === "write" ? (pub.turn_of ? [pub.turn_of] : []) : (pub.players || []).filter((p) => !p.committed && (pub.story || []).some((x) => x.by !== p.name)).map((p) => p.name)),
-  card: (g) => ({ id: g.id, type: "corpse", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turns_total: g.st.turns_total, turn_of: g.status === "running" && g.st.phase === "write" ? g.st.writer : null, segments: g.st.segments.length, genre: g.st.genre || null, variant: g.st.variant, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, segments: g.st.segments.filter((x) => x.by === p.name).length, out: g.st.active.indexOf(p.name) < 0 })) }),
-  stateItem: (r, st) => ({ id: r.id, type: "corpse", status: r.status, phase: st.phase, turn: (st.turn || 0) * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.writer : (st.votes || {})[p.name] !== undefined || !(st.segments || []).some((x) => x.by !== p.name)), accepted: seatAccepted(st, p) })) }),
+  // pub is ecSummary's state
+  targets: (/** @type {import("@chat/contract").CorpseState} */ pub) => (pub.status !== "running" ? [] : pub.phase === "write" ? (pub.turn_of ? [pub.turn_of] : []) : (pub.players || []).filter((p) => !p.committed && (pub.story || []).some((x) => x.by !== p.name)).map((p) => p.name)),
+  card: (/** @type {EcGame} */ g) => ({ id: g.id, type: "corpse", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turns_total: g.st.turns_total, turn_of: g.status === "running" && g.st.phase === "write" ? g.st.writer : null, segments: g.st.segments.length, genre: g.st.genre || null, variant: g.st.variant, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, segments: g.st.segments.filter((x) => x.by === p.name).length, out: g.st.active.indexOf(p.name) < 0 })) }),
+  stateItem: (r, /** @type {EcStored} */ st) => ({ id: r.id, type: "corpse", status: r.status, phase: st.phase, turn: (st.turn || 0) * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.writer : (st.votes || {})[p.name] !== undefined || !(st.segments || []).some((x) => x.by !== p.name)), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: (gm) => (gm.phase === "vote" ? "<the number of your favourite segment - not your own>" : "<your segment: 1 to 3 sentences, following on from the one you can see>"),
   result: (room, g) => room.ecResultText(g),
-  rules: (st) =>
+  rules: (/** @type {EcStored} */ st) =>
     "Exquisite Corpse: " + st.order.length + " writers add to one story in turn (" + st.order.join(", ") + "), " + st.turns_total + " turns in all, 1 to 3 sentences a turn (up to " + EC_MAX + " characters). " +
     "On your turn you see ONLY the segment before yours (you.tail; the first writer sees the seed line) - everything else stays hidden until the end. Send your segment as dir. Never correct the story: a contradiction is the point. " +
     (st.variant === "genre" ? "Genre: " + st.genre + " - honour it, loosely. " : st.variant === "constraints" ? "You hold a secret constraint card (you.constraint): honour it in every segment; the cards are revealed with the story. " : "") +
