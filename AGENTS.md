@@ -10,8 +10,8 @@ There is exactly one home and one identity store: the site's.
 
 **The layout** below (section 2, Repository layout) is the result of a
 restructure done 2026-11-20 and 21; its plan and step-by-step log were
-`REFACTOR.md`, removed when it finished (see the git history). What it
-left open is section 15.
+`REFACTOR.md`, removed when it finished (see the git history). Section
+15 is the open work: the code-health to-do list.
 
 **No personal addresses in the code.** Claude Code's built-in privacy
 plugin refuses shell commands whose scripts read a file holding the owner's
@@ -634,6 +634,45 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 
 ## 15. Open work
 
-There is no open work. The last item the 2026-11 restructure left, the
-Worker in TypeScript, was done on 2026-11-21 (the owner's call).
+The 2026-11 restructure left nothing open (its last item, the Worker in
+TypeScript, was done on 2026-11-21). What follows is the code-health
+to-do list from the 2026-11-21 audit, roughly in the order to take it.
+Counts are from that day; re-count before starting. Tick an item off by
+deleting it here in the commit that finishes it.
+
+1. **Lint the whole repo.** `web/.oxlintrc.json` has every category off
+   and only three rules on (rules-of-hooks, exhaustive-deps,
+   no-explicit-any), and `npm run lint` covers `web/app/src` and
+   `contract/src` only, not `worker/` or `tests/`. With `correctness`
+   on and `suspicious` as warnings (and `react-in-jsx-scope` off: the
+   JSX transform needs no React import), about 220 findings: 59 unused
+   variables, 45 useless escapes, ~80 React rule hits (immutability,
+   refs read in render, effect dependencies), 7 rethrows that drop the
+   original error (`preserve-caught-error`), a few shadowed names and
+   loop conditions that never change. Turn `correctness` on and fix,
+   then `suspicious`; add `worker/` and `tests/` to the lint run.
+2. **Effect dependencies.** 81 `eslint-disable` comments for
+   `react-hooks/exhaustive-deps` in `web/app/src`. React 19.3 has
+   `useEffectEvent` (unused so far), the standard fix for an effect
+   that reads the latest props or state without re-running on them.
+3. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
+   `worker/`; one typed helper (`rows<T>(sql, query, ...args)`) next to
+   the row types in `room/Room.ts` would hold the cast in one place.
+4. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
+   `readBody`) and 18 explicit `any` in `worker/`: a body type per route
+   and a small field check would replace the defensive reads.
+5. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
+   on every Durable Object start and relies on each one throwing once
+   its column exists. A schema version in `cfg` would run each step
+   once and drop the bare `catch {}` exception from section 13.
+6. **Very long lines.** The MCP tool descriptions in
+   `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
+   characters; split them per tool. `worker/routes/pages.ts` inlines
+   the app icons as base64 (lines up to ~65,000 characters); they can
+   be Workers Static Assets files instead.
+7. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+   reason, the old API deploy that embedded the code in a template
+   string, is gone now that wrangler bundles the Worker; it is house
+   style only. The owner decides whether to keep it; if it goes,
+   update those sections and the pitfalls row together.
 
