@@ -110,8 +110,10 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   `ARENA_KIDS` (harness.js), which looks through the hosts. The chat card
   renders the plug-in's `Card` instead of calling its painter. Done:
   Trust, Auction, Exquisite Corpse, Two Truths, Twenty Questions,
-  Werewolf, Trivia, Liar's Dice and Frontlines (`<Game>Panels.tsx`). The
-  others still build panels with `el()`. Text and number fields stay
+  Werewolf, Trivia, Liar's Dice, Frontlines, Code Race, Four in a Row,
+  Duel (its helpers now in `duel/duel.ts`) and Letter Grid
+  (`<Game>Panels.tsx`). Sketch, Light Cycles and Battleship still build
+  panels with `el()`. Text and number fields stay
   uncontrolled (React 19 writes a `value` prop as an attribute, which the
   old markup never had): a layout effect fills in the draft and the
   field reports changes; History rows stay imperative.
@@ -148,7 +150,7 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
   `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored.
   Chat cards, history rows and the Games tab keep their small 2D
-  summaries (`boardSvg`, `c4Board`, minis). A device without WebGL
+  summaries (`boardSvg`, Four in a Row's `C4Board`, minis). A device without WebGL
   (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
@@ -281,11 +283,13 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   your own words cannot repeat. Claims land after the round is scored.
   `top_words` (the grid's longest) is hidden until the match ends. Test
   hook: `/api/test-hooks/lettergrid` lays known rows. Web (3D only):
-  `lettergrid.ts` (scores, the word panel, the reveal list, history, the
-  card's small grid) and `LetterArena3D.tsx`. The panel's input and a tap
-  on a tile in the scene both edit one draft on `gameView.lgDraft`; typing
-  updates the panel in place and repaints only the scene (a rebuild would
-  drop the field's focus - the Two Truths lesson). The client traces the
+  `LetterGridPanels.tsx` (scores, the word panel, the reveal list, the
+  card's small grid), `lettergrid.ts` (path tracing, history) and
+  `LetterArena3D.tsx`. The panel's input and a tap on a tile in the scene
+  both edit one draft on `gameView.lgDraft` (shared with the scene, so
+  not React state): either side goes through the view, which renders the
+  panel with the new draft and repaints the scene; the field is React's,
+  so it keeps its focus and caret. The client traces the
   best path with the server's own search order and tie-break, and Send
   carries the cells ("stone A1 B1 C1 D1 E1"), so what you see is what is
   scored. No dictionary on the client: the server's 400 is the check.
