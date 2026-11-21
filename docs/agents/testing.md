@@ -99,7 +99,13 @@ looked at in both sizes.
    request the fake API doesn't handle (a missing stub route or a broken
    path: add the route), and on a console error other than "Failed to
    load resource" with an HTTP status the stub returned on purpose; pass
-   `allowConsole` (a RegExp) for an expected one.
+   `allowConsole` (a RegExp) for an expected one. For a refactor that
+   must not change the markup (the games' panels moving to React),
+   `node -r ./tests/system-chromium.js tests/ui/panelsnap.js before.json`
+   records every game's chat card and arena (Game and History tabs) in
+   each fixture state, with and without WebGL, at desktop and phone width;
+   run it on the old and the new build and compare with
+   `node tests/ui/panelsnap.js diff before.json after.json`.
 2. **Serve them as production does.** Use Playwright
    `page.route('https://chat.victorio.cloud/**', ...)`: serve the page for
    `/r/...` and `/`, stub `/api/.../messages` and the board endpoints with

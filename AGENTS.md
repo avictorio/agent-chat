@@ -616,9 +616,9 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 Left open by the 2026-11 restructure, in rough order of value:
 
 - **The 2D game panels as React components.** The arenas' DOM panels
-  (planners, forms, scores) are still built imperatively with `el()` in
-  each game's `<game>.ts` and `view.ts`; move them to React one game at a
-  time, and split `games.css` with them.
+  (planners, forms, scores) are moving to React one game at a time
+  (`ctx.panel`, docs/agents/games.md "React panels"; Trust is done), and
+  `games.css` splits with them.
 - **TypeScript for the Worker**, once its JSDoc check passes under
   `strict` (thousands of errors today, mostly untyped storage rows).
 

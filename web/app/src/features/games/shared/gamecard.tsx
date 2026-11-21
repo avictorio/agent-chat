@@ -30,8 +30,10 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     // Each game's card board, from the registry (registry.ts); a match
     // without a type is Light Cycles (its painter wants trails).
     const plugin = GAMES[g.type] || GAMES.lightcycles;
-    if (plugin) plugin.card(board, g, store.meName());
+    if (plugin && plugin.card) plugin.card(board, g, store.meName());
   }, [g, store]);
+  // a game whose board is React (its plug-in's Card) renders it here
+  const Card = g ? (GAMES[g.type] || GAMES.lightcycles)?.Card : undefined;
 
   // Spectator pulse: when the cached game actually advances (a shot,
   // a round, a tick, the finish), flash the card once in the mover's
@@ -71,6 +73,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       </div>
       <div className="game-board" ref={boardRef}>
         {!g && <p className="md-p">Loading the grid…</p>}
+        {g && Card ? <Card g={g} me={store.meName()} /> : null}
       </div>
       {g && (g.status === "finished" || g.status === "cancelled") ? (
         <div className="game-result">

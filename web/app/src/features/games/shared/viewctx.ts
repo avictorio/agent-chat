@@ -1,9 +1,8 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import type { BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
 import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
-import type { TrDraft } from "../trust/trust";
 import type { TtDraft } from "../twotruths/twotruths";
 import type { LgDraft, LgPanel } from "../lettergrid/lettergrid";
 import type { TvAnsDraft, TvAskDraft } from "../trivia/trivia";
@@ -37,6 +36,8 @@ export type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType
 export type GameView = {
   id: number;
   wrap: HTMLElement;
+  // the game's React panels (ctx.panel): one root per slot
+  panels?: Record<string, { host: HTMLElement; root: Root }>;
   lastRounds?: number;
   tab?: string;
   lc3d?: Host3d | null;
@@ -56,8 +57,6 @@ export type GameView = {
   r3dCommit?: (() => void) | null;
   // Code Race: the guess being made (kept across repaints, reset each round)
   crDraft?: { round: number; v: string } | null;
-  // Trust: the choices being made (kept across repaints, reset each round)
-  trDraft?: { round: number; d: TrDraft } | null;
   // Auction: the bid being made (kept across repaints, reset each lot)
   auDraft?: { round: number; v: number } | null;
   ldDraft?: { turn: number; qty: number; face: number } | null;
@@ -89,6 +88,10 @@ export interface GameViewCtx {
   /** The open arena view, or null once it closed. */
   readonly gameView: GameView | null;
   readonly opts: GameStoreOptions;
+  /** A game panel as React: node rendered (synchronously) into the slot's
+   * root, which lives as long as the open view, so the panel keeps its
+   * state (a draft) across repaints; returns its host to append. */
+  panel(slot: string, node: ReactNode): HTMLElement;
   /** True when key differs from the last render's (or force): paint. */
   claimRender(key: string, force?: boolean): boolean;
   arenaHint(key: string, text: string): HTMLElement | null;

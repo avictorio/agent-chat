@@ -1,7 +1,8 @@
 import type { BattleshipState, DuelState, LightCyclesState } from "@chat/contract";
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
-import { createElement, type ComponentType } from "react";
+import { createElement, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { el, toast } from "../../lib/index";
 import { gameDef, matchTitle } from "./shared/catalog";
 import { clockSeconds, fleetStrip, formatLeft, setClockBar, setTurnClock, type GL, type GLPlayer, type GLYou } from "./shared/render";
@@ -59,6 +60,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       return gameView;
     },
     opts,
+    panel,
     claimRender(key, force) {
       if (!force && key === gameRenderKey) return false;
       gameRenderKey = key;
@@ -86,6 +88,30 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     webglOk,
     youSig,
   };
+
+  /* A game's DOM panel as React (ctx.panel): one root per slot, kept on
+     the open view across repaints, so a panel keeps its state (a draft)
+     while the view rebuilds the wrap around it. The host is display:
+     contents, so the panel lays out as a child of the arena. */
+  function panel(slot: string, node: ReactNode): HTMLElement {
+    const gv = gameView!;
+    const panels = gv.panels || (gv.panels = {});
+    let p = panels[slot];
+    if (!p) {
+      const host = el("div", "panel-host");
+      p = panels[slot] = { host, root: createRoot(host) };
+    }
+    const root = p.root;
+    flushSync(() => root.render(node));
+    return p.host;
+  }
+  function dropPanels() {
+    const gv = gameView;
+    if (!gv || !gv.panels) return;
+    const ps = gv.panels;
+    gv.panels = {};
+    Object.values(ps).forEach((p) => p.root.unmount());
+  }
 
   // Teach by playing: one dismissible hint line per arena, shown on
   // first views only (the dismissal persists per kind).
@@ -767,6 +793,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     dropBs3d();
     dropDuel3d();
     drop3d();
+    dropPanels();
     gameRenderKey = "";
     const kind = type || cache.get(id)?.type;
     opts.openViewer(
@@ -871,6 +898,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       dropBs3d();
       dropDuel3d();
       drop3d();
+      dropPanels();
       if (gameViewTimer) {
         clearInterval(gameViewTimer);
         gameViewTimer = 0;

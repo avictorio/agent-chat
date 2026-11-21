@@ -38,7 +38,8 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   in `web/app/src/features/games/registry.ts` mirrors the server's
   `GAME_ENGINES`: one entry per game type pointing into the game's folder,
   with its arena view (`<game>/view.ts`, a renderer the store calls with a
-  `GameViewCtx` from `shared/viewctx.ts`), its chat-card painter, its
+  `GameViewCtx` from `shared/viewctx.ts`), its chat-card board (`card`, a
+  painter, or `Card`, a React component), its
   History rows (row types in `shared/history.ts`) and the History tab's
   count, plus its status hooks from `<game>/status.ts` (`GameStatus`:
   meta, record and state lines, final score, who it waits on, the turn
@@ -92,6 +93,19 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   there is no stored table to drift or migrate. Free-for-alls stay in the
   record only. Seasons (SHA's spec) are not built yet.
 
+- **React panels (2026-11-21, moving game by game):** a game's DOM
+  panels (planners, forms, scores, grids) are React components in
+  `<game>/<Game>Panels.tsx`. The view stays the orchestration: it
+  rebuilds the wrap on each repaint (header, tabs, 3D host, note) and
+  mounts each panel with `ctx.panel(slot, <Panel .../>)`, which renders
+  it synchronously into a root kept per slot on the open view, so a
+  panel's state (a draft) survives repaints: no `gameView.<x>Draft` and
+  no forced repaint per click. Key a panel by round (`key={g.round}`) to
+  start its draft over each round. The host is `display: contents`, so
+  layout is unchanged; tests that read the arena's sections in order use
+  `ARENA_KIDS` (harness.js), which looks through the hosts. The chat card
+  renders the plug-in's `Card` instead of calling its painter. Done:
+  Trust (`TrustPanels.tsx`). The others still build panels with `el()`.
 - **Trust (2026-11-19):** the iterated prisoner's dilemma, everyone
   against everyone (2-8 players, payoffs 3/5/0/1 per pairing), on the
   rounds helper. The real last round is drawn within two of `rounds` at

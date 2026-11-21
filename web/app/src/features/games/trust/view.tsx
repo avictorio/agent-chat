@@ -1,27 +1,26 @@
 import { el } from "../../../lib/index";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { trGrid, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
+import { trLastRound, type TrDraft } from "./trust";
+import { TrustGrid, TrustPlanner, TrustScores } from "./TrustPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TrustPlayer, TrustState } from "@chat/contract";
 
 /* Trust (2026-11-19): the scoreboard, your choices (a Cooperate /
    Defect pair per rival), then the last round's who-trusted-whom grid.
-   The draft lives on gameView so a poll never wipes it; it resets each
-   round. */
+   The panels are React (TrustPanels.tsx, mounted with ctx.panel): the
+   planner keeps its own draft across repaints, keyed by round. */
 export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
   const you = g.you || { playing: false };
   const queued: TrDraft | null = you.queued || null;
-  if (!gv.trDraft || gv.trDraft.round !== g.round) gv.trDraft = { round: g.round, d: queued ? Object.assign({}, queued) : {} };
   const key = [
     g.status,
     g.round,
     (g.rounds || []).length,
     (g.players || []).map((p: TrustPlayer) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
     JSON.stringify(queued || {}),
-    JSON.stringify(gv.trDraft.d),
     ctx.youSig(g),
     gv.tab || "game",
   ].join("|");
@@ -52,26 +51,16 @@ export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean
   const h = ctx.host3d("trust");
   wrap.appendChild(h.host);
   ctx.paint3d("trust", g, h);
-  wrap.appendChild(trScores(g, me));
+  wrap.appendChild(ctx.panel("scores", <TrustScores g={g} me={me} />));
   if (g.status === "running" && you.playing && !you.out) {
     const hint = ctx.arenaHint("trust", "Every pairing scores on its own: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. The last round is a secret.");
     if (hint) wrap.appendChild(hint);
-    wrap.appendChild(
-      trPlanner(
-        g,
-        gv.trDraft.d,
-        (d) => {
-          if (ctx.gameView !== gv) return;
-          gv.trDraft = { round: g.round, d };
-          renderTrustView(ctx, g, true);
-        },
-        (dir) => {
-          if (ctx.gameView !== gv) return;
-          if (gv.r3dCommit) gv.r3dCommit();
-          void ctx.sendMove(g.id, dir, note);
-        }
-      )
-    );
+    const commit = (dir: string) => {
+      if (ctx.gameView !== gv) return;
+      if (gv.r3dCommit) gv.r3dCommit();
+      void ctx.sendMove(g.id, dir, note);
+    };
+    wrap.appendChild(ctx.panel("planner", <TrustPlanner key={g.round} g={g} onCommit={commit} />));
     note.textContent = queued ? "You can change your choices until the round resolves." : "Your choices stay secret until everyone has chosen.";
     wrap.appendChild(note);
   } else if (g.status === "running" && !you.playing) {
@@ -84,6 +73,6 @@ export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean
   if (!ctx.webglOk()) {
     const last = trLastRound(g);
     wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
-    wrap.appendChild(trGrid(g, last, me));
+    wrap.appendChild(ctx.panel("grid", <TrustGrid g={g} round={last} me={me} />));
   }
 }

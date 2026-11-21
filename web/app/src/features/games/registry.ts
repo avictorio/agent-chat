@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { GameState, GameType } from "@chat/contract";
 import type { GL } from "./shared/render";
 import { battleshipBoard, duelBoard } from "./shared/render";
@@ -39,7 +40,8 @@ import { sketchStatus } from "./sketch/status";
 import { tvCardBoard, tvHistoryRows } from "./trivia/trivia";
 import { renderTriviaView } from "./trivia/view";
 import { triviaStatus } from "./trivia/status";
-import { trCardBoard, trHistoryRows } from "./trust/trust";
+import { trHistoryRows } from "./trust/trust";
+import { TrustCard } from "./trust/TrustPanels";
 import { renderTrustView } from "./trust/view";
 import { trustStatus } from "./trust/status";
 import { tqCardBoard, tqHistoryRows } from "./twenty/twenty";
@@ -71,8 +73,11 @@ export interface GamePlugin<S = GL> extends GameStatus<S> {
    * still the open view), skipping the work when nothing it shows changed
    * unless force. */
   view(ctx: GameViewCtx, g: S, force?: boolean): void;
-  /** Paints a match's board into its chat card (board is emptied first). */
-  card(board: HTMLElement, g: S, me: string): void;
+  /** Paints a match's board into its chat card (board is emptied first);
+   * a game whose board is React gives Card instead. */
+  card?(board: HTMLElement, g: S, me: string): void;
+  /** The board in the match's chat card, as a React component. */
+  Card?(props: { g: S; me: string }): ReactNode;
   /** Appends the History tab's rows to the list and returns how many it added. */
   history(g: S, row: HistRow, who: HistWho, list: HTMLElement): number;
   /** The number on the History tab. */
@@ -211,7 +216,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   trust: {
     view: renderTrustView,
-    card: (b, g, me) => fill(b, trCardBoard(g, me)),
+    Card: TrustCard,
     history: trHistoryRows,
     historyCount: rounds,
     ...trustStatus,

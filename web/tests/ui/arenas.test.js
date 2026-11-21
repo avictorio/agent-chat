@@ -1,7 +1,7 @@
 // UI scenarios: each game's arena: its controls, its moves and its finished state, desktop and phone.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = require('./harness');
 
 (async () => {
   // Frontlines (2026-11-19): the card shows the score and the last round
@@ -290,7 +290,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .sg-guess', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .sg-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|sg-form|sg-scores|sg-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|sg-form|sg-scores|sg-reveal/.test(c)));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       out.reveal = await page.$$eval('#viewer .sg-rv', (r) => r.map((x) => x.textContent));
       out.prompt = await page.$eval('#viewer .sg-rv-prompt', (e) => e.textContent);
@@ -324,7 +324,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .tv-answer', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .tv-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tv-q|tv-form|tv-scores|tv-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tv-q|tv-form|tv-scores|tv-reveal/.test(c)));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       out.reveal = await page.$$eval('#viewer .tv-rv', (r) => r.map((x) => x.textContent));
       await page.fill('#viewer .tv-in-a', 'Lisbon');
@@ -405,7 +405,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .lg-panel', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .lg-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|lg-panel|lg-scores|lg-yours|lg-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|lg-panel|lg-scores|lg-yours|lg-reveal/.test(c)));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       out.reveal = await page.$$eval('#viewer .lg-rv', (r) => r.map((x) => x.textContent));
       await page.fill('#viewer .lg-word', 'zzzz');
@@ -452,7 +452,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .ww-action', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .ww-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ww-role|ww-action|ww-talk|ww-events|ww-players/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ww-role|ww-action|ww-talk|ww-events|ww-players/.test(c)));
       out.role = await page.$eval('#viewer .ww-role-name', (e) => e.textContent);
       out.targets = await page.$$eval('#viewer .ww-target', (els) => els.map((e) => e.textContent));
       out.talk = await page.$$eval('#viewer .ww-talk-sec', (els) => els.map((e) => e.querySelector('.ww-talk-title').textContent + ':' + e.querySelectorAll('.ww-line').length));
@@ -521,7 +521,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .tq-panel', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .tq-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tq-panel|tq-budget|tq-log|tq-scores|tq-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tq-panel|tq-budget|tq-log|tq-scores|tq-reveal/.test(c)));
       out.pips = await page.$$eval('#viewer .tq-pip', (els) => els.filter((e) => e.classList.contains('yes')).length + '/' + els.filter((e) => e.classList.contains('no')).length + '/' + els.length);
       out.log = await page.$$eval('#viewer .tq-qa', (els) => els.map((e) => e.textContent));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -574,7 +574,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer .ec-writer', { timeout: 20000 });
       await page.waitForSelector('#viewer:not([hidden]) .ec-3d-host canvas', { timeout: 20000 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ec-writer|ec-strip|ec-story|ec-writers/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ec-writer|ec-strip|ec-story|ec-writers/.test(c)));
       out.fold = await page.$eval('#viewer .ec-fold-text', (e) => e.textContent);
       out.strip = await page.$$eval('#viewer .ec-strip .ec-beat', (els) => els.map((e) => e.className.replace('ec-beat', '').trim() || '-').join(','));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -633,7 +633,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await page.waitForSelector('#viewer:not([hidden]) .tt-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tt-statements|tt-writer|tt-scores|tt-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tt-statements|tt-writer|tt-scores|tt-reveal/.test(c)));
       out.label = await page.$eval('#viewer .tt-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.cards = await page.$$eval('#viewer .tt-statements .tt-card', (els) => els.map((e) => e.textContent));
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
@@ -794,6 +794,11 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       await shot(page, label + '-plan.png');
       await page.click('#viewer .tr-choice:nth-of-type(2) .tr-pick.c');
       out.halfOff = await page.$eval('#viewer .tr-go', (b) => b.disabled);
+      // the planner is React (ctx.panel): a repaint keeps the half-made draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .tr-plan', { timeout: 10000 });
+      out.kept = await page.$$eval('#viewer .tr-pick.on', (n) => n.map((x) => x.closest('.tr-choice').querySelector('.tr-choice-name').textContent + ':' + x.textContent).join(','));
       await page.click('#viewer .tr-choice:nth-of-type(3) .tr-pick.d');
       out.goOn = await page.$eval('#viewer .tr-go', (b) => !b.disabled);
       await page.click('#viewer .tr-go');
@@ -805,6 +810,7 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       if (out.scores !== '14,12,9') throw new Error('the scoreboard ranks by score: ' + out.scores);
       if (out.grid !== '✗✗|✓✗|✓✓') throw new Error('the round 2 grid (rows choose, columns receive): ' + out.grid);
       if (!out.goOff || !out.halfOff || !out.goOn) throw new Error('Lock in waits for a choice per rival: ' + JSON.stringify(out));
+      if (out.kept !== 'Ada:🤝 Cooperate') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (!/"dir":"Ada:C, Henry:D"/.test(out.moveCall)) throw new Error('the choices go per rival: ' + out.moveCall);
       if (!/Locked in/.test(out.locked)) throw new Error('the planner reads locked: ' + out.locked);
       if (!/Your choices · round 3/.test(out.banner)) throw new Error('the turn banner asks for choices: ' + out.banner);

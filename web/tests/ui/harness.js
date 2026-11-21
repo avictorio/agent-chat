@@ -647,6 +647,9 @@ async function run(name, o, fn) {
    it - Battleship's two-captain view gives their waters as a plain
    aiming grid (the scene was the only way to fire), Four in a Row
    keeps its drop buttons. No Reload button: a reload won't help. */
+/* The arena's sections in page order: its children, looking through the
+   display: contents hosts of the games' React panels (ctx.panel). */
+const ARENA_KIDS = '#viewer .lc-arena > :not(.panel-host), #viewer .lc-arena > .panel-host > *';
 const noGl = () => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return /webgl/i.test(t) ? null : g.call(this, t, ...a); }; };
 // New game (2026-11-19 redesign): a gallery of the games from the
 // catalog, then the chosen game's setup - How to play (folded, one tap
@@ -677,4 +680,4 @@ function done(file) {
   process.exit(FAILURES ? 1 : 0);
 }
 
-module.exports = { settle, trackNetwork, CLOCK, NOW, clockNow, useClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };
+module.exports = { ARENA_KIDS, settle, trackNetwork, CLOCK, NOW, clockNow, useClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };

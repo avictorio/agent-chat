@@ -1,7 +1,7 @@
 // UI scenarios: the 3D arenas of the rounds games (Trust, Liar's Dice, Auction, Four in a Row, Code Race, Frontlines).
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas-3d.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, now, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, done, now, run, shot } = require('./harness');
 
 (async () => {
   // Trust in 3D (the default): the table loads first, then the scores and
@@ -16,7 +16,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForSelector('#viewer:not([hidden]) .tr-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .tr-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tr-scores|tr-plan|tr-grid-wrap/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|tr-scores|tr-plan|tr-grid-wrap/.test(c)));
       out.caption = await page.$eval('#viewer .tr-caption', (e) => e.textContent);
       await shot(page, label + '.png');
       await page.click('#viewer .tr-acts button:has-text("Trust everyone")');
@@ -41,7 +41,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForSelector('#viewer:not([hidden]) .ld-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .ld-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ld-now|ld-cup|ld-bidder|ld-table|ld-reveal/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|ld-now|ld-cup|ld-bidder|ld-table|ld-reveal/.test(c)));
       out.caption = await page.$eval('#viewer .ld-caption', (e) => e.textContent).catch(() => null);
       await shot(page, label + '.png');
       await page.click('#viewer .ld-liar');
@@ -64,7 +64,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForSelector('#viewer:not([hidden]) .au-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .au-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|au-lot|au-bid|au-players|au-result/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|au-lot|au-bid|au-players|au-result/.test(c)));
       await shot(page, label + '.png');
       await page.click('#viewer .au-acts button:has-text("Half")');
       await page.click('#viewer .au-go');
@@ -87,7 +87,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForSelector('#viewer:not([hidden]) .c4-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .c4-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|c4-seats|c4-under/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|c4-seats|c4-under/.test(c)));
       out.grid = !!(await page.$('#viewer .c4-grid'));
       await shot(page, label + '.png');
       await page.click('#viewer .c4-drop:nth-child(2)');
@@ -115,7 +115,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForSelector('#viewer:not([hidden]) .cr-3d-host canvas', { timeout: 20000 });
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .cr-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|cr-input|cr-board/.test(c)));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /lc-board-big|cr-input|cr-board/.test(c)));
       out.ledger = await page.$$eval('#viewer .cr-ledger .cr-lrow', (rows) => rows.map((r) => r.querySelector('.cr-ln').textContent + ':' + [...r.querySelectorAll('.cr-lpeg')].map((p) => p.textContent).join('') + ':' + r.querySelectorAll('.cr-lpip.hit').length + '/' + r.querySelectorAll('.cr-lpip.near').length));
       await shot(page, label + '.png');
       for (const k of ['red', 'green', 'blue', 'yellow']) await page.click('#viewer .cr-color[aria-label="Add ' + k + '"]');
@@ -145,7 +145,7 @@ const { settle, done, now, run, shot } = require('./harness');
       await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
       out.label = await page.$eval('#viewer .fl-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
       out.toggle = !!(await page.$('#viewer .lc-view-btn'));
-      out.order = await page.$$eval('#viewer .lc-arena > *', (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /fl-3d-host|lc-board-big|fl-score|fl-plan|fl-cap/.test(c) || c === 'lc-board-big'));
+      out.order = await page.$$eval(ARENA_KIDS, (els) => els.map((e) => e.className.split(' ')[0]).filter((c) => /fl-3d-host|lc-board-big|fl-score|fl-plan|fl-cap/.test(c) || c === 'lc-board-big'));
       out.caption = await page.$eval('#viewer .fl-caption', (e) => e.textContent);
       out.field = await page.$$eval('#viewer .fl-field, #viewer .fl-cap', (f) => f.length);
       await shot(page, label + '.png');
