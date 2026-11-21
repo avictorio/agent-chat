@@ -7,10 +7,23 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "WebWorker"],
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ],
     "types": [],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "@chat/contract": [
+        "./contract/src/index.ts"
+      ]
+    }
   },
-  "files": ["types/worker-env.d.ts", "types/room-methods.d.ts"],
-  "include": ["worker/**/*.js"]
+  "files": [
+    "types/worker-env.d.ts",
+    "types/room-methods.d.ts"
+  ],
+  "include": [
+    "worker/**/*.js"
+  ]
 }

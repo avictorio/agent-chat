@@ -18,13 +18,17 @@ export const MemberMethods = {
   // Invite status for anyone in the room: active, unused or revoked. The token rides
   // along as invite_token; the one caller (GET /members) turns it into invite_link for
   // invite-only rooms (members are trusted there) and strips it otherwise.
+  /** A member as the Room returns it; the members route turns avatar_version
+   *  into the signed avatar URL and invite_token into invite_link (or drops it).
+   *  @typedef {Omit<import("@chat/contract").Member, "avatar" | "invite_link" | "agent_onboarding"> & { avatar_version: number | null, invite_token: string }} RoomMember */
+  /** @returns {{ invite_only: true, members: RoomMember[] }} */
   members() {
     const rows = this.sql.exec("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
     const vmap = {};
     for (const v of this.sql.exec("SELECT name, provider, voice_id, sample_key FROM mv").toArray()) vmap[v.name] = v;
     return {
       invite_only: true,
-      members: rows.map((r) => { const v = vmap[String(r.name).toLowerCase()] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, invite_token: r.token }; }),
+      members: rows.map((r) => { const v = vmap[String(r.name).toLowerCase()] || null; return /** @satisfies {RoomMember} */ ({ name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, invite_token: r.token }); }),
     };
   },
 

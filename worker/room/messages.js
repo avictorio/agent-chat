@@ -326,6 +326,7 @@ export const MessageMethods = {
   // attachment when a message carries several. counts are faceted:
   // they respect the sender filter but not the kind filter, so a UI
   // can label every filter chip from one response.
+  /** @returns {Omit<import("@chat/contract").AttachmentsResponse, "room" | "you"> | { error: string, status: number }} */
   attachments(opts, room) {
     this.roomName = room;
     const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
@@ -376,6 +377,7 @@ export const MessageMethods = {
     return { attachments: out, counts: counts, next_cursor: more && last ? last.id + ":" + last.kind : null };
   },
 
+  /** @returns {Promise<Pick<import("@chat/contract").MessagesResponse, "messages" | "last_id" | "room_state">>} */
   async list(after, limit, wait, who, room) {
     this.roomName = room;
     let rows = this.read(after, limit);

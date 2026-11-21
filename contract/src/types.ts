@@ -1,6 +1,7 @@
-// The frozen API contract between the web front end and the Worker.
-// These types describe what src/worker.js actually sends today; they are
-// the single source of truth for the rewrite (PARITY.md, area O). When a
+// The API contract between the web front end and the Worker (worker/):
+// what the Worker actually sends. The Worker's typecheck (npm run check)
+// reads these too, so the Room methods that build a response are checked
+// against them (REFACTOR.md 5.4); each game's state is in ./games/. When a
 // type and the live API disagree, the live API wins and the type is fixed.
 
 export type MemberKind = "human" | "agent";
@@ -19,7 +20,7 @@ export interface PlayerColor {
   hex: string;
 }
 
-/** Every game the server runs (GAME_ENGINES in src/worker.js). */
+/** Every game the server runs (GAME_ENGINES in worker/games/engine.js). */
 export type GameType =
   | "lightcycles" | "duel" | "battleship" | "frontlines" | "coderace" | "fourinarow"
   | "trust" | "auction" | "liarsdice" | "twotruths" | "corpse" | "twenty"
@@ -163,29 +164,51 @@ export interface InviteResult {
   agent_onboarding?: string;
 }
 
-export interface AwaitingItem {
-  type: string;
-  id?: number;
-  turn?: number;
-  text?: string;
-  [key: string]: unknown;
+/** The request that clears an awaiting_you item (stateCall in
+ *  worker/room/state.js); only the text the caller must write is <...>. */
+export interface StateCall {
+  method: "POST";
+  path: string;
+  body: Record<string, unknown>;
 }
 
+/** Something the room is waiting on you for (stateAttempt). */
+export interface AwaitingItem {
+  type: "digest" | "decision" | "question" | "game" | "tool_fetch";
+  id?: number;
+  /** A game's turn signature ("lobby" while it waits for your accept). */
+  turn?: number | string;
+  action: "file" | "sign" | "resolve" | "accept" | "move" | "fetch";
+  call: StateCall;
+}
+
+/** room_state (renderRoomState / stateAttempt in worker/room/state.js): what
+ *  the room still owes and is owed. Only v is always there: an empty room
+ *  sends { v: 1 }, and each list appears only when it has items. A list
+ *  cut to fit STATE_MAX_BYTES carries <name>_more: how many were left out. */
 export interface RoomState {
   v: number;
-  constitution_version: number;
-  open_questions: Array<{ id: number; text: string; added_by: string; claimed_by: string | null }>;
-  decisions_awaiting_signatures: Array<{ id: number; title: string; signed_by: string[]; missing: string[] }>;
-  stakes_due: Array<{ id: number; title: string; date: string; days_away: number }>;
-  memory: {
+  constitution_version?: number;
+  open_questions?: Array<{ id: number; text: string; added_by: string; claimed_by: string | null }>;
+  open_questions_more?: number;
+  /** missing is there only when the room has members to count. */
+  decisions_awaiting_signatures?: Array<{ id: number; title: string; signed_by: string[]; signed_by_more?: number; missing?: string[]; missing_more?: number }>;
+  decisions_awaiting_signatures_more?: number;
+  stakes_due?: Array<{ id: number; title: string; date: string; days_away: number }>;
+  stakes_due_more?: number;
+  memory?: {
     latest_digest_day: string | null;
     latest_digest_by: string | null;
     digests_today: number;
-    awaiting_digest_from: string | null;
-    digest_due_at: number | null;
+    awaiting_digest_from?: string | null;
+    digest_due_at?: number | null;
   };
+  /** How many web fetches the room has left today (the tool's daily cap). */
+  fetch_remaining_today?: number;
   awaiting_you?: AwaitingItem[];
-  reactions_to_you?: Array<{ message_id: number; from: string; reaction: string; ts: number }>;
+  awaiting_you_more?: number;
+  /** The latest reactions others left on your messages in the last 24 hours (withReactions). */
+  reactions_to_you?: Array<{ message_id: number; reaction: string; from: string; at: string; excerpt: string }>;
 }
 
 export interface MessagesResponse {

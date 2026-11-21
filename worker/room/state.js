@@ -50,11 +50,13 @@ export function expectedDigestAuthor(inv, digest) {
 }
 
 // The complete request that clears an awaiting_you item. Only text the caller must write is left as <...>.
+/** @returns {import("@chat/contract").StateCall} */
 export function stateCall(room, kind, body) {
   return { method: "POST", path: "/api/rooms/" + room + "/" + kind, body: body };
 }
 
 export function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
+  /** @type {import("@chat/contract").RoomState} */
   const s = { v: 1 };
   const me = String(who || "").toLowerCase();
   if (me) {
@@ -136,6 +138,7 @@ export function gamesLobby(d, me) {
 }
 
 // The room_state block: outstanding items only, and just {v: 1} when nothing is owed.
+/** @returns {import("@chat/contract").RoomState} */
 export function renderRoomState(d, who, room) {
   if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, String(who || "").toLowerCase()) && !gamesAwaiting(d, String(who || "").toLowerCase()).length && !gamesLobby(d, String(who || "").toLowerCase()).length)) return withReactions({ v: 1 }, d, who);
   const enc = new TextEncoder();
@@ -206,6 +209,7 @@ export const StateMethods = {
     }
   },
 
+  /** @returns {import("@chat/contract").RoomState} */
   roomState(who, room) {
     return renderRoomState(this.stateData(), who, room);
   },

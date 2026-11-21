@@ -7,8 +7,6 @@ import type { RoomClient } from "@chat/contract";
 // @Mentions only / Off. The chosen mode is kept in localStorage. (The
 // Android shell's device-token path went with the app, 2026-11-20.)
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 type PushState = "off" | "on" | "blocked" | "install";
 type PushMode = "all" | "mentions";
 
@@ -16,8 +14,9 @@ function iosNeedsInstall(): boolean {
   const nav = navigator.userAgent || "";
   const ios = /iPhone|iPad|iPod/i.test(nav) || (/Macintosh/.test(nav) && navigator.maxTouchPoints > 1);
   if (!ios) return false;
+  // iOS Safari's own flag for a home-screen app (not in the DOM types)
   const standalone =
-    (window.navigator as any).standalone === true ||
+    (window.navigator as Navigator & { standalone?: boolean }).standalone === true ||
     (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
   return !standalone;
 }
