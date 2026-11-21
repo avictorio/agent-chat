@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { MemberKind, RoomClient } from "@chat/shared";
+import type { MemberKind, RoomClient } from "@chat/contract";
 import type { Speaker } from "./speak";
 import type { RxApi } from "../feed/reactions";
 import type { ViewerApi } from "../shell/viewer";

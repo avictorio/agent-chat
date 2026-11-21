@@ -1,5 +1,5 @@
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
-import type { RoomClient } from "@chat/shared";
+import type { RoomClient } from "@chat/contract";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../../lib/index";

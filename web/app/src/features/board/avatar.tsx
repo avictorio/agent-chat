@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { MembersResponse } from "@chat/shared";
+import type { MembersResponse } from "@chat/contract";
 import { same, toast } from "../../lib/index";
 import { Avatar, KindTag } from "../feed/feed";
 import { errText, type BoardApi } from "./shared";

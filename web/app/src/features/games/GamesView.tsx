@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
-import type { GameSummary } from "@chat/shared";
+import type { GameSummary } from "@chat/contract";
 import { useFeed, useSession } from "../room/ctx";
 import { finalScore, formatLeft, type GL } from "./shared/render";
 import { chimeMuted, setChimeMuted } from "./shared/chime";

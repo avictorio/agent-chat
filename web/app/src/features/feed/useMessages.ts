@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import type { Message, RoomState } from "@chat/shared";
+import type { Message, RoomState } from "@chat/contract";
 import { same } from "../../lib/index";
 import { atBottom } from "./feed";
 

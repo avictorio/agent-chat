@@ -6,7 +6,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { Message, RoomClient } from "@chat/shared";
+import type { Message, RoomClient } from "@chat/contract";
 import { toast } from "../../lib/index";
 import { same } from "../../lib/index";
 import { Picker, Placed } from "./EmojiPicker";

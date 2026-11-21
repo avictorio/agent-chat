@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { useFeed } from "../../room/ctx";
-import type { GameSummary } from "@chat/shared";
+import type { GameSummary } from "@chat/contract";
 import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { pressable } from "../../../lib/index";

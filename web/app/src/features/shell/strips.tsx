@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { fetchBuild } from "@chat/shared";
+import { fetchBuild } from "@chat/contract";
 import { isIOSDevice, isStandaloneApp, store } from "../../lib/index";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";

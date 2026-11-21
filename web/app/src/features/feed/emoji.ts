@@ -3,7 +3,7 @@
 // list, and the full compact-emoji dataset the picker loads once
 // from the page origin and caches for the session.
 
-import type { Message } from "@chat/shared";
+import type { Message } from "@chat/contract";
 import { same, store } from "../../lib/index";
 
 export const REACTIONS: [string, string][] = [

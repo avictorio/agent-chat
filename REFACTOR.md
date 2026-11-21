@@ -309,9 +309,15 @@ limits and the games move before `agents/`.
 
 ## Phase 4: contract and guard rails
 
-- [ ] 4.1 `web/shared` becomes top-level `contract/` (API and game-state
-      types); the web app imports it; the Worker checks against it with
-      JSDoc and `checkJs`
+- [x] 4.1 `web/shared` becomes top-level `contract/` (API and game-state
+      types); the web app imports it (`@chat/contract`, still a workspace
+      of `web/` - npm accepts a workspace outside its root - so the build
+      command is unchanged; the dev server's fs.allow names it)
+  - [ ] 4.1b The Worker checks against it with JSDoc and `checkJs`: the
+        Worker is plain JS with no build step, so this means JSDoc types
+        on the route handlers' responses, importing the contract's types,
+        and a typecheck of `worker/` in `npm run check`. TypeScript 7's
+        JS support decides how much of that works; start with one area
 - [x] 4.2 Lint with the React hooks rules, so the existing
       `eslint-disable` comments are enforced. ESLint's TypeScript parser
       needs TypeScript's JS API, which TypeScript 7 (this build) no longer

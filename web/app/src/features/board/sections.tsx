@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useBoardApi } from "../room/ctx";
-import type { Decision, Digest, Question, Stake } from "@chat/shared";
+import type { Decision, Digest, Question, Stake } from "@chat/contract";
 import { Avatar } from "../feed/feed";
 import { daysAway, parseDay, rel, shortDate } from "../../lib/dates";
 import { same } from "../../lib/index";

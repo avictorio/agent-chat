@@ -1,4 +1,4 @@
-import { ApiError, type Message, type RoomClient, type UploadKind } from "@chat/shared";
+import { ApiError, type Message, type RoomClient, type UploadKind } from "@chat/contract";
 
 // Resumable uploads for every kind of attachment (the server's upload
 // engine: see UPLOADING FILES in GET /api). A message with a big

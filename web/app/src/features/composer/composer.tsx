@@ -4,7 +4,7 @@ import { useDictation } from "./useDictation";
 import { useAttachments } from "./useAttachments";
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
-import type { Message, RoomState } from "@chat/shared";
+import type { Message, RoomState } from "@chat/contract";
 import { toast } from "../../lib/index";
 import {
   UploadCancelled,

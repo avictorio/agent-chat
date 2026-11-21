@@ -1,0 +1,1 @@
+{"compilerOptions":{"types":[]},"extends":"../web/tsconfig.base.json","include":["src"]}

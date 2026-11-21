@@ -16,6 +16,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | `worker/lib/`, `worker/platform/`, `worker/uploads/`, `worker/limits.js` | Small shared helpers (http, crypto, sniffing, text, media), outside services (R2's S3 API, Web Push, Gmail, Cartesia, Claude, web fetch), the upload plan, and the room-wide limits |
 | `worker/data/` | Game content as data (word lists, prompts, secrets) |
 | `web/` | The front end: React + TypeScript, built with Vite (see `web/README.md`) |
+| `contract/` | The API contract: request and response types and the typed client (`@chat/contract`), used by the web app |
 | `scripts/` | `npm run check` (Worker module syntax and inline-markup checks) and `npm run check:config` (config drift check) |
 | `wrangler.toml` | Deploy config: bindings, vars, custom domain, and the web build (`web/app/dist`) as static assets |
 | `REFACTOR.md` | The codebase restructure in progress: plan and checklist |

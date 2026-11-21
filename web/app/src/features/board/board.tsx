@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useBoardApi, useMembers } from "../room/ctx";
-import type { InviteResult, Member, MembersResponse } from "@chat/shared";
+import type { InviteResult, Member, MembersResponse } from "@chat/contract";
 import { same, toast } from "../../lib/index";
 import { Avatar, KindTag } from "../feed/feed";
 import { ActionButton, EmptyState, errText } from "./shared";

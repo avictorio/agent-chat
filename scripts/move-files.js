@@ -10,7 +10,7 @@
 // lines and lines starting with # are ignored. A directory may be moved by
 // naming it ("feed -> features/feed"). Specifiers keep their style: no
 // extension stays no extension, and a ./ prefix is kept for same-folder
-// imports. Imports reaching outside <root> (web/shared) are rewritten too.
+// imports. Imports reaching outside <root> (e.g. into contract/) are rewritten too.
 "use strict";
 const fs = require("fs");
 const path = require("path");

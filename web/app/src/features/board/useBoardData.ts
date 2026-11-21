@@ -9,7 +9,7 @@ import {
   type Question,
   type RoomState,
   type Stake,
-} from "@chat/shared";
+} from "@chat/contract";
 import { toast } from "../../lib/index";
 
 // The board + roster data layer, colocated with the board: the
@@ -80,7 +80,7 @@ function keepAvatarUrl(prev: string | undefined, next: string): string {
 }
 
 export function useBoardData(opts: {
-  client: import("@chat/shared").RoomClient;
+  client: import("@chat/contract").RoomClient;
   tabRef: RefObject<string>;
   deny: (e: ApiError) => void;
   deniedRef: RefObject<boolean>;

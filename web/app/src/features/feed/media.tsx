@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
-import type { Message } from "@chat/shared";
+import type { Message } from "@chat/contract";
 import { md } from "./markdown";
 import { pressable } from "../../lib/index";
 import { fmtBytes } from "../composer/uploads";

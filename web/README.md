@@ -13,8 +13,9 @@ the Room Durable Objects, the API) is its contract; see the root
 `AGENTS.md` for deploys.
 
 - **Stack** (aligned with the SHA panel on purpose): React 19,
-  TypeScript, Vite, npm workspaces — `shared/` holds the API contract
-  types and client, `app/` holds the web app. Typecheck runs in the
+  TypeScript, Vite, npm workspaces — `app/` holds the web app, and the
+  repo's top-level `contract/` (`@chat/contract`, a workspace of this
+  one) holds the API contract types and the client. Typecheck runs in the
   build, as in the panel. The game arenas are three.js scenes through
   React Three Fiber, drei and postprocessing (load the
   `immersive-3d-games` skill before touching them).

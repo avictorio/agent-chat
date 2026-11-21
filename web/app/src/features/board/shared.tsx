@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { BoardData, RoomState } from "@chat/shared";
+import type { BoardData, RoomState } from "@chat/contract";
 import { toast } from "../../lib/index";
 import { useBoardApi } from "../room/ctx";
 import { Button, type ButtonProps } from "../../ui/Button";

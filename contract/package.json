@@ -1,0 +1,1 @@
+{"exports":{".":"./src/index.ts"},"name":"@chat/contract","private":true,"scripts":{"typecheck":"tsc -p ."},"type":"module","version":"0.1.0"}

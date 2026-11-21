@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Attachment } from "@chat/shared";
+import type { Attachment } from "@chat/contract";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import { rel } from "../../lib/dates";
 import { loadDoc } from "../feed/media";

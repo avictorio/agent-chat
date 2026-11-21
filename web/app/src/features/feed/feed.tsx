@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MemberKind, Message } from "@chat/shared";
+import type { MemberKind, Message } from "@chat/contract";
 import { md } from "./markdown";
 import { canSpeak } from "../room/speak";
 import { RxChips } from "./reactions";

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchBuild } from "@chat/shared";
+import { fetchBuild } from "@chat/contract";
 import { store } from "../../lib/index";
 import { Button } from "../../ui/Button";
 

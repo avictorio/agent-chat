@@ -1,6 +1,6 @@
 import { plainText } from "../feed/markdown";
 import { toast } from "../../lib/index";
-import type { Message } from "@chat/shared";
+import type { Message } from "@chat/contract";
 
 // Read-aloud, ported from the current app: a message plays in the
 // sender's cloned voice when they have one (the server synthesizes and

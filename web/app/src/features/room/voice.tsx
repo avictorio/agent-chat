@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
-import type { VoiceState } from "@chat/shared";
+import type { VoiceState } from "@chat/contract";
 import { toast } from "../../lib/index";
 import { useSession } from "./ctx";
 import { Button } from "../../ui/Button";

@@ -4,7 +4,7 @@ import {
   type Message,
   type RoomClient,
   type RoomState,
-} from "@chat/shared";
+} from "@chat/contract";
 import { store } from "../../lib/index";
 import type { useMessages } from "../feed/useMessages";
 import type { useBoardData } from "../board/useBoardData";

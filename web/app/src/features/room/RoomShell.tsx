@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
-import { ApiError, RoomClient, type MemberKind } from "@chat/shared";
+import { ApiError, RoomClient, type MemberKind } from "@chat/contract";
 import { same, store, toast } from "../../lib/index";
 import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
 import { ToastHost } from "../shell/ToastHost";

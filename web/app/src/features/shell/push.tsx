@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RoomClient } from "@chat/shared";
+import type { RoomClient } from "@chat/contract";
 
 // Phone notifications: Web Push (service worker + the room's
 // subscription registry, with the quiet re-register when the room has
