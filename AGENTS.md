@@ -526,9 +526,16 @@ change behavior. In summary:
   with its arena view (`<game>/view.ts`, a renderer the store calls with a
   `GameViewCtx` from `shared/viewctx.ts`), its chat-card painter, its
   History rows (row types in `shared/history.ts`) and the History tab's
-  count. The store (`games.ts`), the chat card (`shared/gamecard.tsx`)
-  and the frame merge look a game up there instead of branching on its
-  type; a match without a type is Light Cycles, as on the server.
+  count, plus its status hooks from `<game>/status.ts` (`GameStatus`:
+  meta, record and state lines, final score, who it waits on, the turn
+  banner's words, the clock length, the your-move test, the card's pulse
+  signature and mover). The store (`games.ts`), the chat card
+  (`shared/gamecard.tsx`), `shared/render.ts` and the Games tab look a
+  game up there instead of branching on its type. Every status hook is
+  optional: where one is called, the default (Light Cycles, and a match
+  without a type, as on the server) is written beside the call. A
+  rematch's settings are the catalog entry's `rematch(g)`. Adding a game
+  touches no shared switch.
 - **Game engines on the server (2026-11-19):** the Room's shared game
   machinery (lobby and accept, clocks and the alarm, frames, room_state
   nudges, chat cards, result posts, cancel, standings) dispatches through

@@ -425,14 +425,21 @@ Agreed with the owner on 2026-11-21, in this order:
         30 imports the moves had left unused (1,313 -> 1,174 lines);
         `noUnusedLocals` in the web tsconfig catches the next ones,
         since oxlint runs no unused-variable rule here
-  - [ ] 5.2d The per-game status text and counts still branch on the
-        type (164 branches): the turn banner, the rematch request body
-        and the "your move" count in `games.ts`; the meta line, winner
-        banner and last-move text in `shared/render.ts`; the card's
-        pulse signature and mover colour in `shared/gamecard.tsx`; the
-        state, waiting-on, you and length lines in `GamesView.tsx`.
-        Each becomes a plug-in method in the game's folder, the
-        Light Cycles fallback kept
+  - [x] 5.2d The per-game status text and counts (the last 164
+        branches on the type): each game's `<game>/status.ts` holds its
+        `GameStatus` hooks (`registry.ts`) - finalScore, recordLine,
+        metaText, stateLine, waitingOn, youLabel, lengthLine, signature,
+        clockSeconds, awaiting, mover, turnLine - spread into its `GAMES`
+        entry; the callers (`shared/render.ts`, `GamesView.tsx`,
+        `shared/gamecard.tsx`, `games.ts`) look the hook up and keep the
+        default (Light Cycles, a match without a type) where it was. A
+        rematch's settings went on the catalog entry, beside `body`. The
+        turn banner's clock and the Games tab's countdown now read one
+        `clockSeconds` hook (their per-game lengths were identical).
+        `scripts/split-dispatch.mjs` moved the return-shaped functions;
+        the four else-if chains went by a checked script. What is left on
+        the type: the two Light Cycles "has trails" checks. games.ts
+        1,174 -> 874 lines
 - [ ] 5.3 The UI suite: fix the clock (Playwright's `page.clock`; the
       fake data reads `Date.now()` in 18 places), so two runs of a build
       give the same screenshots and a screenshot diff becomes a real
