@@ -8,11 +8,8 @@ import { b64urlEncode, pemToDer } from "../lib/crypto.js";
 // string. Parse strictly first; on failure, retry with raw line
 // breaks inside string values escaped. Anything else malformed
 // still fails, just without throwing.
-/**
- * @param {string | null | undefined} raw the GMAIL_SA secret
- * @returns {{ client_email?: string, private_key?: string } | null}
- */
-export function parseServiceAccount(raw) {
+/** @param raw the GMAIL_SA secret */
+export function parseServiceAccount(raw: string | null | undefined): { client_email?: string, private_key?: string } | null {
   try { return JSON.parse(raw || "null"); } catch (e) { }
   try {
     let out = "";
@@ -37,16 +34,13 @@ export function parseServiceAccount(raw) {
 // domain) with only the gmail.send scope, signed with the lib/crypto helpers;
 // the service-account JSON is the GMAIL_SA secret. Mail then comes from the
 // domain itself, so no DNS changes are needed - Google already signs for it.
-/** @type {{ email: string | null, sender: string | null, key: CryptoKey | null, token: string | null, exp: number }} */
-export const gmailCache = { email: null, sender: null, key: null, token: null, exp: 0 };
+export const gmailCache: { email: string | null, sender: string | null, key: CryptoKey | null, token: string | null, exp: number } = { email: null, sender: null, key: null, token: null, exp: 0 };
 
-/** @param {Env} env */
-export async function gmailAccessToken(env) {
+export async function gmailAccessToken(env: Env) {
   try { return await gmailAccessTokenInner(env); } catch (e) { return null; }
 }
 
-/** @param {Env} env */
-export async function gmailAccessTokenInner(env) {
+export async function gmailAccessTokenInner(env: Env) {
   const sa = parseServiceAccount(env.GMAIL_SA);
   const sender = String(env.GMAIL_SENDER || "").trim();
   if (!sa || !sa.client_email || !sa.private_key || !sender) return null;
@@ -64,31 +58,22 @@ export async function gmailAccessTokenInner(env) {
   const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
   const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
   if (!res.ok) return null;
-  /** @type {{ access_token: string, expires_in?: number }} the token endpoint's answer */
-  const j = await res.json();
+  /** the token endpoint's answer */
+  const j: { access_token: string, expires_in?: number } = await res.json();
   gmailCache.token = j.access_token; gmailCache.exp = now + (j.expires_in || 3600);
   return gmailCache.token;
 }
 
-/** @param {string} text */
-export function mimePart(text) {
+export function mimePart(text: string) {
   const bytes = new TextEncoder().encode(text);
   let bin = "";
   // apply takes any array-like; its strict typing wants a number[]
-  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, /** @type {number[]} */ (/** @type {ArrayLike<number>} */ (bytes.subarray(i, i + 8192))));
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, (bytes.subarray(i, i + 8192) as ArrayLike<number>) as number[]);
   return btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
 }
 
-/**
- * @param {Env} env
- * @param {string} to
- * @param {string} subject
- * @param {string} text
- * @param {string} html
- */
-export async function sendViaGmail(env, to, subject, text, html) {
-  /** @type {string | null} */
-  let token = null;
+export async function sendViaGmail(env: Env, to: string, subject: string, text: string, html: string) {
+  let token: string | null = null;
   try { token = await gmailAccessToken(env); } catch (e) { }
   if (!token) return false;
   const sender = String(env.GMAIL_SENDER || "").trim();

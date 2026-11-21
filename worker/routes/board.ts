@@ -19,13 +19,10 @@ import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
 import { mediaSigParams } from "../lib/media.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function constitutionRoute(rc, m) {
+/** @param m the path's match */
+export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -49,11 +46,8 @@ export async function constitutionRoute(rc, m) {
   return json({ error: "Method not allowed" }, 405);
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function questionsRoute(rc, m) {
+/** @param m the path's match */
+export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -94,11 +88,8 @@ export async function questionsRoute(rc, m) {
   return json({ room, question: r.question });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function boardRoute(rc, m) {
+/** @param m the path's match */
+export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -114,10 +105,10 @@ export async function boardRoute(rc, m) {
   if (kind === "members") {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
     const mb = await stub.members();
-    /** @type {Record<string, string>} signed avatar params, by member name */
-    const avq = {};
+    /** signed avatar params, by member name */
+    const avq: Record<string, string> = {};
     for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-    mb.members = mb.members.map((/** @type {Record<string, any>} a RoomMember, rewritten for the reply */ x) => {
+    mb.members = mb.members.map((/** a RoomMember, rewritten for the reply */ x: Record<string, any>) => {
       const v = x.avatar_version;
       delete x.avatar_version;
       x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null;
@@ -138,7 +129,7 @@ export async function boardRoute(rc, m) {
   }
   if (request.method === "GET" && id === null) {
     // a missing limit parses as NaN, so the default applies
-    if (kind === "digests") return json(Object.assign({ room }, await stub.digests(clamp(parseInt(/** @type {string} */ (url.searchParams.get("limit")), 10) || 10, 1, KEEP_DIGESTS))));
+    if (kind === "digests") return json(Object.assign({ room }, await stub.digests(clamp(parseInt(url.searchParams.get("limit") as string, 10) || 10, 1, KEEP_DIGESTS))));
     if (kind === "decisions") return json(Object.assign({ room }, await stub.decisions()));
     return json(Object.assign({ room }, await stub.stakes()));
   }

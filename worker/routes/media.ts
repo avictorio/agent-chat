@@ -14,15 +14,12 @@ import { CORS, json } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
 // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
 // reading takes the header or a signed URL (?invite= no longer authenticates media reads).
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function avatarRoute(rc, m) {
+/** @param m the path's match */
+export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -39,8 +36,7 @@ export async function avatarRoute(rc, m) {
     const a = await stub.getAvatar(decodeURIComponent(m[3]));
     if (!a) return json({ error: "No avatar" }, 404);
     const fresh = url.searchParams.get("v") === String(a.ver);
-    /** @type {Record<string, string>} */
-    const aheaders = Object.assign({
+    const aheaders: Record<string, string> = Object.assign({
       "Content-Type": a.type, "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
       "ETag": "\"" + a.ver + "\"", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
     }, CORS);
@@ -74,8 +70,8 @@ export async function avatarRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to 2 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** @type {Record<string, any> | null} the request's JSON body */
-    let body = null;
+    /** the request's JSON body */
+    let body: Record<string, any> | null = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
@@ -95,11 +91,8 @@ export async function avatarRoute(rc, m) {
 // Audio clips attached to messages. Reading needs the same access as the room
 // (the header or a signed URL - ?invite= no longer authenticates media
 // reads); attaching is the sender's own invite or the owner key.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function audioRoute(rc, m) {
+/** @param m the path's match */
+export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -119,8 +112,8 @@ export async function audioRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
   let buf, putTranscript;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** @type {Record<string, any> | null} the request's JSON body */
-    let body = null;
+    /** the request's JSON body */
+    let body: Record<string, any> | null = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
@@ -139,11 +132,8 @@ export async function audioRoute(rc, m) {
 
 // Images attached to messages. Reading takes the header or a signed URL
 // (?invite= no longer authenticates media reads); attaching is the sender's own invite or the owner key.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function imageRoute(rc, m) {
+/** @param m the path's match */
+export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -163,8 +153,8 @@ export async function imageRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** @type {Record<string, any> | null} the request's JSON body */
-    let body = null;
+    /** the request's JSON body */
+    let body: Record<string, any> | null = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
@@ -182,11 +172,8 @@ export async function imageRoute(rc, m) {
 
 // Videos attached to messages. Same access as images; serving honours Range so
 // players can seek. The bytes live in R2 (see the media layer in the Room class).
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function videoRoute(rc, m) {
+/** @param m the path's match */
+export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -206,8 +193,8 @@ export async function videoRoute(rc, m) {
   if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
-    /** @type {Record<string, any> | null} the request's JSON body */
-    let body = null;
+    /** the request's JSON body */
+    let body: Record<string, any> | null = null;
     try { body = await request.json(); } catch (e) {}
     const s = String((body && (body.video || body.video_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
@@ -231,11 +218,8 @@ export async function videoRoute(rc, m) {
 // CSP (see mediaCsp): an opaque origin, inline scripts allowed, no network.
 // A general file (kind file) is read the same way and always served as
 // a download (mediaHeaders); its bytes arrive through the upload engine.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function artifactRoute(rc, m) {
+/** @param m the path's match */
+export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);

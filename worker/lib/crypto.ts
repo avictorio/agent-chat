@@ -14,8 +14,7 @@ export const SHA256_K = [
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-/** @param {Uint8Array} msg */
-export function sha256Bytes(msg) {
+export function sha256Bytes(msg: Uint8Array) {
   const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
   const ml = msg.length;
   const total = Math.ceil((ml + 9) / 64) * 64;
@@ -26,7 +25,7 @@ export function sha256Bytes(msg) {
   dv.setUint32(total - 4, ml * 8, false);
   dv.setUint32(total - 8, Math.floor(ml / 0x20000000), false);
   const w = new Uint32Array(64);
-  const rotr = (/** @type {number} */ x, /** @type {number} */ n) => (x >>> n) | (x << (32 - n));
+  const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
   for (let off = 0; off < total; off += 64) {
     for (let t = 0; t < 16; t++) w[t] = dv.getUint32(off + t * 4, false);
     for (let t = 16; t < 64; t++) {
@@ -53,11 +52,7 @@ export function sha256Bytes(msg) {
   return out;
 }
 
-/**
- * @param {Uint8Array} key
- * @param {Uint8Array} msg
- */
-export function hmacSha256(key, msg) {
+export function hmacSha256(key: Uint8Array, msg: Uint8Array) {
   let k = key;
   if (k.length > 64) k = sha256Bytes(k);
   const inner = new Uint8Array(64 + msg.length);
@@ -72,41 +67,32 @@ export function hmacSha256(key, msg) {
   return sha256Bytes(outer);
 }
 
-/** @param {ArrayBuffer | ArrayLike<number>} bytes */
-export function b64urlEncode(bytes) {
+export function b64urlEncode(bytes: ArrayBuffer | ArrayLike<number>) {
   let bin = "";
   const b = new Uint8Array(bytes);
   for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** @param {string | null | undefined} text */
-export function b64urlDecode(text) {
+export function b64urlDecode(text: string | null | undefined) {
   const t = String(text || "").replace(/-/g, "+").replace(/_/g, "/");
   const pad = t.length % 4 === 0 ? "" : "=".repeat(4 - (t.length % 4));
   return Uint8Array.from(atob(t + pad), (c) => c.charCodeAt(0));
 }
 
-/** @param {ArrayBuffer | ArrayLike<number>} buf */
-export function hexBytes(buf) { return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join(""); }
+export function hexBytes(buf: ArrayBuffer | ArrayLike<number>) { return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join(""); }
 
-/**
- * @param {string | Uint8Array<ArrayBuffer>} key
- * @param {string} data
- */
-export async function hmacBytes(key, data) {
+export async function hmacBytes(key: string | Uint8Array<ArrayBuffer>, data: string) {
   const k = await crypto.subtle.importKey("raw", typeof key === "string" ? new TextEncoder().encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(data)));
 }
 
-/** @param {string} text */
-export async function sha256hex(text) {
+export async function sha256hex(text: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text)));
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** @param {...Uint8Array} parts */
-export function concatBytes(...parts) {
+export function concatBytes(...parts: Uint8Array[]) {
   let n = 0;
   for (const a of parts) n += a.length;
   const out = new Uint8Array(n);
@@ -115,20 +101,14 @@ export function concatBytes(...parts) {
   return out;
 }
 
-/**
- * @param {Uint8Array<ArrayBuffer>} ikm
- * @param {Uint8Array<ArrayBuffer>} salt
- * @param {Uint8Array<ArrayBuffer>} info
- * @param {number} len bytes
- */
-export async function hkdf(ikm, salt, info, len) {
+/** @param len bytes */
+export async function hkdf(ikm: Uint8Array<ArrayBuffer>, salt: Uint8Array<ArrayBuffer>, info: Uint8Array<ArrayBuffer>, len: number) {
   const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: salt, info: info }, key, len * 8));
 }
 
-// PEM to DER for the service-account key (platform/gmail.js signs with it).
-/** @param {string | null | undefined} pem */
-export function pemToDer(pem) {
+// PEM to DER for the service-account key (platform/gmail.ts signs with it).
+export function pemToDer(pem: string | null | undefined) {
   const b64 = String(pem || "").replace(/-----BEGIN [^-]+-----/g, "").replace(/-----END [^-]+-----/g, "").replace(/\s+/g, "");
   const bin = atob(b64);
   const der = new Uint8Array(bin.length);

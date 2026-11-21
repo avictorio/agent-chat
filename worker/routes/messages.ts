@@ -24,15 +24,12 @@ import {
 } from "../lib/sniff.js";
 import { isStoreError } from "../lib/errors.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function publishRoute(rc, m) {
+/** @param m the path's match */
+export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -49,11 +46,8 @@ export async function publishRoute(rc, m) {
 
 // Delete one of your own messages (the owner can delete any). Its media
 // (R2 objects, upload parts) and reactions go with it.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function messageRoute(rc, m) {
+/** @param m the path's match */
+export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -67,11 +61,8 @@ export async function messageRoute(rc, m) {
   return json({ room: room, deleted: r.deleted });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function reactionsRoute(rc, m) {
+/** @param m the path's match */
+export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -85,8 +76,8 @@ export async function reactionsRoute(rc, m) {
     return json({ room, id, reactions: r });
   }
   if (request.method !== "POST" && request.method !== "PUT" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
-  /** @type {Record<string, any>} the request's JSON body */
-  let body = {};
+  /** the request's JSON body */
+  let body: Record<string, any> = {};
   if (request.method !== "DELETE") {
     try { body = (await request.json()) || {}; } catch (e) { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
   }
@@ -100,11 +91,8 @@ export async function reactionsRoute(rc, m) {
   return json({ room, id, from, reaction, message_from: r.message_from, reactions: r.reactions });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function attachmentsRoute(rc, m) {
+/** @param m the path's match */
+export async function attachmentsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -119,16 +107,13 @@ export async function attachmentsRoute(rc, m) {
     limit: url.searchParams.get("limit") || "",
   }, room);
   if (r.error) return json({ error: r.error }, r.status || 400);
-  const extra = {};
+  const extra: { you?: string } = {};
   if (acc.name) extra.you = acc.name;
   return json(Object.assign({ room }, extra, r));
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function messagesRoute(rc, m) {
+/** @param m the path's match */
+export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -140,11 +125,10 @@ export async function messagesRoute(rc, m) {
     const a = url.searchParams.get("after");
     const after = a === null || a === "" ? null : Math.max(0, parseInt(a, 10) || 0);
     // a missing limit or wait parses as NaN, so the default applies
-    const limit = clamp(parseInt(/** @type {string} */ (url.searchParams.get("limit")), 10) || 100, 1, 500);
-    const wait = clamp(parseInt(/** @type {string} */ (url.searchParams.get("wait")), 10) || 0, 0, 25);
+    const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || 100, 1, 500);
+    const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, 25);
     const r = await stub.list(after, limit, wait, acc.name || "", room);
-    /** @type {{ invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string }} */
-    const extra = { invite_only: true };
+    const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }
     if (after === null && acc.name && extra.you_kind === "agent") extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite);
@@ -172,8 +156,7 @@ export async function messagesRoute(rc, m) {
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
   if (draftWanted && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
-  /** @type {import("../room/messages.js").InlineMedia | null} */
-  let audio = null;
+  let audio: import("../room/messages.js").InlineMedia | null = null;
     if (body && body.audio) {
       const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -185,8 +168,7 @@ export async function messagesRoute(rc, m) {
       const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
       audio = { data: buf, type: atype, transcript: tr };
     }
-    /** @type {import("../room/messages.js").InlineMedia | null} */
-    let image = null;
+    let image: import("../room/messages.js").InlineMedia | null = null;
     if (body && body.image) {
       const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -197,8 +179,7 @@ export async function messagesRoute(rc, m) {
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       image = { data: buf, type: itype };
     }
-    /** @type {import("../room/messages.js").InlineMedia | null} */
-    let video = null;
+    let video: import("../room/messages.js").InlineMedia | null = null;
     if (body && body.video) {
       const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -209,8 +190,7 @@ export async function messagesRoute(rc, m) {
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       video = { data: buf, type: vtype };
     }
-    /** @type {import("../room/messages.js").InlineMedia | null} */
-    let htmlArt = null;
+    let htmlArt: import("../room/messages.js").InlineMedia | null = null;
     if (body && body.html) {
       const s = decodeTextPayload(body.html);
       if (s === null) return json({ error: "\"html\" must be raw HTML text or a base64 data: URL" }, 400);
@@ -220,8 +200,7 @@ export async function messagesRoute(rc, m) {
       if (!/^\s*</.test(s)) return json({ error: "HTML must be a markup document (starting with a tag or doctype)" }, 415);
       htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(body.html_name, "Page") };
     }
-    /** @type {import("../room/messages.js").InlineMedia | null} */
-    let doc = null;
+    let doc: import("../room/messages.js").InlineMedia | null = null;
     if (body && body.doc) {
       const s = decodeTextPayload(body.doc);
       if (s === null) return json({ error: "\"doc\" must be raw Markdown text or a base64 data: URL" }, 400);

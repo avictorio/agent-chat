@@ -5,19 +5,13 @@ import { sendViaGmail } from "../platform/gmail.js";
 import { json } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
 // Sends the genesis invite for a freshly created room. Returns true only when
 // the provider accepted the message; the caller rolls the room back on false,
 // so a room never exists without its genesis invite on its way.
-/**
- * @param {Env} env
- * @param {string} to
- * @param {string} room
- * @param {string} name
- * @param {string} linkUrl the genesis invite link
- */
-export async function sendGenesisEmail(env, to, room, name, linkUrl) {
+/** @param linkUrl the genesis invite link */
+export async function sendGenesisEmail(env: Env, to: string, room: string, name: string, linkUrl: string) {
   const from = env.RESEND_FROM || "Agent Chat <rooms@send.chat.victorio.cloud>";
   const subject = "Your Agent Chat room is ready: " + room;
   const text = [
@@ -51,8 +45,8 @@ export async function sendGenesisEmail(env, to, room, name, linkUrl) {
 }
 
 // Whether a room exists: its Room object answers from its own storage.
-/** @param {DurableObjectStub} stub the room */
-export async function roomExists(stub) {
+/** @param stub the room */
+export async function roomExists(stub: DurableObjectStub) {
   return await stub.exists();
 }
 
@@ -63,13 +57,12 @@ export async function roomExists(stub) {
 // by UTC day and count ATTEMPTS (counted before the work, so a failed
 // attempt still costs quota). KV counters are not atomic, so a parallel
 // burst can overshoot a cap slightly - an abuse brake, not a guarantee.
-/** @param {RouteContext} rc */
-export async function createRoomRoute(rc) {
+export async function createRoomRoute(rc: RouteContext) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
-  /** @type {Record<string, any> | null} the request's JSON body */
-  let cbody = null;
+  /** the request's JSON body */
+  let cbody: Record<string, any> | null = null;
   try { cbody = await request.json(); } catch (e) {}
   const croom = String((cbody && cbody.room) || "").trim().toLowerCase();
   const cname = String((cbody && cbody.name) || "").trim().slice(0, MAX_NAME);
@@ -83,8 +76,7 @@ export async function createRoomRoute(rc) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
   const cday = new Date().toISOString().slice(0, 10);
   const cip = request.headers.get("CF-Connecting-IP") || "unknown";
-  /** @type {Array<[string, number]>} */
-  const caps = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
+  const caps: Array<[string, number]> = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
   for (const [k, max] of caps) {
     const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
     if (n >= max) return json({ error: "Too many rooms created - try again tomorrow." }, 429);
@@ -112,11 +104,8 @@ export async function createRoomRoute(rc) {
 }
 
 // Every room route passes through here: only the owner can bring a room into existence.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} rm the path's match
- */
-export async function roomRoute(rc, rm) {
+/** @param rm the path's match */
+export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
   const { request, env, url, path, owner } = rc;
   let name = "";
   try { name = decodeURIComponent(rm[1]).toLowerCase(); } catch (e) {}

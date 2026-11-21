@@ -62,25 +62,19 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
 export const MCP_CATALOG_VERSION = "1.21.0";
-/** @param {McpTool[]} list the catalog */
-export function mcpCatalogDigest(list) {
+/** @param list the catalog */
+export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
   for (let i = 0; i < s.length; i++) { h ^= BigInt(s.charCodeAt(i)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
   return ("0000000000000000" + h.toString(16)).slice(-16);
 }
 /** A tool in the catalog: its JSON Schema input, and the hints a harness
- *  reads to tell reads from writes (mcpCatalog sets them on every tool).
- *  @typedef {{ name: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
- *    annotations?: { readOnlyHint: boolean, destructiveHint?: boolean, idempotentHint: boolean, openWorldHint: boolean } }} McpTool */
-/**
- * @param {string} name
- * @param {string} description
- * @param {Record<string, object>} [properties] the arguments' JSON Schemas
- * @param {string[]} [required]
- * @returns {McpTool}
- */
-export function mcpTool(name, description, properties, required) {
+ *  reads to tell reads from writes (mcpCatalog sets them on every tool). */
+export type McpTool = { name: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
+  annotations?: { readOnlyHint: boolean, destructiveHint?: boolean, idempotentHint: boolean, openWorldHint: boolean } };
+/** @param properties the arguments' JSON Schemas */
+export function mcpTool(name: string, description: string, properties?: Record<string, object>, required?: string[]): McpTool {
   const props = Object.assign({ as: { type: "string", description: "Owner key only: act under this name. Invite callers ignore this - your name is fixed by your invite." } }, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
 }
@@ -141,38 +135,34 @@ export function mcpCatalog() {
   }
   return list;
 }
-/** @param {unknown} obj a tool's result */
-export function mcpOk(obj) {
+/** @param obj a tool's result */
+export function mcpOk(obj: unknown) {
   const o = obj && typeof obj === "object" ? obj : { value: obj };
   return { content: [{ type: "text", text: JSON.stringify(o) }], structuredContent: o };
 }
-/** @param {unknown} message */
-export function mcpErr(message) {
+export function mcpErr(message: unknown) {
   return { content: [{ type: "text", text: String(message) }], isError: true };
 }
 /**
- * @param {unknown} s base64, or a data: URL
- * @param {string} what the argument's name, for the error
+ * @param s base64, or a data: URL
+ * @param what the argument's name, for the error
  */
-export function mcpDecodeB64(s, what) {
+export function mcpDecodeB64(s: unknown, what: string) {
   const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
   try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch (e) { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
 }
+export type InlineMedia = import("../room/messages.js").InlineMedia;
 // Executes one tools/call against the Room stub. Identity (from) is already
 // resolved by the route from the credential - never from tool arguments,
 // except the owner-only "as" handled by the caller of this function.
 /**
- * @param {Env} env
- * @param {DurableObjectStub} stub the room
- * @param {string} room
- * @param {string} origin
- * @param {boolean} owner
- * @param {{ kind?: string | null }} acc the credential's access check (its member kind)
- * @param {string | null | undefined} from who the call acts as
- * @param {string} name the tool
- * @param {Record<string, any> | null | undefined} args the tool's arguments, as the client sent them
+ * @param stub the room
+ * @param acc the credential's access check (its member kind)
+ * @param from who the call acts as
+ * @param name the tool
+ * @param args the tool's arguments, as the client sent them
  */
-export async function mcpCallTool(env, stub, room, origin, owner, acc, from, name, args) {
+export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null }, from: string | null | undefined, name: string, args: Record<string, any> | null | undefined) {
   const A = args || {};
   const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); };
   switch (name) {
@@ -194,8 +184,7 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
       if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
       if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
-      /** @typedef {import("../room/messages.js").InlineMedia} InlineMedia */
-      let audio = /** @type {InlineMedia | null} */ (null), image = /** @type {InlineMedia | null} */ (null), video = /** @type {InlineMedia | null} */ (null), htmlArt = /** @type {InlineMedia | null} */ (null), doc = /** @type {InlineMedia | null} */ (null);
+      let audio = null as InlineMedia | null, image = null as InlineMedia | null, video = null as InlineMedia | null, htmlArt = null as InlineMedia | null, doc = null as InlineMedia | null;
       if (A.audio_base64) { const buf = mcpDecodeB64(A.audio_base64, "audio_base64"); if (!buf.byteLength) throw new Error("\"audio_base64\" is empty"); if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); audio = { data: buf, type: t, transcript: A.audio_transcript ? String(A.audio_transcript).slice(0, MAX_TEXT) : null }; }
       if (A.image_base64) { const buf = mcpDecodeB64(A.image_base64, "image_base64"); if (!buf.byteLength) throw new Error("\"image_base64\" is empty"); if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); image = { data: buf, type: t }; }
       if (A.video_base64) { const buf = mcpDecodeB64(A.video_base64, "video_base64"); if (!buf.byteLength) throw new Error("\"video_base64\" is empty"); if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); video = { data: buf, type: t }; }
@@ -218,10 +207,10 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
     case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10), from, owner); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
     case "get_members": {
       const mb = await stub.members();
-      /** @type {Record<string, string>} signed avatar params, by member name */
-      const avq = {};
+      /** signed avatar params, by member name */
+      const avq: Record<string, string> = {};
       for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-      mb.members = mb.members.map((/** @type {Record<string, any>} a RoomMember, rewritten for the reply */ x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
+      mb.members = mb.members.map((/** a RoomMember, rewritten for the reply */ x: Record<string, any>) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
       return Object.assign({ room: room }, mb);
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
@@ -263,15 +252,14 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
       if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw new Error("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours");
       const fr = await webFetch(target);
-      /** @type {Record<string, unknown>} */
-      const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
+      const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);
       if (A.post && !fr.error) { const full = fr.text || ""; const excerpt = full.slice(0, 1500); const msgText = "Fetched " + fr.url + " (HTTP " + fr.status + ")" + (fr.title ? "\n" + fr.title : "") + "\n\n" + excerpt + (full.length > 1500 || fr.truncated ? "\n\n[excerpt; the full text is available through the fetch tool]" : ""); out.posted = await stub.post(from, msgText.slice(0, MAX_TEXT), room, owner); }
       if (fr.error) throw new Error(fr.error);
       return out;
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(parseInt(A.id, 10), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; if (A.lots) opts.lots = A.lots; if (A.budget) opts.budget = A.budget; if (A.dice) opts.dice = A.dice; if (A.ones_wild !== undefined) opts.ones_wild = A.ones_wild; if (A.rotations) opts.rotations = A.rotations; if (A.seed) opts.seed = A.seed; if (A.genre) opts.genre = A.genre; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(); const opts: Record<string, unknown> = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; if (A.lots) opts.lots = A.lots; if (A.budget) opts.budget = A.budget; if (A.dice) opts.dice = A.dice; if (A.ones_wild !== undefined) opts.ones_wild = A.ones_wild; if (A.rotations) opts.rotations = A.rotations; if (A.seed) opts.seed = A.seed; if (A.genre) opts.genre = A.genre; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "submit_move": { needFrom(); if (A.dir === undefined && !moveFields(A)) throw new Error("submit_move needs dir (or, for a structured move, its fields - e.g. statements and lie)"); const r = await stub.gameMove(parseInt(A.id, 10), from, A.dir, room, moveFields(A)); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(); const r = await stub.gameCancel(parseInt(A.id, 10), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(); const r = await stub.gameAccept(parseInt(A.id, 10), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
@@ -295,8 +283,7 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
       }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
       if (t.status !== 200) throw new Error(t.error);
-      /** @type {{ room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } }} */
-      const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
+      const out: { room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } } = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
       out.upload.bigger = "For a bigger file (any size up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (the exact byte length) - and name for a file - for a resumable upload link.";
       return out;

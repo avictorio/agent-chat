@@ -6,7 +6,7 @@ import { docs } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
 import { ROOM_RE } from "../limits.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
 // App icons (base64 PNG) for the manifest and apple-touch-icon: a glossy mint
 // speech bubble with two mint dots and an amber third dot on dark charcoal.
@@ -26,15 +26,10 @@ export const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAABR8UlEQVR
 // are served with the id stamped over the build's "next-dev" placeholder,
 // and GET /api/build reports it, so a long-lived page can tell it is
 // behind the latest deploy and offer a refresh.
-/** @type {Promise<{ text: string, id: string }> | null} */
-export let shellPromise = null;
-/**
- * @param {Env} env
- * @param {string} origin
- */
-export function appShell(env, origin) {
+export let shellPromise: Promise<{ text: string, id: string }> | null = null;
+export function appShell(env: Env, origin: string) {
   if (!shellPromise) {
-    shellPromise = /** @type {{ fetch(req: Request): Promise<Response> }} the ASSETS binding */ (env.ASSETS).fetch(new Request(origin + "/index.html")).then(async function (r) {
+    shellPromise = (env.ASSETS as { fetch(req: Request): Promise<Response> }).fetch(new Request(origin + "/index.html")).then(async function (r) {
       if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
       const text = await r.text();
       const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -45,26 +40,17 @@ export function appShell(env, origin) {
   }
   return shellPromise;
 }
-/**
- * @param {Env} env
- * @param {string} origin
- */
-export async function currentBuildId(env, origin) {
+export async function currentBuildId(env: Env, origin: string) {
   return (await appShell(env, origin)).id;
 }
-/**
- * @param {Env} env
- * @param {string} origin
- */
-export async function page(env, origin) {
+export async function page(env: Env, origin: string) {
   const shell = await appShell(env, origin);
   // Stamp ONLY the meta tag's placeholder: a global replace once also
   // rewrote the literal the update check compares against.
   return html(shell.text.replace('content="next-dev"', 'content="' + shell.id + '"'));
 }
 
-/** @param {RouteContext} rc */
-export async function emojiRoute(rc) {
+export async function emojiRoute(rc: RouteContext) {
   const { env } = rc;
   const data = env.REQUESTS ? await emojiList(env) : null;
   if (!data) return json({ error: "The emoji list isn't available right now" }, 503);
@@ -73,15 +59,13 @@ export async function emojiRoute(rc) {
 
 // The agent-readable docs: /api, /api/docs (agents and older welcome text
 // reach for it by name), /api.txt and /llms.txt all route here.
-/** @param {RouteContext} rc */
-export async function apiDocsRoute(rc) {
+export async function apiDocsRoute(rc: RouteContext) {
   const { url } = rc;
   return new Response(docs(url.origin), { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8" }, CORS) });
 }
 
 // Web app surface: manifest, icons, service worker.
-/** @param {RouteContext} rc */
-export async function manifestRoute(rc) {
+export async function manifestRoute(rc: RouteContext) {
   return json({ name: "Agent Chat", short_name: "Agent Chat", start_url: "/", scope: "/", display: "standalone",
     background_color: "#17171c", theme_color: "#17171c",
     icons: [
@@ -91,26 +75,19 @@ export async function manifestRoute(rc) {
     ] });
 }
 
-/** @param {RouteContext} rc */
-export async function serviceWorkerRoute(rc) {
+export async function serviceWorkerRoute(rc: RouteContext) {
   return new Response(PUSH_SW, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Service-Worker-Allowed": "/", "Cache-Control": "no-cache" } });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} iconMatch the path's match
- */
-export async function iconRoute(rc, iconMatch) {
+/** @param iconMatch the path's match */
+export async function iconRoute(rc: RouteContext, iconMatch: RegExpMatchArray) {
   const b64 = (iconMatch[1] === "512" || iconMatch[1] === "512-maskable") ? ICON_512 : iconMatch[1] === "180" ? ICON_180 : ICON_192;
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   return new Response(bytes, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function roomPageRoute(rc, m) {
+/** @param m the path's match */
+export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { env, url } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return new Response("Room names are 1-64 lowercase letters, digits, - or _", { status: 400 });

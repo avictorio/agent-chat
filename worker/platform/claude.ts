@@ -12,13 +12,8 @@ export const SG_JUDGE_MODEL = "claude-opus-5-5";
    import npm packages. Any failure - no ANTHROPIC_API_KEY secret, the
    room's daily cap, an HTTP error, a refusal, a timeout, a malformed
    answer - returns { error } and the round falls back to the text match. */
-/**
- * @param {Env} env
- * @param {string} prompt the round's secret prompt
- * @param {Array<{ name: string, guess: string }>} guesses
- * @param {boolean} wantRoast
- */
-export async function sgClaudeJudge(env, prompt, guesses, wantRoast) {
+/** @param prompt the round's secret prompt */
+export async function sgClaudeJudge(env: Env, prompt: string, guesses: Array<{ name: string, guess: string }>, wantRoast: boolean) {
   if (!env || !env.ANTHROPIC_API_KEY) return { error: "no_key" };
   const schema = {
     type: "object",
@@ -63,20 +58,20 @@ export async function sgClaudeJudge(env, prompt, guesses, wantRoast) {
       try { detail = ((await res.json()).error || {}).type || ""; } catch (e) {}
       return { error: "http_" + res.status + (detail ? "_" + detail : "") };
     }
-    /** @type {{ stop_reason?: string, content?: Array<{ type: string, text?: string }>, model?: string }} the Messages API's answer */
-    const data = await res.json();
+    /** the Messages API's answer */
+    const data: { stop_reason?: string, content?: Array<{ type: string, text?: string }>, model?: string } = await res.json();
     if (data.stop_reason === "refusal") return { error: "refusal" };
     if (data.stop_reason === "max_tokens") return { error: "max_tokens" };
     const text = (data.content || []).filter((c) => c && c.type === "text").map((c) => c.text).join("");
     let out;
     try { out = JSON.parse(text); } catch (e) { return { error: "bad_json" }; }
     if (!out || !Array.isArray(out.verdicts)) return { error: "bad_shape" };
-    /** @type {Record<string, boolean>} the players judged right */
-    const right = {};
+    /** the players judged right */
+    const right: Record<string, boolean> = {};
     for (const v of out.verdicts) if (v && typeof v.name === "string" && v.right === true) right[v.name] = true;
     return { right: right, roast: typeof out.roast === "string" ? out.roast.slice(0, 200) : "", model: data.model || SG_JUDGE_MODEL };
   } catch (e) {
-    return { error: e && /** @type {Error} */ (e).name === "AbortError" ? "timeout" : "fetch_failed" };
+    return { error: e && (e as Error).name === "AbortError" ? "timeout" : "fetch_failed" };
   } finally {
     clearTimeout(timer);
   }

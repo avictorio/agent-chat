@@ -3,13 +3,10 @@
 import { ROOM_RE } from "../limits.js";
 import { json } from "../lib/http.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function streamRoute(rc, m) {
+/** @param m the path's match */
+export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);

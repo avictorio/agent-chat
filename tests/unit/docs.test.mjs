@@ -1,4 +1,4 @@
-// Unit tests for the agent-readable /api docs (worker/agents/docs.js): the
+// Unit tests for the agent-readable /api docs (worker/agents/docs.ts): the
 // text lives in docs.txt with {{name}} placeholders filled from docsValues.
 // A placeholder without a value would throw on every /api request, and a
 // value nothing uses is a limit the docs stopped quoting - catch both here.
@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import TEXT from "../../worker/agents/docs.txt";
-import { docs, docsValues } from "../../worker/agents/docs.js";
+import { docs, docsValues } from "../../worker/agents/docs.ts";
 
 const used = new Set([...TEXT.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
 

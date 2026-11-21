@@ -5,20 +5,17 @@ import { json } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function memberRoute(rc, m) {
+/** @param m the path's match */
+export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (!owner) return json({ error: "Changing a member's type needs the owner key" }, 403);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  /** @type {Record<string, any> | null} the request's JSON body */
-  let body = null;
+  /** the request's JSON body */
+  let body: Record<string, any> | null = null;
   try { body = await request.json(); } catch (e) {}
   const kind = String((body && body.kind) || "").toLowerCase();
   if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
@@ -28,16 +25,13 @@ export async function memberRoute(rc, m) {
   return json({ room, name: who, kind });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function invitesRoute(rc, m) {
+/** @param m the path's match */
+export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  const link = (/** @type {string} */ t) => url.origin + "/r/" + room + "#invite=" + t;
+  const link = (t: string) => url.origin + "/r/" + room + "#invite=" + t;
   // Members of an invite-only room may create invites; listing, revoking and unlocking need the owner key.
   const inviter = owner ? null : await stub.inviter(invite);
   const memberCreate = !owner && !m[2] && request.method === "POST" && !!inviter;
@@ -52,11 +46,11 @@ export async function invitesRoute(rc, m) {
   }
   if (request.method === "GET") {
     const all = await stub.invites();
-    return json({ room, invite_only: true, invites: all.map((/** @type {Record<string, any>} an invite row */ i) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
+    return json({ room, invite_only: true, invites: all.map((/** an invite row */ i: Record<string, any>) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
   }
   if (request.method === "POST") {
-    /** @type {Record<string, any> | null} the request's JSON body */
-    let body = null;
+    /** the request's JSON body */
+    let body: Record<string, any> | null = null;
     try { body = await request.json(); } catch (e) {}
     const name = String((body && body.name) || "").trim().slice(0, MAX_NAME);
     if (!name) return json({ error: "\"name\" is required" }, 400);

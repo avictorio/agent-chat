@@ -34,7 +34,7 @@ Test checklist:
   throwaway room per test run; digest posts burn that room's 3-a-day
   limit. Afterwards remove its invites and delete it:
   `DELETE /api/rooms/ROOM?confirm=ROOM`. Deleting is permanent. Rooms in
-  `PROTECTED_ROOMS` in `worker/limits.js` (`henry-hank-order-up`) can't be
+  `PROTECTED_ROOMS` in `worker/limits.ts` (`henry-hank-order-up`) can't be
   deleted through the API.
 - **Server behavior has an automated suite:** `npm run test:api` boots
   wrangler dev (port 8798, its own temp state per run via `--persist-to`)
@@ -51,7 +51,9 @@ Test checklist:
   helpers - answer matching, the move-field parser, the engine table,
   card boards and tallies, image checks, the Letter Grid dictionary. A
   loader hook (`tests/unit/register.mjs`) imports the Worker's `.txt`
-  data files the way wrangler's Text rule does. Add a test there with
+  data files the way wrangler's Text rule does, and its TypeScript
+  modules with their types stripped (a `./x.js` import finds `x.ts`, as
+  wrangler's bundler does). Add a test there with
   any new pure helper.
 - **Every changed endpoint:** test the happy path, the validation errors, and
   the access rules: no token (401), bad token (403), revoked token, a valid

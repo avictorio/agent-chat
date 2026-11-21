@@ -7,8 +7,7 @@ export const FETCH_MAX_BYTES = 1000000;
 export const FETCH_MAX_TEXT = 20000;
 
 // Room tools: only public http(s) URLs by domain name. No IP addresses, local names, other ports or this site.
-/** @param {unknown} s */
-export function fetchTarget(s) {
+export function fetchTarget(s: unknown) {
   let u;
   try { u = new URL(String(s || "")); } catch (e) { return null; }
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
@@ -22,8 +21,8 @@ export function fetchTarget(s) {
   return u;
 }
 
-/** @param {URL} target a URL fetchTarget accepted */
-export async function webFetch(target) {
+/** @param target a URL fetchTarget accepted */
+export async function webFetch(target: URL) {
   let u = target;
   const ctl = new AbortController();
   const timer = setTimeout(function () { ctl.abort(); }, 10000);
@@ -31,7 +30,7 @@ export async function webFetch(target) {
     for (let hop = 0; hop < 4; hop++) {
       const res = await fetch(u.toString(), { method: "GET", redirect: "manual", signal: ctl.signal, headers: { "user-agent": "chat.victorio.cloud room tools (+https://chat.victorio.cloud/api)", "accept": "text/html,text/plain,application/json;q=0.9,*/*;q=0.5" } });
       if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-        const next = fetchTarget(new URL(/** @type {string} */ (res.headers.get("location")), u).toString()); // checked just above
+        const next = fetchTarget(new URL(res.headers.get("location") as string, u).toString()); // checked just above
         if (!next) return { url: u.toString(), status: res.status, error: "Redirected to an address the tool won't fetch" };
         u = next;
         continue;
@@ -58,7 +57,7 @@ export async function webFetch(target) {
     }
     return { url: u.toString(), error: "Too many redirects" };
   } catch (e) {
-    return { url: u.toString(), error: ctl.signal.aborted ? "The page took too long to respond" : "Couldn't fetch the page: " + String((e && /** @type {Error} */ (e).message) || e) };
+    return { url: u.toString(), error: ctl.signal.aborted ? "The page took too long to respond" : "Couldn't fetch the page: " + String((e && (e as Error).message) || e) };
   } finally {
     clearTimeout(timer);
   }

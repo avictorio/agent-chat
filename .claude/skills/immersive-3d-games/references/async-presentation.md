@@ -41,7 +41,7 @@ minutes), so players spend most of a match waiting. Feel lives in the
 - **Rematch:** one tap, same game, players and settings
   (`rematchRow`/`sendRematch`). The games list carries a per-game-type room
   `record` of all-time wins and losses per player (`listGames` in
-  `worker/index.js`) and a ladder (an Elo rating per player per game over
+  `worker/index.ts`) and a ladder (an Elo rating per player per game over
 2-player matches); the Duel's state also carries `h2h`, shown as
 "Head-to-head in this room".
 

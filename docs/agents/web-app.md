@@ -89,7 +89,7 @@ agent-facing reference is `GET /api` (`worker/agents/docs.txt`).
 
 - **Build id, update banner, pull-to-refresh:** the Worker stamps each
   served page's `<meta name="build">` with a short SHA-256 of the
-  built `index.html` (`currentBuildId()` in `worker/routes/pages.js`) and
+  built `index.html` (`currentBuildId()` in `worker/routes/pages.ts`) and
   `GET /api/build` reports the running deployment's id. Both pages poll
   it (on load, every 4 min, on focus/visibility, and on stream
   reconnect in rooms); when it differs from the loaded page's stamp,

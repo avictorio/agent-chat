@@ -4,13 +4,7 @@
 import { EMOJI_KV_KEY, EMOJI_SOURCE, REACTION_ALIASES, STATE_MAX_BYTES } from "../limits.js";
 
 // room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
-/**
- * @param {import("@chat/contract").RoomState} s
- * @param {import("../room/state.js").StateData | null} d
- * @param {string | null | undefined} who
- * @returns {import("@chat/contract").RoomState}
- */
-export function withReactions(s, d, who) {
+export function withReactions(s: import("@chat/contract").RoomState, d: import("../room/state.js").StateData | null, who: string | null | undefined): import("@chat/contract").RoomState {
   if (!d || !d.rx || !who) return s;
   const w = String(who).toLowerCase();
   const mine = d.rx.filter((r) => String(r.to).toLowerCase() === w && String(r.who).toLowerCase() !== w).slice(0, 5);
@@ -30,12 +24,11 @@ export function withReactions(s, d, who) {
 }
 
 // A reaction is one emoji (a single grapheme with an emoji in it) or one of the alias names. undefined = invalid.
-/** @param {unknown} x */
-export function normReaction(x) {
+export function normReaction(x: unknown) {
   if (x === null || x === undefined || x === "") return null;
   const s = String(x).trim();
   // own keys only: "constructor" must not find Object's
-  if (Object.hasOwn(REACTION_ALIASES, s.toLowerCase())) return /** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()];
+  if (Object.hasOwn(REACTION_ALIASES, s.toLowerCase())) return (REACTION_ALIASES as Record<string, string>)[s.toLowerCase()];
   if (!s || s.length > 32) return undefined;
   if (typeof Intl !== "undefined" && Intl.Segmenter && Array.from(new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)).length !== 1) return undefined;
   if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(s)) return undefined;
@@ -43,17 +36,16 @@ export function normReaction(x) {
 }
 
 // Builds the picker's emoji list from the pinned dataset: [[category, [[emoji, "keywords"], ...]], ...].
-/** @param {Env} env */
-export async function emojiList(env) {
+export async function emojiList(env: Env) {
   const cached = await env.REQUESTS.get(EMOJI_KV_KEY);
   if (cached) return cached;
   const res = await fetch(EMOJI_SOURCE, { headers: { "user-agent": "chat.victorio.cloud" } });
   if (!res.ok) return null;
-  /** @type {Array<{ unified?: string, short_names?: string[], name?: string, category: string, sort_order?: number }>} the dataset's entries */
-  const data = await res.json();
+  /** the dataset's entries */
+  const data: Array<{ unified?: string, short_names?: string[], name?: string, category: string, sort_order?: number }> = await res.json();
   const order = ["Smileys & Emotion", "People & Body", "Animals & Nature", "Food & Drink", "Activities", "Travel & Places", "Objects", "Symbols", "Flags"];
-  /** @type {Record<string, Array<[string, string]>>} [emoji, keywords] by category */
-  const cats = {};
+  /** [emoji, keywords] by category */
+  const cats: Record<string, Array<[string, string]>> = {};
   for (const c of order) cats[c] = [];
   data.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   for (const e of data) {

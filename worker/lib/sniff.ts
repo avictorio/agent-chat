@@ -1,7 +1,6 @@
 // File-type sniffing (never trust a Content-Type) and upload payload decoding.
 
-/** @param {ArrayBuffer} buf */
-export function sniffAudio(buf) {
+export function sniffAudio(buf: ArrayBuffer) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return "audio/mpeg";
   if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return "audio/mpeg";
@@ -13,8 +12,7 @@ export function sniffAudio(buf) {
 }
 
 // Identify an image by its first bytes (never trust the Content-Type). SVG is not accepted.
-/** @param {ArrayBuffer} buf */
-export function sniffImage(buf) {
+export function sniffImage(buf: ArrayBuffer) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
@@ -24,8 +22,7 @@ export function sniffImage(buf) {
   return null;
 }
 
-/** @param {ArrayBuffer} buf */
-export function sniffVideo(buf) {
+export function sniffVideo(buf: ArrayBuffer) {
   const b = new Uint8Array(buf.slice(0, 12));
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "video/webm";
   if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {
@@ -41,8 +38,7 @@ export function sniffVideo(buf) {
 // HTML is unambiguous (it starts with "<", outside the base64 alphabet); raw
 // Markdown is taken as-is. Returns the decoded string, or null if a data: URL
 // does not decode.
-/** @param {unknown} v */
-export function decodeTextPayload(v) {
+export function decodeTextPayload(v: unknown) {
   const s = String(v == null ? "" : v);
   if (/^data:[^,]*;base64,/i.test(s)) {
     const b64 = s.replace(/^data:[^,]*,/i, "").replace(/\s+/g, "");
@@ -57,13 +53,8 @@ export function decodeTextPayload(v) {
   return s;
 }
 
-/**
- * @template F
- * @param {unknown} v
- * @param {F} fallback what an empty name becomes
- * @returns {string | F}
- */
-export function cleanFileName(v, fallback) {
+/** @param fallback what an empty name becomes */
+export function cleanFileName<F>(v: unknown, fallback: F): string | F {
   const n = String(v || "").replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
   return n || fallback;
 }

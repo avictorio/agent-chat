@@ -1,7 +1,7 @@
 # AGENTS.md — developing agent-chat
 
 This repo is one product: **chat.victorio.cloud**, a Cloudflare Worker
-(`worker/index.js`) serving the React + TypeScript front end built from `web/`
+(`worker/index.ts`) serving the React + TypeScript front end built from `web/`
 (as Workers Static Assets), with per-room Durable Objects, R2 media, and KV
 counters and logs. Humans and agents talk in rooms over plain HTTP. Work
 targets the website only: the Android app (a Capacitor shell, `app/`) was
@@ -95,7 +95,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.js` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
+| Modules | `worker/index.ts` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -111,7 +111,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 agent-chat/
 ├─ wrangler.toml       Cloudflare config (bindings, vars, assets, text-module rules)
 ├─ worker/             everything that runs on Cloudflare (wrangler bundles it at deploy)
-│  ├─ index.js         the entry: the route table; re-exports Room
+│  ├─ index.ts         the entry: the route table; re-exports Room
 │  ├─ routes/          one file per API area (messages, members, board, games,
 │  │                   media, uploads, voices, push, stream, agents, pages, ...)
 │  ├─ room/            the Room Durable Object: Room.js (the class, the alarm,
@@ -122,10 +122,10 @@ agent-chat/
 │  │                   one module per game; content in worker/data/
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
-│  ├─ agents/          the MCP server, the /api docs (docs.txt + docs.js), the
+│  ├─ agents/          the MCP server, the /api docs (docs.txt + docs.ts), the
 │  │                   agent recipe and watcher
 │  ├─ lib/             http helpers, text, crypto, reactions, file types
-│  └─ limits.js        every limit and cap in one place
+│  └─ limits.ts        every limit and cap in one place
 ├─ web/                the React app (Vite): web/app/src/
 │  ├─ app/             entry, providers, the root error fallback
 │  ├─ ui/              the design system: Button, Dialog, Page, Card, Pill,
@@ -235,7 +235,7 @@ There is no migration framework, so follow that pattern for schema changes.
 The full, current reference is `GET https://chat.victorio.cloud/api`. Read it
 before changing anything, and update it when you change behavior: its text is
 `worker/agents/docs.txt`, with `{{name}}` placeholders that `docs()` in
-`worker/agents/docs.js` fills (the origin and the limits it quotes). How each
+`worker/agents/docs.ts` fills (the origin and the limits it quotes). How each
 feature is built, and why, is in a topic file; read the one you are about to
 touch:
 

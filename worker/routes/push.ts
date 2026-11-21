@@ -4,21 +4,17 @@ import { json, readBody } from "../lib/http.js";
 import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
-/** @param {RouteContext} rc */
-export async function pushKeyRoute(rc) {
+export async function pushKeyRoute(rc: RouteContext) {
   const { env } = rc;
   const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
   return json({ key: await keys.vapidPublic() });
 }
 
 // Web Push subscriptions for a room, tied to the invite's member name.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function pushRoute(rc, m) {
+/** @param m the path's match */
+export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -51,7 +47,7 @@ export async function pushRoute(rc, m) {
     if (pLen !== 65) return json({ error: "subscription.keys.p256dh is not a 65-byte public key" }, 400);
     if (aLen < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
     // a missing body has no endpoint, refused above
-    const mode = /** @type {Record<string, any>} */ (body).mode === "mentions" ? "mentions" : "all";
+    const mode = (body as Record<string, any>).mode === "mentions" ? "mentions" : "all";
     await stub.pushSubscribe(acc.name || "", { endpoint: endpoint, p256dh: p256dh, auth: auth }, mode);
     return json({ room, subscribed: true, mode: mode });
   }

@@ -6,10 +6,9 @@ import { json, readBody } from "../lib/http.js";
 import { ROOM_RE } from "../limits.js";
 import { sigv4Presign } from "../platform/r2-s3.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
-/** @param {RouteContext} rc */
-export async function hookGameImages(rc) {
+export async function hookGameImages(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -21,8 +20,7 @@ export async function hookGameImages(rc) {
   return json({ count: listed.objects.length });
 }
 
-/** @param {RouteContext} rc */
-export async function hookR2Fail(rc) {
+export async function hookR2Fail(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -34,8 +32,7 @@ export async function hookR2Fail(rc) {
   return json(await tstub.setTestR2Fail(!!(tb && tb.on)));
 }
 
-/** @param {RouteContext} rc */
-export async function hookTicketTtl(rc) {
+export async function hookTicketTtl(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -47,8 +44,7 @@ export async function hookTicketTtl(rc) {
   return json(await tstub.setTestTicketTtl(tb && tb.ttl_ms));
 }
 
-/** @param {RouteContext} rc */
-export async function hookCoderaceSecret(rc) {
+export async function hookCoderaceSecret(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -60,8 +56,7 @@ export async function hookCoderaceSecret(rc) {
   return json(await tstub.setTestCrSecret(parseInt(tb && tb.id, 10), tb && tb.secret));
 }
 
-/** @param {RouteContext} rc */
-export async function hookGameExpire(rc) {
+export async function hookGameExpire(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -73,8 +68,7 @@ export async function hookGameExpire(rc) {
   return json(await tstub.setTestGameExpire(parseInt(tb && tb.id, 10)));
 }
 
-/** @param {RouteContext} rc */
-export async function hookSketchJudge(rc) {
+export async function hookSketchJudge(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -86,8 +80,7 @@ export async function hookSketchJudge(rc) {
   return json(await tstub.setTestSketchJudge(tb && tb.verdict));
 }
 
-/** @param {RouteContext} rc */
-export async function hookLetterGrid(rc) {
+export async function hookLetterGrid(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -99,8 +92,7 @@ export async function hookLetterGrid(rc) {
   return json(await tstub.setTestLetterGrid(parseInt(tb && tb.id, 10), tb && tb.rows));
 }
 
-/** @param {RouteContext} rc */
-export async function hookSigv4(rc) {
+export async function hookSigv4(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);
@@ -109,8 +101,7 @@ export async function hookSigv4(rc) {
   return json({ url: await sigv4Presign({ method: sb.method, host: sb.host, path: sb.path, query: sb.query, accessKey: sb.accessKey, secretKey: sb.secretKey, region: sb.region, expires: sb.expires, date: new Date(sb.date) }) });
 }
 
-/** @param {RouteContext} rc */
-export async function hookLiarsDice(rc) {
+export async function hookLiarsDice(rc: RouteContext) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
   if (!owner) return json({ error: "The owner key is required" }, 403);

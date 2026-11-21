@@ -11,19 +11,17 @@ import { b64urlDecode, concatBytes, hkdf } from "../lib/crypto.js";
 // site's own mailbox (GMAIL_SENDER, a [vars] entry), never a personal
 // address in the code. RFC 8292 also accepts an https: URL, the fallback.
 // Changing it doesn't touch subscriptions (they're bound to the key).
-/** @param {Env | null | undefined} env */
-export function vapidSubject(env) {
+export function vapidSubject(env: Env | null | undefined) {
   return env && env.GMAIL_SENDER ? "mailto:" + env.GMAIL_SENDER : "https://chat.victorio.cloud";
 }
 
 // aes128gcm body for one subscription: header (salt, record size, ephemeral
 // public key) followed by the single encrypted record.
 /**
- * @param {string} p256dh the subscription's public key (base64url)
- * @param {string} auth its auth secret (base64url)
- * @param {string} payloadText
+ * @param p256dh the subscription's public key (base64url)
+ * @param auth its auth secret (base64url)
  */
-export async function encryptPushPayload(p256dh, auth, payloadText) {
+export async function encryptPushPayload(p256dh: string, auth: string, payloadText: string) {
   const uaPublic = b64urlDecode(p256dh);
   const authSecret = b64urlDecode(auth);
   const ephemeral = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
@@ -45,13 +43,8 @@ export async function encryptPushPayload(p256dh, auth, payloadText) {
   return concatBytes(header, asPublic, ct);
 }
 
-/**
- * @param {Env} env
- * @param {Pick<import("../room/Room.js").PushRow, "endpoint" | "p256dh" | "auth">} sub
- * @param {string} payloadText
- * @returns {Promise<number>} the push service's status
- */
-export async function sendWebPush(env, sub, payloadText) {
+/** @returns the push service's status */
+export async function sendWebPush(env: Env, sub: Pick<import("../room/Room.js").PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string): Promise<number> {
   const aud = new URL(sub.endpoint).origin;
   const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
   const authorization = await keys.vapidAuth(aud);

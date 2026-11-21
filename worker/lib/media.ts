@@ -10,31 +10,22 @@ import { CORS, json, parseRange } from "./http.js";
 // URL - and so the browser's cache entry - stable within the hour).
 // The room key is 32 random bytes kept in the room's own cfg
 // (media_sig_key; room/media.js), so there is no site-wide secret to
-// rotate. The HMAC is lib/crypto.js's synchronous one. Header auth keeps
+// rotate. The HMAC is lib/crypto.ts's synchronous one. Header auth keeps
 // working on the same routes (?invite= no longer authenticates media
 // reads); signatures are what listings, frames and the web app use.
 /**
- * @param {Uint8Array} keyBytes
- * @param {string | null | undefined} room
- * @param {number | string} id a message id, or "match.n" for a Sketch & Guess drawing
- * @param {string} kind
- * @param {number} exp unix seconds
+ * @param id a message id, or "match.n" for a Sketch & Guess drawing
+ * @param exp unix seconds
  */
-export function mediaSig(keyBytes, room, id, kind, exp) {
+export function mediaSig(keyBytes: Uint8Array, room: string | null | undefined, id: number | string, kind: string, exp: number) {
   return b64urlEncode(hmacSha256(keyBytes, new TextEncoder().encode(room + "|" + id + "|" + kind + "|" + exp)));
 }
 
 // The Worker verifies signatures with the room's key, fetched from the
 // room object once and cached in the isolate for a minute.
-/** @type {Map<string, { bytes: Uint8Array, at: number }>} */
-export const _mediaKeyCache = new Map();
+export const _mediaKeyCache: Map<string, { bytes: Uint8Array, at: number }> = new Map();
 
-/**
- * @param {Env} env
- * @param {string} room
- * @returns {Promise<Uint8Array | null>}
- */
-export async function roomMediaKeyBytes(env, room) {
+export async function roomMediaKeyBytes(env: Env, room: string): Promise<Uint8Array | null> {
   const hit = _mediaKeyCache.get(room);
   if (hit && Date.now() - hit.at < 60000) return hit.bytes;
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
@@ -45,13 +36,7 @@ export async function roomMediaKeyBytes(env, room) {
   return bytes;
 }
 
-/**
- * @param {Env} env
- * @param {string} room
- * @param {number | string} id
- * @param {string} kind
- */
-export async function mediaSigParams(env, room, id, kind) {
+export async function mediaSigParams(env: Env, room: string, id: number | string, kind: string) {
   const key = await roomMediaKeyBytes(env, room);
   if (!key) return "";
   // Same hour grid as the Room's mediaQuery, so a URL minted here is
@@ -64,14 +49,7 @@ export async function mediaSigParams(env, room, id, kind) {
 // Tri-state for read routes: "none" (no signature params - fall through
 // to credential auth), "ok" (serve), "bad" (params present but invalid
 // or expired - the route answers 403).
-/**
- * @param {Env} env
- * @param {string} room
- * @param {number | string} id
- * @param {string} kind
- * @param {URL} url
- */
-export async function mediaSigState(env, room, id, kind, url) {
+export async function mediaSigState(env: Env, room: string, id: number | string, kind: string, url: URL) {
   const exp = url.searchParams.get("exp");
   const sig = url.searchParams.get("sig");
   if (!exp || !sig) return "none";
@@ -88,8 +66,7 @@ export async function mediaSigState(env, room, id, kind, url) {
 // opaque origin (the sandbox flags, echoed by the embedding iframe) and no
 // network access at all, so it can never reach the room API, the page around
 // it, or anywhere else.
-/** @param {string} kind */
-export function mediaCsp(kind) {
+export function mediaCsp(kind: string) {
   if (kind === "html") return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; sandbox allow-scripts";
   return "default-src 'none'; sandbox";
 }
@@ -98,14 +75,8 @@ export function mediaCsp(kind) {
 // is only ever a download: octet-stream, Content-Disposition attachment
 // under its own name, nosniff and the locked-down CSP, so no file - an
 // .html, an .svg, a PDF - is ever rendered as a page on this origin.
-/**
- * @param {string} kind
- * @param {string} type
- * @param {string | null | undefined} name
- */
-export function mediaHeaders(kind, type, name) {
-  /** @type {Record<string, string>} */
-  const h = {
+export function mediaHeaders(kind: string, type: string, name: string | null | undefined) {
+  const h: Record<string, string> = {
     "Content-Type": kind === "file" ? "application/octet-stream" : type, "Cache-Control": MEDIA_CACHE,
     "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
     "Accept-Ranges": "bytes",
@@ -115,8 +86,7 @@ export function mediaHeaders(kind, type, name) {
 }
 
 // RFC 6266: an ASCII fallback name plus the exact UTF-8 one (RFC 5987).
-/** @param {string} name */
-export function attachmentDisposition(name) {
+export function attachmentDisposition(name: string) {
   const ascii = String(name).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
   const exact = encodeURIComponent(String(name)).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
   return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + exact;
@@ -134,16 +104,8 @@ export const MEDIA_CACHE = "private, max-age=3600, immutable";
 // materializes inside the Durable Object. If that direct read fails, the Room's
 // own buffered R2 read (getMedia) is the second try; there is no in-DB copy
 // (phase B).
-/**
- * @param {Request} request
- * @param {Env} env
- * @param {DurableObjectStub} stub the room
- * @param {number} id
- * @param {string} kind
- * @param {string} room
- * @param {import("../room/media.js").MediaViewer} viewer
- */
-export async function serveMedia(request, env, stub, id, kind, room, viewer) {
+/** @param stub the room */
+export async function serveMedia(request: Request, env: Env, stub: DurableObjectStub, id: number, kind: string, room: string, viewer: import("../room/media.js").MediaViewer) {
   const meta = await stub.mediaMeta(id, kind, viewer);
   if (meta && meta.r2key && env.MEDIA) {
     try {
@@ -177,14 +139,9 @@ export async function serveMedia(request, env, stub, id, kind, room, viewer) {
 // Serve one media object (from the Room's media layer) with Range support, so audio
 // and video players can seek. The object carries the bytes for the requested range.
 /** One media object's bytes (or none, for a HEAD) and how they sit in the
- *  whole: a range when partial, start and end inclusive.
- *  @typedef {{ type: string, size: number, name: string | null, partial: boolean, start: number, end: number, data: ArrayBuffer | null }} MediaBytes */
-/**
- * @param {Request} request
- * @param {MediaBytes} a
- * @param {string} kind
- */
-export function mediaResponse(request, a, kind) {
+ *  whole: a range when partial, start and end inclusive. */
+export type MediaBytes = { type: string, size: number, name: string | null, partial: boolean, start: number, end: number, data: ArrayBuffer | null };
+export function mediaResponse(request: Request, a: MediaBytes, kind: string) {
   const headers = mediaHeaders(kind, a.type, a.name);
   if (a.partial) {
     headers["Content-Range"] = "bytes " + a.start + "-" + a.end + "/" + a.size;

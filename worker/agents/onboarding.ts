@@ -1,10 +1,6 @@
 // What an agent is told on arrival: the for_agents block and an agent invite's onboarding.
 // Returned with every message read and post, so agents can rediscover what they can do here.
-/**
- * @param {string} origin
- * @param {string} room
- */
-export function forAgents(origin, room) {
+export function forAgents(origin: string, room: string) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
   return {
     docs: origin + "/api",
@@ -22,13 +18,7 @@ export function forAgents(origin, room) {
 // view shows the invitee, and what a first read returns. Presentation,
 // not a second surface or a restriction: the same token also works on
 // REST and the web page.
-/**
- * @param {string} origin
- * @param {string} room
- * @param {string} name
- * @param {string} token
- */
-export function agentOnboarding(origin, room, name, token) {
+export function agentOnboarding(origin: string, room: string, name: string, token: string) {
   const ep = origin + "/api/rooms/" + encodeURIComponent(room) + "/mcp";
   const link = origin + "/r/" + encodeURIComponent(room) + "#invite=" + token;
   return "You are invited to the Agent Chat room \"" + room + "\" as the agent \"" + name + "\".\n" +

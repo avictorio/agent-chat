@@ -16,18 +16,15 @@ import {
   mcpOk,
 } from "../agents/mcp.js";
 
-/** @typedef {import("../index.js").RouteContext} RouteContext */
+export type RouteContext = import("../index.js").RouteContext;
 
 // The wake recipe (Muse harnesses): a text document, plus the watcher
 // script it installs, served from single sources in worker/ with the room,
 // the caller's name and this origin substituted in. The caller's token
 // is never substituted anywhere: the recipe tells the agent to use the
 // token its invite already gave it.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function recipeRoute(rc, m) {
+/** @param m the path's match */
+export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -46,15 +43,12 @@ export async function recipeRoute(rc, m) {
   // One pass with a lookup, never a chain: substituted values are not
   // rescanned, so a member (or room) whose name IS a placeholder string
   // gets it verbatim instead of being rewritten by a later pass.
-  const fill = (/** @type {string} */ t) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => /** @type {Record<string, string>} */ (subs)[mm]);
+  const fill = (t: string) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => (subs as Record<string, string>)[mm]);
   return new Response(fill(m[2] ? AGENT_WATCH : AGENT_RECIPE), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function toolsRoute(rc, m) {
+/** @param m the path's match */
+export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
@@ -72,8 +66,8 @@ export async function toolsRoute(rc, m) {
   }
   if (m[2] !== "fetch") return json({ error: "Unknown tool. GET " + tbase + "/tools lists them" }, 404);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  /** @type {Record<string, any> | null} the request's JSON body */
-  let tb = null;
+  /** the request's JSON body */
+  let tb: Record<string, any> | null = null;
   try { tb = await request.json(); } catch (e) {}
   const target = fetchTarget(tb && tb.url);
   if (!target) return json({ error: "Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)" }, 400);
@@ -82,8 +76,7 @@ export async function toolsRoute(rc, m) {
   if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);
   if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return json({ error: "This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours" }, 429);
   const fr = await webFetch(target);
-  /** @type {Record<string, unknown>} */
-  const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
+  const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);
   if (wantPost && !fr.error) {
     const full = fr.text || "";
     const excerpt = full.slice(0, 1500);
@@ -93,31 +86,28 @@ export async function toolsRoute(rc, m) {
   return json(out, fr.error ? 502 : 200);
 }
 
-// MCP endpoint: the room as a tool surface (see mcpCatalog in agents/mcp.js). POST
+// MCP endpoint: the room as a tool surface (see mcpCatalog in agents/mcp.ts). POST
 // one JSON-RPC request per call; authenticate with the same X-Invite-Token
 // (or ?invite=) as REST, or the owner key. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.
-/**
- * @param {RouteContext} rc
- * @param {RegExpMatchArray} m the path's match
- */
-export async function mcpRoute(rc, m) {
+/** @param m the path's match */
+export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  /** @type {Record<string, any> | null} the request's JSON body: one JSON-RPC request, or a batch */
-  let rpcBody = null;
+  /** the request's JSON body: one JSON-RPC request, or a batch */
+  let rpcBody: Record<string, any> | null = null;
   try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
-  const handleRpc = async (/** @type {Record<string, any> | null | undefined} one JSON-RPC request, as sent */ req) => {
+  const handleRpc = async (/** one JSON-RPC request, as sent */ req: Record<string, any> | null | undefined) => {
     if (!req || typeof req !== "object" || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
     const isNotification = !("id" in req) || req.id === null && req.method.indexOf("notifications/") === 0;
     if (isNotification || req.method.indexOf("notifications/") === 0) return null;
     const id = req.id === undefined ? null : req.id;
-    const ok = (/** @type {unknown} */ result) => ({ jsonrpc: "2.0", id: id, result: result });
-    const fail = (/** @type {number} */ code, /** @type {string} */ message) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
+    const ok = (result: unknown) => ({ jsonrpc: "2.0", id: id, result: result });
+    const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
     if (req.method === "ping") return ok({});
     if (req.method === "initialize") {
       const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
@@ -132,7 +122,7 @@ export async function mcpRoute(rc, m) {
       if (!tname) return fail(-32602, "tools/call needs params.name");
       const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
       try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
-      catch (e) { return ok(mcpErr(e && /** @type {Error} */ (e).message ? /** @type {Error} */ (e).message : String(e))); }
+      catch (e) { return ok(mcpErr(e && (e as Error).message ? (e as Error).message : String(e))); }
     }
     return fail(-32601, "Method not found: " + req.method);
   };

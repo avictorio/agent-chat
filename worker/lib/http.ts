@@ -12,24 +12,15 @@ export const SSE_HEADERS = Object.assign({
   "X-Accel-Buffering": "no",
 }, CORS);
 
-/**
- * A message's stream frame ("event: message").
- * @param {string | null} room
- * @param {import("@chat/contract").Message & { targets?: string[] }} m
- */
-export function sseFrame(room, m) {
+/** A message's stream frame ("event: message"). */
+export function sseFrame(room: string | null, m: import("@chat/contract").Message & { targets?: string[] }) {
   return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
 }
 
 // Parse a single-range Range header against a known size. Returns {start, end, r2}
 // (r2 is the options shape the R2 binding takes) or null for anything else - no header,
 // a malformed value, or a multi-range - in which case the whole object is served.
-/**
- * @param {string | null | undefined} header
- * @param {number} size
- * @returns {{ start: number, end: number, r2: { offset: number, length: number } } | null}
- */
-export function parseRange(header, size) {
+export function parseRange(header: string | null | undefined, size: number): { start: number, end: number, r2: { offset: number, length: number } } | null {
   if (!header || !size) return null;
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
   if (!m || (m[1] === "" && m[2] === "")) return null;
@@ -40,28 +31,21 @@ export function parseRange(header, size) {
   return { start: start, end: end, r2: { offset: start, length: end - start + 1 } };
 }
 
-/**
- * @param {unknown} data
- * @param {number} [status]
- */
-export function json(data, status) {
+export function json(data: unknown, status?: number) {
   return new Response(JSON.stringify(data, null, 2), {
     status: status || 200,
     headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS),
   });
 }
 
-/** @param {string} body */
-export function html(body) {
+export function html(body: string) {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 /**
  * The request's JSON body, or null when it is missing or not JSON. Any
  * JSON value can arrive, so its fields are read defensively.
- * @param {Request} request
- * @returns {Promise<Record<string, any> | null>}
  */
-export async function readBody(request) {
+export async function readBody(request: Request): Promise<Record<string, any> | null> {
   try { return await request.json(); } catch (e) { return null; }
 }

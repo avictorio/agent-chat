@@ -3,7 +3,7 @@ import type { GameDef } from "../shared/catalog";
 // The catalog entry for Two Truths and a Lie: its card, How to play, setup options and
 // the request that starts it (shared/catalog.tsx lists every game in
 // gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.js).
+// docs (worker/agents/docs.ts).
 
 export const TWO_TRUTHS: GameDef = {
   id: "twotruths",

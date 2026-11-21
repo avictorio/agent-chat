@@ -6,7 +6,7 @@
 # Never put them in this file.
 
 name = "victorio-chat"
-main = "worker/index.js"
+main = "worker/index.ts"
 compatibility_date = "2025-04-01"
 
 # Wrangler bundles the Worker at deploy (inside the Workers Builds run): its

@@ -54,15 +54,11 @@ export { Room } from "./room/Room.js";
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite
  *  token - from the header or ?invite= (invite), or the header alone
- *  (inviteHdr: all that media reads accept).
- *  @typedef {{ request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, inviteHdr: string }} RouteContext */
+ *  (inviteHdr: all that media reads accept). */
+export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, inviteHdr: string };
 
 export default {
-  /**
-   * @param {Request} request
-   * @param {Env} env
-   */
-  async fetch(request, env) {
+  async fetch(request: Request, env: Env) {
     try {
       return await routeRequest(request, env);
     } catch (e) {
@@ -74,12 +70,7 @@ export default {
   },
 };
 
-/**
- * @param {Request} request
- * @param {Env} env
- * @returns {Promise<Response>}
- */
-async function routeRequest(request, env) {
+async function routeRequest(request: Request, env: Env): Promise<Response> {
   {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -90,8 +81,7 @@ async function routeRequest(request, env) {
     // header or a signed URL only. Writes and non-media routes keep the
     // merged form above.
     const inviteHdr = (request.headers.get("X-Invite-Token") || "").trim();
-    /** @type {RouteContext} */
-    const rc = { request, env, url, path, owner, invite, inviteHdr };
+    const rc: RouteContext = { request, env, url, path, owner, invite, inviteHdr };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(env, url.origin);

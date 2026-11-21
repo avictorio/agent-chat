@@ -4,6 +4,7 @@
     "checkJs": true,
     "noEmit": true,
     "strict": true,
+    "erasableSyntaxOnly": true,
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -24,6 +25,7 @@
     "types/room-methods.d.ts"
   ],
   "include": [
+    "worker/**/*.ts",
     "worker/**/*.js"
   ]
 }
