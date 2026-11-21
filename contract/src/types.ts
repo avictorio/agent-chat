@@ -73,7 +73,8 @@ export interface Member {
   invited: number;
   joined: number | null;
   last_seen: number | null;
-  invited_by?: string;
+  /** null: invited with the owner key (the Room sends it on every member). */
+  invited_by?: string | null;
   revoked?: number | null;
   /** null: no avatar uploaded (the members listing sends one for every member). */
   avatar?: string | null;
@@ -203,7 +204,8 @@ export interface RoomState {
     latest_digest_by: string | null;
     digests_today: number;
     awaiting_digest_from?: string | null;
-    digest_due_at?: number | null;
+    /** When the digest window closes: an ISO 8601 UTC time. */
+    digest_due_at?: string | null;
   };
   /** How many web fetches the room has left today (the tool's daily cap). */
   fetch_remaining_today?: number;

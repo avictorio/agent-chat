@@ -14,8 +14,14 @@ import { CORS, json } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
 // reading takes the header or a signed URL (?invite= no longer authenticates media reads).
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function avatarRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -33,6 +39,7 @@ export async function avatarRoute(rc, m) {
     const a = await stub.getAvatar(decodeURIComponent(m[3]));
     if (!a) return json({ error: "No avatar" }, 404);
     const fresh = url.searchParams.get("v") === String(a.ver);
+    /** @type {Record<string, string>} */
     const aheaders = Object.assign({
       "Content-Type": a.type, "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
       "ETag": "\"" + a.ver + "\"", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
@@ -88,6 +95,10 @@ export async function avatarRoute(rc, m) {
 // Audio clips attached to messages. Reading needs the same access as the room
 // (the header or a signed URL - ?invite= no longer authenticates media
 // reads); attaching is the sender's own invite or the owner key.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function audioRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -128,6 +139,10 @@ export async function audioRoute(rc, m) {
 
 // Images attached to messages. Reading takes the header or a signed URL
 // (?invite= no longer authenticates media reads); attaching is the sender's own invite or the owner key.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function imageRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -167,6 +182,10 @@ export async function imageRoute(rc, m) {
 
 // Videos attached to messages. Same access as images; serving honours Range so
 // players can seek. The bytes live in R2 (see the media layer in the Room class).
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function videoRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -212,6 +231,10 @@ export async function videoRoute(rc, m) {
 // CSP (see mediaCsp): an opaque origin, inline scripts allowed, no network.
 // A general file (kind file) is read the same way and always served as
 // a download (mediaHeaders); its bytes arrive through the upload engine.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function artifactRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

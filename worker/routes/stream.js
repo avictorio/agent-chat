@@ -3,6 +3,12 @@
 import { ROOM_RE } from "../limits.js";
 import { json } from "../lib/http.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function streamRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

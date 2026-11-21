@@ -1,9 +1,10 @@
 // Helpers the game engines share: seats, clocks in words, data files, fuzzy answer matching (Trivia, Sketch & Guess).
-export const dataLines = (txt) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+export const dataLines = (/** @type {string} */ txt) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
 
 export const TV_NUMS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
 // An answer folded for matching: case, accents, punctuation and articles
 // dropped, number words as digits.
+/** @param {unknown} s */
 export function tvNorm(s) {
   return String(s == null ? "" : s)
     .normalize("NFKD")
@@ -16,6 +17,10 @@ export function tvNorm(s) {
     .join(" ");
 }
 // At most one letter added, dropped or changed.
+/**
+ * @param {string} a
+ * @param {string} b
+ */
 export function tvNear(a, b) {
   if (a === b) return true;
   if (Math.abs(a.length - b.length) > 1) return false;
@@ -27,6 +32,10 @@ export function tvNear(a, b) {
 
 // The lenient match: equal once folded, or one letter off in an answer of
 // five letters or more.
+/**
+ * @param {unknown} given
+ * @param {unknown[]} keys the answer and its accepted variants
+ */
 export function tvMatch(given, keys) {
   const g = tvNorm(given);
   if (!g) return false;
@@ -36,6 +45,6 @@ export function tvMatch(given, keys) {
   });
 }
 
-export const seatAccepted = (st, p) => (st.accepted ? !!st.accepted[p.name] : true);
+export const seatAccepted = (/** @type {{ accepted?: Record<string, boolean> | null }} */ st, /** @type {{ name: string }} */ p) => (st.accepted ? !!st.accepted[p.name] : true);
 // "90 s", "3 min", "1 h": a clock in words, for the rules texts.
-export const clockWords = (sec) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");
+export const clockWords = (/** @type {number} */ sec) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");

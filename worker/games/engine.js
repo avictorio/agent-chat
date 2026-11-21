@@ -17,6 +17,45 @@ import { lettergridEngine } from "./lettergrid.js";
 import { SG_IMAGE_MAX, sketchEngine } from "./sketch.js";
 import { triviaEngine } from "./trivia.js";
 
+/** @typedef {import("../room/Room.js").Room} Room */
+/** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("../room/state.js").GameStateItem} GameStateItem */
+/** A match's public summary or full state as the shared machinery handles
+ *  it: the fields every game's state has (GameStateBase in the contract)
+ *  plus its game's own, which the machinery passes through untouched (and
+ *  to which it adds targets, created, ended, how_to_play).
+ *  @typedef {{ id: number, type: string, status: string, players: Array<{ name: string, hex: string, accepted?: boolean }>, [field: string]: any }} GamePub */
+/** What a create or a move answers: the status to send, with the match's
+ *  full state or the error (and, for a refused move, example moves).
+ *  @typedef {{ status?: number, error?: string, game?: unknown, legal_moves?: unknown }} GameReply */
+/**
+ * A game's plug-in: one entry of GAME_ENGINES, as described below. The
+ * match state (st) is untyped JSON here, as on GameRow; each game's own
+ * module types its own state.
+ * @typedef {{
+ *   name: string,
+ *   turnWord: string,
+ *   logTick(st: any): number,
+ *   clockSeconds(st: any): number,
+ *   create(room: Room, creator: string, players: unknown[], opts: Record<string, any>, roomName: string): GameReply | Promise<GameReply>,
+ *   summary(room: Room, g: GameRow): GamePub,
+ *   full(room: Room, g: GameRow, who: string | null | undefined): GamePub,
+ *   move(room: Room, g: GameRow, who: string, dir: unknown, roomName: string, fields?: Record<string, unknown> | null): GameReply | Promise<GameReply>,
+ *   advance(room: Room, g: GameRow, roomName: string): void,
+ *   advanceAsync?(room: Room, g: GameRow, roomName: string): Promise<void>,
+ *   targets(pub: GamePub): string[],
+ *   card(g: GameRow): object,
+ *   stateItem(r: { id: number, status: string }, st: any): GameStateItem,
+ *   turnOf(item: GameStateItem): number | string,
+ *   moveHint(item: GameStateItem, me: string): string,
+ *   result(room: Room, g: GameRow): string,
+ *   rules(st: any): string,
+ *   resolveRound?(room: Room, g: GameRow): void,
+ *   standing?(room: Room, st: any): string | null,
+ *   active?(room: Room, st: any): Array<{ name: string }>,
+ * }} GameEngine
+ */
+
 /* ---------- game engines (groundwork, 2026-11-19) ----------
    Every game the Room plays is one entry here. The shared machinery -
    lobby and accept, clocks and the alarm, stream frames, room_state
@@ -70,8 +109,10 @@ export const GAME_ENGINES = {
 };
 // A structured move's named parts from a request body or MCP arguments
 // (only the known keys, so nothing else rides along), or null.
+/** @param {Record<string, any> | null | undefined} src */
 export function moveFields(src) {
   if (!src || typeof src !== "object") return null;
+  /** @type {Record<string, unknown>} */
   const out = {};
   if (Array.isArray(src.statements)) out.statements = src.statements.slice(0, 5);
   if (src.lie !== undefined && src.lie !== null) out.lie = src.lie;
@@ -97,6 +138,11 @@ export function moveFields(src) {
 export const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel", connectfour: "fourinarow", connect4: "fourinarow", c4: "fourinarow", liars: "liarsdice", "liar'sdice": "liarsdice", dice: "liarsdice", bluff: "liarsdice", twotruthsandalie: "twotruths", "2truths": "twotruths", "2truthsandalie": "twotruths", truths: "twotruths", exquisitecorpse: "corpse", ec: "corpse", twentyquestions: "twenty", "20questions": "twenty", "20q": "twenty", wolf: "werewolf", werewolves: "werewolf", mafia: "werewolf", letters: "lettergrid", lettergridbrawl: "lettergrid", grid: "lettergrid", brawl: "lettergrid", wordgrid: "lettergrid", quiz: "trivia", quizmaster: "trivia", triviawithwagers: "trivia", roomloretrivia: "trivia", roomlore: "trivia", sketchandguess: "sketch", "sketch&guess": "sketch", pictionary: "sketch", aipictionary: "sketch", drawing: "sketch" };
 // A match's engine, from its state (or a room_state item): matches from
 // before the type field are Light Cycles, the first game.
+/**
+ * @param {{ type?: string } | null | undefined} st
+ * @returns {GameEngine}
+ */
 export function gameEngine(st) {
-  return (st && GAME_ENGINES[st.type]) || GAME_ENGINES.lightcycles;
+  // every entry implements GameEngine (the contract above); an unknown type is no entry
+  return /** @type {GameEngine} */ ((st && GAME_ENGINES[/** @type {import("@chat/contract").GameType} */ (st.type)]) || GAME_ENGINES.lightcycles);
 }

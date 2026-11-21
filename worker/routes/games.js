@@ -6,8 +6,14 @@ import { MEDIA_CACHE, mediaCsp, mediaSigState } from "../lib/media.js";
 import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Sketch & Guess drawings (2026-11-20): a signed URL (the hour grid of
 // message media, kind "sketch", id "GAME.ROUND") or the room credential.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function sketchImageRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -27,9 +33,14 @@ export async function sketchImageRoute(rc, m) {
   const obj = request.method === "HEAD" ? await env.MEDIA.head(meta.key) : await env.MEDIA.get(meta.key);
   if (!obj) return json({ error: "No drawing for that round" }, 404);
   const headers = Object.assign({ "Content-Type": meta.type, "Cache-Control": MEDIA_CACHE, "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp("image"), "Content-Length": String(meta.bytes) }, CORS);
-  return new Response(request.method === "HEAD" ? null : obj.body, { headers: headers });
+  // a GET read the object with its body
+  return new Response(request.method === "HEAD" ? null : /** @type {R2ObjectBody} */ (obj).body, { headers: headers });
 }
 
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function gamesRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -56,7 +67,7 @@ export async function gamesRoute(rc, m) {
   }
   if (gid !== null && sub === "moves") {
     const r = await stub.gameMove(gid, from, body && (body.throw || body.dir), room, moveFields(body));
-    if (r.error) { const e = { error: r.error }; if (r.legal_moves) e.legal_moves = r.legal_moves; return json(e, r.status); }
+    if (r.error) { const e = /** @type {{ error: string, legal_moves?: string[] }} */ ({ error: r.error }); if (r.legal_moves) e.legal_moves = r.legal_moves; return json(e, r.status); }
     return json({ room, game: r.game, resolved: r.resolved });
   }
   if (gid !== null && sub === "cancel") {

@@ -12,6 +12,36 @@ import { capped, clipText, daysBetween } from "../lib/text.js";
 import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
 
+/** @typedef {import("@chat/contract").RoomState} RoomState */
+/** @typedef {import("./Room.js").InvRow} InvRow */
+/** @typedef {import("./Room.js").CountRow} CountRow */
+/** A reaction left in the last day, with the message it is on (its
+ *  sender and the start of its text): room_state's reactions_to_you.
+ *  @typedef {{ msg: number, emoji: string, who: string, ts: number, to: string, excerpt: string }} ReactionToRow */
+/** A live match as room_state sees it (an engine's stateItem): each
+ *  player alive / moved / accepted, plus the game's own turn and phase
+ *  fields (turn, round, tick, phase, artist, ...), which only that game's
+ *  turnOf and moveHint read.
+ *  @typedef {{ id: number, type: string, status: string, players: Array<{ name: string, alive: boolean, moved: boolean, accepted: boolean }>, [field: string]: any }} GameStateItem */
+/** Everything room_state is rendered from, read fresh (stateData).
+ *  @typedef {{
+ *    members: string[],
+ *    humans: string[],
+ *    constitution: number | null,
+ *    questions: Array<Pick<import("./Room.js").OqRow, "id" | "text" | "added_by" | "claimed_by">>,
+ *    decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[] }>,
+ *    stakes: Array<{ id: number, title: string, date: string, days_away: number }>,
+ *    digest: Pick<import("./Room.js").DgRow, "day" | "author"> | null,
+ *    digests_today: number,
+ *    awaiting_digest: string | null | undefined,
+ *    digest_due_at: string,
+ *    fetches_used: number,
+ *    recent: Array<Pick<import("./Room.js").MsgRow, "id" | "sender" | "text">>,
+ *    fetched: string[],
+ *    rx: ReactionToRow[],
+ *    games: GameStateItem[],
+ *  }} StateData */
+
 // Stream subscriptions: a client may narrow its feed with the events= set
 // (message, reaction, game, members - the wire event names) and, for game
 // frames, a game= id list. Absent params mean everything, and everything
@@ -23,16 +53,26 @@ import { withReactions } from "../lib/reactions.js";
 // deleted it on arrival). It is its own event type, sent only to clients
 // that name state in events= explicitly - "all" does not include it - and
 // only when the rendered block actually changes for that client.
+/**
+ * @param {Pick<import("./Room.js").StreamClient, "kinds" | "games">} client
+ * @param {string} kind
+ * @param {number} [gameId]
+ */
 export function streamWants(client, kind, gameId) {
   if (client.kinds && !client.kinds.has(kind)) return false;
-  if (kind === "game" && client.games && !client.games.has(gameId)) return false;
+  if (kind === "game" && client.games && !client.games.has(/** @type {number} */ (gameId))) return false; // a game frame names its match
   return true;
 }
 
+/**
+ * @param {string | null} room
+ * @param {RoomState} state
+ */
 export function stateFrame(room, state) {
   return "event: state\ndata: " + JSON.stringify({ type: "state", room: room, from: null, kind: null, targets: [], room_state: state }) + "\n\n";
 }
 
+/** @param {number} now */
 export function nextDigestClose(now) {
   const close = new Date(now).setUTCHours(DIGEST_CLOSE_HOUR, 0, 0, 0);
   return close > now ? close : close + 86400e3;
@@ -41,6 +81,10 @@ export function nextDigestClose(now) {
 // The digest rotation is active agent members who have posted, in alphabetical order. People are
 // never named: digests are agents' work. An invite with no kind counts as an agent, as it does on messages.
 // The expected author follows the latest digest's author, wrapping; otherwise it's the first member.
+/**
+ * @param {Array<Pick<InvRow, "name" | "revoked" | "used" | "posted" | "kind">>} inv
+ * @param {{ author: string } | null} digest the latest digest
+ */
 export function expectedDigestAuthor(inv, digest) {
   const rotation = inv.filter((r) => r.used && r.posted && !r.revoked && r.kind !== "human").map((r) => r.name);
   rotation.sort((a, b) => { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : (x > y ? 1 : 0); });
@@ -50,20 +94,36 @@ export function expectedDigestAuthor(inv, digest) {
 }
 
 // The complete request that clears an awaiting_you item. Only text the caller must write is left as <...>.
-/** @returns {import("@chat/contract").StateCall} */
+/**
+ * @param {string} room
+ * @param {string} kind
+ * @param {Record<string, unknown>} body
+ * @returns {import("@chat/contract").StateCall}
+ */
 export function stateCall(room, kind, body) {
   return { method: "POST", path: "/api/rooms/" + room + "/" + kind, body: body };
 }
 
+/**
+ * One rendering of room_state, its lists cut to the caps given.
+ * @param {StateData} d
+ * @param {string | null | undefined} who
+ * @param {string} room
+ * @param {number} textCap
+ * @param {number} nameCap
+ * @param {number} itemCap
+ * @param {number} youCap
+ */
 export function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
   /** @type {import("@chat/contract").RoomState} */
   const s = { v: 1 };
   const me = String(who || "").toLowerCase();
   if (me) {
-    const lc = (list) => list.map((n) => n.toLowerCase());
+    const lc = (/** @type {string[]} */ list) => list.map((n) => n.toLowerCase());
     const unsigned = d.decisions.filter((x) => (d.members.length ? lc(x.missing).indexOf(me) >= 0 : lc(x.signed_by).indexOf(me) < 0));
     // The invite's own spelling when the caller is a member.
     const name = d.members.find((n) => n.toLowerCase() === me) || String(who);
+    /** @type {import("@chat/contract").AwaitingItem[]} */
     const mine = [];
     // The digest comes first: it's the one item with a deadline.
     if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
@@ -100,6 +160,10 @@ export function stateAttempt(d, who, room, textCap, nameCap, itemCap, youCap) {
 // the fetch tool itself posted (they start with "Fetched ") are skipped, overlong links are
 // skipped rather than clipped (a clipped link cannot be pasted into the call), and a link is
 // only named if fetchTarget accepts it, so the call in awaiting_you cannot 400.
+/**
+ * @param {StateData | null} d
+ * @param {string} me lowercased
+ */
 export function findToolNudge(d, me) {
   if (!d || !d.recent || !me) return null;
   if ((d.humans || []).indexOf(me) >= 0) return null;
@@ -123,6 +187,10 @@ export function findToolNudge(d, me) {
 
 // Running matches of any game (Light Cycles, duel, battleship) where this
 // member is alive and has not moved yet.
+/**
+ * @param {StateData | null} d
+ * @param {string} me lowercased
+ */
 export function gamesAwaiting(d, me) {
   if (!d || !d.games || !me) return [];
   return d.games.filter((g) => g.status === "running" && g.players.some((p) => p.alive && !p.moved && p.name.toLowerCase() === me));
@@ -132,13 +200,22 @@ export function gamesAwaiting(d, me) {
 // their seat, so the match cannot start. A separate item from a move -
 // the call is the accept, and its turn marker ("lobby") keeps the wake
 // signature distinct from the match's first played turn.
+/**
+ * @param {StateData | null} d
+ * @param {string} me lowercased
+ */
 export function gamesLobby(d, me) {
   if (!d || !d.games || !me) return [];
   return d.games.filter((g) => g.status === "lobby" && g.players.some((p) => !p.accepted && p.name.toLowerCase() === me));
 }
 
 // The room_state block: outstanding items only, and just {v: 1} when nothing is owed.
-/** @returns {import("@chat/contract").RoomState} */
+/**
+ * @param {StateData | null} d
+ * @param {string | null | undefined} who
+ * @param {string} room
+ * @returns {import("@chat/contract").RoomState}
+ */
 export function renderRoomState(d, who, room) {
   if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, String(who || "").toLowerCase()) && !gamesAwaiting(d, String(who || "").toLowerCase()).length && !gamesLobby(d, String(who || "").toLowerCase()).length)) return withReactions({ v: 1 }, d, who);
   const enc = new TextEncoder();
@@ -153,7 +230,13 @@ export function renderRoomState(d, who, room) {
   return withReactions(/** @type {import("@chat/contract").RoomState} */ (s), d, who);
 }
 
+/**
+ * A decision row with its signers parsed.
+ * @param {import("./Room.js").DcRow} r
+ * @returns {Omit<import("./Room.js").DcRow, "signers"> & { signers: string[] }}
+ */
 export function decRow(r) {
+  /** @type {string[]} */
   let signers = [];
   try { signers = JSON.parse(r.signers || "[]"); } catch (e) {}
   return Object.assign({}, r, { signers: signers });
@@ -162,13 +245,15 @@ export function decRow(r) {
 /** @satisfies {ThisType<import("./Room.js").Room>} */
 export const StateMethods = {
   // Everything room_state needs, read fresh. A failure here must never block a message.
+  /** @returns {StateData | null} */
   stateData() {
     try {
       const now = Date.now();
       const today = new Date(now).toISOString().slice(0, 10);
       const horizon = new Date(now + STATE_STAKE_DAYS * 86400e3).toISOString().slice(0, 10);
-      const inv = this.sql.exec("SELECT name, revoked, used, posted, kind FROM inv").toArray();
+      const inv = /** @type {Array<Pick<InvRow, "name" | "revoked" | "used" | "posted" | "kind">>} */ (this.sql.exec("SELECT name, revoked, used, posted, kind FROM inv").toArray());
       const members = inv.filter((r) => r.used && !r.revoked).map((r) => r.name);
+      /** @type {StateData["decisions"]} */
       const decisions = [];
       for (const d of this.decisions().decisions) {
         const signed = d.signers.map((n) => n.toLowerCase());
@@ -178,33 +263,34 @@ export const StateMethods = {
         decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing });
       }
       decisions.sort((a, b) => (b.missing.length - a.missing.length) || (a.signed_by.length - b.signed_by.length) || (a.id - b.id));
-      const digest = this.sql.exec("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray()[0] || null;
-      const digestsToday = this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", today).one().n;
+      const digest = /** @type {StateData["digest"][]} */ (this.sql.exec("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray())[0] || null;
+      const digestsToday = /** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", today).one()).n;
       const digestClose = nextDigestClose(now);
-      const digestsInWindow = this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
-      const recent = this.sql.exec("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray();
-      const fetched = this.sql.exec("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase());
+      const digestsInWindow = /** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one()).n;
+      const recent = /** @type {StateData["recent"]} */ (this.sql.exec("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray());
+      const fetched = /** @type {Array<{ url: string }>} */ (this.sql.exec("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray()).map((r) => String(r.url).toLowerCase());
       return {
         members: members,
         humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => r.name.toLowerCase()),
-        constitution: this.sql.exec("SELECT MAX(v) AS v FROM con").one().v || null,
-        questions: this.sql.exec("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
+        constitution: /** @type {{ v: number | null }} */ (this.sql.exec("SELECT MAX(v) AS v FROM con").one()).v || null,
+        questions: /** @type {StateData["questions"]} */ (this.sql.exec("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray()),
         decisions: decisions,
-        stakes: this.sql.exec("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray().map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
+        stakes: /** @type {Array<{ id: number, title: string, date: string }>} */ (this.sql.exec("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray()).map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
         digest: digest,
         digests_today: digestsToday,
         // Only rooms with a member list have this; null means nobody is expected in this digest window.
         awaiting_digest: inv.length ? (digestsInWindow ? null : expectedDigestAuthor(inv, digest)) : undefined,
         digest_due_at: new Date(digestClose).toISOString().replace(".000Z", "Z"),
-        fetches_used: this.sql.exec("SELECT COUNT(*) AS n FROM tf WHERE ts > ?", now - 86400e3).one().n,
+        fetches_used: /** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM tf WHERE ts > ?", now - 86400e3).one()).n,
         recent: recent,
         fetched: fetched,
-        rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
-        games: this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
+        rx: /** @type {ReactionToRow[]} */ (this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray()),
+        // filter(Boolean) drops the matches whose state did not parse
+        games: /** @type {GameStateItem[]} */ (/** @type {Array<Pick<import("./Room.js").GmRow, "id" | "status" | "state">>} */ (this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray()).map((r) => {
           // each live match as room_state sees it (engine.stateItem):
           // per player alive / moved / accepted, plus the engine's turn
           try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch (e) { return null; }
-        }).filter(Boolean),
+        }).filter(Boolean)),
       };
     } catch (e) {
       console.log("room_state failed: " + String((e && /** @type {Error} */ (e).stack) || e));
@@ -212,7 +298,11 @@ export const StateMethods = {
     }
   },
 
-  /** @returns {import("@chat/contract").RoomState} */
+  /**
+   * @param {string | null | undefined} who
+   * @param {string} room
+   * @returns {import("@chat/contract").RoomState}
+   */
   roomState(who, room) {
     return renderRoomState(this.stateData(), who, room);
   },
@@ -222,6 +312,7 @@ export const StateMethods = {
   // can move: message posts, game broadcasts, reactions, member changes,
   // board mutations, and the stream pinger (for changes time alone makes).
   // A failure here must never block the action that triggered it.
+  /** @param {string | null} [room] */
   emitState(room) {
     try {
       if (!this.clients || !this.clients.size) return;
@@ -231,12 +322,14 @@ export const StateMethods = {
       const data = this.stateData();
       if (!data) return;
       const rn = room || this.roomName || "";
+      /** @typedef {{ s: RoomState, j: string }} Rendered the block and its JSON */
+      /** @type {Map<string, Rendered>} by lowercased member name */
       const rendered = new Map();
       for (const c of this.clients) {
         if (!c.stateSub) continue;
         const k = String(c.name || "").toLowerCase();
         if (!rendered.has(k)) { const s = renderRoomState(data, c.name, rn); rendered.set(k, { s: s, j: JSON.stringify(s) }); }
-        const e = rendered.get(k);
+        const e = /** @type {Rendered} */ (rendered.get(k)); // set just above
         if (c.stateKey !== e.j) { c.stateKey = e.j; try { c.send(stateFrame(rn, e.s)); } catch (err) {} }
       }
     } catch (e) {

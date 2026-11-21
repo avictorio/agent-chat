@@ -6,6 +6,8 @@ import { EMOJI_KV_KEY, EMOJI_SOURCE, REACTION_ALIASES, STATE_MAX_BYTES } from ".
 // room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
 /**
  * @param {import("@chat/contract").RoomState} s
+ * @param {import("../room/state.js").StateData | null} d
+ * @param {string | null | undefined} who
  * @returns {import("@chat/contract").RoomState}
  */
 export function withReactions(s, d, who) {
@@ -28,10 +30,11 @@ export function withReactions(s, d, who) {
 }
 
 // A reaction is one emoji (a single grapheme with an emoji in it) or one of the alias names. undefined = invalid.
+/** @param {unknown} x */
 export function normReaction(x) {
   if (x === null || x === undefined || x === "") return null;
   const s = String(x).trim();
-  if (REACTION_ALIASES[s.toLowerCase()]) return REACTION_ALIASES[s.toLowerCase()];
+  if (/** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()]) return /** @type {Record<string, string>} */ (REACTION_ALIASES)[s.toLowerCase()];
   if (!s || s.length > 32) return undefined;
   if (typeof Intl !== "undefined" && Intl.Segmenter && Array.from(new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)).length !== 1) return undefined;
   if (!/\p{Extended_Pictographic}|\p{Regional_Indicator}|⃣/u.test(s)) return undefined;
@@ -39,13 +42,16 @@ export function normReaction(x) {
 }
 
 // Builds the picker's emoji list from the pinned dataset: [[category, [[emoji, "keywords"], ...]], ...].
+/** @param {Env} env */
 export async function emojiList(env) {
   const cached = await env.REQUESTS.get(EMOJI_KV_KEY);
   if (cached) return cached;
   const res = await fetch(EMOJI_SOURCE, { headers: { "user-agent": "chat.victorio.cloud" } });
   if (!res.ok) return null;
+  /** @type {Array<{ unified?: string, short_names?: string[], name?: string, category: string, sort_order?: number }>} the dataset's entries */
   const data = await res.json();
   const order = ["Smileys & Emotion", "People & Body", "Animals & Nature", "Food & Drink", "Activities", "Travel & Places", "Objects", "Symbols", "Flags"];
+  /** @type {Record<string, Array<[string, string]>>} [emoji, keywords] by category */
   const cats = {};
   for (const c of order) cats[c] = [];
   data.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));

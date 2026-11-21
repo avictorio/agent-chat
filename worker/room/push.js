@@ -6,21 +6,28 @@ import { PUSH_MAX_PER_MEMBER } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 
+/** @typedef {import("./Room.js").PushRow} PushRow */
+/** The site's VAPID keypair (the meta row "vapid" on the __vapid object):
+ *  the private key as a JWK and the public key in base64url.
+ *  @typedef {{ jwk: JsonWebKey, pub: string }} VapidRecord */
+
 /** @satisfies {ThisType<import("./Room.js").Room>} */
 export const PushMethods = {
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
+  /** @returns {Promise<VapidRecord>} */
   async vapidRecord() {
     this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
-    const got = this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray()[0];
+    const got = /** @type {{ v: string }[]} */ (this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray())[0];
     if (got) return JSON.parse(got.v);
     const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
     const pub = b64urlEncode(concatBytes(new Uint8Array([4]), b64urlDecode(jwk.x), b64urlDecode(jwk.y)));
     const rec = { jwk: jwk, pub: pub };
     this.sql.exec("INSERT OR IGNORE INTO meta (k, v) VALUES ('vapid', ?)", JSON.stringify(rec));
-    return JSON.parse(this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray()[0].v);
+    return JSON.parse(/** @type {{ v: string }[]} */ (this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray())[0].v);
   },
   async vapidPublic() { return (await this.vapidRecord()).pub; },
+  /** @param {string} aud the push service's origin */
   async vapidAuth(aud) {
     const rec = await this.vapidRecord();
     const key = await crypto.subtle.importKey("jwk", rec.jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
@@ -32,6 +39,11 @@ export const PushMethods = {
   },
 
   // ---- Web Push: subscriptions and fan-out ----
+  /**
+   * @param {string} member
+   * @param {Pick<PushRow, "endpoint" | "p256dh" | "auth">} sub
+   * @param {string} mode "mentions" or "all"
+   */
   pushSubscribe(member, sub, mode) {
     const who = String(member || "").toLowerCase();
     this.sql.exec("INSERT OR REPLACE INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES (?, ?, ?, ?, ?, ?)",
@@ -41,16 +53,29 @@ export const PushMethods = {
     this.sql.exec("DELETE FROM push WHERE member = ? AND endpoint NOT IN (SELECT endpoint FROM push WHERE member = ? ORDER BY ts DESC LIMIT ?)", who, who, PUSH_MAX_PER_MEMBER);
     return { status: 200 };
   },
+  /**
+   * @param {string} member
+   * @param {string} endpoint
+   * @param {boolean} owner
+   */
   pushUnsubscribe(member, endpoint, owner) {
     if (owner) this.sql.exec("DELETE FROM push WHERE endpoint = ?", endpoint);
     else this.sql.exec("DELETE FROM push WHERE endpoint = ? AND member = ?", endpoint, String(member || "").toLowerCase());
     return { status: 200 };
   },
+  /**
+   * @param {string} member
+   * @param {string} endpoint
+   */
   pushStatus(member, endpoint) {
-    const rows = this.sql.exec("SELECT endpoint, mode FROM push WHERE member = ?", String(member || "").toLowerCase()).toArray();
+    const rows = /** @type {Pick<PushRow, "endpoint" | "mode">[]} */ (this.sql.exec("SELECT endpoint, mode FROM push WHERE member = ?", String(member || "").toLowerCase()).toArray());
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   },
+  /**
+   * @param {import("./messages.js").ApiMessage} msg
+   * @param {string | null} room
+   */
   async notifyPush(msg, room) {
     const sender = String(msg.from || "").toLowerCase();
     const text = String(msg.text || "").trim();
@@ -59,10 +84,10 @@ export const PushMethods = {
     // Only the owner ("") and members with an active invite hear about a
     // message: revoke() drops a leaving member's registrations, and this
     // keeps any that slipped through (older rows) from leaking text.
-    const active = new Set(this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
-    const allowed = (m) => m === "" || active.has(m);
+    const active = new Set(/** @type {Pick<import("./Room.js").InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray()).map((r) => String(r.name).toLowerCase()));
+    const allowed = (/** @type {string} */ m) => m === "" || active.has(m);
     // Web push (browser subscriptions).
-    const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
+    const rows = /** @type {Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">[]} */ (this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray());
     const targets = rows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     for (const r of targets) {
       try {
@@ -72,12 +97,14 @@ export const PushMethods = {
     }
   },
 
+  /** @param {string | null | undefined} name */
   notifyMembers(name) {
     const frame = "event: members\ndata: " + JSON.stringify({ type: "members", room: this.roomName || null, from: name || null, kind: this.memberKind(name), targets: [] }) + "\n\n";
     for (const c of this.clients) { if (streamWants(c, "members")) c.send(frame); }
     this.emitState();
   },
 
+  /** @param {string} name */
   dropPush(name) {
     const member = String(name || "").toLowerCase();
     this.sql.exec("DELETE FROM push WHERE member = ?", member);

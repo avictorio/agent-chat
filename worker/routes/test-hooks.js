@@ -6,6 +6,9 @@ import { json, readBody } from "../lib/http.js";
 import { ROOM_RE } from "../limits.js";
 import { sigv4Presign } from "../platform/r2-s3.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
+/** @param {RouteContext} rc */
 export async function hookGameImages(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -18,6 +21,7 @@ export async function hookGameImages(rc) {
   return json({ count: listed.objects.length });
 }
 
+/** @param {RouteContext} rc */
 export async function hookR2Fail(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -30,6 +34,7 @@ export async function hookR2Fail(rc) {
   return json(await tstub.setTestR2Fail(!!(tb && tb.on)));
 }
 
+/** @param {RouteContext} rc */
 export async function hookTicketTtl(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -42,6 +47,7 @@ export async function hookTicketTtl(rc) {
   return json(await tstub.setTestTicketTtl(tb && tb.ttl_ms));
 }
 
+/** @param {RouteContext} rc */
 export async function hookCoderaceSecret(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -54,6 +60,7 @@ export async function hookCoderaceSecret(rc) {
   return json(await tstub.setTestCrSecret(parseInt(tb && tb.id, 10), tb && tb.secret));
 }
 
+/** @param {RouteContext} rc */
 export async function hookGameExpire(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -66,6 +73,7 @@ export async function hookGameExpire(rc) {
   return json(await tstub.setTestGameExpire(parseInt(tb && tb.id, 10)));
 }
 
+/** @param {RouteContext} rc */
 export async function hookSketchJudge(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -78,6 +86,7 @@ export async function hookSketchJudge(rc) {
   return json(await tstub.setTestSketchJudge(tb && tb.verdict));
 }
 
+/** @param {RouteContext} rc */
 export async function hookLetterGrid(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -90,6 +99,7 @@ export async function hookLetterGrid(rc) {
   return json(await tstub.setTestLetterGrid(parseInt(tb && tb.id, 10), tb && tb.rows));
 }
 
+/** @param {RouteContext} rc */
 export async function hookSigv4(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
@@ -99,6 +109,7 @@ export async function hookSigv4(rc) {
   return json({ url: await sigv4Presign({ method: sb.method, host: sb.host, path: sb.path, query: sb.query, accessKey: sb.accessKey, secretKey: sb.secretKey, region: sb.region, expires: sb.expires, date: new Date(sb.date) }) });
 }
 
+/** @param {RouteContext} rc */
 export async function hookLiarsDice(rc) {
   const { request, env, owner } = rc;
   if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);

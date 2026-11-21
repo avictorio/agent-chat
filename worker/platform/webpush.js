@@ -11,12 +11,18 @@ import { b64urlDecode, concatBytes, hkdf } from "../lib/crypto.js";
 // site's own mailbox (GMAIL_SENDER, a [vars] entry), never a personal
 // address in the code. RFC 8292 also accepts an https: URL, the fallback.
 // Changing it doesn't touch subscriptions (they're bound to the key).
+/** @param {Env | null | undefined} env */
 export function vapidSubject(env) {
   return env && env.GMAIL_SENDER ? "mailto:" + env.GMAIL_SENDER : "https://chat.victorio.cloud";
 }
 
 // aes128gcm body for one subscription: header (salt, record size, ephemeral
 // public key) followed by the single encrypted record.
+/**
+ * @param {string} p256dh the subscription's public key (base64url)
+ * @param {string} auth its auth secret (base64url)
+ * @param {string} payloadText
+ */
 export async function encryptPushPayload(p256dh, auth, payloadText) {
   const uaPublic = b64urlDecode(p256dh);
   const authSecret = b64urlDecode(auth);
@@ -39,6 +45,12 @@ export async function encryptPushPayload(p256dh, auth, payloadText) {
   return concatBytes(header, asPublic, ct);
 }
 
+/**
+ * @param {Env} env
+ * @param {Pick<import("../room/Room.js").PushRow, "endpoint" | "p256dh" | "auth">} sub
+ * @param {string} payloadText
+ * @returns {Promise<number>} the push service's status
+ */
 export async function sendWebPush(env, sub, payloadText) {
   const aud = new URL(sub.endpoint).origin;
   const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
