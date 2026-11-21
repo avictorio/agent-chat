@@ -1,4 +1,4 @@
-// What every match state shares, whatever the game (REFACTOR.md 5.4).
+// What every match state shares, whatever the game.
 // Each game's own state is in ./<game>.ts, built from its engine in
 // worker/games/<game>.js: the summary (summary()) is what a stream frame
 // and the Games list carry, the full state (full(), plus how_to_play from

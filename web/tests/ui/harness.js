@@ -14,7 +14,7 @@ const path = require('path');
 // web/tests: the fixtures, the fake data's files and the screenshots are
 // found from here.
 const TESTS = path.join(__dirname, '..');
-// The suite's clock (REFACTOR.md 5.3): the fake data and every page start at
+// The suite's clock: the fake data and every page start at
 // one fixed instant, a Friday mid-afternoon, UTC on both sides, so two runs
 // of a build give the same times, dates and day separators in their
 // screenshots (live second countdowns still move with the run).

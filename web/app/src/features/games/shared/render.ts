@@ -6,9 +6,14 @@ import { GAMES } from "../registry";
 // round verdicts and the draining round-clock bar. No state lives
 // here — the store (./games) owns the cache and the arena views.
 
-// Game payloads are richer than the shared summary types (heads,
-// record keeper, per-round detail), so rendering works untyped.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+// GL is the shared code's view of a match: this file, the store
+// (games.ts), the registry, the chat card and the Games tab handle every
+// game, and read it untyped. Each game's own code - its status hooks,
+// view, history rows, card board and 3D arena - takes its precise state
+// type from @chat/contract (<Game>State; GameState is their union) at the
+// plug-in boundary. Typing GL as GameState is possible but costs ~470
+// narrowing casts in the shared code for little safety (AGENTS.md section 15).
+/* eslint-disable @typescript-eslint/no-explicit-any -- the shared, all-game view of a match; see above */
 export type GL = any;
 
 export function tickLen(ts: number): string {

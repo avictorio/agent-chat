@@ -8,9 +8,10 @@ targets the website only: the Android app (a Capacitor shell, `app/`) was
 deprecated on 2026-11-19 and removed from the repo on 2026-11-20 (section 11).
 There is exactly one home and one identity store: the site's.
 
-**A codebase restructure is in progress** (started 2026-11-20): the plan,
-its checklist and what has already moved are in `REFACTOR.md`. Read it
-before moving or splitting files, and tick its boxes as steps land.
+**The layout** below (section 2, Repository layout) is the result of a
+restructure done 2026-11-20 and 21; its plan and step-by-step log were
+`REFACTOR.md`, removed when it finished (see the git history). What it
+left open is section 15.
 
 **No personal addresses in the code.** Claude Code's built-in privacy
 plugin refuses shell commands whose scripts read a file holding the owner's
@@ -20,7 +21,7 @@ from configuration (`GMAIL_SENDER`, the site's own mailbox).
 
 This file is the development guide and its index. Every session reads it
 whole; the long references it points to are topic files in `docs/agents/`
-(split out 2026-11-21, REFACTOR.md 5.6): how each feature is built
+(split out 2026-11-21): how each feature is built
 (section 3) and how to test and check UI changes (sections 9 and 10). Open
 the one for the area you are changing. It replaced the former
 `docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When the
@@ -94,7 +95,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.js` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The split into `worker/lib`, `platform`, `agents`, `games`, `routes` and `room` modules is under way (`REFACTOR.md` phase 2). |
+| Modules | `worker/index.js` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The Worker is split by responsibility: see Repository layout below. |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -103,6 +104,46 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Cron trigger | none since 2026-11-12: `wrangler.toml` carries `crons = []` (the queue's `*/3 * * * *` ntfy alerts were retired) |
 | Compatibility date | `2025-04-01` |
 | Observability | on |
+
+### Repository layout
+
+```
+agent-chat/
+├─ wrangler.toml       Cloudflare config (bindings, vars, assets, text-module rules)
+├─ worker/             everything that runs on Cloudflare, uploaded unbundled
+│  ├─ index.js         the entry: the route table; re-exports Room
+│  ├─ routes/          one file per API area (messages, members, board, games,
+│  │                   media, uploads, voices, push, stream, agents, pages, ...)
+│  ├─ room/            the Room Durable Object: Room.js (the class, the alarm,
+│  │                   storage) and its method groups, installed with
+│  │                   Object.assign (messages, members, board, games, state,
+│  │                   media, uploads, voices, push, ...)
+│  ├─ games/           engine.js (GAME_ENGINES, the plug-in contract), shared.js,
+│  │                   one module per game; content in worker/data/
+│  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
+│  │                   Cartesia, Claude, web fetch
+│  ├─ agents/          the MCP server, the /api docs (docs.txt + docs.js), the
+│  │                   agent recipe and watcher
+│  ├─ lib/             http helpers, text, crypto, reactions, file types
+│  └─ limits.js        every limit and cap in one place
+├─ web/                the React app (Vite): web/app/src/
+│  ├─ app/             entry, providers, the root error fallback
+│  ├─ ui/              the design system: Button, Dialog, Page, Card, Pill,
+│  │                   ErrorBoundary..., each with its CSS
+│  ├─ lib/             DOM and date helpers
+│  └─ features/        room, feed, composer, board, media, home, shell and
+│     └─ games/        games: games.ts (the store), registry.ts (GAMES: each
+│                      game's plug-in), GamesView, dialogs, shared/ (render,
+│                      cards, catalog types, history rows), three/ (the 3D
+│                      engine: arena3d, juice, sfx, atmos) and one folder per
+│                      game (catalog, status hooks, view, history, Arena3D...)
+├─ contract/           @chat/contract: the API and every game's state types;
+│                      the web app and the Worker's typecheck both read it
+├─ types/              ambient types for the Worker's typecheck
+├─ scripts/            check-worker, check-inline, check-config, move-files
+├─ tests/              api/ (the Worker on wrangler dev), unit/, fixtures/
+└─ web/tests/ui/       the UI suite (harness, feature files, run.js)
+```
 
 ### Bindings and variables
 
@@ -362,7 +403,12 @@ After pushing:
 
 1. Wait for the build (Cloudflare dashboard → Workers & Pages → victorio-chat
    → Deployments, or the commit's status on GitHub).
-2. Confirm the live module hashes match the commit, run `npm run check:config`
+2. Confirm the live module hashes match the commit, and that the web
+   build is the one you tested: `/api/build` is the first 16 hex digits of
+   the SHA-256 of the tested `web/app/dist/index.html`, and every
+   `/assets/*` file hashes the same as the tested build's. A change meant
+   to leave behaviour alone (a move, types, comments) should build a
+   byte-identical `web/app/dist`: compare the hashes before pushing. Run `npm run check:config`
    (variables and secrets against the file and the section 2 inventory) and
    confirm the Worker has no cron schedules (`GET .../schedules` lists none).
 3. Fetch the changed page and confirm the new content is actually served.
@@ -564,3 +610,26 @@ Test (cloud)    POST /accounts/{acct}/browser-rendering/content  {url, addScript
 Owner header    X-Owner-Key: <proxy-injected on the agent-chat env; else ask Anthony>   Invite header  X-Invite-Token: <token>
 Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  + X-Owner-Key   (see section 4)
 ```
+
+## 15. Open work
+
+Left open by the 2026-11 restructure, in rough order of value:
+
+- **The 2D game panels as React components.** The arenas' DOM panels
+  (planners, forms, scores) are still built imperatively with `el()` in
+  each game's `<game>.ts` and `view.ts`; move them to React one game at a
+  time, and split `games.css` with them.
+- **`GL` in the shared game code** (`features/games/shared/render.ts`):
+  the store, registry, chat card and Games tab read a match untyped. Each
+  game's own code is typed (`@chat/contract`); typing `GL` as `GameState`
+  costs about 470 narrowing casts, so it waits for a reason.
+- **A shared base type for the rotating-role games** (Twenty Questions,
+  Trivia, Sketch & Guess, Exquisite Corpse, Two Truths): they repeat
+  `draw`, `places`, `round`, `rounds_total`, `rotations` and `order`.
+- **TypeScript for the Worker**, once its JSDoc check passes under
+  `strict` (thousands of errors today, mostly untyped storage rows).
+- Small: the Duel view's render key adds its counters instead of joining
+  them (two states could share a key; round and status changes keep it
+  from mattering today); the Corpse client compares `you.name`, which the
+  server never sends (harmless).
+

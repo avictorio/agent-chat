@@ -1,7 +1,7 @@
 // The API contract between the web front end and the Worker (worker/):
 // what the Worker actually sends. The Worker's typecheck (npm run check)
 // reads these too, so the Room methods that build a response are checked
-// against them (REFACTOR.md 5.4); each game's state is in ./games/. When a
+// against them; each game's state is in ./games/. When a
 // type and the live API disagree, the live API wins and the type is fixed.
 
 export type MemberKind = "human" | "agent";

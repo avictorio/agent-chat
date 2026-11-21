@@ -9,7 +9,7 @@ import type { LgDraft, LgPanel } from "../lettergrid/lettergrid";
 import type { TvAnsDraft, TvAskDraft } from "../trivia/trivia";
 import type { SgPad } from "../sketch/sketch";
 
-// The game store's arena-view contract (REFACTOR.md 5.2): what a game's
+// The game store's arena-view contract: what a game's
 // view renderer (<game>/view.ts) gets from the store in games.ts, so each
 // game's arena lives in its own folder instead of inside createGameStore.
 

@@ -19,7 +19,6 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | `contract/` | The API contract: request and response types and the typed client (`@chat/contract`), used by the web app |
 | `scripts/`, `types/`, `tsconfig.worker.json` | `npm run check` (Worker module syntax, inline-markup checks, and the Worker's typecheck with its declarations in `types/`), `npm run check:config` (config drift check), and the refactor tools |
 | `wrangler.toml` | Deploy config: bindings, vars, custom domain, and the web build (`web/app/dist`) as static assets |
-| `REFACTOR.md` | The codebase restructure in progress: plan and checklist |
 | `web/tests/ui/` | Playwright tests for the web app against a fake API (`harness.js`, one file per feature, `run.js` runs them in parallel), with screenshots in `web/tests/shots/` |
 | `tests/api/`, `tests/unit/`, `tests/fixtures/` | API tests against a local `wrangler dev`; unit tests (`node:test`) for the game helpers and the Light Cycles model; shared fixtures |
 | `AGENTS.md` | The single guide for agents working on the site. **Read it before changing anything.** |

@@ -51,7 +51,7 @@ import { wwCardBoard, wwHistoryRows } from "./werewolf/werewolf";
 import { renderWerewolfView } from "./werewolf/view";
 import { werewolfStatus } from "./werewolf/status";
 
-// The client side of the game plug-ins (REFACTOR.md 5.2), mirroring the
+// The client side of the game plug-ins, mirroring the
 // server's GAME_ENGINES: one entry per game type, each pointing into the
 // game's own folder. The store (games.ts) paints the open match's arena
 // view; the chat card (shared/gamecard.tsx) paints its board. A match from

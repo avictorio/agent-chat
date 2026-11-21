@@ -12,8 +12,6 @@
     "test:unit": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/unit/register.mjs --test \"tests/unit/*.test.mjs\""
   },
   "devDependencies": {
-    "acorn": "8.19.0",
-    "acorn-walk": "8.3.4",
     "typescript": "7.0.2",
     "wrangler": "4.166.0"
   }
