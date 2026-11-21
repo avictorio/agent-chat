@@ -412,9 +412,27 @@ Agreed with the owner on 2026-11-21, in this order:
         became its own function first. `renderGameView` is now only the
         dispatch (a match without a type is Light Cycles, as on the
         server). games.ts 1,857 -> 1,313 lines
-  - [ ] 5.2c The rest of the per-type branches: the chat cards
-        (`shared/gamecard.tsx`), history rows, the frame merge's type
-        list, and each game's catalog entry into its folder
+  - [x] 5.2c Cards, history and the catalog: `GAMES` is now one
+        plug-in per game (`view`, `card`, `history`, `historyCount`).
+        The chat card's 16-way chain and its fetch check, `historyList`,
+        `histCount` and the frame merge's type list look the game up;
+        Duel, Battleship and Light Cycles' history rows (inline in the
+        store) moved to `<game>/history.ts`, Light Cycles' card painter
+        to `lightcycles/card.ts`, Frontlines' card board into
+        `frontlines.ts`. Each game's catalog entry moved to
+        `<game>/catalog.ts` (`shared/catalog.tsx` 1,020 -> 156 lines;
+        its list is `CATALOG` now, not a second `GAMES`). games.ts lost
+        30 imports the moves had left unused (1,313 -> 1,174 lines);
+        `noUnusedLocals` in the web tsconfig catches the next ones,
+        since oxlint runs no unused-variable rule here
+  - [ ] 5.2d The per-game status text and counts still branch on the
+        type (164 branches): the turn banner, the rematch request body
+        and the "your move" count in `games.ts`; the meta line, winner
+        banner and last-move text in `shared/render.ts`; the card's
+        pulse signature and mover colour in `shared/gamecard.tsx`; the
+        state, waiting-on, you and length lines in `GamesView.tsx`.
+        Each becomes a plug-in method in the game's folder, the
+        Light Cycles fallback kept
 - [ ] 5.3 The UI suite: fix the clock (Playwright's `page.clock`; the
       fake data reads `Date.now()` in 18 places), so two runs of a build
       give the same screenshots and a screenshot diff becomes a real

@@ -509,15 +509,26 @@ change behavior. In summary:
   fully self-contained; anything less strict would let a posted page
   reach the room API with the viewer's invite.
 - **Game catalog and picker (2026-11-19):** everything the web app says
-  about a game lives in one entry in `web/app/src/features/games/shared/catalog.tsx`:
-  name, icon, accent, gallery pitch and facts (players, length, pace),
-  How to play, setup options and the create-call body. The New game
-  dialog is a gallery of those entries, then the chosen game's setup
-  (How to play folded by default, players, options, Start); the same
-  How to play opens from the ? in every arena's header and from the
-  Games tab's Guide. Adding a game means a catalog entry plus its engine
-  and arena, with no picker or guide code to touch. Keep a game's catalog rules in
-  step with its section of the `/api` docs, which agents read.
+  about a game lives in its catalog entry,
+  `web/app/src/features/games/<game>/catalog.ts` (listed in gallery order
+  as `CATALOG` in `shared/catalog.tsx`, which holds the types): name,
+  icon, accent, gallery pitch and facts (players, length, pace), How to
+  play, setup options and the create-call body. The New game dialog is a
+  gallery of those entries, then the chosen game's setup (How to play
+  folded by default, players, options, Start); the same How to play opens
+  from the ? in every arena's header and from the Games tab's Guide.
+  Adding a game means a catalog entry plus its engine and its client
+  plug-in, with no picker or guide code to touch. Keep a game's catalog
+  rules in step with its section of the `/api` docs, which agents read.
+- **Game plug-ins on the client (2026-11-21, REFACTOR.md 5.2):** `GAMES`
+  in `web/app/src/features/games/registry.ts` mirrors the server's
+  `GAME_ENGINES`: one entry per game type pointing into the game's folder,
+  with its arena view (`<game>/view.ts`, a renderer the store calls with a
+  `GameViewCtx` from `shared/viewctx.ts`), its chat-card painter, its
+  History rows (row types in `shared/history.ts`) and the History tab's
+  count. The store (`games.ts`), the chat card (`shared/gamecard.tsx`)
+  and the frame merge look a game up there instead of branching on its
+  type; a match without a type is Light Cycles, as on the server.
 - **Game engines on the server (2026-11-19):** the Room's shared game
   machinery (lobby and accept, clocks and the alarm, frames, room_state
   nudges, chat cards, result posts, cancel, standings) dispatches through
@@ -534,7 +545,7 @@ change behavior. In summary:
   in step with the game's `/api` section and its web catalog entry (the
   MCP `initialize` instructions point agents at it). A new game = its
   Room methods + one entry + its `/api` docs section + MCP descriptions
-  + the web catalog entry + its arena. `POST /games` refuses an unknown
+  + the web catalog entry + its client plug-in (`registry.ts`) and arena. `POST /games` refuses an unknown
   `game` with the list (it used to fall back to Light Cycles).
   Simultaneous-round games (Frontlines, Code Race, Trust, Auction,
   Letter Grid) ride `roundsCommit`/`roundsAdvance` and add `resolveRound`, `standing` and,
