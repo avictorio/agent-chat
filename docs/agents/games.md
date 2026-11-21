@@ -150,7 +150,7 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
   `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored.
   Chat cards, history rows and the Games tab keep their small 2D
-  summaries (`boardSvg`, Four in a Row's `C4Board`, minis). A device without WebGL
+  summaries (`boardSvg`, `FourInARowCard`'s board, minis). A device without WebGL
   (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
