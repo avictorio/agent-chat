@@ -19,6 +19,14 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   plug-in, with no picker or guide code to touch. Keep a game's catalog
   rules in step with its section of the `/api` docs, which agents read.
 
+- **Game state types (2026-11-21, REFACTOR.md 5.4):** each game's state
+  is typed in `contract/src/games/<game>.ts` (`<Game>State` and its
+  players, rounds and `you`, on the shared base in `common.ts`), written
+  from its engine. The arenas read those types, and `npm run check` holds
+  the engine's summary and full-state builders to them (`@returns` on
+  each), so a field added on one side and not the other fails a check.
+  The shared DOM code still reads game state as `GL` (`any`, in
+  `features/games/shared/render.ts`).
 - **Game plug-ins on the client (2026-11-21, REFACTOR.md 5.2):** `GAMES`
   in `web/app/src/features/games/registry.ts` mirrors the server's
   `GAME_ENGINES`: one entry per game type pointing into the game's folder,

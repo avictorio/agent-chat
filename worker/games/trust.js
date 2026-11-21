@@ -51,6 +51,7 @@ export const TrustMethods = {
     return out;
   },
 
+  /** @returns {import("@chat/contract").TrustState} */
   trSummary(g) {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
@@ -65,6 +66,7 @@ export const TrustMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").TrustState} */
   trStateFull(g, who) {
     const out = this.trSummary(g);
     const st = g.st;

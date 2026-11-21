@@ -15,7 +15,6 @@
    A turn that ran out skips the reveal: the die just shatters. The last
    round adds the winner's pillar and shockwave. Catch-up, tap to skip and
    reduced motion as in the other arenas. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -24,6 +23,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { LiarsDiceBid, LiarsDicePlayer, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -57,7 +57,7 @@ const smooth = (a: number, b: number, t: number) => {
 };
 const WORD = ["", "one", "two", "three", "four", "five", "six"];
 const faceWord = (f: number, plural: boolean) => (plural ? (f === 6 ? "sixes" : (WORD[f] || f) + "s") : WORD[f] || String(f));
-const bidText = (b: any) => b.qty + " " + faceWord(b.face, b.qty !== 1);
+const bidText = (b: LiarsDiceBid) => b.qty + " " + faceWord(b.face, b.qty !== 1);
 const counts = (d: number, face: number, wild: boolean) => d === face || (wild && d === 1 && face !== 1);
 
 /* ---------- the dice: one atlas, one geometry, one instanced draw ---------- */
@@ -333,11 +333,11 @@ function ClockStart({ onStart }: { onStart: (t: number) => void }) {
 }
 
 type Plan = { lifted: boolean; hits: number; step: number; countAt: number; verdictAt: number; breakAt: number; downAt: number; doneAt: number };
-function planOf(r: any, wild: boolean, last: boolean): Plan {
+function planOf(r: LiarsDiceRound, wild: boolean, last: boolean): Plan {
   const lifted = r.reason === "call" && !!r.call;
   let hits = 0;
   if (lifted) {
-    const f = r.call.bid.face;
+    const f = r.call!.bid.face;
     Object.keys(r.cups || {}).forEach((n) => ((r.cups[n] || []) as number[]).forEach((d) => (hits += counts(d, f, wild) ? 1 : 0)));
   }
   const step = Math.min(0.26, 1.8 / Math.max(1, hits));
@@ -381,7 +381,7 @@ function Beats({ t0, plan, onT, onBeat, onDone }: { t0: number; plan: Plan; onT:
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function roundImpact(r: any, me: string): Impact {
+function roundImpact(r: LiarsDiceRound, me: string): Impact {
   const lost = r.loser === me;
   const out = !!r.out;
   if (r.reason !== "call" || !r.call) {
@@ -398,12 +398,12 @@ function roundImpact(r: any, me: string): Impact {
   return { trauma: 0.2, stop: 70, sound: ["smash", "shatter"], title: { big: r.stands ? "IT STANDS" : "LIAR!", small: what + " - " + r.loser + (out ? " is out" : " loses a die"), tone: "neutral" } };
 }
 
-function finalImpact(g: any, me: string, many: boolean): Impact {
+function finalImpact(g: LiarsDiceState, me: string, many: boolean): Impact {
   const w = g.winner as string | null;
   const line = (g.places || []).join(" · ");
   if (!w) return { trauma: 0.3, stop: 120, sound: "whoosh", title: { big: "OVER", small: line, tone: "neutral" } };
   if (me && me === w) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: "Last with dice · " + line, tone: "good" } };
-  if (me && (g.players || []).some((p: any) => p.name === me)) {
+  if (me && (g.players || []).some((p: LiarsDicePlayer) => p.name === me)) {
     const place = (g.places || []).indexOf(me) + 1;
     if (place === 2 && many) return { trauma: 0.4, stop: 150, buzz: BUZZ.scored, sound: "win", title: { big: "#2", small: w + " is the last with dice · " + line, tone: "neutral" } };
     return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 0.8, buzz: BUZZ.lostMatch, sound: ["clash", "lose"], title: { big: "DEFEAT", small: w + " is the last with dice", tone: "bad" } };
@@ -411,7 +411,7 @@ function finalImpact(g: any, me: string, many: boolean): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: w.toUpperCase() + " WINS", small: line, tone: "neutral" } };
 }
 
-function sayRound(r: any): string {
+function sayRound(r: LiarsDiceRound): string {
   if (!r) return "";
   if (r.reason !== "call" || !r.call) return "Round " + r.n + ": " + r.loser + "'s turn ran out; " + r.loser + (r.out ? " is out." : " loses a die.");
   return "Round " + r.n + ": " + r.call.by + " called liar on " + r.call.bid.by + "'s " + bidText(r.call.bid) + ". The table showed " + r.count + "; " + r.loser + (r.out ? " is out." : " loses a die.");
@@ -497,7 +497,7 @@ function ldHome(aspect: number, width: number): Home {
 
 /* The standing bid over the table: a big die (it flips when the bid
    changes), the count, and who bid it. */
-function BidMark({ bid, opener, big, still, over }: { bid: any; opener: string | null; big: boolean; still: boolean; over?: string }) {
+function BidMark({ bid, opener, big, still, over }: { bid: LiarsDiceBid | null; opener: string | null; big: boolean; still: boolean; over?: string }) {
   // tip the top face toward the camera's elevation
   const tilt = big ? 0.8 : 0.9;
   const g = useRef<Group>(null);
@@ -556,7 +556,7 @@ export default function LiarsArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: LiarsDiceState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -571,8 +571,8 @@ export default function LiarsArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: LiarsDicePlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: LiarsDiceRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const wild = !!(g && g.ones_wild);
@@ -589,7 +589,7 @@ export default function LiarsArena3D({
     });
     const n = list.length;
     const mine = list.findIndex((p) => String(p.name).toLowerCase() === meL);
-    return list.map((p: any, i: number) => {
+    return list.map((p: LiarsDicePlayer, i: number) => {
       const a = Math.PI / 2 + ((i - (mine >= 0 ? mine : 0)) / Math.max(1, n)) * Math.PI * 2;
       return { name: String(p.name), hex: String(p.hex || "#ef4444"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * SEAT_R, z: Math.sin(a) * SEAT_R, a };
     });
@@ -627,10 +627,10 @@ export default function LiarsArena3D({
     setBroke(false);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g, meName, players.length > 2) : roundImpact(r, meName);
+    const imp = isLast(n) ? finalImpact(g!, meName, players.length > 2) : roundImpact(r, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -669,7 +669,7 @@ export default function LiarsArena3D({
     const prev = prevBid.current;
     prevBid.current = bidSig;
     if (prev == null || !ready || !bidSig || prev === bidSig) return;
-    if (g.bid.by !== meName) juice.hit({ sound: "ping" });
+    if (g!.bid!.by !== meName) juice.hit({ sound: "ping" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bidSig, ready]);
 
@@ -730,10 +730,10 @@ export default function LiarsArena3D({
   const first = home(aspect || 1.6, hostW);
   /* A seat's latest bid this round (the page's table listed it; the seat
      plate carries it now). */
-  const lastBidOf = (name: string): any => {
+  const lastBidOf = (name: string): LiarsDiceBid | null => {
     if (!running || r) return null;
-    const mine = ((g.bids || []) as any[]).filter((b) => b && b.by === name);
-    return mine.length ? mine[mine.length - 1] : null;
+    const mine = ((g.bids || []) as LiarsDiceBid[]).filter((b) => b && b.by === name);
+    return mine.length ? mine[mine.length - 1]! : null;
   };
   const myDice: number[] = running && g.you && g.you.playing && !g.you.out ? ((g.you.dice || []) as number[]) : [];
   const wildNote = !!(running && !r && g.ones_wild && myDice.indexOf(1) >= 0);
@@ -801,7 +801,7 @@ export default function LiarsArena3D({
           <spotLight position={[0, 8, 0.6]} angle={0.5} penumbra={0.7} intensity={45} distance={16} color="#ffd8a8" />
           <Table />
           {seats.map((s) => (
-            <Cup key={s.name} seat={s} aside={s.you ? ((((g.you && g.you.dice) || []).length || 5) / 2) * DIE * MINE * 1.3 + 0.5 : 0.62} lift={s.you && !r ? 0 : lift} tipped={s.you && !r && running && !outOf(s.name)} turn={running && !r && g.turn_of === s.name} out={outOf(s.name)} shake={shake} still={still} />
+            <Cup key={s.name} seat={s} aside={s.you ? ((((g!.you && g!.you.dice) || []).length || 5) / 2) * DIE * MINE * 1.3 + 0.5 : 0.62} lift={s.you && !r ? 0 : lift} tipped={s.you && !r && running && !outOf(s.name)} turn={running && !r && g.turn_of === s.name} out={outOf(s.name)} shake={shake} still={still} />
           ))}
           <Dice list={diceList} />
           {seats.map((s) => {
@@ -815,7 +815,7 @@ export default function LiarsArena3D({
                 <spriteMaterial
                   map={textTex([
                     { text: s.name + (s.you ? " (you)" : ""), color: s.hex, size: 42 },
-                    { text: out ? "out" : n + (n === 1 ? " die" : " dice") + (turn ? " · to bid" : lastBidOf(s.name) ? " · bid " + bidText(lastBidOf(s.name)) : ""), color: turn ? "#fde68a" : "rgba(254,226,226,0.92)", size: 32 },
+                    { text: out ? "out" : n + (n === 1 ? " die" : " dice") + (turn ? " · to bid" : lastBidOf(s.name) ? " · bid " + bidText(lastBidOf(s.name)!) : ""), color: turn ? "#fde68a" : "rgba(254,226,226,0.92)", size: 32 },
                   ])}
                   transparent
                   depthWrite={false}
@@ -829,7 +829,7 @@ export default function LiarsArena3D({
               <BidMark bid={shownBid} opener={null} big={big} still={still} />
               {lit > 0 ? (
                 <sprite position={[0, BID_Y + 0.85, 0]} scale={big ? [2.6, 0.9, 1] : [2.1, 0.72, 1]} renderOrder={6}>
-                  <spriteMaterial map={textTex([{ text: countNow + " of " + r.call.bid.qty, color: rt >= plan.verdictAt ? (r.stands ? "#86efac" : "#fca5a5") : "#ffffff", size: 64 }], 360, 124)} transparent depthWrite={false} depthTest={false} />
+                  <spriteMaterial map={textTex([{ text: countNow + " of " + r.call!.bid.qty, color: rt >= plan.verdictAt ? (r.stands ? "#86efac" : "#fca5a5") : "#ffffff", size: 64 }], 360, 124)} transparent depthWrite={false} depthTest={false} />
                 </sprite>
               ) : null}
             </group>
@@ -861,8 +861,8 @@ export default function LiarsArena3D({
                   }
                 } else if (k === "down") {
                   if (isLast(playing.n)) {
-                    juice.hit(finalImpact(g, meName, players.length > 2));
-                    if (g.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g!, meName, players.length > 2));
+                    if (g!.winner) setCeremony((c) => c + 1);
                   } else setShakeUntil(Date.now());
                 }
               }}

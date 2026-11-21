@@ -214,6 +214,7 @@ export const LetterGridMethods = {
     return { word: word, path: path };
   },
 
+  /** @returns {import("@chat/contract").LetterGridState} */
   lgSummary(g) {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
@@ -229,6 +230,7 @@ export const LetterGridMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").LetterGridState} */
   lgStateFull(g, who) {
     const out = this.lgSummary(g);
     const st = g.st;

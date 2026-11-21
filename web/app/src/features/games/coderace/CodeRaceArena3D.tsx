@@ -27,7 +27,6 @@
    latest unseen round replays on open; under reduced motion a round
    lands at once with its title. The guess input and the full record
    stay in the page: the scene shows, the page acts. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -36,6 +35,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { CodeRaceColor, CodeRaceFeedback, CodeRacePlayer, CodeRaceRound, CodeRaceState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -67,21 +67,21 @@ const CLICK_GAP = 0.16;
 type Racer = { name: string; hex: string; you: boolean; x: number; z: number; committed: boolean; solved: number | null; out: boolean };
 type TState = "hit" | "near" | "g" | "y" | "off";
 
-function states(g: any, fb: any): TState[] {
+function states(g: CodeRaceState, fb: CodeRaceFeedback | null): TState[] {
   const len = g.length || 4;
   if (fb == null) return Array(len).fill("off");
   if (g.mode === "words") return String(fb).split("").slice(0, len).map((c) => (c === "G" ? "g" : c === "Y" ? "y" : "off"));
-  const b = fb[0] || 0;
-  const w = fb[1] || 0;
+  const b = (fb as [number, number])[0] || 0;
+  const w = (fb as [number, number])[1] || 0;
   return Array.from({ length: len }, (_, i) => (i < b ? "hit" : i < b + w ? "near" : "off"));
 }
 
 /* A racer's latest feedback as of round n (rounds they skipped keep the
    one before), and whether they had cracked it by then. */
-function latest(g: any, name: string, upto: number): { fb: any; cracked: boolean } {
-  let fb: any = null;
+function latest(g: CodeRaceState, name: string, upto: number): { fb: CodeRaceFeedback | null; cracked: boolean } {
+  let fb: CodeRaceFeedback | null = null;
   let cracked = false;
-  ((g.rounds || []) as any[]).slice(0, upto).forEach((r) => {
+  ((g.rounds || []) as CodeRaceRound[]).slice(0, upto).forEach((r) => {
     const x = (r.guesses || {})[name];
     if (x) fb = x.fb;
     if ((r.solved || []).indexOf(name) >= 0) cracked = true;
@@ -146,12 +146,12 @@ function labelTex(name: string, sub: string, hex: string): CanvasTexture {
    racer's rounds. Rows follow the settled rounds, so a replay never
    spoils its round. */
 
-type LedgerRow = { n: number; guess: string | null; fb: any; cracked: boolean; sealed?: boolean };
+type LedgerRow = { n: number; guess: string | null; fb: CodeRaceFeedback | null; cracked: boolean; sealed?: boolean };
 const LEDGER_MAX = 8; // rows on the board; earlier ones fold into a "+k earlier" line
 
-function ledgerRows(g: any, name: string, upto: number, sealedGuess: string | null): LedgerRow[] {
+function ledgerRows(g: CodeRaceState, name: string, upto: number, sealedGuess: string | null): LedgerRow[] {
   const rows: LedgerRow[] = [];
-  ((g.rounds || []) as any[]).slice(0, upto).forEach((r) => {
+  ((g.rounds || []) as CodeRaceRound[]).slice(0, upto).forEach((r) => {
     const x = (r.guesses || {})[name];
     if (!x) return;
     rows.push({ n: r.n, guess: x.guess || null, fb: x.fb, cracked: (r.solved || []).indexOf(name) >= 0 });
@@ -160,7 +160,7 @@ function ledgerRows(g: any, name: string, upto: number, sealedGuess: string | nu
   return rows;
 }
 
-function LedgerBoard({ g, rows, pal }: { g: any; rows: LedgerRow[]; pal: Record<string, string> }) {
+function LedgerBoard({ g, rows, pal }: { g: CodeRaceState; rows: LedgerRow[]; pal: Record<string, string> }) {
   const len = g.length || 4;
   const words = g.mode === "words";
   const shown = rows.slice(-LEDGER_MAX);
@@ -200,8 +200,8 @@ function LedgerBoard({ g, rows, pal }: { g: any; rows: LedgerRow[]; pal: Record<
                 {r.fb != null ? (
                   <span className="cr-lpips" style={{ gridTemplateColumns: "repeat(" + Math.ceil(len / 2) + ", 7px)" }} aria-label={((r.fb && r.fb[0]) || 0) + " right place, " + ((r.fb && r.fb[1]) || 0) + " right colour"}>
                     {Array.from({ length: len }, (_, i) => {
-                      const b = (r.fb && r.fb[0]) || 0;
-                      const w = (r.fb && r.fb[1]) || 0;
+                      const b = (r.fb && (r.fb as [number, number])[0]) || 0;
+                      const w = (r.fb && (r.fb as [number, number])[1]) || 0;
                       return <span key={i} className={"cr-lpip" + (i < b ? " hit" : i < b + w ? " near" : "")} />;
                     })}
                   </span>
@@ -218,7 +218,7 @@ function LedgerBoard({ g, rows, pal }: { g: any; rows: LedgerRow[]; pal: Record<
 
 /* ---------- the vault ---------- */
 
-function Vault({ g, open, still, pal }: { g: any; open: number; still: boolean; pal: Record<string, string> }) {
+function Vault({ g, open, still, pal }: { g: CodeRaceState; open: number; still: boolean; pal: Record<string, string> }) {
   const len = g.length || 4;
   const j = useJuice();
   const rings = useRef<(Group | null)[]>([]);
@@ -327,7 +327,7 @@ function Tumblers({
   t0,
   still,
 }: {
-  g: any;
+  g: CodeRaceState;
   racers: Racer[];
   from: Record<string, TState[]>;
   to: Record<string, TState[]>;
@@ -424,7 +424,7 @@ function Tumblers({
 /* A pillar's glass and base: the racer's colour on the foot ring, which
    lights while they have guessed this round (breathes while thinking),
    and burns while they have cracked it. */
-function Pillar({ g, r, lit, burn, crackedIn, still }: { g: any; r: Racer; lit: boolean; burn: boolean; crackedIn: number | null; still: boolean }) {
+function Pillar({ g, r, lit, burn, crackedIn, still }: { g: CodeRaceState; r: Racer; lit: boolean; burn: boolean; crackedIn: number | null; still: boolean }) {
   const len = g.length || 4;
   const h = BASE + len * STEP + 0.05;
   const foot = useRef<MeshStandardMaterial>(null);
@@ -535,7 +535,7 @@ function crackImpact(solvers: string[], racers: Racer[]): Impact | null {
   return { trauma: 0.25, stop: 80, sound: "shatter", title: { big: "CRACKED", small: solvers.join(" & ") + (solvers.length > 1 ? " crack it" : " cracks it"), tone: "neutral" } };
 }
 
-function roundImpact(g: any, round: any, racers: Racer[], prevBest: number): Impact {
+function roundImpact(g: CodeRaceState, round: CodeRaceRound, racers: Racer[], prevBest: number): Impact {
   const you = racers.find((r) => r.you);
   const x = you ? (round.guesses || {})[you.name] : null;
   if (you && x) {
@@ -550,7 +550,7 @@ function roundImpact(g: any, round: any, racers: Racer[], prevBest: number): Imp
   return { sound: "beat", title: { big: "ROUND " + round.n, small: Object.keys(round.guesses || {}).length + " guesses in", tone: "neutral" } };
 }
 
-function finalImpact(g: any, racers: Racer[]): Impact {
+function finalImpact(g: CodeRaceState, racers: Racer[]): Impact {
   const you = racers.find((r) => r.you);
   const places: string[] = g.places || [];
   const winner = g.winner as string | null;
@@ -567,7 +567,7 @@ function finalImpact(g: any, racers: Racer[]): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: winner.toUpperCase() + " WINS", small: "Cracked it" + how, tone: "neutral" } };
 }
 
-function sayRound(g: any, round: any, racers: Racer[], over: boolean): string {
+function sayRound(g: CodeRaceState, round: CodeRaceRound, racers: Racer[], over: boolean): string {
   if (!round) return "";
   const parts = racers.map((r) => {
     const x = (round.guesses || {})[r.name];
@@ -662,7 +662,7 @@ export default function CodeRaceArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: CodeRaceState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -678,14 +678,14 @@ export default function CodeRaceArena3D({
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const phone = hostW < PHONE_BELOW;
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: CodeRacePlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: CodeRaceRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const len = (g && g.length) || 4;
   const pal = useMemo(() => {
     const m: Record<string, string> = {};
-    ((g && g.palette) || []).forEach((c: any) => (m[c.k] = c.hex));
+    ((g && g.palette) || []).forEach((c: CodeRaceColor) => (m[c.k] = c.hex));
     return m;
   }, [g]);
 
@@ -697,11 +697,11 @@ export default function CodeRaceArena3D({
     if (mine >= 0) {
       const others = list.filter((_, i) => i !== mine);
       const mid = Math.floor(list.length / 2);
-      order = others.slice(0, mid).concat([list[mine]], others.slice(mid));
+      order = others.slice(0, mid).concat([list[mine]!], others.slice(mid));
     }
     const gap = phone ? 1.75 : 2.15;
     const n = order.length;
-    return order.map((p: any, i: number) => {
+    return order.map((p: CodeRacePlayer, i: number) => {
       const k = i - (n - 1) / 2;
       return {
         name: String(p.name),
@@ -743,10 +743,10 @@ export default function CodeRaceArena3D({
     const you = racers.find((r) => r.you);
     if (!you) return 0;
     let best = 0;
-    rounds.slice(0, n - 1).forEach((r: any) => {
+    rounds.slice(0, n - 1).forEach((r: CodeRaceRound) => {
       const x = (r.guesses || {})[you.name];
       if (!x) return;
-      const st = states(g, x.fb);
+      const st = states(g!, x.fb);
       best = Math.max(best, st.filter((s) => s === "hit" || s === "g").length * 10 + st.filter((s) => s === "near" || s === "y").length);
     });
     return best;
@@ -759,11 +759,11 @@ export default function CodeRaceArena3D({
     if (!r) return;
     const hits: Impact[] = [];
     const ci = crackImpact(r.solved || [], racers);
-    if (isLast(n)) hits.push(finalImpact(g, racers));
+    if (isLast(n)) hits.push(finalImpact(g!, racers));
     else if (ci) hits.push(ci);
-    else hits.push(roundImpact(g, r, racers, bestBefore(n)));
+    else hits.push(roundImpact(g!, r, racers, bestBefore(n)));
     hits.forEach((h) => juice.hit(quiet ? { ...h, trauma: 0, stop: 0, slow: 0, pulse: 0 } : h));
-    setSay(sayRound(g, r, racers, isLast(n)));
+    setSay(sayRound(g!, r, racers, isLast(n)));
     if (isLast(n)) {
       setOpen(1);
       setCeremony((c) => c + 1);
@@ -819,16 +819,16 @@ export default function CodeRaceArena3D({
   const fromStates = useMemo(() => {
     const m: Record<string, TState[]> = {};
     racers.forEach((r) => {
-      const l = latest(g, r.name, fromN);
-      m[r.name] = l.cracked ? Array(len).fill(g.mode === "words" ? "g" : "hit") : states(g, l.fb);
+      const l = latest(g!, r.name, fromN);
+      m[r.name] = l.cracked ? Array(len).fill(g!.mode === "words" ? "g" : "hit") : states(g!, l.fb);
     });
     return m;
   }, [g, racers, fromN, len]);
   const toStates = useMemo(() => {
     const m: Record<string, TState[]> = {};
     racers.forEach((r) => {
-      const l = latest(g, r.name, fieldN);
-      m[r.name] = states(g, l.fb);
+      const l = latest(g!, r.name, fieldN);
+      m[r.name] = states(g!, l.fb);
     });
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -841,7 +841,7 @@ export default function CodeRaceArena3D({
   }, [playingRound]);
   const crackedBy = (n: number) => {
     const s = new Set<string>();
-    rounds.slice(0, n).forEach((r: any) => (r.solved || []).forEach((x: string) => s.add(x)));
+    rounds.slice(0, n).forEach((r: CodeRaceRound) => (r.solved || []).forEach((x: string) => s.add(x)));
     return s;
   };
   const [burnN, setBurnN] = useState(-1);
@@ -864,15 +864,15 @@ export default function CodeRaceArena3D({
     const m: Record<string, LedgerRow[]> = {};
     racers.forEach((r) => {
       const sealedGuess = r.you && running && !playing && g.you && g.you.queued ? String(g.you.queued) : null;
-      m[r.name] = ledgerRows(g, r.name, shown, sealedGuess);
+      m[r.name] = ledgerRows(g!, r.name, shown, sealedGuess);
     });
     return m;
   }, [racers, g, shown, running, playing]);
   const myLedger = (racers.find((r) => r.you) && ledgers[racers.find((r) => r.you)!.name]) || [];
   const home = (a: number, width: number) => crHome(a, width, racers, len);
   const first = home(aspect || 1.6, hostW);
-  const fbWords = (fb: any) =>
-    g.mode === "words"
+  const fbWords = (fb: CodeRaceFeedback | null) =>
+    g!.mode === "words"
       ? String(fb || "")
           .split("")
           .map((c) => (c === "G" ? "green" : c === "Y" ? "amber" : "grey"))
@@ -882,7 +882,7 @@ export default function CodeRaceArena3D({
     .map((r) => {
       const rows = (ledgers[r.name] || []).filter((x) => !x.sealed);
       if (!rows.length) return "";
-      return (r.you ? "Your rounds: " : r.name + "'s rounds: ") + rows.map((x) => x.n + (x.guess ? " " + (g.mode === "words" ? x.guess.toUpperCase() : x.guess.split("").join(" ")) : "") + " - " + fbWords(x.fb)).join("; ");
+      return (r.you ? "Your rounds: " : r.name + "'s rounds: ") + rows.map((x) => x.n + (x.guess ? " " + (g!.mode === "words" ? x.guess.toUpperCase() : x.guess.split("").join(" ")) : "") + " - " + fbWords(x.fb)).join("; ");
     })
     .filter(Boolean)
     .join(". ");
@@ -914,7 +914,7 @@ export default function CodeRaceArena3D({
                 Round {playingRound.n} · tap to skip
               </div>
             ) : myLedger.length ? (
-              <LedgerBoard g={g} rows={myLedger} pal={pal} />
+              <LedgerBoard g={g!} rows={myLedger} pal={pal} />
             ) : null}
             <div className="sr-only" aria-live="polite">
               {say}
@@ -945,11 +945,11 @@ export default function CodeRaceArena3D({
           <directionalLight position={[-5, 8, 10]} intensity={1.1} color="#f5d0fe" />
           <HorizonGrid half={[60, 60]} cell={1.5} a="#2e1065" b="#a855f7" fade={40} line={0.55} y={0.002} />
           <OpenClock target={open} still={still} onValue={setOpenT} />
-          <Vault g={g} open={openT} still={still} pal={pal} />
+          <Vault g={g!} open={openT} still={still} pal={pal} />
           {racers.map((r) => (
-            <Pillar key={r.name} g={g} r={r} lit={running && !playing && (r.committed || (r.you && sealed === g.round))} burn={burnSet.has(r.name)} crackedIn={crackedIn(r.name)} still={still} />
+            <Pillar key={r.name} g={g!} r={r} lit={running && !playing && (r.committed || (r.you && sealed === g.round))} burn={burnSet.has(r.name)} crackedIn={crackedIn(r.name)} still={still} />
           ))}
-          <Tumblers g={g} racers={racers} from={playing ? fromStates : toStates} to={toStates} playing={spinning} t0={t0} still={still} />
+          <Tumblers g={g!} racers={racers} from={playing ? fromStates : toStates} to={toStates} playing={spinning} t0={t0} still={still} />
           {playing && playingRound && t0 == null ? <ClockStart key={"c" + playing.n} onStart={(t) => setPlaying((p) => (p && p.t0 == null ? { ...p, t0: t } : p))} /> : null}
           {playing && playingRound && t0 != null ? (
             <Beats
@@ -976,8 +976,8 @@ export default function CodeRaceArena3D({
                 }
               }}
               onVerdict={() => {
-                setSay(sayRound(g, playingRound, racers, last));
-                if (!last && !(playingRound.solved || []).length) juice.hit(roundImpact(g, playingRound, racers, bestBefore(playing.n)));
+                setSay(sayRound(g!, playingRound, racers, last));
+                if (!last && !(playingRound.solved || []).length) juice.hit(roundImpact(g!, playingRound, racers, bestBefore(playing.n)));
               }}
               onOpen={() => {
                 setOpen(1);
@@ -985,7 +985,7 @@ export default function CodeRaceArena3D({
               }}
               onDone={() => {
                 if (last) {
-                  juice.hit(finalImpact(g, racers));
+                  juice.hit(finalImpact(g!, racers));
                   setCeremony((c) => c + 1);
                 }
                 setPlaying(null);

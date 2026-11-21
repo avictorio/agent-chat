@@ -17,15 +17,15 @@
    the viewer's seat. Catch-up: the rounds seen are remembered per game
    (localStorage) and the latest unseen round replays on open (a tap
    skips); reduced motion lands it at once. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
-import { CanvasTexture, Color, SRGBColorSpace, TextureLoader, type Texture } from "three";
+import { CanvasTexture, Color, SRGBColorSpace, TextureLoader, type MeshBasicMaterial, type MeshStandardMaterial, type Texture } from "three";
 import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuality, useReducedMotion, type Ctl, type Home } from "../three/arena3d";
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
+import type { SketchPlayer, SketchRound, SketchState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -96,7 +96,7 @@ function textTex(lines: { text: string; font: string; color: string }[], w: numb
 
 function Gallery({ still }: { still: boolean }) {
   const j = useJuice();
-  const glow = useRef<any>(null);
+  const glow = useRef<MeshStandardMaterial>(null);
   useFrame(() => {
     if (glow.current) glow.current.emissiveIntensity = 0.5 + (still ? 0 : 0.08 * Math.sin(j.t * 0.7));
   });
@@ -125,7 +125,7 @@ function Gallery({ still }: { still: boolean }) {
    while the artist works), the plaque under it. */
 function Frame({ image, blank, plaque, still }: { image: Texture | null; blank: CanvasTexture; plaque: CanvasTexture; still: boolean }) {
   const j = useJuice();
-  const shimmer = useRef<any>(null);
+  const shimmer = useRef<MeshBasicMaterial>(null);
   useFrame((state) => {
     if (shimmer.current && !image) {
       shimmer.current.opacity = still ? 0.12 : 0.1 + 0.08 * (0.5 + 0.5 * Math.sin(j.t * 1.6));
@@ -277,7 +277,7 @@ function Beats({ t0, count, onBeat, onDone }: { t0: number; count: number; onBea
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function roundImpact(g: any, round: any, seats: Seat[], last: boolean): Impact | null {
+function roundImpact(g: SketchState, round: SketchRound | undefined, seats: Seat[], last: boolean): Impact | null {
   const you = seats.find((s) => s.you);
   if (last) {
     if (g.draw) return { trauma: 0.2, stop: 80, sound: "whoosh", title: { big: "DRAW", small: "A tie at the top", tone: "neutral" } };
@@ -341,7 +341,7 @@ function sgHome(aspect: number, width: number, n: number): Home {
 
 /* ---------- the arena ---------- */
 
-export default function SketchArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: any; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
+export default function SketchArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: SketchState | null; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
   const still = useReducedMotion();
   const q = useQuality(still);
   const juice = useJuiceStore(still);
@@ -351,10 +351,10 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: SketchPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: SketchRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
-  const seats: Seat[] = useMemo(() => players.map((p: any) => ({ name: String(p.name), hex: String(p.hex || "#fbbf24"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
+  const seats: Seat[] = useMemo(() => players.map((p: SketchPlayer) => ({ name: String(p.name), hex: String(p.hex || "#fbbf24"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
   const n = seats.length || 3;
 
   const [init] = useState(() => {
@@ -379,21 +379,21 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
   }, [ready, go, firstVisit, still]);
 
   const isLast = (k: number) => finished && k === rounds.length;
-  const cardOrder = (rd: any): string[] => (rd ? seats.map((s) => s.name).filter((nm) => nm !== rd.artist) : []);
+  const cardOrder = (rd: SketchRound | null | undefined): string[] => (rd ? seats.map((s) => s.name).filter((nm) => nm !== rd.artist) : []);
   const sayRound = (k: number) => {
     const rd = rounds[k - 1];
     if (!rd) return "";
     if (rd.forfeit) return "Round " + k + ": " + rd.artist + " didn't draw. It was " + rd.prompt + ".";
-    return "Round " + k + ": it was " + rd.prompt + ". " + (rd.right.length ? rd.right.join(", ") + " got it." : "Nobody got it." + (rd.roast ? " " + rd.roast : "")) + (isLast(k) ? (g.winner ? " " + g.winner + " wins." : " A tie at the top.") : "");
+    return "Round " + k + ": it was " + rd.prompt + ". " + (rd.right.length ? rd.right.join(", ") + " got it." : "Nobody got it." + (rd.roast ? " " + rd.roast : "")) + (isLast(k) ? (g!.winner ? " " + g!.winner + " wins." : " A tie at the top.") : "");
   };
   const finish = (k: number, quiet: boolean) => {
     setPlaying(null);
     setBeat(-1);
     setShown(k);
-    const imp = roundImpact(g, rounds[k - 1], seats, isLast(k));
+    const imp = roundImpact(g!, rounds[k - 1], seats, isLast(k));
     if (imp) juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(k));
-    if (isLast(k) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(k) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -427,24 +427,24 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
   // the round on show: the one playing, else (between rounds) the live
   // drawing, else the last one shown
   const lastShown = rounds[shown - 1] || null;
-  const live = g.status === "running" && !playing;
-  const imageUrl = playRound && playRound.image ? playRound.image.url : live && g.image ? g.image.url : !live && lastShown && lastShown.image ? lastShown.image.url : null;
+  const live = g!.status === "running" && !playing;
+  const imageUrl = playRound && playRound.image ? playRound.image.url : live && g!.image ? g!.image.url : !live && lastShown && lastShown.image ? lastShown.image.url : null;
   const image = useImage(imageUrl);
   const blank = useMemo(
     () =>
       textTex(
         [
-          { text: live && g.phase === "draw" ? (g.artist || "The artist") + " is drawing…" : live && g.phase === "judging" ? "The Referee is judging…" : finished ? "Fin." : "", font: "italic 700 44px Georgia, serif", color: "#57534e" },
+          { text: live && g!.phase === "draw" ? (g!.artist || "The artist") + " is drawing…" : live && g!.phase === "judging" ? "The Referee is judging…" : finished ? "Fin." : "", font: "italic 700 44px Georgia, serif", color: "#57534e" },
         ],
         640,
         480,
         "#f5f1e8",
         null
       ),
-    [live, g.phase, g.artist, finished]
+    [live, g!.phase, g!.artist, finished]
   );
   useEffect(() => () => blank.dispose(), [blank]);
-  const plaqueText = playRound ? (beat >= 0 ? playRound.prompt : "Untitled · by " + playRound.artist) : live ? (g.phase === "draw" ? "In progress · " + (g.artist || "") : "Untitled · by " + (g.artist || "")) : lastShown ? lastShown.prompt : "Sketch & Guess";
+  const plaqueText = playRound ? (beat >= 0 ? playRound.prompt : "Untitled · by " + playRound.artist) : live ? (g!.phase === "draw" ? "In progress · " + (g!.artist || "") : "Untitled · by " + (g!.artist || "")) : lastShown ? lastShown.prompt : "Sketch & Guess";
   const plaque = useMemo(() => textTex([{ text: plaqueText, font: "700 40px Georgia, serif", color: "#1c1917" }], 600, 100, "#c9a227", "#7a5b12"), [plaqueText]);
   useEffect(() => () => plaque.dispose(), [plaque]);
 
@@ -452,7 +452,7 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     const out: Record<string, number> = {};
     seats.forEach((s) => (out[s.name] = 0));
     const upto = playing ? playing.n - 1 : rounds.length;
-    rounds.slice(0, upto).forEach((r: any) => Object.keys(r.points || {}).forEach((nm) => (out[nm] = (out[nm] || 0) + r.points[nm])));
+    rounds.slice(0, upto).forEach((r: SketchRound) => Object.keys(r.points || {}).forEach((nm) => (out[nm] = (out[nm] || 0) + r.points[nm]!)));
     if (playRound) {
       order.slice(0, Math.max(0, beat)).forEach((nm) => (out[nm] = (out[nm] || 0) + ((playRound.points || {})[nm] || 0)));
       if (beat > order.length) out[playRound.artist] = (out[playRound.artist] || 0) + ((playRound.points || {})[playRound.artist] || 0);
@@ -469,8 +469,8 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     });
     if (beat > order.length) cards[playRound.artist] = { text: "the artist", sub: "+" + ((playRound.points || {})[playRound.artist] || 0), tone: "#fbbf24" };
   }
-  const artist = playRound ? playRound.artist : live ? g.artist : null;
-  const sealed = (nm: string) => live && g.phase === "guess" && nm !== g.artist && !!(players.find((p: any) => p.name === nm) || {}).committed;
+  const artist = playRound ? playRound.artist : live ? g!.artist : null;
+  const sealed = (nm: string) => live && g!.phase === "guess" && nm !== g!.artist && !!(players.find((p: SketchPlayer) => p.name === nm) || {}).committed;
 
   const home = (a: number, width: number) => sgHome(a, width, n);
   const first = home(aspect || 1.6, hostW);
@@ -478,7 +478,7 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     "Sketch & Guess arena, 3D view: " +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " " + (scores[s.name] || 0) + " points").join("; ") +
     ". " +
-    (g.status === "running" ? "Round " + g.round + " of " + g.rounds_total + ", " + (g.artist || "?") + (g.phase === "draw" ? " is drawing." : g.phase === "guess" ? "'s drawing is up." : " - the Referee is judging.") : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
+    (g!.status === "running" ? "Round " + g!.round + " of " + g!.rounds_total + ", " + (g!.artist || "?") + (g!.phase === "draw" ? " is drawing." : g!.phase === "guess" ? "'s drawing is up." : " - the Referee is judging.") : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
   const intro = firstVisit ? { title: "Sketch & Guess", sub: seats.map((s) => s.name).join(" · ") || "Draw it, name it", color: "#fbbf24" } : null;
   return (
     <JuiceProvider juice={juice}>
@@ -552,10 +552,10 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
           {fx.map((f) => (
             <Burst key={f.id} at={f.at} hex={f.hex} box={[0.7, 0.4, 0.7]} count={18} power={1.4} piece={0.07} dur={1} onDone={() => setFx((l) => l.filter((x) => x.id !== f.id))} />
           ))}
-          {ceremony && g.winner && !still ? (
+          {ceremony && g!.winner && !still ? (
             <group key={"cer" + ceremony}>
-              <LightPillar at={[standX(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n), 0, standZ(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n)]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#fbbf24" }).hex} height={14} width={0.9} />
-              <Shockwave at={[0, 0.02, 0.8]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#fbbf24" }).hex} radius={9} dur={1.2} />
+              <LightPillar at={[standX(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n), 0, standZ(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n)]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#fbbf24" }).hex} height={14} width={0.9} />
+              <Shockwave at={[0, 0.02, 0.8]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#fbbf24" }).hex} radius={9} dur={1.2} />
             </group>
           ) : null}
           <CameraControls ref={ctl} makeDefault minDistance={5} maxDistance={40} maxPolarAngle={Math.PI / 2.05} />

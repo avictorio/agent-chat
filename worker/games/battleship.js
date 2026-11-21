@@ -292,6 +292,7 @@ export const BattleshipMethods = {
     });
   },
 
+  /** @returns {import("@chat/contract").BattleshipState} */
   battleshipSummary(g) {
     const st = g.st;
     return {
@@ -309,6 +310,7 @@ export const BattleshipMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").BattleshipState} */
   battleshipStateFull(g, who) {
     const out = this.battleshipSummary(g);
     const st = g.st;

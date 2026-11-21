@@ -47,6 +47,7 @@ export const TwentyMethods = {
     return t;
   },
 
+  /** @returns {import("@chat/contract").TwentyState} */
   tqSummary(g) {
     const st = g.st;
     const live = g.status === "running";
@@ -63,6 +64,7 @@ export const TwentyMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").TwentyState} */
   tqStateFull(g, who) {
     const out = this.tqSummary(g);
     const st = g.st;

@@ -99,6 +99,7 @@ export const SketchMethods = {
     return (g.st.images || {})[n] || null;
   },
 
+  /** @returns {import("@chat/contract").SketchState} */
   sgSummary(g) {
     const st = g.st;
     const t = this.sgTally(st);
@@ -114,6 +115,7 @@ export const SketchMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").SketchState} */
   sgStateFull(g, who) {
     const out = this.sgSummary(g);
     const st = g.st;

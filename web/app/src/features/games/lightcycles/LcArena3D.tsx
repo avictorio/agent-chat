@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { CameraControls, MeshReflectorMaterial } from "@react-three/drei";
 import { AdditiveBlending, Color, DoubleSide, ShaderMaterial, Vector3, type Group, type Mesh, type PointLight } from "three";
@@ -30,6 +30,7 @@ import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } fro
 import { BUZZ, sfx } from "../three/sfx";
 import { CYCLE_NOSE, CYCLE_REAR_WHEEL, CYCLE_WHEEL_R, CycleModel, EdgeWall, GridFloor, MAX_RIDERS, Ridges, TrailSystem, poolTexture, type TrailUniforms } from "./cycles";
 import { DV, impactAt, nearMisses, options, poseAt, riders, seenTick, setSeenTick, territory, type Dir, type Rider } from "./lcmodel";
+import type { LightCyclesPlayer, LightCyclesState } from "@chat/contract";
 
 /* Light Cycles in 3D (2026-11-13: the race).
 
@@ -55,8 +56,6 @@ import { DV, impactAt, nearMisses, options, poseAt, riders, seenTick, setSeenTic
 
    The look follows Tron: Legacy (cycles.tsx). Loaded lazily by
    games.ts, so three.js ships in its own chunk. */
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const BIKE_SCALE = 0.9;
 /* The nose ends 0.45 of a cell ahead of the bike's cell centre: never
@@ -113,7 +112,7 @@ class Race {
   played = false;
   fired = new Set<string>();
   list: Rider[] = [];
-  g: any = null;
+  g: LightCyclesState | null = null;
   live: number[] = new Array(MAX_RIDERS).fill(1);
   waveAt: number[] = new Array(MAX_RIDERS).fill(-1);
   push: null | { until: number; pos: [number, number, number]; tgt: [number, number, number] } = null;
@@ -636,7 +635,7 @@ void main() {
   gl_FragColor = vec4(c, ring * 0.9);
 }`;
 
-function Fuse({ g, at, hex, race }: { g: any; at: [number, number] | null; hex: string; race: MutableRefObject<Race> }) {
+function Fuse({ g, at, hex, race }: { g: LightCyclesState | null; at: [number, number] | null; hex: string; race: MutableRefObject<Race> }) {
   const j = useJuice();
   const mesh = useRef<Mesh>(null);
   const mat = useMemo(
@@ -708,7 +707,7 @@ export default function LcArena3D({
   onReady,
   onSteer,
 }: {
-  g: any;
+  g: LightCyclesState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -847,14 +846,14 @@ export default function LcArena3D({
       }
     : undefined;
 
-  const status = (p: any): string => {
+  const status = (p: Partial<LightCyclesPlayer>): string => {
     if (!g || replaying) return "";
     if (g.status === "lobby") return p.accepted ? "✓" : "…";
     if (g.status === "running" && p.alive) return p.moved ? "✓" : "…";
     if (g.status === "finished" && g.winner === p.name) return "★";
     return "";
   };
-  const players: any[] = (g && g.players) || [];
+  const players: LightCyclesPlayer[] = (g && g.players) || [];
   const label =
     "Light Cycles board, 3D view: " + (players.map((p) => p.name + (p.alive ? " riding" : " out")).join(", ") || "no riders") + ".";
   const intro = firstVisit ? { title: "Light Cycles", sub: players.map((p) => p.name).join(" · ") || "The grid is live", color: "#22d3ee" } : null;
@@ -936,7 +935,7 @@ export default function LcArena3D({
                         tagEls.current[r.i] = el;
                       }}
                       className={"lc-tag" + (r.me ? " me" : "")}
-                      style={{ ["--tc" as any]: r.hex, opacity: 0 }}
+                      style={{ ["--tc"]: r.hex, opacity: 0 } as CSSProperties}
                     >
                       {r.me ? "You" : r.name}
                       {st ? <span className="lc-tag-st">{st}</span> : null}

@@ -21,7 +21,9 @@ export interface GamePlayerBase {
   name: string;
   color: string;
   hex: string;
-  /** Lobby only: whether this player has accepted the seat. */
+  /** Whether this player has accepted the seat. The engines send it in
+   *  every state, and it stays true once the lobby has filled; it is
+   *  optional here only because the oldest Light Cycles matches lack it. */
   accepted?: boolean;
 }
 

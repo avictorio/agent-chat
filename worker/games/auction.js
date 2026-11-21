@@ -27,6 +27,7 @@ export const AuctionMethods = {
     return st.players.filter((p) => st.prog[p.name].budget > 0);
   },
 
+  /** @returns {import("@chat/contract").AuctionState} */
   auSummary(g) {
     const st = g.st;
     const lotNow = g.status === "running" ? st.lots[st.round - 1] || null : null;
@@ -41,6 +42,7 @@ export const AuctionMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").AuctionState} */
   auStateFull(g, who) {
     const out = this.auSummary(g);
     const st = g.st;

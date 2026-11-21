@@ -12,7 +12,6 @@
    votes drop onto the pages as gold stars and the honours page lights,
    with the winner's pillar. Catch-up, tap to skip and reduced motion as
    in the other arenas; the full text lives in the page under the scene. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -22,6 +21,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { LightPillar, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
+import type { CorpseBeat, CorpsePlayer, CorpseSegment, CorpseState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -253,8 +253,8 @@ function Page({ p, still }: { p: PageSpec; still: boolean }) {
 
 /* The pile before the reveal: a stack of folded pages, edges in each
    author's ink; on your turn the top page lies face up with your tail. */
-function Pile({ g, tail, hexOf, still }: { g: any; tail: string | null; hexOf: (n: string) => string; still: boolean }) {
-  const beats: any[] = ((g && g.beats) || []).filter((b: any) => b.wrote);
+function Pile({ g, tail, hexOf, still }: { g: CorpseState | null; tail: string | null; hexOf: (n: string) => string; still: boolean }) {
+  const beats: CorpseBeat[] = ((g && g.beats) || []).filter((b: CorpseBeat) => b.wrote);
   const top = useRef<Group>(null);
   const j = useJuice();
   const held = tail != null;
@@ -278,7 +278,7 @@ function Pile({ g, tail, hexOf, still }: { g: any; tail: string | null; hexOf: (
       <group ref={top} position={[0, 0.02 + beats.length * 0.025 + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <mesh>
           <planeGeometry args={[PW, PH]} />
-          <meshStandardMaterial map={pageTex(tail != null ? (g.segments ? "The segment before yours" : "The seed line") : "", tail != null ? "#b45309" : "#7c5c34", tail, tail != null && !g.segments)} roughness={0.9} toneMapped={false} />
+          <meshStandardMaterial map={pageTex(tail != null ? (g!.segments ? "The segment before yours" : "The seed line") : "", tail != null ? "#b45309" : "#7c5c34", tail, tail != null && !g!.segments)} roughness={0.9} toneMapped={false} />
         </mesh>
       </group>
     </group>
@@ -327,14 +327,14 @@ function Clock({ t0, doneAt, beats, onT, onBeat, onDone }: { t0: number; doneAt:
 
 /* ---------- impacts ---------- */
 
-function revealImpact(g: any): Impact {
-  const writers = new Set(((g.story || []) as any[]).map((s) => s.by)).size;
+function revealImpact(g: CorpseState): Impact {
+  const writers = new Set(((g.story || []) as CorpseSegment[]).map((s) => s.by)).size;
   return { trauma: 0.2, stop: 80, pulse: 0.5, sound: ["whoosh", "win"], title: { big: "THE STORY", small: (g.story || []).length + " segments by " + writers + (writers === 1 ? " writer" : " writers") + " - vote for a favourite", tone: "neutral" } };
 }
 
-function honoursImpact(g: any, me: string): Impact {
+function honoursImpact(g: CorpseState, me: string): Impact {
   const hs: number[] = g.honours || [];
-  const story: any[] = g.story || [];
+  const story: CorpseSegment[] = g.story || [];
   const authors = [...new Set(hs.map((k) => (story[k - 1] || {}).by).filter(Boolean))] as string[];
   if (!hs.length) return { trauma: 0.2, stop: 80, sound: "whoosh", title: { big: "THE END", small: "Nobody voted for a favourite", tone: "neutral" } };
   const n = (g.votes || {})[hs[0] as number] || 0;
@@ -436,7 +436,7 @@ export default function CorpseArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: CorpseState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -451,7 +451,7 @@ export default function CorpseArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
+  const players: CorpsePlayer[] = (g && g.players) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const revealed = !!g && !!g.story;
@@ -467,7 +467,7 @@ export default function CorpseArena3D({
     const list = players.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
     const n = list.length;
     const span = Math.min(L.w - 1.2, n * 1.5);
-    return list.map((p: any, i: number) => ({ name: String(p.name), hex: String(p.hex || "#a16207"), you: String(p.name).toLowerCase() === meL, x: n > 1 ? (i / (n - 1) - 0.5) * span : 0, z: L.d / 2 - 0.55 }));
+    return list.map((p: CorpsePlayer, i: number) => ({ name: String(p.name), hex: String(p.hex || "#a16207"), you: String(p.name).toLowerCase() === meL, x: n > 1 ? (i / (n - 1) - 0.5) * span : 0, z: L.d / 2 - 0.55 }));
   }, [players, meL, g, L.w, L.d]);
 
   // what still has to play: the deal (on reveal) and the honours (at the end)
@@ -497,7 +497,7 @@ export default function CorpseArena3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealt, honoured]);
 
-  const story: any[] = (g && g.story) || [];
+  const story: CorpseSegment[] = (g && g.story) || [];
   const dealAt = (i: number) => 0.4 + i * DEAL;
   const dealDone = dealAt(story.length + 1) + FLIGHT + 0.6;
   const starsAt = 0.5;
@@ -507,13 +507,13 @@ export default function CorpseArena3D({
     setPlaying(null);
     if (kind === "deal") {
       setDealt(true);
-      juice.hit(revealImpact(g));
+      juice.hit(revealImpact(g!));
       setSay("The story is revealed: " + story.length + " segments.");
     } else {
       setHonoured(true);
-      juice.hit(honoursImpact(g, meName));
-      setSay(g.honours && g.honours.length ? "The honours go to segment " + g.honours.join(" and ") + "." : "Nobody voted.");
-      if (g.winner) setCeremony((c) => c + 1);
+      juice.hit(honoursImpact(g!, meName));
+      setSay(g!.honours && g!.honours.length ? "The honours go to segment " + g!.honours.join(" and ") + "." : "Nobody voted.");
+      if (g!.winner) setCeremony((c) => c + 1);
     }
   };
 
@@ -575,7 +575,7 @@ export default function CorpseArena3D({
 
   const tail = running && g.you && g.you.writer ? g.you.tail || "" : null;
   const champion = finished && g.winner ? seats.find((s) => s.name === g.winner) || null : null;
-  const bestPage = finished && (g.honours || []).length ? L.spot(g.honours[0]) : null;
+  const bestPage = finished && (g.honours || []).length ? L.spot(g.honours![0]!) : null;
   const home = (a: number, width: number) => ecHome(a, width, revealed ? story.length + 1 : total);
   const first = home(aspect || 1.6, hostW);
   const label =
@@ -637,7 +637,7 @@ export default function CorpseArena3D({
           {!revealed || (!dealt && !playing) ? <Pile g={g} tail={tail} hexOf={hexOf} still={still} /> : null}
           {revealed && (dealt || playing) ? pages.map((p) => <Page key={p.key} p={p} still={still} />) : null}
           {seats.map((s) => {
-            const p = players.find((x) => x.name === s.name) || {};
+            const p: Partial<CorpsePlayer> = players.find((x) => x.name === s.name) || {};
             return (
               <group key={s.name}>
                 <Inkwell s={s} writing={running && g.phase === "write" && g.turn_of === s.name} voted={running && g.phase === "vote" && !!p.committed} out={!!p.out} still={still} />
@@ -667,8 +667,8 @@ export default function CorpseArena3D({
                 if (k === "start") sfx("whoosh");
                 else if (k === "stars") sfx("beat");
                 else if (k === "best") {
-                  juice.hit(honoursImpact(g, meName));
-                  if (g.winner) setCeremony((c) => c + 1);
+                  juice.hit(honoursImpact(g!, meName));
+                  if (g!.winner) setCeremony((c) => c + 1);
                 }
               }}
               onDone={() => {
@@ -676,7 +676,7 @@ export default function CorpseArena3D({
                 setPlaying(null);
                 if (kind === "deal") {
                   setDealt(true);
-                  juice.hit(revealImpact(g));
+                  juice.hit(revealImpact(g!));
                   setSay("The story is revealed: " + story.length + " segments.");
                 } else setHonoured(true);
               }}

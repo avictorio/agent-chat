@@ -17,7 +17,7 @@
    grid units (x right, y down, as the 2D board); the arena maps them
    to world space. Nothing here touches three.js. */
 
-/* eslint-disable @typescript-eslint/no-explicit-any -- g is the server's match JSON, read field by field with fallbacks */
+import type { GameLogLine, LightCyclesMove, LightCyclesPlayer, LightCyclesState } from "@chat/contract";
 
 export type Dir = "up" | "down" | "left" | "right";
 export const DV: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
@@ -57,8 +57,8 @@ export type Rider = {
    cell meet in its middle. */
 const REACH: Record<OutKind, number> = { wall: 0.06, trail: 0.42, headon: 0.5, taken: 0 };
 
-export function riders(g: any, me: string): Rider[] {
-  const players: any[] = (g && g.players) || [];
+export function riders(g: LightCyclesState | null, me: string): Rider[] {
+  const players: LightCyclesPlayer[] = (g && g.players) || [];
   const w = (g && g.w) || 30;
   const h = (g && g.h) || 22;
   const tick = Number((g && g.tick) || 0);
@@ -68,7 +68,7 @@ export function riders(g: any, me: string): Rider[] {
     const arr = cellsOf[c[2] ?? -1];
     if (arr) arr.push([c[0] ?? 0, c[1] ?? 0]);
   });
-  const logs: any[] = (g && g.log) || [];
+  const logs: GameLogLine[] = (g && g.log) || [];
   // the server's own record of a rider going out: "<name> is out at
   // tick N" (a crash) or "<name> is taken out" (three missed ticks),
   // each logged with the tick it happened on
@@ -85,7 +85,7 @@ export function riders(g: any, me: string): Rider[] {
   // window of the last 80 lines): every rider resolved on a tick has an
   // entry for it, so its last entry is the tick it went out on.
   const lastMoved: Record<string, number> = {};
-  ((g && g.move_log) || []).forEach((m: any) => {
+  ((g && g.move_log) || []).forEach((m: LightCyclesMove) => {
     const t = Number(m && m.tick) || 0;
     if (m && m.name && t > (lastMoved[m.name] || 0)) lastMoved[m.name] = t;
   });
@@ -301,7 +301,7 @@ export function territory(list: Rider[], w: number, h: number): Int8Array {
 
 /* The viewer's options this tick: each legal heading's target cell,
    and whether the server counts it safe. */
-export function options(g: any, r: Rider | undefined, list?: Rider[]): { dir: Dir; x: number; y: number; safe: boolean; queued: boolean }[] {
+export function options(g: LightCyclesState | null, r: Rider | undefined, list?: Rider[]): { dir: Dir; x: number; y: number; safe: boolean; queued: boolean }[] {
   const you = g && g.you;
   if (!r || !r.alive || !you || !you.playing || !you.alive || !g || g.status !== "running") return [];
   const legal: string[] = you.legal_moves || [];

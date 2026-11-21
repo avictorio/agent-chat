@@ -14,7 +14,6 @@
    last round adds the winner's pillar. Catch-up, tap to skip and reduced
    motion as in the other arenas. The page under the scene carries the
    writing form, the votes, the scores and the full reveal. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -24,6 +23,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
+import type { TwoTruthsPlayer, TwoTruthsRound, TwoTruthsState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -344,7 +344,7 @@ function Beats({ t0, beats, doneAt, onT, onBeat, onDone }: { t0: number; beats: 
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function roundImpact(r: any, me: string): Impact {
+function roundImpact(r: TwoTruthsRound, me: string): Impact {
   if (r.forfeit) {
     if (r.teller === me) return { trauma: 0.3, stop: 90, buzz: BUZZ.hitYou, sound: "buzzer", title: { big: "FORFEIT", small: "Your writing time ran out", tone: "bad" } };
     return { trauma: 0.1, sound: "whoosh", title: { big: "FORFEIT", small: r.teller + " ran out of time to write", tone: "neutral" } };
@@ -362,13 +362,13 @@ function roundImpact(r: any, me: string): Impact {
   return { trauma: 0.35, stop: 100, buzz: BUZZ.hitYou, sound: ["shatter", "lose"], title: { big: "FOOLED", small: "#" + lie + " was the lie - you picked #" + v, tone: "bad" } };
 }
 
-function finalImpact(g: any, me: string): Impact {
+function finalImpact(g: TwoTruthsState, me: string): Impact {
   const w = g.winner as string | null;
-  const pts = (n: string) => ((g.players || []).find((p: any) => p.name === n) || {}).score || 0;
+  const pts = (n: string) => (((g.players || []).find((p: TwoTruthsPlayer) => p.name === n) || {}) as Partial<TwoTruthsPlayer>).score || 0;
   const line = (g.places || []).map((n: string) => n + " " + pts(n)).join(" · ");
   if (!w) return { trauma: 0.3, stop: 120, sound: "whoosh", title: { big: "A TIE", small: line, tone: "neutral" } };
   if (me && me === w) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: line, tone: "good" } };
-  if (me && (g.players || []).some((p: any) => p.name === me)) {
+  if (me && (g.players || []).some((p: TwoTruthsPlayer) => p.name === me)) {
     const place = (g.places || []).indexOf(me) + 1;
     if (place === 2) return { trauma: 0.4, stop: 150, buzz: BUZZ.scored, sound: "win", title: { big: "#2", small: w + " tells the best tales · " + line, tone: "neutral" } };
     return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 0.8, buzz: BUZZ.lostMatch, sound: ["clash", "lose"], title: { big: "DEFEAT", small: w + " wins · " + line, tone: "bad" } };
@@ -376,10 +376,10 @@ function finalImpact(g: any, me: string): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: w.toUpperCase() + " WINS", small: line, tone: "neutral" } };
 }
 
-function sayRound(r: any): string {
+function sayRound(r: TwoTruthsRound): string {
   if (!r) return "";
   if (r.forfeit) return "Round " + r.n + ": " + r.teller + " ran out of time to write; the round is forfeit.";
-  const lie = (r.statements || [])[r.lie - 1] || "";
+  const lie = (r.statements || [])[r.lie! - 1] || "";
   return "Round " + r.n + ": " + r.teller + "'s lie was number " + r.lie + ", " + lie + ". " + ((r.right || []).length ? (r.right || []).join(", ") + " spotted it" : "Nobody spotted it") + "; " + r.teller + " fooled " + r.fooled + ".";
 }
 
@@ -468,7 +468,7 @@ export default function TwoTruthsArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: TwoTruthsState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -483,11 +483,11 @@ export default function TwoTruthsArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: TwoTruthsPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: TwoTruthsRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
-  const meName = (players.find((p) => String(p.name).toLowerCase() === meL) || {}).name || "";
+  const meName = ((players.find((p) => String(p.name).toLowerCase() === meL) || {}) as Partial<TwoTruthsPlayer>).name || "";
   const big = hostW < PHONE_BELOW;
 
   // seats in turn order round the fire, you nearest the camera
@@ -496,7 +496,7 @@ export default function TwoTruthsArena3D({
     const list = players.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
     const n = list.length;
     const mine = list.findIndex((p) => String(p.name).toLowerCase() === meL);
-    return list.map((p: any, i: number) => {
+    return list.map((p: TwoTruthsPlayer, i: number) => {
       const a = Math.PI / 2 + ((i - (mine >= 0 ? mine : 0)) / Math.max(1, n)) * Math.PI * 2;
       return { name: String(p.name), hex: String(p.hex || "#fb923c"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * SEAT_R, z: Math.sin(a) * SEAT_R, a };
     });
@@ -529,10 +529,10 @@ export default function TwoTruthsArena3D({
     setPlaying(null);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g, meName) : roundImpact(r, meName);
+    const imp = isLast(n) ? finalImpact(g!, meName) : roundImpact(r, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -596,7 +596,7 @@ export default function TwoTruthsArena3D({
       return { text: ss[i] || "", mark: yl === i + 1 ? "lie" : "", faceDown: false };
     }
     if (finished && rounds.length) {
-      const last = rounds[rounds.length - 1];
+      const last = rounds[rounds.length - 1]!;
       if (!last.forfeit) return { text: (last.statements || [])[i] || "", mark: i + 1 === last.lie ? "lie" : "true", faceDown: false };
     }
     return { text: null, mark: "", faceDown: true };
@@ -676,7 +676,7 @@ export default function TwoTruthsArena3D({
             return <Card key={i} i={i} text={c.text} mark={c.mark} faceDown={c.faceDown} burn={isLie ? burn : 0} glow={r && !r.forfeit && !isLie ? glowK : 0} still={still} />;
           })}
           {seats.map((s) => {
-            const p = players.find((x) => x.name === s.name) || {};
+            const p = (players.find((x) => x.name === s.name) || {}) as Partial<TwoTruthsPlayer>;
             const ox = Math.cos(s.a);
             const oz = Math.sin(s.a);
             const teller = tellerNow === s.name;
@@ -728,13 +728,13 @@ export default function TwoTruthsArena3D({
                   juice.hit(roundImpact(r, meName));
                   setSay(sayRound(r));
                   if (!r.forfeit && !q.lite) {
-                    const at = cardPos(r.lie - 1);
+                    const at = cardPos(r.lie! - 1);
                     setFx((l) => [...l.slice(-4), { id: ++fxId.current, at: [at[0], CARD_Y, at[2]], hex: "#f97316" }]);
                   }
                 } else if (k === "pts" && isLast(playing.n)) {
                   setTimeout(() => {
-                    juice.hit(finalImpact(g, meName));
-                    if (g.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g!, meName));
+                    if (g!.winner) setCeremony((c) => c + 1);
                   }, 700);
                 }
               }}

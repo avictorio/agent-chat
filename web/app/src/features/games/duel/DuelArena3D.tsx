@@ -43,7 +43,6 @@
    once on its title card, sound and buzz. The throw pad, the verdict
    banner and the scoreboard stay in the DOM: the scene shows, the page
    acts. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls, Sparkles } from "@react-three/drei";
@@ -67,6 +66,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact, type Juice } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx, type SfxName } from "../three/sfx";
+import type { DuelPlayer, DuelRound, DuelState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -658,16 +658,16 @@ function drawThrow(x: CanvasRenderingContext2D, kind: string | null, cx: number,
 }
 
 /* Round wins in a row, counted back from the latest round shown. */
-function streakIn(rounds: any[], name: string): number {
+function streakIn(rounds: DuelRound[], name: string): number {
   let n = 0;
   for (let i = rounds.length - 1; i >= 0; i--) {
-    if (rounds[i] && rounds[i].winner === name) n++;
+    if (rounds[i] && rounds[i]!.winner === name) n++;
     else break;
   }
   return n;
 }
 
-function Record({ rounds, sides, phone }: { rounds: any[]; sides: Side[]; phone: boolean }) {
+function Record({ rounds, sides, phone }: { rounds: DuelRound[]; sides: Side[]; phone: boolean }) {
   const [L, R] = sides as [Side, Side];
   const sig = rounds.map((r) => (r.throws ? (r.throws[L.name] || "-") + (r.throws[R.name] || "-") : "--") + (r.winner || "=")).join("|") + L.hex + R.hex;
   const tex = useMemo(() => {
@@ -719,7 +719,7 @@ function Record({ rounds, sides, phone }: { rounds: any[]; sides: Side[]; phone:
 
 /* ---------- the reveal ---------- */
 
-type Item = { idx: number; round: any; mode: Mode; final: { winner: string } | null; skip?: boolean };
+type Item = { idx: number; round: DuelRound; mode: Mode; final: { winner: string } | null; skip?: boolean };
 
 function Reveal({
   item,
@@ -1180,7 +1180,7 @@ export default function DuelArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: DuelState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -1194,8 +1194,8 @@ export default function DuelArena3D({
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const rv = useRef<RevealRef>({ t0: null, plan: null, absent: null });
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: DuelPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: DuelRound[] = (g && g.rounds) || NO_ITEMS;
   const target = (g && g.target) || 3;
   const meL = me.toLowerCase();
   const finished = !!g && g.status === "finished";
@@ -1206,7 +1206,7 @@ export default function DuelArena3D({
   // You stand on the left; spectators see the order the match lists.
   const ordered = useMemo(() => {
     const list = players.slice(0, 2);
-    if (list.length === 2 && String(list[1].name).toLowerCase() === meL) list.reverse();
+    if (list.length === 2 && String(list[1]!.name).toLowerCase() === meL) list.reverse();
     return list;
   }, [players, meL]);
   const youPlaying = !!(g && g.you && g.you.playing);
@@ -1227,7 +1227,7 @@ export default function DuelArena3D({
     from = Math.max(from, n - 3);
     const queue: Item[] = [];
     for (let i = from; i < n; i++)
-      queue.push({ idx: i, round: rounds[i], mode: i === n - 1 ? "full" : "quick", final: i === n - 1 && finished && winner ? { winner } : null });
+      queue.push({ idx: i, round: rounds[i]!, mode: i === n - 1 ? "full" : "quick", final: i === n - 1 && finished && winner ? { winner } : null });
     return { shown: from, end: !finished, queue, catchup: queue.length };
   });
   const [queue, setQueue] = useState<Item[]>(init.queue);
@@ -1275,12 +1275,12 @@ export default function DuelArena3D({
   const revealing = !!current;
   const shownRounds = rounds.slice(0, shown);
   const lastShown = shownRounds[shownRounds.length - 1] || null;
-  const winsIn = (list: any[], name: string) => list.filter((r) => r.winner === name).length;
+  const winsIn = (list: DuelRound[], name: string) => list.filter((r) => r.winner === name).length;
   const sides: Side[] = ordered.map((p, i) => {
     const you = String(p.name).toLowerCase() === meL && youPlaying;
     const wins = shown === rounds.length ? p.wins || 0 : winsIn(shownRounds, p.name);
     const thrownIn = current ? !!(current.round.throws || {})[p.name] : false;
-    const running = g.status === "running";
+    const running = g!.status === "running";
     const own = you && running && !current ? pending?.t || queued : null;
     const locked = current ? thrownIn : running && (!!p.thrown || !!own);
     const out = endShown && !!winner && p.name !== winner;
@@ -1303,10 +1303,10 @@ export default function DuelArena3D({
         .join(" · "),
     };
   });
-  const scoreOf = (list: any[]) => ordered.map((p) => winsIn(list, p.name)).join("–");
+  const scoreOf = (list: DuelRound[]) => ordered.map((p) => winsIn(list, p.name)).join("–");
   const realScore = ordered.map((p) => p.wins || 0).join("–");
-  const mpOf = (list: any[]) => ordered.some((p) => winsIn(list, p.name) === target - 1);
-  const matchPointNow = !endShown || g.status === "running" ? sides.some((s) => s.wins === target - 1) : false;
+  const mpOf = (list: DuelRound[]) => ordered.some((p) => winsIn(list, p.name) === target - 1);
+  const matchPointNow = !endShown || g!.status === "running" ? sides.some((s) => s.wins === target - 1) : false;
 
   /* New rounds while open queue up like the catch-up; the newest plays
      in full. A match that ends without a new round (nobody threw in
@@ -1318,7 +1318,7 @@ export default function DuelArena3D({
     const was = prev.current;
     prev.current = { n, finished };
     if (n > was.n) {
-      const r = rounds[n - 1];
+      const r = rounds[n - 1]!;
       const final = finished && winner ? { winner } : null;
       const names = sides.map((s) => (s.you ? "you" : s.name));
       const throwsTxt = sides
@@ -1351,7 +1351,7 @@ export default function DuelArena3D({
         return;
       }
       const items: Item[] = [];
-      for (let i = was.n; i < n; i++) items.push({ idx: i, round: rounds[i], mode: i === n - 1 ? "full" : "quick", final: i === n - 1 ? final : null });
+      for (let i = was.n; i < n; i++) items.push({ idx: i, round: rounds[i]!, mode: i === n - 1 ? "full" : "quick", final: i === n - 1 ? final : null });
       if (final) setEndShown(false);
       setQueue((qq) => [...qq, ...items]);
       return;

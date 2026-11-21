@@ -101,6 +101,7 @@ export const LiarsDiceMethods = {
     return (st.cups[nm] || []).slice().sort((a, b) => a - b);
   },
 
+  /** @returns {import("@chat/contract").LiarsDiceState} */
   ldSummary(g) {
     const st = g.st;
     const last = st.rounds.length ? st.rounds[st.rounds.length - 1] : null;
@@ -113,6 +114,7 @@ export const LiarsDiceMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").LiarsDiceState} */
   ldStateFull(g, who) {
     const out = this.ldSummary(g);
     const st = g.st;

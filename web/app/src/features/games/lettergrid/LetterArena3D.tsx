@@ -16,15 +16,15 @@
    seat. Catch-up: the rounds seen are remembered per game (localStorage)
    and the latest unseen round replays on open (a tap skips); reduced
    motion lands it at once with its title and sound. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
-import { CanvasTexture, Color, CurvePath, LineCurve3, Object3D, SRGBColorSpace, TubeGeometry, Vector3, type InstancedMesh, type Mesh } from "three";
+import { CanvasTexture, Color, CurvePath, LineCurve3, Object3D, SRGBColorSpace, TubeGeometry, Vector3, type InstancedMesh, type Mesh, type MeshStandardMaterial } from "three";
 import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, fitHome, goHome, useQuality, useReducedMotion, type Ctl, type Home } from "../three/arena3d";
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
+import type { LetterGridPlayer, LetterGridRound, LetterGridState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -115,7 +115,7 @@ function poolTex(): CanvasTexture {
 
 function Plinth({ n, still }: { n: number; still: boolean }) {
   const j = useJuice();
-  const rim = useRef<any>(null);
+  const rim = useRef<MeshStandardMaterial>(null);
   useFrame(() => {
     if (rim.current) rim.current.emissiveIntensity = 0.5 + (still ? 0 : 0.12 * Math.sin(j.t * 0.9));
   });
@@ -375,7 +375,7 @@ function wordImpact(w: Word, seats: Seat[]): Impact {
   return { trauma: mine ? 0.15 : 0.08, sound: "ping", buzz: mine ? BUZZ.commit : undefined };
 }
 
-function roundImpact(g: any, n: number, words: Word[], seats: Seat[], last: boolean): Impact | null {
+function roundImpact(g: LetterGridState, n: number, words: Word[], seats: Seat[], last: boolean): Impact | null {
   const you = seats.find((s) => s.you);
   if (last) {
     if (g.draw) return { trauma: 0.2, stop: 80, sound: "whoosh", title: { big: "DRAW", small: "A tie at the top", tone: "neutral" } };
@@ -419,10 +419,10 @@ function writeSeen(id: unknown, n: number) {
   }
 }
 
-function wordsOf(round: any): Word[] {
+function wordsOf(round: LetterGridRound | undefined): Word[] {
   if (!round) return [];
   const out: Word[] = Object.keys(round.words || {}).map((by) => {
-    const w = round.words[by];
+    const w = round.words[by]!;
     return { by, word: String(w.word || ""), path: w.path || [], points: (round.points || {})[by] || 0, claimed: w.claimed || [], contested: w.contested || [], dup: !!w.dup };
   });
   // lowest first: the round's best word lands last
@@ -440,7 +440,7 @@ export default function LetterArena3D({
   draft,
   onCell,
 }: {
-  g: any;
+  g: LetterGridState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -459,10 +459,10 @@ export default function LetterArena3D({
   const meL = me.toLowerCase();
   const grid: string[] = (g && g.grid) || [];
   const n = grid.length || 5;
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: LetterGridPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: LetterGridRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
-  const seats: Seat[] = useMemo(() => players.map((p: any) => ({ name: String(p.name), hex: String(p.hex || "#2dd4bf"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
+  const seats: Seat[] = useMemo(() => players.map((p: LetterGridPlayer) => ({ name: String(p.name), hex: String(p.hex || "#2dd4bf"), you: String(p.name).toLowerCase() === meL })), [players, meL]);
 
   const [init] = useState(() => {
     const R = rounds.length;
@@ -492,17 +492,17 @@ export default function LetterArena3D({
   const isLast = (k: number) => finished && k === rounds.length;
   const sayRound = (k: number) => {
     const ws = wordsOf(rounds[k - 1]);
-    return "Round " + k + ": " + (ws.length ? ws.slice().reverse().map((w) => w.by + " " + w.word.toUpperCase() + " +" + w.points).join(", ") : "no words") + "." + (isLast(k) ? (g.winner ? " " + g.winner + " wins the grid." : " A tie at the top.") : "");
+    return "Round " + k + ": " + (ws.length ? ws.slice().reverse().map((w) => w.by + " " + w.word.toUpperCase() + " +" + w.points).join(", ") : "no words") + "." + (isLast(k) ? (g!.winner ? " " + g!.winner + " wins the grid." : " A tie at the top.") : "");
   };
   const finish = (k: number, quiet: boolean) => {
     setPlaying(null);
     setProg([]);
     setLanded(0);
     setShown(k);
-    const imp = roundImpact(g, k, wordsOf(rounds[k - 1]), seats, isLast(k));
+    const imp = roundImpact(g!, k, wordsOf(rounds[k - 1]), seats, isLast(k));
     if (imp) juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(k));
-    if (isLast(k) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(k) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -539,7 +539,7 @@ export default function LetterArena3D({
     const hiddenFrom = playing ? playing.n : shown + 1;
     for (let k = hiddenFrom; k <= rounds.length; k++) {
       const rd = rounds[k - 1];
-      for (const by of Object.keys((rd && rd.words) || {})) for (const cell of rd.words[by].claimed || []) out[cell] = null;
+      for (const by of Object.keys((rd && rd.words) || {})) for (const cell of rd!.words[by]!.claimed || []) out[cell] = null;
     }
     if (playing) playWords.slice(0, landed).forEach((w) => w.claimed.forEach((cell) => (out[cell] = w.by)));
     return out;
@@ -570,12 +570,12 @@ export default function LetterArena3D({
     " grid of letters. " +
     seats
       .map((s) => {
-        const p = players.find((x: any) => x.name === s.name) || {};
+        const p = (players.find((x: LetterGridPlayer) => x.name === s.name) || {}) as Partial<LetterGridPlayer>;
         return s.name + (s.you ? " (you)" : "") + " " + (p.score || 0) + " points, " + (p.cells || 0) + " cells";
       })
       .join("; ") +
     ". " +
-    (g.status === "running" ? "Round " + g.round + " of " + g.rounds_total + ". " : finished ? (g.winner ? g.winner + " won. " : "A tie at the top. ") : "") +
+    (g!.status === "running" ? "Round " + g!.round + " of " + g!.rounds_total + ". " : finished ? (g.winner ? g.winner + " won. " : "A tie at the top. ") : "") +
     claimedCount +
     " cells claimed.";
   const intro = firstVisit ? { title: "Letter Grid", sub: seats.map((s) => s.name).join(" · ") || "Trace a word, claim the cells", color: "#2dd4bf" } : null;
@@ -673,10 +673,10 @@ export default function LetterArena3D({
           {fx.map((f) => (
             <Burst key={f.id} at={f.at} hex={f.hex} box={[0.7, 0.3, 0.7]} count={f.small ? 10 : 18} power={f.small ? 0.9 : 1.3} piece={0.06} dur={0.9} onDone={() => setFx((l) => l.filter((x) => x.id !== f.id))} />
           ))}
-          {ceremony && g.winner && !still ? (
+          {ceremony && g!.winner && !still ? (
             <group key={"cer" + ceremony}>
-              <LightPillar at={[0, 0, 0]} hex={hexOf(g.winner)} height={14} width={0.9} />
-              <Shockwave at={[0, 0.02, 0]} hex={hexOf(g.winner)} radius={12} dur={1.2} />
+              <LightPillar at={[0, 0, 0]} hex={hexOf(g!.winner)} height={14} width={0.9} />
+              <Shockwave at={[0, 0.02, 0]} hex={hexOf(g!.winner)} radius={12} dur={1.2} />
             </group>
           ) : null}
           <CameraControls ref={ctl} makeDefault minDistance={4} maxDistance={40} maxPolarAngle={Math.PI / 2.1} />

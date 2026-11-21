@@ -13,7 +13,6 @@
    draw gets a quiet one. Catch-up: the moves seen are remembered per game
    (localStorage) and the latest unseen move drops in on open (a tap
    skips); reduced motion places it at once with its title and sound. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -22,6 +21,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
+import type { FourInARowMove, FourInARowPlayer, FourInARowState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -310,7 +310,7 @@ function WinClock({ on, still, onValue }: { on: boolean; still: boolean; onValue
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function landImpact(g: any, mv: any, seats: Seat[], last: boolean): Impact {
+function landImpact(g: FourInARowState, mv: FourInARowMove, seats: Seat[], last: boolean): Impact {
   const you = seats.find((s) => s.you);
   const mine = !!you && mv.by === you.name;
   if (last) {
@@ -378,7 +378,7 @@ export default function FourArena3D({
   registerCommit,
   onDrop,
 }: {
-  g: any;
+  g: FourInARowState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -394,11 +394,11 @@ export default function FourArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const moves: any[] = (g && g.moves) || [];
+  const players: FourInARowPlayer[] = (g && g.players) || NO_ITEMS;
+  const moves: FourInARowMove[] = (g && g.moves) || [];
   const finished = !!g && g.status === "finished";
   const seats: Seat[] = useMemo(
-    () => players.map((p: any) => ({ name: String(p.name), hex: String(p.hex || "#fb7185"), piece: p.piece === "O" ? "O" : "X", you: String(p.name).toLowerCase() === meL })),
+    () => players.map((p: FourInARowPlayer) => ({ name: String(p.name), hex: String(p.hex || "#fb7185"), piece: p.piece === "O" ? "O" : "X", you: String(p.name).toLowerCase() === meL })),
     [players, meL]
   );
   const pieceOf = (name: string): "X" | "O" => (seats.find((s) => s.name === name) || { piece: "X" as const }).piece;
@@ -425,17 +425,17 @@ export default function FourArena3D({
   }, [ready, go, firstVisit, still]);
 
   const isLast = (n: number) => finished && n === moves.length;
-  const sayMove = (mv: any, last: boolean) =>
-    mv.by + " drops in column " + mv.col + "." + (last ? (g.draw ? " The board is full - a draw." : g.winner ? " " + g.winner + " connects four and wins." : "") : "");
+  const sayMove = (mv: FourInARowMove, last: boolean) =>
+    mv.by + " drops in column " + mv.col + "." + (last ? (g!.draw ? " The board is full - a draw." : g!.winner ? " " + g!.winner + " connects four and wins." : "") : "");
   const land = (n: number, quiet: boolean) => {
     const mv = moves[n - 1];
     setPlaying(null);
     setShown(n);
     if (!mv) return;
-    const imp = landImpact(g, mv, seats, isLast(n));
+    const imp = landImpact(g!, mv, seats, isLast(n));
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayMove(mv, isLast(n)));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -467,7 +467,7 @@ export default function FourArena3D({
 
   const settledN = playing ? playing.n - 1 : shown;
   const discs: Disc[] = useMemo(
-    () => moves.slice(0, settledN).map((m: any) => ({ col: m.col, row: m.row, piece: pieceOf(m.by), n: m.n })),
+    () => moves.slice(0, settledN).map((m: FourInARowMove) => ({ col: m.col, row: m.row, piece: pieceOf(m.by), n: m.n })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [moves, settledN, seats]
   );
@@ -475,7 +475,7 @@ export default function FourArena3D({
   const fall = fallMove ? { disc: { col: fallMove.col, row: fallMove.row, piece: pieceOf(fallMove.by), n: fallMove.n }, t0: playing!.t0 } : null;
   const showWin = finished && !!g.line && shown === moves.length && !playing;
   const winCells = useMemo(() => new Set<string>(showWin ? (g.line as number[][]).map((c) => c[0] + ":" + c[1]) : []), [showWin, g]);
-  const winner = seats.find((s) => s.name === g.winner) || null;
+  const winner = seats.find((s) => s.name === g!.winner) || null;
   const you = seats.find((s) => s.you) || null;
   const myTurn = !!(g && g.status === "running" && you && g.turn_of === you.name && !playing);
   const open = useMemo(() => {
@@ -489,7 +489,7 @@ export default function FourArena3D({
     "Four in a Row arena, 3D view: " +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " plays " + (s.piece === "X" ? "solid" : "ringed") + " discs").join("; ") +
     ". " +
-    (g.status === "running" ? (g.turn_of ? g.turn_of + " to move, turn " + g.turn + "." : "") : finished ? (g.draw ? "A draw." : g.winner ? g.winner + " won." : "") : "") +
+    (g!.status === "running" ? (g!.turn_of ? g!.turn_of + " to move, turn " + g!.turn + "." : "") : finished ? (g.draw ? "A draw." : g.winner ? g.winner + " won." : "") : "") +
     " " +
     moves.length +
     " discs on the board.";
@@ -554,18 +554,18 @@ export default function FourArena3D({
               last={isLast(playing.n)}
               onLand={() => {
                 const last = isLast(playing.n);
-                juice.hit(landImpact(g, fallMove, seats, last));
+                juice.hit(landImpact(g!, fallMove, seats, last));
                 setSay(sayMove(fallMove, last));
-                if (last && g.winner && g.line && !q.lite) {
+                if (last && g!.winner && g!.line && !q.lite) {
                   const hex = (winner || { hex: "#fb7185" }).hex;
-                  (g.line as number[][]).forEach((c) => setFx((l) => [...l.slice(-6), { id: ++fxId.current, at: [cellX(c[0]!), cellY(c[1]!), 0.2], hex }]));
+                  (g!.line as number[][]).forEach((c) => setFx((l) => [...l.slice(-6), { id: ++fxId.current, at: [cellX(c[0]!), cellY(c[1]!), 0.2], hex }]));
                 }
               }}
               onDone={() => {
                 const last = isLast(playing.n);
                 setPlaying(null);
                 setShown(playing.n);
-                if (last && g.winner) setCeremony((c) => c + 1);
+                if (last && g!.winner) setCeremony((c) => c + 1);
               }}
             />
           ) : null}

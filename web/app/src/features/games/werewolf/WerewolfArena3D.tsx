@@ -15,7 +15,6 @@
    winners' pillars. Catch-up, tap to skip and reduced motion as in the
    other arenas; the talk, the votes and the timeline live in the page
    under the scene. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -32,6 +31,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
+import type { WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfYou } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -250,7 +250,7 @@ function Clock({ t0, doneAt, beats, onT, onBeat, onDone }: { t0: number; doneAt:
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function eventImpact(e: any, me: string, myRole: string | null): Impact {
+function eventImpact(e: WerewolfEvent, me: string, myRole: string | null): Impact {
   const role = roleInfo(e.role);
   const wolf = myRole === "werewolf";
   if (e.kind === "death") {
@@ -269,15 +269,15 @@ function eventImpact(e: any, me: string, myRole: string | null): Impact {
   return { trauma: 0, sound: "whoosh", title: { big: "NO ONE", small: e.kind === "tie" ? "A tied vote - nobody was voted out" : "Nobody voted", tone: "neutral" } };
 }
 
-function endImpact(g: any, me: string): Impact {
+function endImpact(g: WerewolfState, me: string): Impact {
   const side = g.side === "wolves" ? "THE WOLVES WIN" : "THE VILLAGE WINS";
-  const playing = me && (g.players || []).some((p: any) => p.name === me);
+  const playing = me && (g.players || []).some((p: WerewolfPlayer) => p.name === me);
   if (playing && (g.winners || []).indexOf(me) >= 0) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: side.toLowerCase().replace(/^\w/, (c) => c.toUpperCase()), tone: "good" } };
   if (playing) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 0.8, buzz: BUZZ.lostMatch, sound: ["clash", "lose"], title: { big: "DEFEAT", small: side.toLowerCase().replace(/^\w/, (c) => c.toUpperCase()), tone: "bad" } };
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, sound: ["clash", "win"], title: { big: side, small: (g.winners || []).join(" · "), tone: "neutral" } };
 }
 
-function sayEvent(e: any): string {
+function sayEvent(e: WerewolfEvent): string {
   if (!e) return "";
   if (e.kind === "death") return "Dawn " + e.night + ": " + e.who + " was killed in the night, a " + e.role + ".";
   if (e.kind === "saved") return "Dawn " + e.night + ": someone was attacked and survived.";
@@ -366,7 +366,7 @@ export default function WerewolfArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: WerewolfState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -381,12 +381,12 @@ export default function WerewolfArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const events: any[] = (g && g.events) || NO_ITEMS;
+  const players: WerewolfPlayer[] = (g && g.players) || NO_ITEMS;
+  const events: WerewolfEvent[] = (g && g.events) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
-  const you = (g && g.you) || {};
-  const meName = (players.find((p) => String(p.name).toLowerCase() === meL) || {}).name || "";
+  const you = ((g && g.you) || {}) as Partial<WerewolfYou>;
+  const meName = ((players.find((p) => String(p.name).toLowerCase() === meL) || {}) as Partial<WerewolfPlayer>).name || "";
   const myRole: string | null = you.playing ? you.role || null : null;
   const big = hostW < PHONE_BELOW;
 
@@ -395,7 +395,7 @@ export default function WerewolfArena3D({
     const list = players.slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
     const n = list.length;
     const mine = list.findIndex((p) => String(p.name).toLowerCase() === meL);
-    return list.map((p: any, i: number) => {
+    return list.map((p: WerewolfPlayer, i: number) => {
       const a = Math.PI / 2 + ((i - (mine >= 0 ? mine : 0)) / Math.max(1, n)) * Math.PI * 2;
       return { name: String(p.name), hex: String(p.hex || "#a3a3a3"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * RING_R, z: Math.sin(a) * RING_R, a };
     });
@@ -430,7 +430,7 @@ export default function WerewolfArena3D({
     setPlaying(null);
     setShown(n);
     if (!e) return;
-    const imp = isLast(n) ? endImpact(g, meName) : eventImpact(e, meName, myRole);
+    const imp = isLast(n) ? endImpact(g!, meName) : eventImpact(e, meName, myRole);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayEvent(e));
     if (isLast(n)) setCeremony((c) => c + 1);
@@ -484,7 +484,7 @@ export default function WerewolfArena3D({
     events.slice(0, upto).forEach((e) => e.who && out.add(e.who));
     return out;
   }, [events, shown, playing]);
-  const roleOf = (n: string) => (players.find((p) => p.name === n) || {}).role || (ev && ev.who === n ? ev.role : null);
+  const roleOf = (n: string) => ((players.find((p) => p.name === n) || {}) as Partial<WerewolfPlayer>).role || (ev && ev.who === n ? ev.role : null);
   // the scene's time of day: the event's (a dawn is morning, a vote is
   // dusk), else the live phase
   const night = ev ? !!ev.night && rt < fallAt : running ? g.phase === "night" : false;
@@ -499,7 +499,7 @@ export default function WerewolfArena3D({
   const label =
     "Werewolf, 3D view: " +
     (running ? (g.phase === "night" ? "night " + g.night + ", the village sleeps. " : "day " + g.day + ", " + alive + " alive, " + Object.keys(g.votes || {}).length + " voted. ") : finished ? (g.side === "wolves" ? "the wolves won. " : "the village won. ") : "") +
-    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !(players.find((p) => p.name === s.name) || {}).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "")).join(", ") +
+    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !((players.find((p) => p.name === s.name) || {}) as Partial<WerewolfPlayer>).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "")).join(", ") +
     ".";
   const intro = firstVisit ? { title: "Werewolf", sub: seats.map((s) => s.name).join(" · ") || "Night falls", color: "#93c5fd" } : null;
   return (
@@ -558,7 +558,7 @@ export default function WerewolfArena3D({
           <Village night={night} />
           <FireSystem fires={[{ key: "bonfire", x: 0, y: 0.1, z: 0, scale: 0.6, light: false, kind: "ship", heat: night ? 1 : 0.6 }]} lite={q.lite} still={still} />
           {seats.map((s) => {
-            const p = players.find((x) => x.name === s.name) || {};
+            const p = (players.find((x) => x.name === s.name) || {}) as Partial<WerewolfPlayer>;
             const isVictim = !!ev && ev.who === s.name;
             const dead = deadNow.has(s.name) || (!ev && !p.alive) || (isVictim && rt >= fallAt);
             const fall = isVictim ? smooth(fallAt, fallAt + 0.7, rt) : dead ? 1 : 0;
@@ -613,7 +613,7 @@ export default function WerewolfArena3D({
                   setSay(sayEvent(ev));
                   if (isLast(playing.n)) {
                     setTimeout(() => {
-                      juice.hit(endImpact(g, meName));
+                      juice.hit(endImpact(g!, meName));
                       setCeremony((c) => c + 1);
                     }, 1500);
                   }
@@ -631,7 +631,7 @@ export default function WerewolfArena3D({
           {ceremony && !still
             ? winners.map((w) => (
                 <group key={"cer" + ceremony + w.name}>
-                  <LightPillar at={[w.x, 0, w.z]} hex={g.side === "wolves" ? "#ef4444" : w.hex} height={10} width={0.5} />
+                  <LightPillar at={[w.x, 0, w.z]} hex={g!.side === "wolves" ? "#ef4444" : w.hex} height={10} width={0.5} />
                 </group>
               ))
             : null}

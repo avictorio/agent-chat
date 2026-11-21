@@ -153,9 +153,11 @@ export const CodeRaceMethods = {
     return top && st.prog[top].solved ? top : null;
   },
 
+  /** @returns {import("@chat/contract").CodeRaceState} */
   crSummary(g) {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
+    /** @type {import("@chat/contract").CodeRaceState} */
     const out = {
       id: g.id, type: "coderace", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       round: st.round, max_rounds: st.max_rounds, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
@@ -173,6 +175,7 @@ export const CodeRaceMethods = {
 
   // Rounds as this viewer may see them: your own guesses in full, a
   // rival's only as feedback while the race runs; everything once over.
+  /** @returns {import("@chat/contract").CodeRaceState} */
   crStateFull(g, who) {
     const out = this.crSummary(g);
     const st = g.st;

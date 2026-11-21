@@ -15,7 +15,6 @@
    pillar and shockwave. Catch-up, tap-to-skip and reduced motion as in
    the other rounds arenas. Bids are sealed until a lot resolves; the
    scene never shows a pending one. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -24,6 +23,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { AuctionPlayer, AuctionRound, AuctionState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -331,20 +331,20 @@ function Beats({
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function lotImpact(r: any, bidders: Bidder[]): Impact {
+function lotImpact(r: AuctionRound, bidders: Bidder[]): Impact {
   const you = bidders.find((b) => b.you);
   if (!r.winner) return { trauma: 0.1, sound: "whoosh", title: { big: "UNSOLD", small: "Nobody bid on lot " + r.n, tone: "neutral" } };
   const how = r.tie ? " (a tie - " + r.tie + ")" : "";
   if (you && r.winner === you.name) return { trauma: 0.3, stop: 90, pulse: 0.5, buzz: BUZZ.scored, sound: ["smash", "win"], title: { big: "SOLD", small: "to you for " + r.price + how, tone: "good" } };
   const mine = you ? (r.bids || {})[you.name] : 0;
-  if (you && mine > 0) return { trauma: 0.3, stop: 100, buzz: BUZZ.hitYou, sound: "smash", title: { big: "OUTBID", small: r.winner + " took it for " + r.price + how, tone: "bad" } };
+  if (you && (mine as number) > 0) return { trauma: 0.3, stop: 100, buzz: BUZZ.hitYou, sound: "smash", title: { big: "OUTBID", small: r.winner + " took it for " + r.price + how, tone: "bad" } };
   return { trauma: 0.2, stop: 70, sound: "smash", title: { big: "SOLD", small: "to " + r.winner + " for " + r.price + how, tone: "neutral" } };
 }
 
-function finalImpact(g: any, bidders: Bidder[]): Impact {
+function finalImpact(g: AuctionState, bidders: Bidder[]): Impact {
   const you = bidders.find((b) => b.you);
   const w = g.winner as string | null;
-  const line = (g.places || []).map((n: string) => n + " " + (((g.players || []).find((p: any) => p.name === n) || {}).won || 0)).join(" · ");
+  const line = (g.places || []).map((n: string) => n + " " + (((g.players || []).find((p: AuctionPlayer) => p.name === n) || {}).won || 0)).join(" · ");
   if (!w) return { trauma: 0.3, stop: 120, sound: "whoosh", title: { big: "A TIE", small: line, tone: "neutral" } };
   if (you && you.name === w) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: "Most lots · " + line, tone: "good" } };
   if (you) {
@@ -355,7 +355,7 @@ function finalImpact(g: any, bidders: Bidder[]): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: w.toUpperCase() + " WINS", small: line, tone: "neutral" } };
 }
 
-function sayLot(r: any): string {
+function sayLot(r: AuctionRound): string {
   if (!r) return "";
   const bids = Object.keys(r.bids || {}).map((n) => n + " " + (r.bids[n] || "pass")).join(", ");
   return "Lot " + r.n + ", " + r.lot + ": " + (r.winner ? "sold to " + r.winner + " for " + r.price : "unsold") + ". Bids: " + bids + ".";
@@ -449,7 +449,7 @@ export default function AuctionArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: AuctionState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -464,8 +464,8 @@ export default function AuctionArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: AuctionPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: AuctionRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const budget0 = (g && g.budget) || 100;
@@ -478,11 +478,11 @@ export default function AuctionArena3D({
     if (mine >= 0) {
       const others = list.filter((_, i) => i !== mine);
       const mid = Math.floor(list.length / 2);
-      order = others.slice(0, mid).concat([list[mine]], others.slice(mid));
+      order = others.slice(0, mid).concat([list[mine]!], others.slice(mid));
     }
     const n = order.length;
     const span = Math.min(Math.PI * 0.95, 0.5 * n);
-    return order.map((p: any, i: number) => {
+    return order.map((p: AuctionPlayer, i: number) => {
       const a = Math.PI / 2 + (n > 1 ? (i / (n - 1) - 0.5) * span : 0);
       return { name: String(p.name), hex: String(p.hex || "#818cf8"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * 3.6 * -1, z: Math.sin(a) * 3.6 - 0.6, committed: !!p.committed };
     });
@@ -518,10 +518,10 @@ export default function AuctionArena3D({
     setHammered(false);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g, bidders) : lotImpact(r, bidders);
+    const imp = isLast(n) ? finalImpact(g!, bidders) : lotImpact(r, bidders);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayLot(r));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -575,7 +575,7 @@ export default function AuctionArena3D({
       budgets[b.name] = budget0;
       won[b.name] = 0;
     });
-    rounds.slice(0, upto).forEach((r: any) => {
+    rounds.slice(0, upto).forEach((r: AuctionRound) => {
       if (r.winner) {
         budgets[r.winner] = (budgets[r.winner] ?? budget0) - r.price;
         won[r.winner] = (won[r.winner] || 0) + 1;
@@ -590,8 +590,8 @@ export default function AuctionArena3D({
   const order = useMemo(() => {
     if (!playingRound) return [] as string[];
     return Object.keys(playingRound.bids || {})
-      .filter((n) => playingRound.bids[n] > 0)
-      .sort((a, b) => playingRound.bids[a] - playingRound.bids[b]);
+      .filter((n) => playingRound.bids[n]! > 0)
+      .sort((a, b) => playingRound.bids[a]! - playingRound.bids[b]!);
   }, [playingRound]);
   const hammerAt = ANTIC + Math.max(0, order.length - 1) * RAISE + UP + 0.45;
   const raiseOf = (name: string) => {
@@ -698,8 +698,8 @@ export default function AuctionArena3D({
                 if (winnerB && !q.lite) setFx((l) => [...l.slice(-4), { id: ++fxId.current, at: [0, GEM_Y, 0], hex: "#fbbf24" }]);
                 if (last) {
                   setTimeout(() => {
-                    juice.hit(finalImpact(g, bidders));
-                    if (g.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g!, bidders));
+                    if (g!.winner) setCeremony((c) => c + 1);
                   }, 900);
                 }
               }}

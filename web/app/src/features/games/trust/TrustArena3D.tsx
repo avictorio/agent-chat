@@ -16,7 +16,6 @@
    ("Betrayed by Ada", "Trust held", "+8"). The last round adds the
    winner's pillar and shockwave. Catch-up, tap-to-skip and reduced
    motion work as in the other rounds arenas. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -25,6 +24,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { TrustChoice, TrustPlayer, TrustRound, TrustState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -149,7 +149,7 @@ function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: bo
 /* Every half-thread of a round in one instanced draw: from a seat toward
    the middle of its pairing, in the colour of that player's choice. A
    pair's halves grow at that pair's beat (t0 null: all settled). */
-function Threads({ seats, round, t0, gap, still }: { seats: Seat[]; round: any; t0: number | null; gap: number; still: boolean }) {
+function Threads({ seats, round, t0, gap, still }: { seats: Seat[]; round: TrustRound | null; t0: number | null; gap: number; still: boolean }) {
   const ref = useRef<InstancedMesh>(null);
   const j = useJuice();
   const o = useMemo(() => new Object3D(), []);
@@ -179,7 +179,7 @@ function Threads({ seats, round, t0, gap, still }: { seats: Seat[]; round: any; 
       if (k <= 0.001) return;
       const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
       for (const [from, to] of [[a, b], [b, a]] as [Seat, Seat][]) {
-        const c = (round.moves[from.name] || {})[to.name];
+        const c = (round!.moves[from.name] || {})[to.name];
         const ex = from.x + (mx - from.x) * k, ez = from.z + (mz - from.z) * k;
         const sx = from.x * 0.86, sz = from.z * 0.86; // start at the table's edge
         const len = Math.hypot(ex - sx, ez - sz);
@@ -188,7 +188,7 @@ function Threads({ seats, round, t0, gap, still }: { seats: Seat[]; round: any; 
         o.scale.set(Math.max(0.001, len), 1, 1);
         o.updateMatrix();
         m.setMatrixAt(n, o.matrix);
-        const both = c === "D" && (round.moves[to.name] || {})[from.name] === "D";
+        const both = c === "D" && (round!.moves[to.name] || {})[from.name] === "D";
         m.setColorAt(n, c === "C" ? TRUST : both ? DIM_RED : BETRAY);
         n++;
       }
@@ -248,7 +248,7 @@ function Beats({ t0, pairs, gap, holdAfter, onPair, onVerdict, onDone }: { t0: n
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function roundImpact(round: any, seats: Seat[]): Impact {
+function roundImpact(round: TrustRound, seats: Seat[]): Impact {
   const you = seats.find((s) => s.you);
   const pts = you ? (round.points || {})[you.name] : null;
   if (you && pts != null && (round.moves || {})[you.name]) {
@@ -260,15 +260,15 @@ function roundImpact(round: any, seats: Seat[]): Impact {
     if (kept.length && kept.length === Object.keys(mine).length) return { trauma: 0.15, stop: 60, buzz: BUZZ.scored, sound: "win", title: { big: "TRUST HELD", small: "+" + pts + " this round", tone: "good" } };
     return { trauma: 0.12, stop: 40, sound: "clash", title: { big: "ROUND " + round.n, small: "+" + pts + " this round", tone: "neutral" } };
   }
-  const all = Object.values(round.moves || {}).flatMap((m: any) => Object.values(m) as string[]);
+  const all = Object.values(round.moves || {}).flatMap((m: Record<string, TrustChoice>) => Object.values(m) as string[]);
   const cs = all.filter((v) => v === "C").length;
   return { trauma: 0.1, sound: "clash", title: { big: "ROUND " + round.n, small: cs + " of " + all.length + " choices were trust", tone: "neutral" } };
 }
 
-function finalImpact(g: any, seats: Seat[]): Impact {
+function finalImpact(g: TrustState, seats: Seat[]): Impact {
   const you = seats.find((s) => s.you);
   const w = g.winner as string | null;
-  const scores = (g.places || []).map((n: string) => n + " " + (((g.players || []).find((p: any) => p.name === n) || {}).score || 0)).join(" · ");
+  const scores = (g.places || []).map((n: string) => n + " " + (((g.players || []).find((p: TrustPlayer) => p.name === n) || {}).score || 0)).join(" · ");
   if (!w) return { trauma: 0.3, stop: 120, sound: "whoosh", title: { big: "A TIE AT THE TOP", small: scores, tone: "neutral" } };
   if (you && you.name === w) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: scores, tone: "good" } };
   if (you) {
@@ -279,7 +279,7 @@ function finalImpact(g: any, seats: Seat[]): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: w.toUpperCase() + " WINS", small: scores, tone: "neutral" } };
 }
 
-function sayRound(round: any, seats: Seat[]): string {
+function sayRound(round: TrustRound | null, seats: Seat[]): string {
   if (!round) return "";
   const parts: string[] = [];
   for (let i = 0; i < seats.length; i++)
@@ -370,7 +370,7 @@ export default function TrustArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: TrustState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -385,8 +385,8 @@ export default function TrustArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: TrustPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: TrustRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
 
@@ -396,7 +396,7 @@ export default function TrustArena3D({
     const mine = players.findIndex((p) => String(p.name).toLowerCase() === meL);
     const start = mine >= 0 ? mine : 0;
     const R = tableR(n);
-    return players.map((p: any, i: number) => {
+    return players.map((p: TrustPlayer, i: number) => {
       const k = (i - start + n) % n;
       const a = Math.PI / 2 + (k * 2 * Math.PI) / n; // k = 0 at the front (+z)
       return { name: String(p.name), hex: String(p.hex || "#2dd4bf"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * R, z: Math.sin(a) * R, committed: !!p.committed, out: !!p.out };
@@ -433,10 +433,10 @@ export default function TrustArena3D({
     setShown(n);
     setScoredN(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g, seats) : roundImpact(r, seats);
+    const imp = isLast(n) ? finalImpact(g!, seats) : roundImpact(r, seats);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r, seats));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -593,9 +593,9 @@ export default function TrustArena3D({
                 setPulse(p);
                 setTimeout(() => setPulse({}), 500);
                 const last = isLast(playing.n);
-                juice.hit(last ? finalImpact(g, seats) : roundImpact(round, seats));
+                juice.hit(last ? finalImpact(g!, seats) : roundImpact(round, seats));
                 setSay(sayRound(round, seats));
-                if (last && g.winner) setCeremony((c) => c + 1);
+                if (last && g!.winner) setCeremony((c) => c + 1);
               }}
               onDone={() => {
                 setPlaying(null);

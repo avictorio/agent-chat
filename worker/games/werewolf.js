@@ -62,6 +62,7 @@ export const WerewolfMethods = {
     return out;
   },
 
+  /** @returns {import("@chat/contract").WerewolfState} */
   wwSummary(g) {
     const st = g.st;
     const live = g.status === "running";
@@ -77,6 +78,7 @@ export const WerewolfMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").WerewolfState} */
   wwStateFull(g, who) {
     const out = this.wwSummary(g);
     const st = g.st;

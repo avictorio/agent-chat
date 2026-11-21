@@ -45,6 +45,7 @@ export const FrontlinesMethods = {
     return v;
   },
 
+  /** @returns {import("@chat/contract").FrontlinesState} */
   flSummary(g) {
     const st = g.st;
     return {
@@ -56,6 +57,7 @@ export const FrontlinesMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").FrontlinesState} */
   flStateFull(g, who) {
     const out = this.flSummary(g);
     const st = g.st;

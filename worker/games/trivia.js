@@ -39,6 +39,7 @@ export const TriviaMethods = {
     return Math.max(0, Math.min(TV_MAX_WAGER, st.balance[name] || 0));
   },
 
+  /** @returns {import("@chat/contract").TriviaState} */
   tvSummary(g) {
     const st = g.st;
     const live = g.status === "running";
@@ -56,6 +57,7 @@ export const TriviaMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").TriviaState} */
   tvStateFull(g, who) {
     const out = this.tvSummary(g);
     const st = g.st;

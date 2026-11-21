@@ -51,6 +51,7 @@ export const CorpseMethods = {
     return { bySeg, byName };
   },
 
+  /** @returns {import("@chat/contract").CorpseState} */
   ecSummary(g) {
     const st = g.st;
     const live = g.status === "running";
@@ -72,6 +73,7 @@ export const CorpseMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").CorpseState} */
   ecStateFull(g, who) {
     const out = this.ecSummary(g);
     const st = g.st;

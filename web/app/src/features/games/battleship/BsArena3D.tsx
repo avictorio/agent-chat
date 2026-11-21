@@ -14,7 +14,7 @@
    never render. Shot animations replay from last_move diffs and are
    presentation only. Mounted by games.ts through a dynamic import so
    three.js stays in the lazy chunk. */
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   ArenaFrame,
@@ -56,12 +56,20 @@ import {
   type InstancedMesh,
   type Material,
   type Mesh,
+  type Sprite,
   type SpriteMaterial,
 } from "three";
-
-// The server's match JSON and loose three.js handles, read field by field.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see above
-type GL = any;
+import type {
+  BattleshipBoard,
+  BattleshipMove,
+  BattleshipPlayer,
+  BattleshipShip,
+  BattleshipShot,
+  BattleshipSonar,
+  BattleshipState,
+  BattleshipSunkShip,
+  BattleshipTarget,
+} from "@chat/contract";
 
 const GRID_C = "#22d3ee";
 
@@ -487,9 +495,9 @@ function ShotFx({ anim, onImpact, onDone }: { anim: Anim; onImpact: () => void; 
   const impacted = useRef(false);
   const bomb = useRef<Group>(null);
   const burst = useRef<Group>(null);
-  const parts = useRef<(GL | null)[]>([]);
+  const parts = useRef<(Mesh | Sprite | null)[]>([]);
   const ring = useRef<Mesh>(null);
-  const flash = useRef<GL>(null);
+  const flash = useRef<Sprite>(null);
   const done = useRef(false);
   const start = useRef<number | null>(null);
   const vels = useMemo(() => {
@@ -660,7 +668,7 @@ function PendingMark({ x, z }: { x: number; z: number }) {
    across that row/column on the hunted tile, a bright sweep line
    travelling its length, and a floating label - presentation only,
    the same public information the 2D arena prints as a text line. */
-function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; sonar: GL }) {
+function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; sonar: BattleshipSonar }) {
   const bandMat = useRef<MeshStandardMaterial>(null);
   const sweep = useRef<Group>(null);
   const isRow = sonar.axis === "row";
@@ -745,6 +753,9 @@ function GhostHull({ tile, w, h, bow, size, orient, valid }: { tile: TileT; w: n
 
 /* ---------- one ocean tile: grid hologram, labels, ships, fires ---------- */
 
+/* A ship as buildTiles reads it from the state: one of your own (with
+   its hits and sunk flag) or a sunk one (size and cells only). */
+type ShipView = BattleshipSunkShip & Partial<Pick<BattleshipShip, "hits" | "sunk">>;
 type ShipT = { key: string; size: number; variant: number; sunk: boolean; cells: string[]; hits: string[] };
 type TileT = {
   name: string;
@@ -856,21 +867,21 @@ function GridHolo({ tile, w, h }: { tile: TileT; w: number; h: number }) {
 
 /* ---------- derive the oceans from the per-viewer state ---------- */
 
-function buildTiles(g: GL, me: string): TileT[] {
+function buildTiles(g: BattleshipState, me: string): TileT[] {
   const w = g.w || 10;
   const h = g.h || 10;
-  const mkShips = (list: GL[], sunkOf: (s: GL) => boolean): ShipT[] => {
+  const mkShips = (list: ShipView[], sunkOf: (s: ShipView) => boolean): ShipT[] => {
     const seenSize: Record<number, number> = {};
-    return (list || []).map((s: GL) => {
+    return (list || []).map((s: ShipView) => {
       const v = seenSize[s.size] || 0;
       seenSize[s.size] = v + 1;
       return { key: s.cells.join("."), size: s.size, variant: v, sunk: sunkOf(s), cells: s.cells, hits: s.hits || [] };
     });
   };
   // open water that took fire: every shot except those inside a sunk hull
-  const waterOf = (shots: Record<string, string>, hulls: GL[]): { label: string; result: string }[] => {
+  const waterOf = (shots: Record<string, string>, hulls: BattleshipSunkShip[]): { label: string; result: string }[] => {
     const inHull = new Set<string>();
-    (hulls || []).forEach((s: GL) => s.cells.forEach((c: string) => inHull.add(c)));
+    (hulls || []).forEach((s: BattleshipSunkShip) => s.cells.forEach((c: string) => inHull.add(c)));
     return Object.keys(shots || {})
       .filter((c) => !inHull.has(c))
       .map((c) => ({ label: c, result: String(shots[c]) }));
@@ -886,7 +897,7 @@ function buildTiles(g: GL, me: string): TileT[] {
   if (you.playing) {
     const players = g.players || [];
     // The server matches names case-insensitively; so does the scene.
-    const isMe = (p: GL) => String(p.name).toLowerCase() === String(me).toLowerCase();
+    const isMe = (p: BattleshipPlayer) => String(p.name).toLowerCase() === String(me).toLowerCase();
     const meP = players.filter(isMe)[0] || players[0] || { name: me, hex: "#22d3ee" };
     const turn = !!(g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated);
     const own: Omit<TileT, "cx" | "cz"> = {
@@ -904,7 +915,7 @@ function buildTiles(g: GL, me: string): TileT[] {
     if (Array.isArray(you.targets) && players.length > 2) {
       return place([
         own,
-        ...you.targets.map((t: GL) => {
+        ...you.targets.map((t: BattleshipTarget) => {
           const fire = turn && !t.eliminated;
           return {
             name: t.name,
@@ -918,7 +929,7 @@ function buildTiles(g: GL, me: string): TileT[] {
         }),
       ]);
     }
-    const foeP = players.filter((p: GL) => p !== meP)[0] || players[1] || { name: "?", hex: "#fb923c" };
+    const foeP = players.filter((p: BattleshipPlayer) => p !== meP)[0] || players[1] || { name: "?", hex: "#fb923c" };
     return place([
       own,
       {
@@ -932,7 +943,7 @@ function buildTiles(g: GL, me: string): TileT[] {
     ]);
   }
   return place(
-    (g.boards || []).map((b: GL) => ({
+    (g.boards || []).map((b: BattleshipBoard) => ({
       name: b.name,
       title: b.name + "'s waters" + (b.eliminated ? " — wreck" : ""),
       hex: b.hex,
@@ -992,12 +1003,12 @@ const BS_OCEAN: OceanLook = {
    the full loss), large for everyone else. */
 /* Whose ocean a shot landed in: the server's record names the target;
    a two-captain record without one means the shooter's rival. */
-function shotTarget(lm: GL, g: GL): string {
+function shotTarget(lm: BattleshipMove, g: BattleshipState): string {
   if (lm && lm.target) return String(lm.target);
-  return ((g.players || []) as GL[]).map((p) => String(p.name)).filter((n) => n !== (lm && lm.by))[0] || "";
+  return ((g.players || []) as BattleshipPlayer[]).map((p) => String(p.name)).filter((n) => n !== (lm && lm.by))[0] || "";
 }
 
-function shotImpact(lm: GL, me: string, target: string, shipName: string, final: boolean, out?: boolean): Impact {
+function shotImpact(lm: BattleshipMove, me: string, target: string, shipName: string, final: boolean, out?: boolean): Impact {
   const meL = (me || "").toLowerCase();
   const mine = String(lm.by || "").toLowerCase() === meL;
   const atMe = target.toLowerCase() === meL;
@@ -1066,7 +1077,7 @@ function Scene({
   me: string;
   intro: boolean;
   ready: boolean;
-  g: GL;
+  g: BattleshipState;
   /* fleet placement: the next hull (0 once the fleet is down) */
   placing?: { size: number; orient: string; occupied: Set<string> } | null;
   tiles: TileT[];
@@ -1097,8 +1108,8 @@ function Scene({
      with no recorded shot keeps full heat. */
   const heatAt = (() => {
     const m = new Map<string, number>();
-    const shots = (g.shots || []) as GL[];
-    const names = ((g.players || []) as GL[]).map((p) => String(p.name).toLowerCase());
+    const shots = (g.shots || []) as BattleshipShot[];
+    const names = ((g.players || []) as BattleshipPlayer[]).map((p) => String(p.name).toLowerCase());
     if (shots.length) {
       const perBoard = new Map<string, string[]>();
       for (const s of shots) {
@@ -1136,7 +1147,7 @@ function Scene({
   /* Shot animations replay off last_move diffs (never on mount, and
      never under reduced motion - the bomb drop and the camera shake
      are exactly what that setting asks to skip). */
-  const lm = g.last_move as GL;
+  const lm = g.last_move as BattleshipMove | null;
   const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const seenLm = useRef<string | null>(null);
   const seenStatus = useRef<string | null>(null);
@@ -1173,12 +1184,12 @@ function Scene({
     if (lmKey && lmKey !== seenLm.current) {
       seenLm.current = lmKey;
       shot = true;
-      const target = shotTarget(lm, g);
+      const target = shotTarget(lm!, g);
       const tt = tiles.filter((t) => t.name === target)[0];
-      const ship = tt && lm.sunk ? tt.ships.filter((sh) => sh.cells.includes(lm.cell))[0] : undefined;
+      const ship = tt && lm!.sunk ? tt.ships.filter((sh) => sh.cells.includes(lm!.cell))[0] : undefined;
       // a free-for-all captain knocked out by this shot
-      const out = !!(lm.sunk && ((g.eliminated || []) as string[]).some((n) => String(n).toLowerCase() === target.toLowerCase()));
-      const imp = shotImpact(lm, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm.sunk ? SHIP_NAME(lm.sunk, 0) : "", ended, out);
+      const out = !!(lm!.sunk && ((g.eliminated || []) as string[]).some((n) => String(n).toLowerCase() === target.toLowerCase()));
+      const imp = shotImpact(lm!, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm!.sunk ? SHIP_NAME(lm!.sunk, 0) : "", ended, out);
       let sink: Sink | null = null;
       if (tt && ship) {
         const pts = ship.cells.map((c) => cellLocal(c, w, h));
@@ -1189,9 +1200,9 @@ function Scene({
         sink = { id: lmKey, at: [tt.cx + cx, 0.1, tt.cz + cz], box: [Math.max(...xs) - Math.min(...xs) + 0.7, 0.7, Math.max(...zs) - Math.min(...zs) + 0.7] };
       }
       if (tt && !still) {
-        const loc = cellLocal(lm.cell, w, h);
+        const loc = cellLocal(lm!.cell, w, h);
         sfx("whistle");
-        const next: Anim = { id: lmKey, x: tt.cx + loc.x, z: tt.cz + loc.z, result: lm.result, sunk: lm.sunk, impact: imp, sink };
+        const next: Anim = { id: lmKey, x: tt.cx + loc.x, z: tt.cz + loc.z, result: lm!.result, sunk: lm!.sunk, impact: imp, sink };
         setAnims((l) => [...l.filter((a) => a.id !== next.id).slice(-5), next]);
       } else juice.hit(imp);
     }
@@ -1199,7 +1210,7 @@ function Scene({
       const winner = String(g.winner || "");
       const meL = (me || "").toLowerCase();
       const delay = shot && !still ? 2600 : 0;
-      const players = (g.players || []).map((p: GL) => String(p.name).toLowerCase());
+      const players = (g.players || []).map((p: BattleshipPlayer) => String(p.name).toLowerCase());
       if (winner && winner.toLowerCase() === meL)
         juice.hit({ sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Enemy fleet destroyed", tone: "good" }, titleDelay: delay });
       else if (winner && players.includes(meL))
@@ -1230,7 +1241,7 @@ function Scene({
     return label;
   };
   const evXY = (e: ThreeEvent<PointerEvent>): { x: number; y: number } => {
-    const n = (e as GL).nativeEvent || e;
+    const n = e.nativeEvent || e;
     return { x: n.clientX || 0, y: n.clientY || 0 };
   };
 
@@ -1281,7 +1292,7 @@ function Scene({
           const debris: Debris[] = [];
           let lights = 0;
           const groups = tiles.map((tile) => {
-            const shipEls: GL[] = [];
+            const shipEls: ReactElement[] = [];
             tile.ships.forEach((s) => {
               const c0 = s.cells[0] ?? "A1";
               const cN = s.cells[s.cells.length - 1] ?? c0;
@@ -1547,7 +1558,7 @@ export default function BsArena3D({
   onReady,
   placing,
 }: {
-  g: GL;
+  g: BattleshipState;
   me: string;
   aspect?: number;
   /* target: the rival's name in a free-for-all (the shot goes out as
@@ -1568,7 +1579,7 @@ export default function BsArena3D({
   /* Placing a fleet: your ocean alone, the hulls laid so far on it. */
   const tiles = useMemo((): TileT[] => {
     if (!placing) return buildTiles(g, me);
-    const meP = ((g.players || []) as GL[]).filter((p) => String(p.name).toLowerCase() === String(me).toLowerCase())[0] || { name: me, hex: "#22d3ee" };
+    const meP = ((g.players || []) as BattleshipPlayer[]).filter((p) => String(p.name).toLowerCase() === String(me).toLowerCase())[0] || { name: me, hex: "#22d3ee" };
     const seen: Record<number, number> = {};
     const ships: ShipT[] = placing.placed.map((p) => {
       const cells = shipCells(p.start, p.dir, p.size, w, h) || [];
@@ -1611,7 +1622,7 @@ export default function BsArena3D({
      turn, yours while you wait; a spectator sees the ocean the last
      shot landed in. A tap on the switch overrides that until the turn
      changes. */
-  const lm = g.last_move as GL;
+  const lm = g.last_move as BattleshipMove | null;
   const lastShotIdx = lm ? Math.max(0, tiles.findIndex((t) => t.name === shotTarget(lm, g))) : 0;
   const foeIdx = foe ? Math.max(0, tiles.indexOf(foe)) : 1;
   /* A new shot holds the view on the ocean it landed in for a few

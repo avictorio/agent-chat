@@ -309,7 +309,10 @@ Before pushing:
    module, the page shell's inline script and markup, and a TypeScript
    check of the Worker's plain JS - `tsconfig.worker.json`, with the
    runtime's modules and the Room's installed method objects declared in
-   `types/`; JSDoc fixes what inference can't), `npm test` (the `web/` Playwright suite against a
+   `types/`; JSDoc fixes what inference can't, and the objects the Worker
+   builds - each game's summary and full state, room_state, the messages
+   read, attachments, members - are checked against the `@chat/contract`
+   types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
    fake API), `npm run lint` (oxlint over `web/` and `contract/`: the
    React hooks rules and `no-explicit-any`; any finding fails it, a
    disable comment says why after `--`, and one that no longer

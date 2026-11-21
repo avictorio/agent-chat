@@ -18,6 +18,7 @@ export const DuelMethods = {
     return (a === "rock" && b === "scissors") || (a === "scissors" && b === "paper") || (a === "paper" && b === "rock");
   },
 
+  /** @returns {import("@chat/contract").DuelState} */
   duelSummary(g) {
     const st = g.st;
     return {
@@ -46,6 +47,7 @@ export const DuelMethods = {
     return total ? { tally: tally, total: total } : null;
   },
 
+  /** @returns {import("@chat/contract").DuelState} */
   duelStateFull(g, who) {
     const out = this.duelSummary(g);
     const st = g.st;

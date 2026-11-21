@@ -57,6 +57,7 @@ export const FourInARowMethods = {
     return out;
   },
 
+  /** @returns {import("@chat/contract").FourInARowState} */
   c4Summary(g) {
     const st = g.st;
     return {
@@ -69,6 +70,7 @@ export const FourInARowMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").FourInARowState} */
   c4StateFull(g, who) {
     const out = this.c4Summary(g);
     const st = g.st;

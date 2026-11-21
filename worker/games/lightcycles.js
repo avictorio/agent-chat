@@ -9,15 +9,17 @@ import { clockWords, seatAccepted } from "./shared.js";
 
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
+  /** @returns {import("@chat/contract").LightCyclesDir[]} */
   legalMoves(p) {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
-    return ["up", "down", "left", "right"].filter((d) => d !== rev[p.dir]);
+    return /** @type {import("@chat/contract").LightCyclesDir[]} */ (["up", "down", "left", "right"]).filter((d) => d !== rev[p.dir]);
   },
 
   // The subset of legal moves that does not crash on this tick as the
   // board stands: the target cell is in bounds and holds no trail and
   // no rider's head. (Another rider steering into the same cell can
   // still kill you - that is the game, not a wall.)
+  /** @returns {import("@chat/contract").LightCyclesDir[]} */
   safeMoves(st, p) {
     const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
@@ -29,6 +31,7 @@ export const LightCyclesMethods = {
     });
   },
 
+  /** @returns {import("@chat/contract").LightCyclesState} */
   lcSummary(g) {
     const st = g.st;
     return {
@@ -39,6 +42,7 @@ export const LightCyclesMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").LightCyclesState} */
   lcStateFull(g, who) {
     const out = this.lcSummary(g);
     const st = g.st;

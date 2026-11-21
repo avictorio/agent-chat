@@ -15,14 +15,12 @@ delete this file.
 
 State on 2026-11-21: phases 1-4 are done and live; in phase 5, 5.1
 (error boundaries), 5.2 (the client game registry), 5.3 (the UI suite),
-5.5 (the docs text) and 5.6 (AGENTS.md as an index) are done and live.
+5.4 (types), 5.5 (the docs text) and 5.6 (AGENTS.md as an index) are
+done and live.
 What is left, in order:
 
-- 5.4: type the Worker's responses with `@chat/contract` (JSDoc on the
-  route handlers and Room methods) and per-game state types, so the web
-  files that switch off `no-explicit-any` (`GL = any` in
-  `features/games/shared/render.ts` is the root) can drop it.
-- The "Later" items under phase 5.
+- The "Later" items under phase 5 (5.4 is done: game state and the
+  Worker's main responses are typed; `GL` in shared/render.ts is next).
 - Then fold the final layout into AGENTS.md and README.md and delete this
   file.
 
@@ -471,10 +469,37 @@ Agreed with the owner on 2026-11-21, in this order:
       pulses, second countdowns) - 113 of 204 screenshots, every non-3D
       difference a few pixels - where before every clock and day
       separator moved too
-- [ ] 5.4 (was 4.1c) Type the Worker's responses with `@chat/contract`
-      (JSDoc on the route handlers and Room methods), and per-game state
-      types so the 19 web files that switch off `no-explicit-any` can drop
-      it. The Worker has 3,502 errors under `strict`; that is not the goal
+- [x] 5.4 Types for game state and the Worker's responses.
+  - Game state: `contract/src/games/` holds each game's state type,
+    written from its engine (summary, full, round records, the viewer's
+    `you`) on a shared base (`common.ts`). All 16 arenas and `lcmodel.ts`
+    read them instead of `any` and dropped their `no-explicit-any`
+    switches (push.tsx too). Type-only: annotations, `!` where the code
+    already guarantees a value, a few `as`; the web build is
+    byte-identical to the live one. Frontlines was the template; four
+    helpers typed the other 15 games in parallel.
+  - The Worker: `tsconfig.worker.json` maps `@chat/contract`, and the
+    objects the Worker builds are checked against it in `npm run check`:
+    every game's summary and full-state builder (`@returns` with its
+    state type: field names and types of the literals), `room_state`
+    (renderRoomState, stateAttempt, withReactions, stateCall), the
+    messages read, attachments and each member (`@satisfies`). A
+    planted typo fails the check in each place. The routes that pass
+    database rows straight through stay unchecked (the rows are
+    untyped). `RoomState` in the contract had drifted from the server
+    (optional lists with `_more` counts, `fetch_remaining_today`,
+    `awaiting_you`'s action and call, `reactions_to_you`'s `at` and
+    `excerpt`); the web app read none of the drifted fields.
+  - Left: `GL = any` in `features/games/shared/render.ts`, the one file
+    still switching the rule off; the shared DOM code (the store, the
+    views, the cards) reads game state through it in about 900 places.
+    Typing it is its own step (below).
+  - Found on the way, not fixed (types only): several arenas read `g`
+    without the null check they use elsewhere (Code Race, Duel, Four in a
+    Row, Letter Grid, Trivia, Sketch) - harmless while the host always
+    passes a state; and Four in a Row's catch-up replay of a match that
+    ended on the clock after its last drop titles it "VICTORY - four in a
+    row" or "DRAW - the board is full" (the arena never reads `forfeit`)
 - [x] 5.5 The `/api` docs text (`worker/agents/docs.js`, 984 lines of
       JS strings) is `worker/agents/docs.txt`, a text module with
       `{{name}}` placeholders that `docs()` fills from `docsValues` (the
@@ -492,6 +517,11 @@ Agreed with the owner on 2026-11-21, in this order:
       AGENTS.md 1,598 -> 563 lines; a script checked that every line of
       the moved sections is in a topic file and every other line is still
       in AGENTS.md
+- [ ] Later: type `GL` (shared/render.ts) as the union of the game
+      states, file by file; fix Four in a Row's forfeit-ending replay title
+      and the arenas' unguarded `g` reads (behaviour changes, each its own
+      commit); a shared base for the rotating-role games' fields (`draw`,
+      `places`, `round`, `rounds_total`, `rotations`, `order`).
 - [ ] Later: the 2D game panels (`el()` builders) as React components,
       one game at a time once 5.2 gives each a home; `games.css` splits
       with them; TypeScript for the Worker once the JSDoc check is

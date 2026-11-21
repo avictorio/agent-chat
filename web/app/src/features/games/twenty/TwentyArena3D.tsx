@@ -14,7 +14,6 @@
    stumped). The candles relight for the next round. Catch-up, tap to skip
    and reduced motion as in the other arenas; the Q/A log lives in the
    page under the scene. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -23,6 +22,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { TwentyPlayer, TwentyQuestion, TwentyRound, TwentyState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -265,7 +265,7 @@ function Clock({ t0, doneAt, beats, onT, onBeat, onDone }: { t0: number; doneAt:
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function roundImpact(r: any, me: string): Impact {
+function roundImpact(r: TwentyRound, me: string): Impact {
   const pts = (r.points || {})[me] || 0;
   const named = r.how === "guessed" || r.how === "forfeit";
   const secret = "“" + r.secret + "”";
@@ -281,13 +281,13 @@ function roundImpact(r: any, me: string): Impact {
   return { trauma: 0.2, stop: 70, sound: ["clash"], title: { big: "IT WAS", small: secret, tone: "neutral" } };
 }
 
-function finalImpact(g: any, me: string): Impact {
+function finalImpact(g: TwentyState, me: string): Impact {
   const w = g.winner as string | null;
-  const pts = (n: string) => ((g.players || []).find((p: any) => p.name === n) || {}).score || 0;
+  const pts = (n: string) => ((g.players || []).find((p: TwentyPlayer) => p.name === n) || {}).score || 0;
   const line = (g.places || []).map((n: string) => n + " " + pts(n)).join(" · ");
   if (!w) return { trauma: 0.3, stop: 120, sound: "whoosh", title: { big: "A TIE", small: line, tone: "neutral" } };
   if (me && me === w) return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 1, buzz: BUZZ.wonMatch, sound: ["clash", "win"], title: { big: "VICTORY", small: line, tone: "good" } };
-  if (me && (g.players || []).some((p: any) => p.name === me)) {
+  if (me && (g.players || []).some((p: TwentyPlayer) => p.name === me)) {
     const place = (g.places || []).indexOf(me) + 1;
     if (place === 2 && (g.players || []).length > 2) return { trauma: 0.4, stop: 150, buzz: BUZZ.scored, sound: "win", title: { big: "#2", small: line, tone: "neutral" } };
     return { trauma: 0.8, stop: 250, slow: 0.8, pulse: 0.8, buzz: BUZZ.lostMatch, sound: ["clash", "lose"], title: { big: "DEFEAT", small: w + " wins · " + line, tone: "bad" } };
@@ -295,7 +295,7 @@ function finalImpact(g: any, me: string): Impact {
   return { trauma: 0.6, stop: 200, slow: 0.6, pulse: 0.8, buzz: BUZZ.scored, sound: ["clash", "win"], title: { big: w.toUpperCase() + " WINS", small: line, tone: "neutral" } };
 }
 
-function sayRound(r: any): string {
+function sayRound(r: TwentyRound): string {
   if (!r) return "";
   return "Round " + r.n + ": the secret was " + r.secret + ". " + (r.how === "guessed" ? r.guessed_by + " named it after " + r.asked + " questions." : r.how === "forfeit" ? r.answerer + " went silent and forfeit the round." : r.answerer + " held it.");
 }
@@ -373,7 +373,7 @@ function tqHome(aspect: number, width: number): Home {
 }
 
 // the candles as a round's log leaves them
-function candleState(qa: any[]): ("lit" | "yes" | "no")[] {
+function candleState(qa: TwentyQuestion[]): ("lit" | "yes" | "no")[] {
   const out: ("lit" | "yes" | "no")[] = Array.from({ length: 20 }, () => "lit" as const);
   let i = 0;
   (qa || []).forEach((x) => {
@@ -392,7 +392,7 @@ export default function TwentyArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: TwentyState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -407,8 +407,8 @@ export default function TwentyArena3D({
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: TwentyPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: TwentyRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const meName = (players.find((p) => String(p.name).toLowerCase() === meL) || {}).name || "";
@@ -441,7 +441,7 @@ export default function TwentyArena3D({
     const others = list.filter((p) => p.name !== answerer);
     const n = others.length;
     const span = Math.min(Math.PI * 1.05, 0.62 * Math.max(1, n));
-    const out: Seat[] = others.map((p: any, i: number) => {
+    const out: Seat[] = others.map((p: TwentyPlayer, i: number) => {
       const a = Math.PI / 2 + (n > 1 ? (i / (n - 1) - 0.5) * span : 0);
       return { name: String(p.name), hex: String(p.hex || "#a78bfa"), you: String(p.name).toLowerCase() === meL, x: Math.cos(a) * SEAT_R, z: Math.sin(a) * SEAT_R };
     });
@@ -462,10 +462,10 @@ export default function TwentyArena3D({
     setPlaying(null);
     setShown(n);
     if (!rr) return;
-    const imp = isLast(n) ? finalImpact(g, meName) : roundImpact(rr, meName);
+    const imp = isLast(n) ? finalImpact(g!, meName) : roundImpact(rr, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(rr));
-    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -497,7 +497,7 @@ export default function TwentyArena3D({
 
   // live: a new answer snuffs a candle and pops YES / NO; a new question
   // pings; the secret going in whooshes
-  const liveQa: any[] = (running && g.qa) || [];
+  const liveQa: TwentyQuestion[] = (running && g.qa) || [];
   const answered = liveQa.filter((x) => !x.flagged && x.a);
   const sig = running ? g.round + ":" + (g.phase || "") + ":" + liveQa.length + ":" + answered.length : "";
   const prev = useRef<{ sig: string; answered: number; round: number } | null>(null);
@@ -507,22 +507,22 @@ export default function TwentyArena3D({
     prev.current = { sig, answered: answered.length, round: running ? g.round : 0 };
     if (!p || !ready || p.sig === sig) return;
     if (running && p.round === g.round && answered.length > p.answered) {
-      const last = answered[answered.length - 1];
+      const last = answered[answered.length - 1]!;
       const yes = last.a === "yes" || last.a === "right";
       snuffAt.current[answered.length - 1] = j0.t;
-      j0.word(last.a.toUpperCase(), yes ? "#4ade80" : "#f87171");
+      j0.word(last.a!.toUpperCase(), yes ? "#4ade80" : "#f87171");
       j0.hit({ sound: yes ? "ping" : "snip", buzz: last.by === meName ? BUZZ.commit : undefined });
     } else if (running && g.phase === "answer") j0.hit({ sound: "beat" });
     else if (running && g.phase === "ask" && p.sig.split(":")[1] === "secret") sfx("whoosh");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, ready]);
 
-  const state = r ? candleState(r.qa) : running ? candleState(g.qa) : finished && rounds.length ? candleState(rounds[rounds.length - 1].qa) : candleState([]);
+  const state = r ? candleState(r.qa) : running ? candleState(g.qa) : finished && rounds.length ? candleState(rounds[rounds.length - 1]!.qa) : candleState([]);
   const next = running && !r && g.phase === "answer" ? Math.min(19, (g.asked || 0)) : -1;
   const openAt = 0.5;
   const open = r ? smooth(openAt, openAt + 0.7, rt) : finished && rounds.length ? 1 : 0;
   const doneAt = openAt + 3.0 + (playing && isLast(playing.n) ? 1.4 : 0);
-  const secretShown = r ? (rt >= openAt + 0.4 ? r.secret : null) : finished && rounds.length ? rounds[rounds.length - 1].secret : null;
+  const secretShown = r ? (rt >= openAt + 0.4 ? r.secret : null) : finished && rounds.length ? rounds[rounds.length - 1]!.secret : null;
   const askerNow = running && !r && g.phase === "answer" && g.pending ? g.pending.by : null;
   const champion = finished && g.winner ? seats.find((s) => s.name === g.winner) || null : null;
   const home = (a: number, width: number) => tqHome(a, width);
@@ -595,7 +595,7 @@ export default function TwentyArena3D({
           ) : null}
           <Candles state={state} next={next} snuffAt={snuffAt.current} still={still} />
           {seats.map((s) => {
-            const p = players.find((x) => x.name === s.name) || {};
+            const p: Partial<TwentyPlayer> = players.find((x) => x.name === s.name) || {};
             const isAns = s.name === answerer;
             return (
               <group key={s.name}>
@@ -631,8 +631,8 @@ export default function TwentyArena3D({
                   setSay(sayRound(r));
                   if (isLast(playing.n)) {
                     setTimeout(() => {
-                      juice.hit(finalImpact(g, meName));
-                      if (g.winner) setCeremony((c) => c + 1);
+                      juice.hit(finalImpact(g!, meName));
+                      if (g!.winner) setCeremony((c) => c + 1);
                     }, 1400);
                   }
                 }

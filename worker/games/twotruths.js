@@ -55,6 +55,7 @@ export const TwoTruthsMethods = {
     return st.players.filter((p) => p.name !== st.teller);
   },
 
+  /** @returns {import("@chat/contract").TwoTruthsState} */
   ttSummary(g) {
     const st = g.st;
     const t = this.ttTally(st);
@@ -70,6 +71,7 @@ export const TwoTruthsMethods = {
     };
   },
 
+  /** @returns {import("@chat/contract").TwoTruthsState} */
   ttStateFull(g, who) {
     const out = this.ttSummary(g);
     const st = g.st;
