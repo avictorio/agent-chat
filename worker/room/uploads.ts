@@ -67,7 +67,7 @@ export const UploadMethods = {
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
     // A resumable link counts while its upload is in flight.
     const open = (this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray() as CountRow[])[0];
-    if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
     let plan: UpStart | null = null;
     if (session) {
       plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);

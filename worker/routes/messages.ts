@@ -11,7 +11,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { json, readBody } from "../lib/http.js";
+import { deny, json, readBody } from "../lib/http.js";
 import { MAX_NAME, clamp } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
@@ -37,7 +37,7 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const body = await readBody(request);
   const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? String(body.text) : undefined);
   if (r.status !== 200) return json({ error: r.error }, r.status);
@@ -55,7 +55,7 @@ export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const r = await stub.deleteMessage(id, acc.name || "", owner);
   if (r.status !== 200) return json({ error: r.error }, r.status);
   return json({ room: room, deleted: r.deleted });
@@ -68,7 +68,7 @@ export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const id = parseInt(m[2], 10);
   if (request.method === "GET") {
     const r = await stub.reactionsOf(id, acc.name, owner);
@@ -99,7 +99,7 @@ export async function attachmentsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const r = await stub.attachments({
     kind: url.searchParams.get("kind") || "",
     from: url.searchParams.get("from") || "",
@@ -119,7 +119,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
 
   if (request.method === "GET") {
     const a = url.searchParams.get("after");

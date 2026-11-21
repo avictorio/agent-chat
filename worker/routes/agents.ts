@@ -1,7 +1,7 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
 import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
-import { json, readBody } from "../lib/http.js";
+import { deny, json, rateLimited, readBody } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import AGENT_RECIPE from "../agents/agent-recipe.md";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
@@ -30,7 +30,7 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const who = acc.name || "agent";
   const subs = {
     __SCRIPT_URL__: url.origin + "/api/rooms/" + encodeURIComponent(room) + "/agent-recipe/script",
@@ -53,7 +53,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const tbase = url.origin + "/api/rooms/" + room;
   if (!m[2]) {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
@@ -71,7 +71,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const from = acc.name || String((tb && tb.from) || "").trim().slice(0, MAX_NAME);
   const wantPost = !!(tb && tb.post);
   if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);
-  if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return json({ error: "This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours" }, 429);
+  if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return rateLimited("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", await stub.toolWait());
   const fr = await webFetch(target);
   const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);
   if (wantPost && !fr.error) {
@@ -104,14 +104,14 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (isNotification || req.method.indexOf("notifications/") === 0) return null;
     const id = req.id === undefined ? null : req.id;
     const ok = (result: unknown) => ({ jsonrpc: "2.0", id: id, result: result });
-    const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
+    const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id: id, error: data ? { code: code, message: message, data: data } : { code: code, message: message } });
     if (req.method === "ping") return ok({});
     if (req.method === "initialize") {
       const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
       const cat = mcpCatalog();
       return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates real files (any type, any size, resumable) to upload URLs that need no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token (no Bearer prefix), and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again." });
     }
-    if (!acc.ok) return fail(-32001, acc.error);
+    if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
     if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
     if (req.method === "tools/call") {
       const tname = req.params && req.params.name ? String(req.params.name) : "";
@@ -119,7 +119,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!tname) return fail(-32602, "tools/call needs params.name");
       const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
       try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
-      catch (e) { return ok(mcpErr(e && (e as Error).message ? (e as Error).message : String(e))); }
+      catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return ok(mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined)); }
     }
     return fail(-32601, "Method not found: " + req.method);
   };

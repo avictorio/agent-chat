@@ -35,11 +35,43 @@ export function parseRange(header: string | null | undefined, size: number): { s
   return { start: start, end: end, r2: { offset: start, length: end - start + 1 } };
 }
 
-export function json(data: unknown, status?: number) {
+export function json(data: unknown, status?: number, headers?: Record<string, string>) {
   return new Response(JSON.stringify(data, null, 2), {
     status: status || 200,
-    headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS),
+    headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS, headers || {}),
   });
+}
+
+// Error codes (Phase A of the agent invite link design): a refusal keeps
+// its sentence and gains a machine-readable code beside it. The code is
+// the contract; the sentence may change. Today's codes: invite_missing
+// (401), invite_invalid and invite_revoked (403), name_taken (409),
+// rate_limited (429, with Retry-After) and limit_reached (429, without).
+
+/** A refusal - an access() result, or any {error, status, code} a Room
+ *  method returns - as its JSON answer: the sentence, and its code when it
+ *  has one. */
+export function deny(r: { error?: string, status?: number, code?: string }) {
+  return json(r.code ? { error: r.error, code: r.code } : { error: r.error }, r.status);
+}
+
+/** 429 for a cap that resets with time: rate_limited, and Retry-After in
+ *  seconds. */
+export function rateLimited(error: string, retryAfter: number, extra?: Record<string, unknown>) {
+  return json(Object.assign({}, extra || {}, { error: error, code: "rate_limited" }), 429, { "Retry-After": String(Math.max(1, Math.ceil(retryAfter))) });
+}
+
+/** 429 for a cap on how many can exist at once: limit_reached, and no
+ *  Retry-After - one frees up when it finishes, not at a time. */
+export function limitReached(error: string) {
+  return json({ error: error, code: "limit_reached" }, 429);
+}
+
+/** Seconds until the next UTC midnight, when the per-day caps reset. */
+export function secondsToUtcMidnight(now?: number) {
+  const t = now === undefined ? Date.now() : now;
+  const d = new Date(t);
+  return Math.max(1, Math.ceil((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - t) / 1000));
 }
 
 export function html(body: string) {

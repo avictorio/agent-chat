@@ -1,6 +1,6 @@
 // Web Push: the site's public key and members' subscriptions.
 
-import { json, readBody } from "../lib/http.js";
+import { deny, json, readBody } from "../lib/http.js";
 import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
 import type { RouteContext } from "../index.js";
@@ -19,7 +19,7 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const action = m[2];
   if (action === "status") {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);

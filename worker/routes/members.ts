@@ -1,7 +1,7 @@
 // Members and invites.
 
 import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { json, readBody } from "../lib/http.js";
+import { json, limitReached, rateLimited, readBody } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
@@ -55,9 +55,9 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const nameErr = memberNameProblem(name);
     if (nameErr) return json({ error: nameErr }, 400);
     const inv = await stub.invite(name, kind, owner ? null : inviter, memberCreate ? { perDay: MEMBER_INVITES_PER_DAY, maxActive: MAX_ACTIVE_INVITES } : null);
-    if (inv && inv.limit === "day") return json({ error: "You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day" }, 429);
-    if (inv && inv.limit === "active") return json({ error: "This room already has " + MAX_ACTIVE_INVITES + " active invites" }, 429);
-    if (!inv) return json({ error: name + " already has an active invite (names match regardless of case). Revoke it first to make a new one." }, 409);
+    if (inv && inv.limit === "day") return rateLimited("You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day", "retry_after" in inv && inv.retry_after ? inv.retry_after : 3600);
+    if (inv && inv.limit === "active") return limitReached("This room already has " + MAX_ACTIVE_INVITES + " active invites");
+    if (!inv) return json({ error: name + " already has an active invite (names match regardless of case). Revoke it first to make a new one.", code: "name_taken" }, 409);
     const created = Object.assign({ room, link: link(inv.token) }, inv);
     if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token);
     return json(created, 201);

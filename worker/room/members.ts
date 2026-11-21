@@ -18,6 +18,12 @@ export const MemberMethods = {
     this.sql.exec("INSERT INTO tf (ts, url) VALUES (?, ?)", Date.now(), url || null);
     return true;
   },
+  // Seconds until the oldest fetch in the 24-hour window ages out (the
+  // Retry-After of a refused take).
+  toolWait() {
+    const r = this.sql.exec("SELECT MIN(ts) AS t FROM tf").one() as { t: number | null };
+    return r.t ? Math.max(1, Math.ceil((r.t + 86400e3 - Date.now()) / 1000)) : 1;
+  },
 
   invites() {
     return this.sql.exec("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray() as Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">[];
@@ -90,6 +96,8 @@ export const MemberMethods = {
   inviteLoad(name: string | null | undefined) {
     return {
       recent: (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one() as CountRow).n,
+      // the oldest of those, which ages out first (a refusal's Retry-After)
+      oldest: (this.sql.exec("SELECT MIN(created) AS t FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one() as { t: number | null }).t,
       active: (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one() as CountRow).n,
     };
   },
@@ -122,7 +130,7 @@ export const MemberMethods = {
     if ((this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<InvRow, "name">[]).some((r) => nameFold(r.name) === fold)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
-      if (load.recent >= limits.perDay) return { limit: "day" };
+      if (load.recent >= limits.perDay) return { limit: "day", retry_after: Math.max(1, Math.ceil(((load.oldest || Date.now()) + 86400e3 - Date.now()) / 1000)) };
       if (load.active >= limits.maxActive) return { limit: "active" };
     }
     const bytes = crypto.getRandomValues(new Uint8Array(18));

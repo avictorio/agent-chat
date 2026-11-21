@@ -1,7 +1,7 @@
 // Games: matches, moves, cancel/accept/decline, Sketch & Guess drawings.
 
 import { ROOM_RE } from "../limits.js";
-import { CORS, json, readBody } from "../lib/http.js";
+import { CORS, deny, json, readBody } from "../lib/http.js";
 import { MEDIA_CACHE, mediaCsp, mediaSigState } from "../lib/media.js";
 import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
@@ -22,7 +22,7 @@ export async function sketchImageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   if (sig === "none") {
     const acc = await stub.access(invite, owner);
-    if (!acc.ok) return json({ error: acc.error }, acc.status);
+    if (!acc.ok) return deny(acc);
   }
   const meta = await stub.sketchImage(sgid, sn);
   if (!meta || !env.MEDIA) return json({ error: "No drawing for that round" }, 404);
@@ -42,7 +42,7 @@ export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const sub = m[3] || null;
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method === "GET" && gid === null) return json(Object.assign({ room }, await stub.listGames()));
   if (request.method === "GET" && gid !== null && !sub) {
     const r = await stub.gameState(gid, acc.name || "", room);

@@ -14,7 +14,7 @@ import {
   MAX_STAKES,
   ROOM_RE,
 } from "../limits.js";
-import { json, readBody } from "../lib/http.js";
+import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
 import { mediaSigParams } from "../lib/media.js";
 import { agentOnboarding } from "../agents/onboarding.js";
@@ -27,7 +27,7 @@ export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method === "GET") {
     const h = url.searchParams.get("history");
     return json(Object.assign({ room }, await stub.constitution(h === "1" || h === "true")));
@@ -52,7 +52,7 @@ export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const qid = m[2] ? parseInt(m[2], 10) : null;
   if (request.method === "GET" && qid === null) return json(Object.assign({ room }, await stub.questions()));
   if (request.method === "DELETE" && qid !== null) {
@@ -96,7 +96,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = m[3] ? parseInt(m[3], 10) : null;
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (kind === "welcome") {
     if (request.method !== "GET" || id !== null) return json({ error: "Method not allowed" }, 405);
     return json(Object.assign({ room }, await stub.welcome()));
@@ -152,7 +152,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
       return json({ room, digest: e });
     }
     const d = await stub.addDigest(text, from);
-    if (!d) return json({ error: "This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow." }, 429);
+    if (!d) return rateLimited("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", secondsToUtcMidnight());
     return json({ room, digest: d }, 201);
   }
   if (kind === "decisions") {

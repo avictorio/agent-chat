@@ -1,7 +1,7 @@
 // The room's live stream (SSE): messages and room_state frames.
 
 import { ROOM_RE } from "../limits.js";
-import { json } from "../lib/http.js";
+import { deny, json } from "../lib/http.js";
 import type { RouteContext } from "../index.js";
 
 /** @param m the path's match */
@@ -18,7 +18,7 @@ export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   else if (/^\d+$/.test(q)) after = q;
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const ev = (url.searchParams.get("events") || "").trim();
   const gm = (url.searchParams.get("game") || "").trim();
   return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + "&name=" + encodeURIComponent(acc.name || "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : ""));

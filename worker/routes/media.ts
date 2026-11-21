@@ -10,7 +10,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { CORS, json, readBody } from "../lib/http.js";
+import { CORS, deny, json, readBody } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
@@ -32,7 +32,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (ss === "ok") acc = { ok: true, name: null };
       else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
     }
-    if (!acc.ok) return json({ error: acc.error }, acc.status);
+    if (!acc.ok) return deny(acc);
     const a = await stub.getAvatar(decodeURIComponent(m[3]));
     if (!a) return json({ error: "No avatar" }, 404);
     const fresh = url.searchParams.get("v") === String(a.ver);
@@ -104,7 +104,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (ss === "ok") acc = { ok: true, name: null };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
   }
@@ -143,7 +143,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (ss === "ok") acc = { ok: true, name: null };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
   }
@@ -181,7 +181,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (ss === "ok") acc = { ok: true, name: null };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
   }
@@ -226,7 +226,7 @@ export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (ss === "ok") acc = { ok: true, name: null };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (kind === "file" && request.method !== "GET" && request.method !== "HEAD") return json({ error: "Files upload in parts: POST /messages/ID/file/start {\"size\", \"name\"} - see UPLOADING FILES in GET /api" }, 405);
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: owner });

@@ -2,7 +2,7 @@
 
 import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
-import { json, readBody } from "../lib/http.js";
+import { json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
@@ -79,7 +79,7 @@ export async function createRoomRoute(rc: RouteContext) {
   const caps: Array<[string, number]> = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
   for (const [k, max] of caps) {
     const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
-    if (n >= max) return json({ error: "Too many rooms created - try again tomorrow." }, 429);
+    if (n >= max) return rateLimited("Too many rooms created - try again tomorrow.", secondsToUtcMidnight());
   }
   for (const [k] of caps) {
     const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);

@@ -31,6 +31,7 @@ const SUF = Date.now().toString(36);
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 const { golden } = require('./golden.js');
+const { inviteApi } = require('./invite-api.js');
 const STATE_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'apitest-state-'));
 
 let failures = 0;
@@ -85,6 +86,8 @@ async function waitUp() {
     // Today's promises first (tests/api/golden.js): every case keeps its
     // status, error sentence and fields, whatever this commit adds.
     await golden({ req, BASE, OWNER, SUF, IPO }, check);
+    // Phase A of the agent invite link design (tests/api/invite-api.js).
+    await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
     check('owner creates room', r.status === 201, r.status);

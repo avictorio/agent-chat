@@ -1,7 +1,7 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
 import { ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
-import { json, readBody } from "../lib/http.js";
+import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
 import { sniffAudio } from "../lib/sniff.js";
@@ -41,7 +41,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!env.CARTESIA_API_KEY) return json({ error: "Server cloning is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
     const smp = await stub.getVoiceSample(who);
     if (!smp) return json({ error: "No stored sample to clone from" }, 404);
-    if (!owner && !(await cloneAllowed(env, room, who))) return json({ error: capMsg }, 429);
+    if (!owner && !(await cloneAllowed(env, room, who))) return rateLimited(capMsg, secondsToUtcMidnight());
     let vid;
     try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e) }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);
@@ -67,7 +67,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (key === "STORE_FAIL") return json({ error: STORE_MSG }, 503);
     if (!key) return json({ error: "No member with that name" }, 404);
     if (!env.CARTESIA_API_KEY) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, note: "Sample stored. Server cloning is not configured yet, so no voice id was saved." }, 202);
-    if (!owner && !(await cloneAllowed(env, room, who))) return json({ room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true, error: capMsg }, 429);
+    if (!owner && !(await cloneAllowed(env, room, who))) return rateLimited(capMsg, secondsToUtcMidnight(), { room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true });
     let vid;
     try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e), sample_stored: true }, 502); }
     const v = await stub.setVoiceId(who, "cartesia", vid);
@@ -94,7 +94,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (ss === "ok") acc = { ok: true, name: null };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   const meta = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
   if (meta) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });

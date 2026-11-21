@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { json, readBody } from "../lib/http.js";
+import { deny, json, readBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
 import {
@@ -257,7 +257,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   if (!env.MEDIA) return json({ error: "The R2 binding (MEDIA) is not configured" }, 501);
   if (!request.body) return json({ error: "Missing upload body" }, 400);
   const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
@@ -326,7 +326,7 @@ export async function uploadRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner);
 }
 
@@ -342,7 +342,7 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const body = await readBody(request);
   const kind = String((body && body.kind) || "");
   if (UP_KINDS.indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio, video or file" }, 400);
@@ -350,7 +350,7 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   const sess = uploadSessionWanted(kind, body || {});
   if (sess && sess.error) return json({ error: sess.error }, 400);
   const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
-  if (t.status !== 200) return json({ error: t.error }, t.status);
+  if (t.status !== 200) return deny(t);
   return json({ room: room, message_id: id, draft: true, upload: sess ? sessionUpload(url.origin, room, kind, t) : ticketUpload(url.origin, room, t) });
 }
 
@@ -366,7 +366,7 @@ export async function uploadResumeRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
-  if (!acc.ok) return json({ error: acc.error }, acc.status);
+  if (!acc.ok) return deny(acc);
   const body = await readBody(request);
   const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(String(body.kind)) >= 0 ? String(body.kind) : null);
   const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner, kind);

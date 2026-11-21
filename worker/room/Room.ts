@@ -56,6 +56,11 @@ export type RxRow = { msg: number, emoji: string, who: string, ts: number };
 export type InvRow = { token: string, name: string, created: number, revoked: number | null, used: number | null, seen: number | null, kind: string | null,
   invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null };
 /** cfg: a room setting (every write stores a string). */
+/** What the invite lookup reads from an inv row. */
+export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "created">;
+/** A refused credential: the status, its code and its sentence. */
+export type Refusal = { ok: false, status: number, code: string, error: string };
+export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
 export type CfgRow = { k: string, v: string };
 /** tf: one tool fetch. */
 export type TfRow = { ts: number, url: string | null };
@@ -309,14 +314,25 @@ export class Room extends DurableObject {
     }
   }
 
+  // The invite a token names, or the refusal: the one lookup behind
+  // access() (which then marks the invite used and seen) and the invite
+  // preview (which marks nothing), so their answers cannot drift. Each
+  // refusal carries its code beside the sentence (lib/http.ts deny).
+  lookupInvite(token: string | null | undefined): InviteLookup {
+    if (!token) return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
+    const row = (this.sql.exec("SELECT name, revoked, used, seen, kind, invited_by, created FROM inv WHERE token = ?", token).toArray() as InviteCols[])[0];
+    if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
+    if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };
+    return { ok: true, row: row };
+  }
+
   // Access: every room is invite-only (product decision, 2026-11-07):
   // reading, streaming and posting always need a valid invite or the owner key.
   access(token: string | null | undefined, owner: boolean) {
     if (owner) return { ok: true };
-    if (!token) return { ok: false, status: 401, error: "This room is invite-only. Open your invite link to join." };
-    const row = (this.sql.exec("SELECT name, revoked, used, seen, kind FROM inv WHERE token = ?", token).toArray() as Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind">[])[0];
-    if (!row) return { ok: false, status: 403, error: "This invite link isn't valid for this room." };
-    if (row.revoked) return { ok: false, status: 403, error: "This invite link has been revoked. Ask the room owner for a new one." };
+    const l = this.lookupInvite(token);
+    if (!l.ok) return l;
+    const row = l.row;
     const now = Date.now();
     if (!row.used) this.sql.exec("UPDATE inv SET used = ? WHERE token = ?", now, token);
     if (!row.seen || now - row.seen > 60000) this.sql.exec("UPDATE inv SET seen = ? WHERE token = ?", now, token);

@@ -38,6 +38,8 @@ import {
   VIDEO_MAX,
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
+import { codedError } from "../lib/errors.js";
+import { secondsToUtcMidnight } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { clamp, isPlaceholder } from "../lib/text.js";
@@ -141,8 +143,12 @@ export function mcpOk(obj: unknown) {
   const o = obj && typeof obj === "object" ? obj : { value: obj };
   return { content: [{ type: "text", text: JSON.stringify(o) }], structuredContent: o };
 }
-export function mcpErr(message: unknown) {
-  return { content: [{ type: "text", text: String(message) }], isError: true };
+/** A tool error: the message, and its error code (as structuredContent)
+ *  when it has one. */
+export function mcpErr(message: unknown, structured?: Record<string, unknown>) {
+  const out: { content: { type: string, text: string }[], isError: boolean, structuredContent?: Record<string, unknown> } = { content: [{ type: "text", text: String(message) }], isError: true };
+  if (structured) out.structuredContent = structured;
+  return out;
 }
 /**
  * @param s base64, or a data: URL
@@ -243,14 +249,14 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const r = await stub.updateStake(id, String(A.action || ""), from); if (r.error) throw new Error(r.error); return { room: room, stake: r.stake };
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(parseInt(A.limit, 10) || 10, 1, KEEP_DIGESTS)));
-    case "file_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw new Error("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow."); return { room: room, digest: d }; }
+    case "file_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw codedError("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", "rate_limited", secondsToUtcMidnight()); return { room: room, digest: d }; }
     case "edit_digest": { needFrom(); const text = String(A.text || "").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(parseInt(A.id, 10), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
     case "delete_digest": { needFrom(); if (!(await stub.deleteDigest(parseInt(A.id, 10)))) throw new Error("Nothing with that id"); return { room: room, deleted: parseInt(A.id, 10) }; }
     case "fetch_url": {
       needFrom();
       const target = fetchTarget(A.url);
       if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
-      if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw new Error("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours");
+      if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw codedError("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", "rate_limited", await stub.toolWait());
       const fr = await webFetch(target);
       const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);
       if (A.post && !fr.error) { const full = fr.text || ""; const excerpt = full.slice(0, 1500); const msgText = "Fetched " + fr.url + " (HTTP " + fr.status + ")" + (fr.title ? "\n" + fr.title : "") + "\n\n" + excerpt + (full.length > 1500 || fr.truncated ? "\n\n[excerpt; the full text is available through the fetch tool]" : ""); out.posted = await stub.post(from, msgText.slice(0, MAX_TEXT), room, owner); }
@@ -276,13 +282,13 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const msg = await stub.post(from, String(A.text || ""), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
       if (sess) {
         const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess);
-        if (st.status !== 200) { await stub.deleteMessage(msg.id, from, owner); throw new Error(st.error); }
+        if (st.status !== 200) { await stub.deleteMessage(msg.id, from, owner); throw st.code ? codedError(st.error, st.code) : new Error(st.error); }
         const sout = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: sessionUpload(origin, room, kind, st) };
         if (A.publish_on_complete) sout.upload.note += " publish_on_complete is set, so the message publishes itself the moment finish succeeds.";
         return sout;
       }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
-      if (t.status !== 200) throw new Error(t.error);
+      if (t.status !== 200) throw t.code ? codedError(t.error, t.code) : new Error(t.error);
       const out: { room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } } = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
       out.upload.bigger = "For a bigger file (any size up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (the exact byte length) - and name for a file - for a resumable upload link.";

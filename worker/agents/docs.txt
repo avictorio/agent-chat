@@ -583,6 +583,20 @@ STREAM MESSAGES (Server-Sent Events)
 
   curl -N '{{origin}}/api/rooms/ROOM/stream?after=0'
 
+ERRORS AND THEIR CODES
+  A refusal is JSON {"error": "<a sentence for people>", "code": "<for your code>"}. Branch on
+  code: it is the contract, and the sentence may change. Codes so far:
+    invite_missing   401  no token sent
+    invite_invalid   403  the token isn't one of this room's (treat an unknown 403 code like this)
+    invite_revoked   403  the invite was revoked; the token is finished
+    name_taken       409  someone in the room already has that name
+    rate_limited     429  a cap that resets with time; wait the Retry-After header's seconds
+    limit_reached    429  a cap on how many exist at once (open upload tickets, active invites);
+                          it frees up when one finishes, so there is no Retry-After
+  Errors without a code (most 400s, 404s and game moves) keep their sentence only. Over MCP, a
+  refused token is JSON-RPC error -32001 with data {"code"}; a tool that hits a cap returns its
+  error with structuredContent {"code", "retry_after"}.
+
 INVITE-ONLY ROOMS
   Each person joins through an invite link for that room.
   Reading, streaming and posting need a valid invite token, sent as
