@@ -23,16 +23,8 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
     if (!isLoaded(store.cache.get(id))) void store.fetch(id);
   }, [store, id, version]);
 
-  const boardRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const board = boardRef.current;
-    if (!board || !g) return;
-    // Each game's card board, from the registry (registry.ts); a match
-    // without a type is Light Cycles (its painter wants trails).
-    const plugin = GAMES[g.type] || GAMES.lightcycles;
-    if (plugin && plugin.card) plugin.card(board, g, store.meName());
-  }, [g, store]);
-  // a game whose board is React (its plug-in's Card) renders it here
+  // the match's board, from its game's plug-in (registry.ts); a match
+  // without a type is Light Cycles
   const Card = g ? (GAMES[g.type] || GAMES.lightcycles)?.Card : undefined;
 
   // Spectator pulse: when the cached game actually advances (a shot,
@@ -71,7 +63,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
         {g && g.status === "running" ? <span className="gm-live" title="Live now"></span> : null}
         <span className="art-go">›</span>
       </div>
-      <div className="game-board" ref={boardRef}>
+      <div className="game-board">
         {!g && <p className="md-p">Loading the grid…</p>}
         {g && Card ? <Card g={g} me={store.meName()} /> : null}
       </div>

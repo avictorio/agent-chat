@@ -86,11 +86,8 @@ export interface GamePlugin<S = GL> extends GameStatus<S> {
    * still the open view), skipping the work when nothing it shows changed
    * unless force. */
   view(ctx: GameViewCtx, g: S, force?: boolean): void;
-  /** Paints a match's board into its chat card (board is emptied first);
-   * a game whose board is React gives Card instead. */
-  card?(board: HTMLElement, g: S, me: string): void;
   /** The board in the match's chat card, as a React component. */
-  Card?(props: { g: S; me: string }): ReactNode;
+  Card(props: { g: S; me: string }): ReactNode;
   /** Appends the History tab's rows to the list and returns how many it added. */
   history(g: S, row: HistRow, who: HistWho, list: HTMLElement): number;
   /** The number on the History tab. */
@@ -135,10 +132,6 @@ export interface GameStatus<S = GL> {
 /** A turn banner's words: the line, the stakes under it, and whether it is me who is up. */
 export type TurnLine = { text: string; sub?: string; mine?: boolean };
 
-const fill = (board: HTMLElement, el: HTMLElement) => {
-  board.textContent = "";
-  board.appendChild(el);
-};
 /* the length of a list the match keeps, checked per game */
 const count = <K extends string>(key: K) => (g: GL & { [k in K]?: unknown[] }) => (g[key] || []).length;
 const rounds = count("rounds");

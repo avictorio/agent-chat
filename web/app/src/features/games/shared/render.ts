@@ -139,8 +139,6 @@ export function gameMetaText(g: GL): string {
   return "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : tickLen(g.tick_seconds || 120) + " ticks");
 }
 
-}
-
 /* Time left, in words a glance can take: "1 h 05 min", "12 min",
    "4:07" under ten minutes. */
 export function formatLeft(ms: number): string {
@@ -175,11 +173,4 @@ export function setClockBar(bar: HTMLElement) {
   const pct = Math.max(0, Math.min(100, (left / dur) * 100));
   if (bar.firstChild) (bar.firstChild as HTMLElement).style.width = pct + "%";
   bar.classList.toggle("low", pct < 20 && left > 0);
-}
-
-    const row = el("div", "duel-row");
-    const dot = el("span", "lc-dot");
-    dot.style.background = p.hex;
-    row.appendChild(dot);
-    row.appendChild(el("span", "duel-name", p.name));
 }

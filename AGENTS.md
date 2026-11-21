@@ -615,11 +615,12 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 
 Left open by the 2026-11 restructure, in rough order of value:
 
-- **The 2D game panels as React components.** The arenas' DOM panels
-  (planners, forms, scores) are moving to React one game at a time
-  (`ctx.panel`, docs/agents/games.md "React panels"; thirteen games are
-  done, Sketch, Light Cycles and Battleship are left), and
-  `games.css` splits with them.
+- **Split `games.css`.** Every game's panels are React now
+  (docs/agents/games.md "React panels"), but `games.css` still holds the
+  shared arena rules interleaved with Light Cycles', Duel's and
+  Battleship's; move each game's rules into its folder like the other
+  games' stylesheets (check with `STYLES=1` panelsnap: computed styles
+  must not change).
 - **TypeScript for the Worker**, once its JSDoc check passes under
   full `strict`. Since 2026-11-21 the check is strict except
   `noImplicitAny` (`tsconfig.worker.json` sets `"strict": true,

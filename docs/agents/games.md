@@ -37,9 +37,9 @@ each game, the 3D arenas and the Games tab are built, and why. Read
 - **Game plug-ins on the client (2026-11-21):** `GAMES`
   in `web/app/src/features/games/registry.ts` mirrors the server's
   `GAME_ENGINES`: one entry per game type pointing into the game's folder,
-  with its arena view (`<game>/view.ts`, a renderer the store calls with a
-  `GameViewCtx` from `shared/viewctx.ts`), its chat-card board (`card`, a
-  painter, or `Card`, a React component), its
+  with its arena view (`<game>/view.tsx`, a renderer the store calls with a
+  `GameViewCtx` from `shared/viewctx.ts`), its chat-card board (`Card`, a
+  React component the card renders), its
   History rows (row types in `shared/history.ts`) and the History tab's
   count, plus its status hooks from `<game>/status.ts` (`GameStatus`:
   meta, record and state lines, final score, who it waits on, the turn
@@ -108,12 +108,13 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   start its draft over each round. The host is `display: contents`, so
   layout is unchanged; tests that read the arena's sections in order use
   `ARENA_KIDS` (harness.js), which looks through the hosts. The chat card
-  renders the plug-in's `Card` instead of calling its painter. Done:
-  Trust, Auction, Exquisite Corpse, Two Truths, Twenty Questions,
-  Werewolf, Trivia, Liar's Dice, Frontlines, Code Race, Four in a Row,
-  Duel (its helpers now in `duel/duel.ts`) and Letter Grid
-  (`<Game>Panels.tsx`). Sketch, Light Cycles and Battleship still build
-  panels with `el()`. Text and number fields stay
+  renders the plug-in's `Card`. Every game is converted (2026-11-21), each
+  in `<game>/<Game>Panels.tsx`; Duel's helpers are in `duel/duel.ts`, and
+  Battleship's, Light Cycles' and Sketch's moved out of
+  `shared/render.ts` into their folders. State the 3D scene shares stays
+  on `gameView`: Letter Grid's draft, Battleship's placement draft
+  (`bsDrafts` in `battleship/view.tsx`, `bsPlace`, `bsFire`, focus) and
+  Sketch's pad strokes (`sgPad`). Text and number fields stay
   uncontrolled (React 19 writes a `value` prop as an attribute, which the
   old markup never had): a layout effect fills in the draft and the
   field reports changes; History rows stay imperative.
@@ -150,7 +151,7 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   toggles and their `ac:*3d` preferences (`lc`, `bs`, `duel`, `fl`, `cr`,
   `c43d`, `tr`, `au`, `ld`) are gone, and a stored value is ignored.
   Chat cards, history rows and the Games tab keep their small 2D
-  summaries (`boardSvg`, `FourInARowCard`'s board, minis). A device without WebGL
+  summaries (`LightCyclesCard`'s board, `FourInARowCard`'s board, minis). A device without WebGL
   (`webglOk()` in games.ts, or a WebGL error from the scene) gets a
   one-line note in place of the arena - "3D isn't available on this
   device - play with the controls below." - with no Reload button; every
@@ -216,8 +217,8 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   without WebGL).
 
 - **Fleet placement in 3D (2026-11-20, the second step):** the setup
-  phase mounts the same scene with a `placing` prop (games.ts keeps the
-  draft in `bsDrafts` and hands the scene `gameView.bsPlace`: the hulls
+  phase mounts the same scene with a `placing` prop (`battleship/view.tsx`
+  keeps the draft in `bsDrafts` and hands the scene `gameView.bsPlace`: the hulls
   laid, the orientation, the next size and the place / rotate / undo
   actions). The scene shows your ocean alone, framed like a phone's one
   ocean; laid hulls are real ship models and the next one is a hologram
