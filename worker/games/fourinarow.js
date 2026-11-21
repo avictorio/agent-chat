@@ -3,6 +3,40 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("./engine.js").GameEngine} GameEngine */
+/** A seat at the board, in turn order (the first plays X).
+ *  @typedef {{ name: string, color: string, hex: string }} C4Seat */
+/** Four in a Row's stored match state (g.st; the API's FourInARowState is
+ *  built from it). cols holds each column's discs bottom first, as the
+ *  seat index that dropped it; the turn fields and timeouts/passes are the
+ *  turn-order helper's (turnsNext/turnsAdvance in room/games.js), accepted,
+ *  declined_by and ended the lobby's and saveGame's.
+ *  @typedef {{
+ *    type: "fourinarow",
+ *    turn_seconds: number,
+ *    turn: number,
+ *    order: string[],
+ *    turn_of: string,
+ *    cols: number[][],
+ *    moves: import("@chat/contract").FourInARowMove[],
+ *    line: Array<[number, number]> | null,
+ *    timeouts: Record<string, number>,
+ *    passes: number,
+ *    pass_limit: number,
+ *    deadline: number | null,
+ *    lobby_deadline: number,
+ *    accepted: Record<string, boolean>,
+ *    players: C4Seat[],
+ *    log: import("@chat/contract").GameLogLine[],
+ *    winner: string | null,
+ *    draw: boolean,
+ *    forfeit: string | null,
+ *    announced: boolean,
+ *    declined_by?: string,
+ *    ended?: number,
+ *  }} C4St */
+/** A Four in a Row match: its gm row with the state typed.
+ *  @typedef {Omit<GameRow, "st"> & { st: C4St }} C4Game */
 
 // Four in a Row: the classic board.
 export const C4_COLS = 7;
@@ -10,6 +44,7 @@ export const C4_ROWS = 6;
 
 // Four in a Row's board rows, top first: X for the first seat, O for the
 // second, . for empty (the chat card needs it without a Room to hand).
+/** @param {Pick<C4St, "cols">} st */
 export function c4BoardOf(st) {
   const rows = [];
   for (let r = C4_ROWS - 1; r >= 0; r--) {
@@ -33,16 +68,24 @@ export const FourInARowMethods = {
      (left to right). A turn waits turn_seconds (default an hour); an
      expired turn passes, the third forfeits, 20 passes draw. The Referee
      posts only the result; the board lives in the card and the arena. */
+  /** @param {C4St} st */
   c4Board(st) {
     return c4BoardOf(st);
   },
 
   // The four (or more) in a line through (c, r), as [[col, row], ...]
   // 1-based (column 1 = left, row 1 = bottom), or null.
+  /**
+   * @param {C4St} st
+   * @param {number} c the column, 0-based
+   * @param {number} r the row, 0-based from the bottom
+   * @returns {Array<[number, number]> | null}
+   */
   c4Line(st, c, r) {
     const me = st.cols[c][r];
-    const at = (x, y) => (x >= 0 && x < C4_COLS && y >= 0 && y < C4_ROWS ? st.cols[x][y] : undefined);
+    const at = (/** @type {number} */ x, /** @type {number} */ y) => (x >= 0 && x < C4_COLS && y >= 0 && y < C4_ROWS ? st.cols[x][y] : undefined);
     for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+      /** @type {Array<[number, number]>} */
       const cells = [[c, r]];
       for (const s of [1, -1]) {
         let x = c + s * dx, y = r + s * dy;
@@ -53,13 +96,17 @@ export const FourInARowMethods = {
     return null;
   },
 
+  /** @param {C4St} st */
   c4Open(st) {
     const out = [];
     for (let c = 0; c < C4_COLS; c++) if (st.cols[c].length < C4_ROWS) out.push(String(c + 1));
     return out;
   },
 
-  /** @returns {import("@chat/contract").FourInARowState} */
+  /**
+   * @param {C4Game} g
+   * @returns {import("@chat/contract").FourInARowState}
+   */
   c4Summary(g) {
     const st = g.st;
     return {
@@ -72,7 +119,11 @@ export const FourInARowMethods = {
     };
   },
 
-  /** @returns {import("@chat/contract").FourInARowState} */
+  /**
+   * @param {C4Game} g
+   * @param {string | null | undefined} who the viewer
+   * @returns {import("@chat/contract").FourInARowState}
+   */
   c4StateFull(g, who) {
     const out = this.c4Summary(g);
     const st = g.st;
@@ -88,6 +139,12 @@ export const FourInARowMethods = {
     return out;
   },
 
+  /**
+   * @param {string} creator
+   * @param {unknown[]} playersIn
+   * @param {Record<string, any>} opts the create's options (tick_seconds, lobby_seconds)
+   * @param {string} room
+   */
   async createFourInARow(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Four in a Row needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
@@ -99,6 +156,7 @@ export const FourInARowMethods = {
     turnSeconds = Math.min(86400, Math.max(30, turnSeconds));
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    /** @type {C4St} */
     const st = {
       type: "fourinarow", turn_seconds: turnSeconds, turn: 1, order: names.slice(), turn_of: names[0],
       cols: Array.from({ length: C4_COLS }, () => []), moves: [], line: null, timeouts: {}, passes: 0, pass_limit: 20,
@@ -118,6 +176,12 @@ export const FourInARowMethods = {
     return { status: 201, game: this.c4StateFull(g, creator) };
   },
 
+  /**
+   * @param {C4Game} g
+   * @param {string} who
+   * @param {unknown} raw the column, as sent
+   * @param {string} room
+   */
   async c4Move(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -153,6 +217,7 @@ export const FourInARowMethods = {
     return { status: 200, game: this.c4StateFull(g, who), resolved: true };
   },
 
+  /** @param {C4Game} g */
   c4ResultText(g) {
     const st = g.st;
     const [a, b] = st.players;
@@ -165,23 +230,24 @@ export const FourInARowMethods = {
   },
 };
 
+/** @satisfies {GameEngine} */
 export const fourinarowEngine = {
   name: "Four in a Row",
   turnWord: "turn",
-  logTick: (st) => st.turn,
-  clockSeconds: (st) => st.turn_seconds,
+  logTick: (/** @type {C4St} */ st) => st.turn,
+  clockSeconds: (/** @type {C4St} */ st) => st.turn_seconds,
   create: (room, creator, players, opts, roomName) => room.createFourInARow(creator, players, opts, roomName),
   summary: (room, g) => room.c4Summary(g),
   full: (room, g, who) => room.c4StateFull(g, who),
   move: (room, g, who, dir, roomName) => room.c4Move(g, who, dir, roomName),
   advance: (room, g, roomName) => room.turnsAdvance(g, roomName),
   targets: (pub) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
-  card: (g) => ({ id: g.id, type: "fourinarow", status: g.status, turn: g.st.turn, turn_of: g.status === "running" ? g.st.turn_of : null, winner: g.st.winner || null, draw: !!g.st.draw, board: c4BoardOf(g.st), players: g.st.players.map((p, i) => ({ name: p.name, color: p.color, hex: p.hex, piece: i === 0 ? "X" : "O" })) }),
-  stateItem: (r, st) => ({ id: r.id, type: "fourinarow", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
+  card: (/** @type {C4Game} */ g) => ({ id: g.id, type: "fourinarow", status: g.status, turn: g.st.turn, turn_of: g.status === "running" ? g.st.turn_of : null, winner: g.st.winner || null, draw: !!g.st.draw, board: c4BoardOf(g.st), players: g.st.players.map((p, i) => ({ name: p.name, color: p.color, hex: p.hex, piece: i === 0 ? "X" : "O" })) }),
+  stateItem: (r, /** @type {C4St} */ st) => ({ id: r.id, type: "fourinarow", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: () => "<a column, 1-7 from the left>",
   result: (room, g) => room.c4ResultText(g),
-  rules: (st) =>
+  rules: (/** @type {C4St} */ st) =>
     "Four in a Row: two players take turns dropping a disc into one of 7 columns; it falls to the lowest free cell of the 6 rows. Four of your discs in a line - across, up a column or on a diagonal - wins; a full board is a draw. " +
     st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, the third timeout forfeits the match, and " + (st.pass_limit || 20) + " passes in all make it a draw. Send dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
 };
