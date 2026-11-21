@@ -63,10 +63,12 @@ function serialise(styles) {
   };
   const css = (n) => {
     if (!styles) return '';
-    const cs = getComputedStyle(n);
+    // computed values (computedStyleMap), not getComputedStyle's resolved
+    // ones: those resolve margins and sizes against the layout of the
+    // moment, which varies run to run; the cascade's result does not
     let all = '';
-    for (let i = 0; i < cs.length; i++) all += cs[i] + ':' + cs.getPropertyValue(cs[i]) + ';';
-    return ' css=' + hash(all);
+    for (const [prop, vals] of n.computedStyleMap()) all += prop + ':' + vals.map(String).join(',') + ';';
+    return ' css=' + (styles === 'full' ? JSON.stringify(all) : hash(all));
   };
   const SKIP = '.turn-banner, .duel-clockwrap, .lc-3d-host, .arena3d-frame, canvas, .gm-due, .turn-left';
   const walk = (n) => {
@@ -103,7 +105,11 @@ async function snapOne(browser, state, mode) {
     await page.goto('https://chat.victorio.cloud/r/demo');
     await settle(page);
     const card = await page.waitForSelector(cardSel + ' .game-board > *:not(.md-p)', { timeout: 10000 }).catch(() => null);
-    const snap = (sel) => page.evaluate(([sel, fn, styles]) => { const walk = new Function('return ' + fn)()(styles); const el = document.querySelector(sel); return el ? walk(el) : null; }, [sel, serialise.toString(), !!process.env.STYLES]);
+    // computed styles mid-animation differ run to run: in STYLES mode
+    // finish every finite animation and park infinite ones at their start
+    const still = () => process.env.STYLES ? page.evaluate(() => document.getAnimations().forEach((an) => { try { if (isFinite(an.effect.getComputedTiming().endTime)) an.finish(); else { an.pause(); an.currentTime = 0; } } catch (e) {} })) : null;
+    const snap = async (sel) => { await still(); return snap0(sel); };
+    const snap0 = (sel) => page.evaluate(([sel, fn, styles]) => { const walk = new Function('return ' + fn)()(styles); const el = document.querySelector(sel); return el ? walk(el) : null; }, [sel, serialise.toString(), process.env.STYLES === 'full' ? 'full' : !!process.env.STYLES]);
     if (card) {
       await settle(page);
       out.card = await snap(cardSel);

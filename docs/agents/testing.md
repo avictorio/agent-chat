@@ -106,6 +106,10 @@ looked at in both sizes.
    each fixture state, with and without WebGL, at desktop and phone width;
    run it on the old and the new build and compare with
    `node tests/ui/panelsnap.js diff before.json after.json`.
+   `ONLY_GAMES=tr,au` limits it to some fixtures; `STYLES=1` adds a hash
+   of each element's computed style (CSS Typed OM computed values, with
+   animations settled, so two runs of one build agree) for a CSS move
+   that must not change how anything looks.
 2. **Serve them as production does.** Use Playwright
    `page.route('https://chat.victorio.cloud/**', ...)`: serve the page for
    `/r/...` and `/`, stub `/api/.../messages` and the board endpoints with

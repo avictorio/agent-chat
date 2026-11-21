@@ -28,3 +28,10 @@
 .c4-seat-to { font-size: 11.5px; color: #f43f5e; }
 /* in the arena page (light or dark), text follows the page ink */
 .lc-arena .c4-seats, .lc-arena .c4-drop { color: var(--ink); }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Four in a Row: a tall board - a taller host. */
+.lc-3d-host.c4-3d-host { height: min(56vh, 520px); }
+.c4-under .c4-wrap { margin-top: 8px; }
+@media (max-width: 560px) {
+  .lc-3d-host.c4-3d-host { height: min(48vh, 380px); }
+}

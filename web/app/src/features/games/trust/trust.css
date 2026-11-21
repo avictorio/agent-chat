@@ -39,3 +39,11 @@
 .tr-grid-empty { text-align: center; color: var(--dim); font-size: 13px; padding: 10px; }
 .tr-card { color: #dff7f2; }
 .tr-card-cap { text-align: center; font-size: 12px; color: #8fc9bf; padding: 0 10px 8px; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Trust: the round table seen from above. */
+.lc-3d-host.tr-3d-host { height: min(46vh, 420px); }
+.tr-caption .tr-cap-c { color: #2dd4bf; }
+.tr-caption .tr-cap-d { color: #f87171; }
+@media (max-width: 560px) {
+  .lc-3d-host.tr-3d-host { height: min(40vh, 310px); }
+}

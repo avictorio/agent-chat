@@ -49,3 +49,8 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
 .tv-rv.mine .tv-rv-name { text-decoration: underline; text-underline-offset: 3px; }
 .tv-card { color: #f5f3ff; padding: 4px 0; }
 .tv-card-q { font-family: Georgia, "Times New Roman", serif; font-size: 13.5px; font-weight: 700; padding: 6px 12px 0; line-height: 1.3; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+.lc-3d-host.tv-3d-host { height: min(48vh, 430px); }
+@media (max-width: 560px) {
+  .lc-3d-host.tv-3d-host { height: min(42vh, 330px); }
+}

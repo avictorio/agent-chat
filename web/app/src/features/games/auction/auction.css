@@ -39,3 +39,9 @@
 .au-bidn { text-align: right; font-variant-numeric: tabular-nums; }
 .au-tie { font-size: 12px; color: #a5b4fc; }
 .au-hist-lot { font-style: italic; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* The auction: the pedestal and the bidders' arc. */
+.lc-3d-host.au-3d-host { height: min(44vh, 400px); }
+@media (max-width: 560px) {
+  .lc-3d-host.au-3d-host { height: min(38vh, 300px); }
+}

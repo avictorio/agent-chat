@@ -53,3 +53,10 @@
 .fl-card { padding: 8px 10px 10px; color: #e2f4fd; }
 .fl-card-score { text-align: center; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
 .fl-card-cap { text-align: center; font-size: 12px; color: #94a3b8; margin-top: 2px; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Frontlines: a wide, shallow field - a lower host than the boards. */
+.lc-3d-host.fl-3d-host { height: min(44vh, 360px); }
+@media (max-width: 560px) {
+  /* Frontlines in 3D: the planner must follow close under the field. */
+  .lc-3d-host.fl-3d-host { height: min(32vh, 240px); }
+}

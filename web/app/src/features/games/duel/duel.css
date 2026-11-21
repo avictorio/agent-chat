@@ -1,0 +1,31 @@
+/* Duel (rock-paper-scissors): the arena's own pieces - pips and score,
+   the face-off line, the round clock, the throw tiles, tendencies and
+   head-to-head. The pieces other games borrow (duel-board, duel-pill,
+   duel-statusline, duel-verdict) stay in games.css. Split from
+   games.css 2026-11-21, in its order. */
+.kind-duel .duel-btn, .kind-duel .duel-tile, .kind-duel .duel-pill { color: #fde68a; }
+.duel-pips { color: #fbbf24; letter-spacing: 2px; margin-left: 8px; }
+.duel-h2h { text-align: center; font-size: 12.5px; color: var(--muted, #94a3b8); margin-top: 6px; letter-spacing: .2px; }
+.duel-tend { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--gbg); display: grid; gap: 4px; }
+.duel-tend-row { font-size: 12.5px; color: #cbd5e1; display: flex; gap: 8px; flex-wrap: wrap; }
+.duel-tend-name { font-weight: 700; }
+.duel-score { margin-left: auto; font-size: 22px; font-weight: 800; line-height: 1; }
+.duel-faceoff-line { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; font-size: 13px; color: #c9e7f2; }
+.duel-faceoff-line .fo-icons { font-size: 20px; letter-spacing: 2px; white-space: nowrap; }
+.duel-clockbar { height: 4px; border-radius: 2px; background: rgba(148, 197, 219, .15); overflow: hidden; margin: 2px 2px 0; }
+.duel-clockbar > div { height: 100%; background: rgb(var(--ga)); border-radius: 2px; }
+.duel-clockbar.low > div { background: #f87171; }
+.duel-pad2 { display: flex; gap: 8px; justify-content: center; margin: 14px auto 4px; }
+.duel-tile { flex: 1; max-width: 110px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 4px 8px; border-radius: 14px; border: 1px solid rgba(var(--ga), .45); background: #0a1420; color: #a5f3fc; cursor: pointer; }
+.duel-tile .t-icon { font-size: 30px; line-height: 1.15; }
+.duel-tile .t-name { font-size: 14px; font-weight: 700; text-transform: capitalize; }
+.duel-tile .t-beats { font-size: 10.5px; color: #8fb8c9; }
+.duel-tile.queued { background: #164e63; color: #ecfeff; border-color: #4ade80; }
+.duel-tile .t-lock { font-size: 9.5px; font-weight: 800; letter-spacing: 1px; color: #4ade80; min-height: 12px; }
+.duel-pad2.your-move .duel-tile:not(.queued) { animation: duelPulse 1.6s ease-in-out infinite; }
+@media (max-width: 560px) {
+  /* Duel in 3D: the scene carries the score (pips) and the round
+     record (chips), so the scoreboard under it gives its room to the
+     throw pad, which must stay on screen. */
+  .lc-3d-host.duel-3d-host { height: min(40vh, 300px); }
+}

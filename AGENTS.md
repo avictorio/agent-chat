@@ -615,12 +615,6 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 
 Left open by the 2026-11 restructure, in rough order of value:
 
-- **Split `games.css`.** Every game's panels are React now
-  (docs/agents/games.md "React panels"), but `games.css` still holds the
-  shared arena rules interleaved with Light Cycles', Duel's and
-  Battleship's; move each game's rules into its folder like the other
-  games' stylesheets (check with `STYLES=1` panelsnap: computed styles
-  must not change).
 - **TypeScript for the Worker?** Since 2026-11-21 its JSDoc check
   (`npm run check`, `tsconfig.worker.json`) passes under full `strict`:
   every parameter is typed, storage rows have row types (next to

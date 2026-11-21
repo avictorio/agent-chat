@@ -42,3 +42,9 @@
 .tq-reveal-how { color: #c4b5fd; }
 .tq-reveal-pts { font-size: 12.5px; color: #fde68a; }
 .tq-card-line { margin: 6px 10px 0; font-size: 13px; color: #ddd6fe; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Twenty Questions: the box and its ring of candles. */
+.lc-3d-host.tq-3d-host { height: min(44vh, 400px); }
+@media (max-width: 560px) {
+  .lc-3d-host.tq-3d-host { height: min(38vh, 300px); }
+}

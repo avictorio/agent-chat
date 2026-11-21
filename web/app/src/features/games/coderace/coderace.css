@@ -67,3 +67,30 @@
 .cr-card .cr-secret .cr-peg { width: 18px; height: 18px; font-size: 8px; }
 .hist-seg .cr-tiles .cr-tile { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
 .gm-rec-places { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Code Race: the vault and the pillars - a little taller than the field. */
+.lc-3d-host.cr-3d-host { height: min(46vh, 400px); }
+/* Code Race: your guesses in the frame (the lanes folded in) */
+/* both classes: it must beat .arena3d-caption (games.css, later) on padding and width */
+.arena3d-caption.cr-ledger { padding: 6px 9px 7px; max-width: min(250px, calc(100% - 170px)); }
+.cr-ledger-h { font-size: 11px; font-weight: 700; letter-spacing: .02em; color: #c4b5fd; margin-bottom: 3px; }
+.cr-ledger-more { font-size: 10.5px; color: #a78bfa; opacity: .8; }
+.cr-lrow { display: flex; align-items: center; gap: 6px; min-height: 19px; }
+.cr-lrow.sealed { opacity: .55; }
+.cr-lrow.cracked { background: rgba(167, 139, 250, .18); border-radius: 6px; }
+.cr-ln { width: 22px; flex: none; font-size: 10.5px; color: #a5a1c4; font-weight: 700; }
+.cr-lpegs, .cr-ltiles { display: inline-flex; gap: 3px; }
+.cr-lpeg { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 8.5px; font-weight: 800; color: rgba(10, 5, 24, .85); background: transparent; box-shadow: inset 0 0 0 1.5px rgba(124, 108, 170, .55); }
+.cr-lpeg[style] { box-shadow: none; }
+.cr-lpips { display: inline-grid; gap: 2px; margin-left: 4px; }
+.cr-lpip { width: 7px; height: 7px; border-radius: 50%; background: #3b3552; }
+.cr-lpip.hit { background: #f8fafc; }
+.cr-lpip.near { background: transparent; box-shadow: inset 0 0 0 1.5px #f8fafc; }
+.cr-ltile { width: 16px; height: 16px; border-radius: 3px; display: inline-grid; place-items: center; font-size: 10px; font-weight: 800; color: #f8fafc; background: #2b2440; }
+.cr-ltile.g { background: #16a34a; }
+.cr-ltile.y { background: #d97706; }
+.cr-ltile.open { background: rgba(76, 60, 120, .6); }
+.cr-lsealed { font-size: 10px; font-weight: 700; color: #e9d5ff; margin-left: 2px; }
+@media (max-width: 560px) {
+  .lc-3d-host.cr-3d-host { height: min(36vh, 280px); }
+}

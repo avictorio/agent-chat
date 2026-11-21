@@ -25,6 +25,9 @@
 @import "./features/games/fourinarow/fourinarow.css";
 @import "./features/games/coderace/coderace.css";
 @import "./features/games/frontlines/frontlines.css";
+@import "./features/games/duel/duel.css";
+@import "./features/games/battleship/battleship.css";
+@import "./features/games/lightcycles/lightcycles.css";
 @import "./features/games/games.css";
 @import "./ui/late.css";
 @import "./features/board/board.css";

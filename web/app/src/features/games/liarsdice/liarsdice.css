@@ -58,3 +58,9 @@
 .ld-open-name { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ld-open-dice { display: flex; flex-wrap: wrap; gap: 5px; }
 .ld-open-dice .ld-die { --ds: 22px; }
+/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* Liar's Dice: the round table from above. */
+.lc-3d-host.ld-3d-host { height: min(46vh, 420px); }
+@media (max-width: 560px) {
+  .lc-3d-host.ld-3d-host { height: min(40vh, 320px); }
+}

@@ -118,6 +118,18 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   uncontrolled (React 19 writes a `value` prop as an attribute, which the
   old markup never had): a layout effect fills in the draft and the
   field reports changes; History rows stay imperative.
+- **Stylesheets (2026-11-21):** each game's rules are in its folder
+  (`<game>/<game>.css`), imported from `web/app/src/styles.css` in order,
+  all before `games.css`, which holds what every game shares (the card,
+  the turn banner, the 3D host and frame tools, the impact layer,
+  history, the pieces several games borrow - `duel-board`, `duel-pill`,
+  `duel-statusline`, `duel-verdict`, `lc-board-big` - the Games tab and
+  the winner banner). Because a game's file loads first, a game rule
+  that must beat a shared rule of equal specificity on the same element
+  needs a more specific selector (`.arena3d-caption.cr-ledger`, not
+  `.cr-ledger`). Check a CSS move with `STYLES=1` panelsnap (each
+  element's computed style; the 3D frame's overlays are outside it, so
+  check those by hand).
 - **Trust (2026-11-19):** the iterated prisoner's dilemma, everyone
   against everyone (2-8 players, payoffs 3/5/0/1 per pairing), on the
   rounds helper. The real last round is drawn within two of `rounds` at
