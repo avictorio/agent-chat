@@ -7,7 +7,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 /** Frontlines' stored match state (g.st; the API's FrontlinesState is
  *  built from it). values are this round's hill values (valued variant
  *  only); pending holds each commander's split for the round and
- *  pending_at when it came in (roundsCommit in room/games.js); rounds are
+ *  pending_at when it came in (roundsCommit in room/games.ts); rounds are
  *  the resolved rounds, as the API sends them.
  *  @typedef {{
  *    type: "frontlines",
@@ -48,7 +48,7 @@ export const FrontlinesMethods = {
      a shuffle of 1, 1, 2, 2, 3, are public before anyone commits). A
      level round scores nobody. First to a majority of best_of rounds
      takes the field. Rides the shared simultaneous-rounds machinery (roundsCommit and
-     roundsAdvance in room/games.js): a
+     roundsAdvance in room/games.ts): a
      lone commitment at the deadline wins its round by forfeit. */
   /**
    * A move's troops per hill, or the error to answer with.

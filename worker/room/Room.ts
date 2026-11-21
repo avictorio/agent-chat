@@ -36,75 +36,83 @@ import { GameMachineryMethods } from "./games.js";
 import { TestHookMethods } from "./test-hooks.js";
 
 /* ---------- storage rows ----------
-   One typedef per table: the columns ensureSchema creates. A column is
+   One type per table: the columns ensureSchema creates. A column is
    nullable where the code can leave it NULL (a later ALTER, an optional
    field, a state such as revoked); columns every write fills are not.
    A query casts its rows to its table's row, or to a Pick of it for a
    column list, once. */
-/** m: one message (draft until published).
- *  @typedef {{ id: number, ts: number, sender: string, text: string, draft: number | null, pubauto: number | null, pub_ts: number | null, owntrust: number | null,
- *    audio_type: string | null, audio_size: number | null, audio_transcript: string | null, image_type: string | null, image_size: number | null,
- *    video_type: string | null, video_size: number | null, html_type: string | null, html_size: number | null, html_name: string | null,
- *    doc_type: string | null, doc_size: number | null, doc_name: string | null, file_type: string | null, file_size: number | null, file_name: string | null,
- *    game_id: number | null }} MsgRow */
-/** rx: one member's reaction to a message.
- *  @typedef {{ msg: number, emoji: string, who: string, ts: number }} RxRow */
-/** inv: an invite, and the member it names.
- *  @typedef {{ token: string, name: string, created: number, revoked: number | null, used: number | null, seen: number | null, kind: string | null,
- *    invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null }} InvRow */
-/** cfg: a room setting (every write stores a string).
- *  @typedef {{ k: string, v: string }} CfgRow */
-/** tf: one tool fetch.
- *  @typedef {{ ts: number, url: string | null }} TfRow */
+/** m: one message (draft until published). */
+export type MsgRow = { id: number, ts: number, sender: string, text: string, draft: number | null, pubauto: number | null, pub_ts: number | null, owntrust: number | null,
+  audio_type: string | null, audio_size: number | null, audio_transcript: string | null, image_type: string | null, image_size: number | null,
+  video_type: string | null, video_size: number | null, html_type: string | null, html_size: number | null, html_name: string | null,
+  doc_type: string | null, doc_size: number | null, doc_name: string | null, file_type: string | null, file_size: number | null, file_name: string | null,
+  game_id: number | null };
+/** rx: one member's reaction to a message. */
+export type RxRow = { msg: number, emoji: string, who: string, ts: number };
+/** inv: an invite, and the member it names. */
+export type InvRow = { token: string, name: string, created: number, revoked: number | null, used: number | null, seen: number | null, kind: string | null,
+  invited_by: string | null, posted: number | null, avatar_type: string | null, avatar_ver: number | null, avatar_key: string | null };
+/** cfg: a room setting (every write stores a string). */
+export type CfgRow = { k: string, v: string };
+/** tf: one tool fetch. */
+export type TfRow = { ts: number, url: string | null };
 /** md: one message's media of one kind - an R2 object, or an upload in
  *  flight while upload_id is set (part_size, fp, began and mode belong to
- *  the upload engine's sessions).
- *  @typedef {{ msg: number, kind: string, type: string, r2key: string, size: number, upload_id: string | null, parts: string | null, fp: string | null,
- *    part_size: number | null, name: string | null, began: number | null, mode: string | null }} MdRow */
-/** upp: a part R2 has acknowledged, for an upload in flight.
- *  @typedef {{ msg: number, kind: string, n: number, etag: string }} UppRow */
-/** ut: an upload ticket (only its SHA-256, h, is kept).
- *  @typedef {{ h: string, msg: number, kind: string, member: string, created: number, expires: number, max_bytes: number, used: number | null,
- *    tries: number, owner: number | null, sess: number | null }} UtRow */
-/** push: a member's Web Push subscription.
- *  @typedef {{ member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null }} PushRow */
-/** mv: a member's voice (name lowercased).
- *  @typedef {{ name: string, provider: string | null, voice_id: string | null, sample_key: string | null, sample_type: string | null,
- *    sample_ts: number | null, ts: number | null }} MvRow */
-/** gm: a match of any game; state is its JSON.
- *  @typedef {{ id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, state: string }} GmRow */
-/** con: a constitution version.
- *  @typedef {{ v: number, ts: number, editor: string, text: string }} ConRow */
-/** oq: an open question.
- *  @typedef {{ id: number, ts: number, added_by: string, text: string, status: import("@chat/contract").QuestionStatus, claimed_by: string | null,
- *    resolved_by: string | null, resolution: string | null, updated: number }} OqRow */
-/** dg: a digest.
- *  @typedef {{ id: number, ts: number, day: string, author: string, text: string }} DgRow */
-/** sk: a stake.
- *  @typedef {{ id: number, ts: number, added_by: string, title: string, date: string | null, note: string | null, done: number | null,
- *    done_by: string | null, updated: number }} SkRow */
-/** dc: a decision; signers is a JSON list of names.
- *  @typedef {{ id: number, ts: number, added_by: string, title: string, note: string | null, signers: string, updated: number }} DcRow */
-/** A COUNT(*) AS n query's row.
- *  @typedef {{ n: number }} CountRow */
+ *  the upload engine's sessions). */
+export type MdRow = { msg: number, kind: string, type: string, r2key: string, size: number, upload_id: string | null, parts: string | null, fp: string | null,
+  part_size: number | null, name: string | null, began: number | null, mode: string | null };
+/** upp: a part R2 has acknowledged, for an upload in flight. */
+export type UppRow = { msg: number, kind: string, n: number, etag: string };
+/** ut: an upload ticket (only its SHA-256, h, is kept). */
+export type UtRow = { h: string, msg: number, kind: string, member: string, created: number, expires: number, max_bytes: number, used: number | null,
+  tries: number, owner: number | null, sess: number | null };
+/** push: a member's Web Push subscription. */
+export type PushRow = { member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null };
+/** mv: a member's voice (name lowercased). */
+export type MvRow = { name: string, provider: string | null, voice_id: string | null, sample_key: string | null, sample_type: string | null,
+  sample_ts: number | null, ts: number | null };
+/** gm: a match of any game; state is its JSON. */
+export type GmRow = { id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, state: string };
+/** con: a constitution version. */
+export type ConRow = { v: number, ts: number, editor: string, text: string };
+/** oq: an open question. */
+export type OqRow = { id: number, ts: number, added_by: string, text: string, status: import("@chat/contract").QuestionStatus, claimed_by: string | null,
+  resolved_by: string | null, resolution: string | null, updated: number };
+/** dg: a digest. */
+export type DgRow = { id: number, ts: number, day: string, author: string, text: string };
+/** sk: a stake. */
+export type SkRow = { id: number, ts: number, added_by: string, title: string, date: string | null, note: string | null, done: number | null,
+  done_by: string | null, updated: number };
+/** dc: a decision; signers is a JSON list of names. */
+export type DcRow = { id: number, ts: number, added_by: string, title: string, note: string | null, signers: string, updated: number };
+/** A COUNT(*) AS n query's row. */
+export type CountRow = { n: number };
 /** A live stream subscriber (fetch): the filter it asked for, the state
- *  block it was last sent, and how to write to it or end it.
- *  @typedef {{ token: string, owner: boolean, name: string, kinds: Set<string> | null, games: Set<number> | null, stateSub: boolean,
- *    stateKey: string | null, send: (s: string) => void, close: () => void }} StreamClient */
+ *  block it was last sent, and how to write to it or end it. */
+export type StreamClient = { token: string, owner: boolean, name: string, kinds: Set<string> | null, games: Set<number> | null, stateSub: boolean,
+  stateKey: string | null, send: (s: string) => void, close: () => void };
 
 export class Room extends DurableObject {
-  /**
-   * @param {DurableObjectState} ctx
-   * @param {Env} env
-   */
-  constructor(ctx, env) {
+  // The instance's fields: declared only (the constructor and the methods
+  // set them), so the class carries no field initializers.
+  declare sql: SqlStorage;
+  /** long-polls waiting for the next change */
+  declare waiters: Set<() => void>;
+  declare clients: Set<StreamClient>;
+  /** the stream keep-alive interval */
+  declare pinger: number | null;
+  declare ready: boolean;
+  /** the media signing key, once read (mediaSigKeyBytes) */
+  declare _sigBytes?: Uint8Array | null;
+  /** when sweepDrafts last ran */
+  declare _sweptAt?: number;
+  declare roomName?: string;
+
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    /** @type {Set<() => void>} long-polls waiting for the next change */
     this.waiters = new Set();
-    /** @type {Set<StreamClient>} */
     this.clients = new Set();
-    /** @type {number | null} the stream keep-alive interval */
     this.pinger = null;
     // A room has storage only once the owner creates it, so touching an unknown name must not write anything.
     this.ready = this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'm'").toArray().length > 0;
@@ -228,8 +236,7 @@ export class Room extends DurableObject {
   // serialized, so two racing creates for the same name cannot interleave -
   // the loser is told the room existed and must not roll anything back
   // (the check-then-create version let a loser destroy the winner's room).
-  /** @param {string} name */
-  createGenesis(name) {
+  createGenesis(name: string) {
     if (this.ready) return { existed: true };
     this.ensureSchema();
     this.ready = true;
@@ -239,10 +246,9 @@ export class Room extends DurableObject {
   }
 
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
-  /** @param {string} room */
-  async destroy(room) {
+  async destroy(room: string) {
     if (!this.ready) return { error: "No room with that name", status: 404 };
-    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one()).n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
+    if ((this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one() as CountRow).n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
     await this.activityLog(room, "room deleted with the owner key");
     this.ready = false;
     for (const c of Array.from(this.clients)) c.close();
@@ -254,19 +260,19 @@ export class Room extends DurableObject {
     // only the object store would orphan them in the bucket forever, voice
     // samples included, while the API promises the room is gone for good.
     try {
-      const keys = /** @type {Pick<MdRow, "r2key">[]} */ (this.sql.exec("SELECT r2key FROM md WHERE r2key IS NOT NULL").toArray()).map((r) => r.r2key);
-      for (const v of /** @type {{ sample_key: string }[]} */ (this.sql.exec("SELECT sample_key FROM mv WHERE sample_key IS NOT NULL").toArray())) keys.push(v.sample_key);
-      for (const v of /** @type {{ avatar_key: string }[]} */ (this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray())) keys.push(v.avatar_key);
+      const keys = (this.sql.exec("SELECT r2key FROM md WHERE r2key IS NOT NULL").toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key);
+      for (const v of this.sql.exec("SELECT sample_key FROM mv WHERE sample_key IS NOT NULL").toArray() as { sample_key: string }[]) keys.push(v.sample_key);
+      for (const v of this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray() as { avatar_key: string }[]) keys.push(v.avatar_key);
       // Sketch & Guess drawings: their keys live in each match's state
-      for (const v of /** @type {Pick<GmRow, "state">[]} */ (this.sql.exec("SELECT state FROM gm").toArray())) {
+      for (const v of this.sql.exec("SELECT state FROM gm").toArray() as Pick<GmRow, "state">[]) {
         try {
           const st = JSON.parse(v.state || "{}");
-          if (st.type === "sketch") for (const im of /** @type {Array<{ key?: string } | null>} */ (Object.values(st.images || {}))) if (im && im.key) keys.push(im.key);
+          if (st.type === "sketch") for (const im of Object.values(st.images || {}) as Array<{ key?: string } | null>) if (im && im.key) keys.push(im.key);
         } catch (e) {}
       }
       // Abort any in-flight multipart sessions so their parts die too
       // (same pattern as deleteMessage: the md row carries key + upload id).
-      for (const md of /** @type {{ r2key: string, upload_id: string }[]} */ (this.sql.exec("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray())) {
+      for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray() as { r2key: string, upload_id: string }[]) {
         try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch (e) {}
       }
       for (const k of keys) { try { await this.env.MEDIA.delete(k); } catch (e) {} }
@@ -275,20 +281,14 @@ export class Room extends DurableObject {
     // In-memory caches of what was just deleted: a room recreated under the
     // same name in this instance's lifetime must not sign with the old key
     // or skip its draft sweep.
-    /** @type {Uint8Array | null} the media signing key, once read (mediaSigKeyBytes) */
     this._sigBytes = null;
-    /** when sweepDrafts last ran */
     this._sweptAt = 0;
     return { deleted: true };
   }
 
   // Activity log in KV ("log:" keys, kept 7 days), readable through the
   // Cloudflare API: room deletions and push errors.
-  /**
-   * @param {string | null | undefined} room
-   * @param {string} text
-   */
-  async activityLog(room, text) {
+  async activityLog(room: string | null | undefined, text: string) {
     try {
       const key = "log:" + new Date().toISOString() + ":" + Math.random().toString(36).slice(2, 6);
       await this.env.REQUESTS.put(key, room + " | " + text, { expirationTtl: 604800 });
@@ -297,14 +297,10 @@ export class Room extends DurableObject {
 
   // Access: every room is invite-only (product decision, 2026-11-07):
   // reading, streaming and posting always need a valid invite or the owner key.
-  /**
-   * @param {string | null | undefined} token
-   * @param {boolean} owner
-   */
-  access(token, owner) {
+  access(token: string | null | undefined, owner: boolean) {
     if (owner) return { ok: true };
     if (!token) return { ok: false, status: 401, error: "This room is invite-only. Open your invite link to join." };
-    const row = /** @type {Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind">[]} */ (this.sql.exec("SELECT name, revoked, used, seen, kind FROM inv WHERE token = ?", token).toArray())[0];
+    const row = (this.sql.exec("SELECT name, revoked, used, seen, kind FROM inv WHERE token = ?", token).toArray() as Pick<InvRow, "name" | "revoked" | "used" | "seen" | "kind">[])[0];
     if (!row) return { ok: false, status: 403, error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, error: "This invite link has been revoked. Ask the room owner for a new one." };
     const now = Date.now();
@@ -319,9 +315,8 @@ export class Room extends DurableObject {
   // finish overnight with nobody reading it.
   async alarm() {
     let saved = "";
-    try { const r = /** @type {Pick<CfgRow, "v">[]} */ (this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray())[0]; saved = r ? String(r.v || "") : ""; } catch (e) {}
-    /** @type {string} */
-    const room = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
+    try { const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray() as Pick<CfgRow, "v">[])[0]; saved = r ? String(r.v || "") : ""; } catch (e) {}
+    const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
     if (room && !this.roomName) this.roomName = room;
     // One match's bad state must not stop every clock in the room:
     // advance each match under its own try/catch, and re-arm in a
@@ -329,7 +324,7 @@ export class Room extends DurableObject {
     // no match had a clock until somebody happened to read one
     // (games review, 2026-11-12).
     try {
-      const rows = /** @type {Pick<GmRow, "id">[]} */ (this.sql.exec("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray());
+      const rows = this.sql.exec("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "id">[];
       for (const r of rows) {
         try {
           const g = this.gameRow(r.id);
@@ -337,11 +332,11 @@ export class Room extends DurableObject {
           // an engine with async clock work (Sketch & Guess's Referee) is
           // awaited here; the read paths only ever run the sync part
           // eng is set only for a running match, so g is too
-          if (eng && eng.advanceAsync) await eng.advanceAsync(this, /** @type {import("./games.js").GameRow} */ (g), room);
+          if (eng && eng.advanceAsync) await eng.advanceAsync(this, g as import("./games.js").GameRow, room);
           else if (g && g.status === "running") this.advanceGame(g, room);
           else if (g && g.status === "lobby") this.advanceLobby(g, room);
         } catch (e) {
-          console.error("alarm: advancing match " + r.id + " failed: " + (e && /** @type {Error} */ (e).message ? /** @type {Error} */ (e).message : e));
+          console.error("alarm: advancing match " + r.id + " failed: " + (e && (e as Error).message ? (e as Error).message : e));
         }
       }
     } finally {
@@ -350,20 +345,18 @@ export class Room extends DurableObject {
   }
 
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
-  /** @param {Request} request */
-  async fetch(request) {
+  async fetch(request: Request) {
     const url = new URL(request.url);
-    const room = /** @type {string} */ (url.searchParams.get("room")); // the stream route always sends room=
+    const room = url.searchParams.get("room") as string; // the stream route always sends room=
     this.roomName = room;
     const a = url.searchParams.get("after");
-    const after = a === "latest" ? null : Math.max(0, parseInt(/** @type {string} */ (a), 10) || 0); // the stream route always sends after=
+    const after = a === "latest" ? null : Math.max(0, parseInt(a as string, 10) || 0); // the stream route always sends after=
     // Subscription filter: ?events=message,game (or all) narrows the frame
     // kinds; ?game=1,2 restricts game frames to those matches. Both are
     // validated here, before the stream opens, so a bad subscription fails
     // fast instead of silently starving.
     const STREAM_KINDS = ["message", "reaction", "game", "members", "state"];
-    /** @type {Set<string> | null} */
-    let kinds = null;
+    let kinds: Set<string> | null = null;
     const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
     // state is opt-in only: naming it anywhere in events= subscribes, and
     // "all" (or no events= at all) does not - see the note at streamWants.
@@ -379,8 +372,7 @@ export class Room extends DurableObject {
       }
       if (kinds && !kinds.size) kinds = null;
     }
-    /** @type {Set<number> | null} */
-    let games = null;
+    let games: Set<number> | null = null;
     const gRaw = (url.searchParams.get("game") || "").trim();
     if (gRaw) {
       games = new Set();
@@ -396,7 +388,7 @@ export class Room extends DurableObject {
     const writer = writable.getWriter();
     const enc = new TextEncoder();
     // send and close are attached next
-    const client = /** @type {StreamClient} */ ({ token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: /** @type {string | null} */ (null) });
+    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: null as string | null } as StreamClient;
     client.send = (s) => {
       writer.write(enc.encode(s)).catch(() => this.clients.delete(client));
     };
@@ -425,7 +417,7 @@ export class Room extends DurableObject {
         // see those transitions without any room activity.
         try { this.emitState(); } catch (e) {}
         // this runs only while its interval is set, so pinger holds its id
-        if (!this.clients.size) { clearInterval(/** @type {number} */ (this.pinger)); this.pinger = null; }
+        if (!this.clients.size) { clearInterval(this.pinger as number); this.pinger = null; }
       }, 15000);
     }
     return new Response(readable, { headers: SSE_HEADERS });

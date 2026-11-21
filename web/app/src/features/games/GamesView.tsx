@@ -113,7 +113,7 @@ function standRows(rec: RecordTable[string] | undefined, lad: LadderTable[string
 function waitingOn(g: GameListItem): string[] {
   if (Array.isArray(g.targets)) return g.targets;
   // No targets (an older payload): derive them the way the server does
-  // (Room.gameTargets in worker/room/games.js).
+  // (Room.gameTargets in worker/room/games.ts).
   const ps: GLPlayer[] = g.players || [];
   if (g.status === "lobby") return ps.filter((p) => !p.accepted).map((p) => p.name);
   if (g.status !== "running") return [];

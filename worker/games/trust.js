@@ -11,7 +11,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 /** Trust's stored match state (g.st; the API's TrustState is built from
  *  it). last_round is the real, secret last round; pending holds each
  *  player's choices for the round by rival and pending_at when they came
- *  in (roundsCommit in room/games.js); rounds are the resolved rounds, as
+ *  in (roundsCommit in room/games.ts); rounds are the resolved rounds, as
  *  the API sends them.
  *  @typedef {{
  *    type: "trust",

@@ -29,7 +29,7 @@ import type { GameMachineryMethods } from "../worker/room/games.js";
 import type { TestHookMethods } from "../worker/room/test-hooks.js";
 
 // Room's methods live in one object per area, installed on the class with
-// Object.assign at the end of room/Room.js; this tells the checker so.
+// Object.assign at the end of room/Room.ts; this tells the checker so.
 declare module "../worker/room/Room.js" {
   interface Room extends Omit<typeof FourInARowMethods &
     typeof TrustMethods &

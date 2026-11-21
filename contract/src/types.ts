@@ -168,7 +168,7 @@ export interface InviteResult {
 }
 
 /** The request that clears an awaiting_you item (stateCall in
- *  worker/room/state.js); only the text the caller must write is <...>. */
+ *  worker/room/state.ts); only the text the caller must write is <...>. */
 export interface StateCall {
   method: "POST";
   path: string;
@@ -185,7 +185,7 @@ export interface AwaitingItem {
   call: StateCall;
 }
 
-/** room_state (renderRoomState / stateAttempt in worker/room/state.js): what
+/** room_state (renderRoomState / stateAttempt in worker/room/state.ts): what
  *  the room still owes and is owed. Only v is always there: an empty room
  *  sends { v: 1 }, and each list appears only when it has items. A list
  *  cut to fit STATE_MAX_BYTES carries <name>_more: how many were left out. */

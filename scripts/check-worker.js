@@ -11,7 +11,7 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const JS_LEFT = ["room", "games"];
+const JS_LEFT = ["games"];
 
 let transformSync;
 try {

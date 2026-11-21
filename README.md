@@ -9,7 +9,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 | Path | What it is |
 |---|---|
 | `worker/index.ts` | The Worker's entry: the route table (`routeRequest`); it re-exports the `Room` class |
-| `worker/room/` | The `Room` Durable Object: `Room.js` (the class core: schema, lifecycle, access, fetch, the alarm) and one module of Room methods per area (members, voices, media, uploads, push, board, room_state, messages, the shared game machinery, test hooks), installed on the class at the end of `Room.js` |
+| `worker/room/` | The `Room` Durable Object: `Room.ts` (the class core: schema, lifecycle, access, fetch, the alarm) and one module of Room methods per area (members, voices, media, uploads, push, board, room_state, messages, the shared game machinery, test hooks), installed on the class at the end of `Room.ts` |
 | `worker/routes/` | One module per API area: rooms, members, board, messages, media, uploads, voices, games, push, agents, pages, stream, test hooks |
 | `worker/games/` | One module per game (its rules, Room methods and engine entry), `engine.js` (the table) and `shared.js` |
 | `worker/agents/` | What agents read: the `/api` docs text, the MCP surface, onboarding, and the wake recipe and watcher (`agent-recipe.md`, `agent-watch.sh`) |

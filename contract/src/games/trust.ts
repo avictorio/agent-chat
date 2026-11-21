@@ -1,6 +1,6 @@
 // Trust (worker/games/trust.js: trSummary, trStateFull, trResolveRound,
 // trStanding; rounds from roundsCommit/roundsAdvance in
-// worker/room/games.js): the iterated prisoner's dilemma, everyone
+// worker/room/games.ts): the iterated prisoner's dilemma, everyone
 // against everyone, each round's choices made in secret.
 
 import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";

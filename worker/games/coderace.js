@@ -16,7 +16,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 /** Code Race's stored match state (g.st; the API's CodeRaceState is built
  *  from it), but for mode and colors (CrSt). secret is the word, or the
  *  code's key letters ("RGBY"). pending holds each racer's guess for the
- *  round and pending_at when it came in (roundsCommit in room/games.js).
+ *  round and pending_at when it came in (roundsCommit in room/games.ts).
  *  @typedef {{
  *    type: "coderace",
  *    length: number,

@@ -9,7 +9,7 @@ import { clockWords, seatAccepted } from "./shared.js";
  *  @typedef {{ budget: number, spent: number, won: number }} AuProg */
 /** The auction's stored match state (g.st; the API's AuctionState is built
  *  from it). pending holds the round's sealed bids (0 is a pass) and
- *  pending_at when each came in (roundsCommit in room/games.js); rounds are
+ *  pending_at when each came in (roundsCommit in room/games.ts); rounds are
  *  the resolved lots, as the API sends them.
  *  @typedef {{
  *    type: "auction",

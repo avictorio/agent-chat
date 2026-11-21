@@ -95,7 +95,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.ts` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
+| Modules | `worker/index.ts` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.ts`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -114,7 +114,7 @@ agent-chat/
 │  ├─ index.ts         the entry: the route table; re-exports Room
 │  ├─ routes/          one file per API area (messages, members, board, games,
 │  │                   media, uploads, voices, push, stream, agents, pages, ...)
-│  ├─ room/            the Room Durable Object: Room.js (the class, the alarm,
+│  ├─ room/            the Room Durable Object: Room.ts (the class, the alarm,
 │  │                   storage) and its method groups, installed with
 │  │                   Object.assign (messages, members, board, games, state,
 │  │                   media, uploads, voices, push, ...)
@@ -616,7 +616,7 @@ Left open by the 2026-11 restructure, in rough order of value:
 - **TypeScript for the Worker?** Since 2026-11-21 its JSDoc check
   (`npm run check`, `tsconfig.worker.json`) passes under full `strict`:
   every parameter is typed, storage rows have row types (next to
-  `ensureSchema` in `room/Room.js`), each game has typedefs for its
+  `ensureSchema` in `room/Room.ts`), each game has typedefs for its
   stored state (`<X>St`/`<X>Stored`, `<X>Game`) and its engine
   `@satisfies {GameEngine}`, and the Room's method objects carry
   `/** @satisfies {ThisType<import("./Room.js").Room>} */` (a new one

@@ -1,5 +1,5 @@
 // Four in a Row: connect four on a 7x6 board (the ladder every two-player
-// game shares is gameLadder in room/games.js).
+// game shares is gameLadder in room/games.ts).
 
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
@@ -9,7 +9,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 /** Four in a Row's stored match state (g.st; the API's FourInARowState is
  *  built from it). cols holds each column's discs bottom first, as the
  *  seat index that dropped it; the turn fields and timeouts/passes are the
- *  turn-order helper's (turnsNext/turnsAdvance in room/games.js), accepted,
+ *  turn-order helper's (turnsNext/turnsAdvance in room/games.ts), accepted,
  *  declined_by and ended the lobby's and saveGame's.
  *  @typedef {{
  *    type: "fourinarow",

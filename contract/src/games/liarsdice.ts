@@ -1,5 +1,5 @@
 // Liar's Dice (worker/games/liarsdice.js: ldSummary, ldStateFull, ldMove,
-// ldEndRound, ldAdvance; turns by turnsNext in worker/room/games.js):
+// ldEndRound, ldAdvance; turns by turnsNext in worker/room/games.ts):
 // hidden cups of dice, rising bids on the whole table, call liar.
 
 import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";

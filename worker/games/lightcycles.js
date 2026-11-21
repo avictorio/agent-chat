@@ -3,7 +3,7 @@
 // expires (a miss sends the bike straight). st.move_log records per tick
 // and rider the direction, its source (submitted / clock default), and
 // when a submitted move arrived. The clocks and the alarm are the shared
-// machinery in room/games.js.
+// machinery in room/games.ts.
 
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */

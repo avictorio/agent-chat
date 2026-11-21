@@ -6,18 +6,19 @@ import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
 
-/** @typedef {import("../games/engine.js").GameEngine} GameEngine */
-/** @typedef {import("../games/engine.js").GamePub} GamePub */
+export type GameEngine = import("../games/engine.js").GameEngine;
+export type GamePub = import("../games/engine.js").GamePub;
 /** The engine of a game on the simultaneous-rounds machinery, which
- *  supplies resolveRound and standing.
- *  @typedef {GameEngine & Required<Pick<GameEngine, "resolveRound" | "standing">>} RoundsEngine */
+ *  supplies resolveRound and standing. */
+export type RoundsEngine = GameEngine & Required<Pick<GameEngine, "resolveRound" | "standing">>;
 /** A player's row in the room record (listGames): wins, losses and, in a
- *  race with placements, 2nd and 3rd places.
- *  @typedef {{ name: string, hex: string | null, w: number, l: number, p2?: number, p3?: number }} RecordRow */
-/** A player's row on the ladder (gameLadder), before rounding.
- *  @typedef {{ name: string, hex: string | null, rating: number, w: number, l: number, d: number, last: number }} LadderRow */
+ *  race with placements, 2nd and 3rd places. */
+export type RecordRow = { name: string, hex: string | null, w: number, l: number, p2?: number, p3?: number };
+/** A player's row on the ladder (gameLadder), before rounding. */
+export type LadderRow = { name: string, hex: string | null, rating: number, w: number, l: number, d: number, last: number };
+/** A match as gameRow reads it: its gm row, with the state parsed. */
+export type GameRow = { id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, st: any };
 
-/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
      State is one JSON row per match in gm; m.game_id links the match's card
@@ -37,25 +38,17 @@ export const GameMachineryMethods = {
     ];
   },
 
-  /** A match as gameRow reads it: its gm row, with the state parsed.
-   *  @typedef {{ id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, st: any }} GameRow */
-  /**
-   * @param {number} id
-   * @returns {GameRow | null}
-   */
-  gameRow(id) {
-    const r = /** @type {import("./Room.js").GmRow[]} */ (this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray())[0];
+  gameRow(id: number): GameRow | null {
+    const r = (this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray() as import("./Room.js").GmRow[])[0];
     if (!r) return null;
     // the match state (untyped JSON); null only if a stored row did not parse,
     // and every write is JSON.stringify of the state
-    /** @type {any} */
-    let st = null;
+    let st: any = null;
     try { st = JSON.parse(r.state || "{}"); } catch (e) {}
     return { id: r.id, status: r.status, created: r.created, created_by: r.created_by, card_msg: r.card_msg, st: st };
   },
 
-  /** @param {GameRow} g */
-  saveGame(g) {
+  saveGame(g: GameRow) {
     // The narrative log is a mirror of the structured record (ticks /
     // rounds), which is never trimmed; keep the log itself bounded so a
     // marathon match cannot grow the stored state without limit.
@@ -69,9 +62,9 @@ export const GameMachineryMethods = {
   // Resolve a proposed player list to canonical member names (case-
   // insensitive), or the 400 to answer with. Shared by both games so the
   // membership rules - and their wording - can never drift apart.
-  /** @param {unknown[]} playersIn the names a create asked for */
-  gamePlayers(playersIn) {
-    const members = /** @type {Pick<import("./Room.js").InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray()).map((r) => r.name);
+  /** @param playersIn the names a create asked for */
+  gamePlayers(playersIn: unknown[]) {
+    const members = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<import("./Room.js").InvRow, "name">[]).map((r) => r.name);
     const byLower = new Map(members.map((n) => [n.toLowerCase(), n]));
     const names = [];
     for (const p of playersIn) {
@@ -86,23 +79,14 @@ export const GameMachineryMethods = {
 
   // The public summary and the per-viewer full state of any match: each
   // game's engine (GAME_ENGINES) supplies its own.
-  /**
-   * @param {GameRow} g
-   * @returns {GamePub}
-   */
-  gameSummary(g) {
+  gameSummary(g: GameRow): GamePub {
     return gameEngine(g.st).summary(this, g);
   },
 
   // The full state carries how_to_play (2026-11-19): the match's rules in
   // a few lines with its own settings, so an agent reading get_game never
   // needs the rulebook - and one holding a stale tool list still gets them.
-  /**
-   * @param {GameRow} g
-   * @param {string | null | undefined} who
-   * @returns {GamePub}
-   */
-  gameStateFull(g, who) {
+  gameStateFull(g: GameRow, who: string | null | undefined): GamePub {
     const eng = gameEngine(g.st);
     const out = eng.full(this, g, who);
     if (out && eng.rules) out.how_to_play = eng.rules(g.st);
@@ -124,29 +108,21 @@ export const GameMachineryMethods = {
      it stands, or null), and may add active(room, st): the players a
      round waits on (default: all of them - Code Race leaves out racers
      who have finished or dropped). */
-  /**
-   * @param {any} st the match state
-   * @returns {Array<{ name: string }>}
-   */
-  roundsActive(st) {
+  /** @param st the match state */
+  roundsActive(st: any): Array<{ name: string }> {
     const eng = gameEngine(st);
     return eng.active ? eng.active(this, st) : st.players;
   },
 
-  /**
-   * @param {GameRow} g
-   * @param {string} who a seated player
-   * @param {unknown} move
-   * @param {string} room
-   */
-  roundsCommit(g, who, move, room) {
+  /** @param who a seated player */
+  roundsCommit(g: GameRow, who: string, move: unknown, room: string) {
     const st = g.st;
-    const me = st.players.find((/** @type {{ name: string }} */ p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    const me = st.players.find((p: { name: string }) => p.name.toLowerCase() === String(who || "").toLowerCase());
     st.pending[me.name] = move;
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();
     const all = this.roundsActive(st).every((p) => st.pending[p.name] !== undefined);
-    if (all) /** @type {RoundsEngine} */ (gameEngine(st)).resolveRound(this, g);
+    if (all) (gameEngine(st) as RoundsEngine).resolveRound(this, g);
     this.saveGame(g);
     // a frame per commit (from the player, targets who still owes), and
     // the frame that opens the next round speaks as the Referee
@@ -155,14 +131,10 @@ export const GameMachineryMethods = {
     return all;
   },
 
-  /**
-   * @param {GameRow | null} g
-   * @param {string} room
-   */
-  roundsAdvance(g, room) {
+  roundsAdvance(g: GameRow | null, room: string) {
     if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
     const st = g.st;
-    const eng = /** @type {RoundsEngine} */ (gameEngine(st));
+    const eng = gameEngine(st) as RoundsEngine;
     const committed = this.roundsActive(st).filter((p) => st.pending[p.name] !== undefined).length;
     if (committed === 0) {
       if (st.round === 1) {
@@ -195,8 +167,7 @@ export const GameMachineryMethods = {
      (the rival wins), and pass_limit passes in all (st.pass_limit, when set)
      call it a draw - so two absent players cannot keep a match alive
      forever. The engine's advance is turnsAdvance. */
-  /** @param {GameRow} g */
-  turnsNext(g) {
+  turnsNext(g: GameRow) {
     const st = g.st;
     const i = st.order.indexOf(st.turn_of);
     st.turn_of = st.order[(i + 1) % st.order.length];
@@ -204,11 +175,7 @@ export const GameMachineryMethods = {
     st.deadline = Date.now() + st.turn_seconds * 1000;
   },
 
-  /**
-   * @param {GameRow | null} g
-   * @param {string} room
-   */
-  turnsAdvance(g, room) {
+  turnsAdvance(g: GameRow | null, room: string) {
     if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
     const st = g.st;
     const who = st.turn_of;
@@ -218,7 +185,7 @@ export const GameMachineryMethods = {
     if (st.timeouts[who] >= 3) {
       g.status = "finished";
       st.forfeit = who;
-      st.winner = st.order.find((/** @type {string} */ n) => n !== who) || null;
+      st.winner = st.order.find((n: string) => n !== who) || null;
       st.log.push({ tick: st.turn, text: who + "'s turn timed out a third time - " + who + " forfeits; " + st.winner + " wins." });
     } else if (st.pass_limit && st.passes >= st.pass_limit) {
       g.status = "finished";
@@ -239,21 +206,16 @@ export const GameMachineryMethods = {
      round n's holder is st.order[(n - 1) % seats]. Built with Two Truths
      and a Lie. */
   /**
-   * @param {any} st the match state
-   * @param {number} n the round
-   * @returns {string}
+   * @param st the match state
+   * @param n the round
    */
-  roleOf(st, n) {
+  roleOf(st: any, n: number): string {
     return st.order[(n - 1) % st.order.length];
   },
 
   // Settle whatever the clock owes a running match (resolutions,
   // forfeits): the engine's own advance.
-  /**
-   * @param {GameRow | null} g
-   * @param {string} room
-   */
-  advanceGame(g, room) {
+  advanceGame(g: GameRow | null, room: string) {
     if (!g || g.status !== "running") return;
     gameEngine(g.st).advance(this, g, room);
   },
@@ -264,9 +226,9 @@ export const GameMachineryMethods = {
   // armed time already matches, so hot read paths stay cheap.
   async armGameAlarm() {
     try {
-      const rows = /** @type {Pick<import("./Room.js").GmRow, "status" | "state">[]} */ (this.sql.exec("SELECT status, state FROM gm WHERE status IN ('running', 'lobby')").toArray());
-      /** @type {number | null} the nearest deadline */
-      let next = null;
+      const rows = this.sql.exec("SELECT status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<import("./Room.js").GmRow, "status" | "state">[];
+      /** the nearest deadline */
+      let next: number | null = null;
       for (const r of rows) {
         try { const st = JSON.parse(r.state || "{}"); const dl = r.status === "lobby" ? st.lobby_deadline : st.deadline; if (dl && (next === null || dl < next)) next = dl; } catch (e) {}
       }
@@ -280,12 +242,7 @@ export const GameMachineryMethods = {
     } catch (e) {}
   },
 
-  /**
-   * @param {GameRow} g
-   * @param {string} room
-   * @param {string | null | undefined} actor
-   */
-  afterGameChange(g, room, actor) {
+  afterGameChange(g: GameRow, room: string, actor: string | null | undefined) {
     // Ticks are quiet in the transcript (owner's call, 2026-11-08): a
     // resolution travels as an event: game frame and through
     // room_state.awaiting_you - that is what wakes players now. The
@@ -300,12 +257,7 @@ export const GameMachineryMethods = {
     }
   },
 
-  /**
-   * @param {GameRow} g
-   * @param {string | null | undefined} room
-   * @param {string | null | undefined} actor
-   */
-  broadcastGame(g, room, actor) {
+  broadcastGame(g: GameRow, room: string | null | undefined, actor: string | null | undefined) {
     if (!this.clients || !this.clients.size) return;
     const pub = this.gameSummary(g);
     if (g.st.trails) pub.trails = g.st.trails;
@@ -316,15 +268,9 @@ export const GameMachineryMethods = {
 
   // The match card: a normal message that carries the game reference, so it
   // renders in the stream and opens the arena full-screen.
-  /**
-   * @param {string} sender
-   * @param {string} text
-   * @param {number} gameId
-   * @param {string} room
-   */
-  async postGameCard(sender, text, gameId, room) {
+  async postGameCard(sender: string, text: string, gameId: number, room: string) {
     const ts = Date.now();
-    const id = /** @type {Pick<import("./Room.js").MsgRow, "id">} */ (this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one()).id;
+    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one() as Pick<import("./Room.js").MsgRow, "id">).id;
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room);
@@ -333,26 +279,16 @@ export const GameMachineryMethods = {
 
   // opts.game names the engine; no game is Light Cycles (the first game,
   // and still the API's default).
-  /**
-   * @param {string} creator
-   * @param {unknown[]} playersIn
-   * @param {Record<string, any> | null | undefined} opts the create's options (game names the engine)
-   * @param {string} room
-   */
-  async createGame(creator, playersIn, opts, room) {
+  /** @param opts the create's options (game names the engine) */
+  async createGame(creator: string, playersIn: unknown[], opts: Record<string, any> | null | undefined, room: string) {
     const key = String((opts && opts.game) || "lightcycles").toLowerCase().replace(/[\s_-]+/g, "");
     // an unknown spelling is no entry: the check below answers it
-    const eng = /** @type {Record<string, GameEngine | undefined>} */ (GAME_ENGINES)[/** @type {Record<string, string>} */ (GAME_ALIASES)[key] || key];
+    const eng = (GAME_ENGINES as Record<string, GameEngine | undefined>)[(GAME_ALIASES as Record<string, string>)[key] || key];
     if (!eng) return { status: 400, error: "game must be one of " + Object.keys(GAME_ENGINES).join(", ") };
     return eng.create(this, creator, playersIn, opts || {}, room);
   },
 
-  /**
-   * @param {number} id
-   * @param {string | null | undefined} who
-   * @param {string} room
-   */
-  async gameState(id, who, room) {
+  async gameState(id: number, who: string | null | undefined, room: string) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceGame(g, room);
@@ -364,14 +300,7 @@ export const GameMachineryMethods = {
   // fields: a structured move's named parts (2026-11-19, wave 3), beside
   // or instead of dir - e.g. a storyteller's {statements, lie}. Engines
   // that take only dir ignore them, so every string move keeps working.
-  /**
-   * @param {number} id
-   * @param {string} who
-   * @param {unknown} dir
-   * @param {string} room
-   * @param {Record<string, unknown> | null} [fields]
-   */
-  async gameMove(id, who, dir, room, fields) {
+  async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceGame(g, room);
@@ -384,13 +313,7 @@ export const GameMachineryMethods = {
   // Stop a running match where it stands: no winner, no result post, no
   // further ticks or moves. The creator or the owner may cancel; cancelling
   // an already-cancelled match answers 200 with the same state.
-  /**
-   * @param {number} id
-   * @param {string | null | undefined} who
-   * @param {boolean} owner
-   * @param {string} room
-   */
-  async gameCancel(id, who, owner, room) {
+  async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceLobby(g, room);
@@ -415,8 +338,7 @@ export const GameMachineryMethods = {
      the table, so one duel expired 0-0 and another was a thirty-minute
      forfeit sweep. The lobby separates "invited" from "playing": a
      player who accepts has said they are here, at this clock. */
-  /** @param {Record<string, any> | null | undefined} opts */
-  lobbySeconds(opts) {
+  lobbySeconds(opts: Record<string, any> | null | undefined) {
     let sec = Math.floor(Number(opts && opts.lobby_seconds) || 0);
     if (!sec) sec = LOBBY_DEFAULT_SECONDS;
     return Math.min(86400, Math.max(5, sec));
@@ -425,38 +347,31 @@ export const GameMachineryMethods = {
   // The accept map a new match starts with: a creator who is playing
   // is in automatically; everyone else has been invited, not seated.
   /**
-   * @param {string | null | undefined} creator
-   * @param {string[] | undefined} names the seats: gamePlayers' names, set whenever
+   * @param names the seats: gamePlayers' names, set whenever
    *   it answers no error (a check its callers' types cannot narrow on)
    */
-  lobbyAccepted(creator, names) {
-    /** @type {Record<string, boolean>} */
-    const acc = {};
-    for (const n of /** @type {string[]} */ (names)) acc[n] = n.toLowerCase() === String(creator || "").toLowerCase();
+  lobbyAccepted(creator: string | null | undefined, names: string[] | undefined) {
+    const acc: Record<string, boolean> = {};
+    for (const n of names as string[]) acc[n] = n.toLowerCase() === String(creator || "").toLowerCase();
     return acc;
   },
 
-  /** @param {GameRow} g */
-  gameTypeName(g) {
+  gameTypeName(g: GameRow) {
     return gameEngine(g.st).name;
   },
 
   // The match's own clock step - a tick, a round, a turn - for log lines.
-  /** @param {any} st the match state */
-  gameLogTick(st) {
+  /** @param st the match state */
+  gameLogTick(st: any) {
     return gameEngine(st).logTick(st);
   },
 
   // Settle a lobby whose join window has closed: the match is called
   // off (status cancelled, like a creator cancel) and the Referee says
   // so once - a card that silently dies is how the room got furniture.
-  /**
-   * @param {GameRow | null} g
-   * @param {string} room
-   */
-  advanceLobby(g, room) {
+  advanceLobby(g: GameRow | null, room: string) {
     if (!g || g.status !== "lobby" || !g.st.lobby_deadline || Date.now() < g.st.lobby_deadline) return;
-    const missing = g.st.players.filter((/** @type {{ name: string }} */ pl) => !(g.st.accepted || {})[pl.name]).map((/** @type {{ name: string }} */ pl) => pl.name);
+    const missing = g.st.players.filter((pl: { name: string }) => !(g.st.accepted || {})[pl.name]).map((pl: { name: string }) => pl.name);
     g.status = "cancelled";
     g.st.log.push({ tick: this.gameLogTick(g.st), text: "The lobby expired - " + (missing.join(", ") || "a player") + " never accepted. The match is called off." });
     this.saveGame(g);
@@ -467,17 +382,12 @@ export const GameMachineryMethods = {
   // Take your seat. Idempotent for a player already in, and for a match
   // that has already started (a slow agent re-accepting on a later wake
   // just gets the live state). The last accept starts the clock.
-  /**
-   * @param {number} id
-   * @param {string | null | undefined} who
-   * @param {string} room
-   */
-  async gameAccept(id, who, room) {
+  async gameAccept(id: number, who: string | null | undefined, room: string) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceLobby(g, room);
     const st = g.st;
-    const me = st.players.find((/** @type {{ name: string }} */ pl) => pl.name.toLowerCase() === String(who || "").toLowerCase());
+    const me = st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
     if (g.status === "running") return { status: 200, game: this.gameStateFull(g, who) };
     if (g.status !== "lobby") return { status: 409, error: "That match is " + g.status };
@@ -486,7 +396,7 @@ export const GameMachineryMethods = {
       st.accepted[me.name] = true;
       st.log.push({ tick: this.gameLogTick(st), text: me.name + " is in." });
     }
-    if (st.players.every((/** @type {{ name: string }} */ pl) => st.accepted[pl.name])) {
+    if (st.players.every((pl: { name: string }) => st.accepted[pl.name])) {
       g.status = "running";
       st.deadline = Date.now() + gameEngine(st).clockSeconds(st) * 1000;
       st.log.push({ tick: this.gameLogTick(st), text: "Everyone is in - the match starts." });
@@ -500,19 +410,14 @@ export const GameMachineryMethods = {
   // Refuse your seat: the match is called off for everyone, and the
   // Referee posts that it is off (declining is news; a silent card is
   // how the room ended up with dead matches nobody could explain).
-  /**
-   * @param {number} id
-   * @param {string | null | undefined} who
-   * @param {string} room
-   */
-  async gameDecline(id, who, room) {
+  async gameDecline(id: number, who: string | null | undefined, room: string) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     this.advanceLobby(g, room);
     if (g.status === "running") return { status: 409, error: "That match is already under way" };
     if (g.status !== "lobby") return { status: 409, error: "That match is " + g.status };
     const st = g.st;
-    const me = st.players.find((/** @type {{ name: string }} */ pl) => pl.name.toLowerCase() === String(who || "").toLowerCase());
+    const me = st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
     g.status = "cancelled";
     st.declined_by = me.name;
@@ -533,9 +438,9 @@ export const GameMachineryMethods = {
   // takes a W, the other finishers an L; undecided finishes and
   // called-off matches count for nothing).
   listGames() {
-    const scanned = /** @type {Pick<import("./Room.js").GmRow, "id">[]} */ (this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray());
+    const scanned = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray() as Pick<import("./Room.js").GmRow, "id">[];
     // filter(Boolean) drops the rows that did not parse
-    const all = /** @type {GamePub[]} */ (scanned.map((r) => {
+    const all = scanned.map((r) => {
       const g = this.gameRow(r.id);
       if (!g || !g.st) return null;
       const s = this.gameSummary(g);
@@ -551,14 +456,14 @@ export const GameMachineryMethods = {
         s.ended = (g.st && g.st.ended) || null;
       }
       return s;
-    }).filter(Boolean));
+    }).filter(Boolean) as GamePub[];
     const live = all.filter((g) => g.status === "lobby" || g.status === "running").slice(0, 100);
     const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
-    /** @type {Record<string, Record<string, RecordRow>>} by game type, then player name */
-    const byType = {};
+    /** by game type, then player name */
+    const byType: Record<string, Record<string, RecordRow>> = {};
     // A race with placements (Code Race) also counts 2nd and 3rd places
     // (p2, p3); its W and L stay winner / everyone else.
-    const placed = (/** @type {RecordRow} */ row, /** @type {unknown} */ places, /** @type {string} */ name) => {
+    const placed = (row: RecordRow, places: unknown, name: string) => {
       const k = Array.isArray(places) ? places.indexOf(name) : -1;
       if (k === 1) row.p2 = (row.p2 || 0) + 1;
       else if (k === 2) row.p3 = (row.p3 || 0) + 1;
@@ -581,14 +486,13 @@ export const GameMachineryMethods = {
       const floor = scanned[scanned.length - 1].id;
       try {
         // ws and places come back as JSON text (json_extract of a list)
-        const rows = /** @type {Array<{ t: string | null, w: string | null, ws: string | null, places: string | null, name: string | null, hex: string | null }>} */ (this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.winners') AS ws, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray());
+        const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.winners') AS ws, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray() as Array<{ t: string | null, w: string | null, ws: string | null, places: string | null, name: string | null, hex: string | null }>;
         for (const r of rows) {
           if ((!r.w && !r.ws) || !r.name) continue;
-          const type = /** @type {Record<string, unknown>} */ (GAME_ENGINES)[/** @type {string} */ (r.t)] ? /** @type {string} */ (r.t) : "lightcycles";
+          const type = (GAME_ENGINES as Record<string, unknown>)[r.t as string] ? (r.t as string) : "lightcycles";
           const table = byType[type] || (byType[type] = {});
           const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
-          /** @type {string[] | null} */
-          let ws = null;
+          let ws: string[] | null = null;
           if (r.ws) { try { ws = JSON.parse(r.ws); } catch (e) { ws = null; } }
           if (ws ? ws.indexOf(r.name) >= 0 : r.name === r.w) row.w++;
           else row.l++;
@@ -596,8 +500,8 @@ export const GameMachineryMethods = {
         }
       } catch (e) {}
     }
-    /** @type {Record<string, RecordRow[]>} by game type, best first */
-    const record = {};
+    /** by game type, best first */
+    const record: Record<string, RecordRow[]> = {};
     Object.keys(byType).forEach((t) => {
       record[t] = Object.values(byType[t]).sort((a, b) => b.w - a.w || a.l - b.l || (a.name < b.name ? -1 : 1));
     });
@@ -614,10 +518,10 @@ export const GameMachineryMethods = {
      Rows: { name, hex, rating, w, l, d, last } - last is the rating
      change from the player's most recent ladder match. */
   gameLadder() {
-    /** @type {Record<string, Record<string, LadderRow>>} by game type, then player name */
-    const ladder = {};
-    /** @type {Array<{ id: number, t: string | null, w: string | null, d: number | null, ps: string | null }>} ps: the players as JSON text */
-    let rows = [];
+    /** by game type, then player name */
+    const ladder: Record<string, Record<string, LadderRow>> = {};
+    /** ps: the players as JSON text */
+    let rows: Array<{ id: number, t: string | null, w: string | null, d: number | null, ps: string | null }> = [];
     try {
       rows = this.sql.exec("SELECT id, json_extract(state, '$.type') AS t, json_extract(state, '$.winner') AS w, json_extract(state, '$.draw') AS d, json_extract(state, '$.players') AS ps FROM gm WHERE status = 'finished' ORDER BY id").toArray();
     } catch (e) {
@@ -637,9 +541,9 @@ export const GameMachineryMethods = {
       else if (r.w && r.w === b.name) sa = 0;
       else if (r.d) sa = 0.5;
       else continue;
-      const type = /** @type {Record<string, unknown>} */ (GAME_ENGINES)[/** @type {string} */ (r.t)] ? /** @type {string} */ (r.t) : "lightcycles";
+      const type = (GAME_ENGINES as Record<string, unknown>)[r.t as string] ? (r.t as string) : "lightcycles";
       const table = ladder[type] || (ladder[type] = {});
-      const seat = (/** @type {{ name: string, hex?: string }} */ p) => {
+      const seat = (p: { name: string, hex?: string }) => {
         const x = table[p.name] || (table[p.name] = { name: p.name, hex: null, rating: 1000, w: 0, l: 0, d: 0, last: 0 });
         if (p.hex) x.hex = p.hex;
         return x;
@@ -655,8 +559,8 @@ export const GameMachineryMethods = {
       else if (sa === 0) { ra.l++; rb.w++; }
       else { ra.d++; rb.d++; }
     }
-    /** @type {Record<string, Array<Omit<LadderRow, "rating" | "last"> & { rating: number, last: number }>>} by game type, best first */
-    const out = {};
+    /** by game type, best first */
+    const out: Record<string, Array<Omit<LadderRow, "rating" | "last"> & { rating: number, last: number }>> = {};
     Object.keys(ladder).forEach((t) => {
       out[t] = Object.values(ladder[t])
         .map((x) => ({ name: x.name, hex: x.hex, rating: Math.round(x.rating), w: x.w, l: x.l, d: x.d, last: Math.round(x.last) }))
@@ -668,15 +572,11 @@ export const GameMachineryMethods = {
   // Who a game frame is waiting on, from the public summary alone: the
   // unaccepted in a lobby; in play, the players yet to move (battleship:
   // yet to place in setup, the shooter in play). Nobody once it ends.
-  /**
-   * @param {GameRow} g
-   * @param {GamePub | null} pub its summary
-   * @returns {string[]}
-   */
-  gameTargets(g, pub) {
+  /** @param pub its summary */
+  gameTargets(g: GameRow, pub: GamePub | null): string[] {
     if (!pub || !pub.players) return [];
     if (g.status === "lobby") return pub.players.filter((p) => !p.accepted).map((p) => p.name);
     if (g.status !== "running") return [];
     return gameEngine(g.st).targets(pub);
   },
-};
+} satisfies ThisType<import("./Room.js").Room>;

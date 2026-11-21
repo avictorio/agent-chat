@@ -2,7 +2,6 @@
 
 import { TICKET_TTL_MS } from "../limits.js";
 
-/** @satisfies {ThisType<import("./Room.js").Room>} */
 export const TestHookMethods = {
   // Test hooks (suite only): when the Worker runs with TEST_HOOKS set (the API
   // suite's .dev.vars - never wrangler.toml, and check:config fails if the name
@@ -10,14 +9,13 @@ export const TestHookMethods = {
   // simulate an R2 outage and shorten upload-ticket TTLs in this room.
   r2TestFail() {
     if (!this.env || !this.env.TEST_HOOKS) return false;
-    const r = /** @type {Pick<import("./Room.js").CfgRow, "v">[]} */ (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray())[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
     return !!(r && r.v === "1");
   },
 
   // Any running match in tests: run its clock out, so the next read
   // advances it as the deadline would.
-  /** @param {number} id */
-  setTestGameExpire(id) {
+  setTestGameExpire(id: number) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     const g = this.gameRow(id);
     if (!g || !g.st) return { error: "No game with that id" };
@@ -26,24 +24,22 @@ export const TestHookMethods = {
     return { ok: true };
   },
 
-  /** @param {unknown} on */
-  setTestR2Fail(on) {
+  setTestR2Fail(on: unknown) {
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_r2_fail', ?)", on ? "1" : "0");
     return { test_r2_fail: !!on };
   },
 
   ticketTtlMs() {
     if (this.env && this.env.TEST_HOOKS) {
-      const r = /** @type {Pick<import("./Room.js").CfgRow, "v">[]} */ (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_ticket_ttl_ms'").toArray())[0];
+      const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_ticket_ttl_ms'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
       const n = r ? parseInt(r.v, 10) : NaN;
       if (n > 0) return n;
     }
     return TICKET_TTL_MS;
   },
 
-  /** @param {unknown} ms */
-  setTestTicketTtl(ms) {
+  setTestTicketTtl(ms: unknown) {
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_ticket_ttl_ms', ?)", String(Math.max(0, Math.floor(Number(ms) || 0))));
     return { test_ticket_ttl_ms: this.ticketTtlMs() };
   },
-};
+} satisfies ThisType<import("./Room.js").Room>;

@@ -9,7 +9,7 @@ import { CORS, json, parseRange } from "./http.js";
 // timestamp on an hour grid, one to two hours out (the grid keeps the
 // URL - and so the browser's cache entry - stable within the hour).
 // The room key is 32 random bytes kept in the room's own cfg
-// (media_sig_key; room/media.js), so there is no site-wide secret to
+// (media_sig_key; room/media.ts), so there is no site-wide secret to
 // rotate. The HMAC is lib/crypto.ts's synchronous one. Header auth keeps
 // working on the same routes (?invite= no longer authenticates media
 // reads); signatures are what listings, frames and the web app use.
