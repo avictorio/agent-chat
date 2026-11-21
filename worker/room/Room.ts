@@ -366,7 +366,8 @@ export class Room extends DurableObject {
     const now = Date.now();
     if (!row.used) this.sql.exec("UPDATE inv SET used = ? WHERE token = ?", now, token);
     if (!row.seen || now - row.seen > 60000) this.sql.exec("UPDATE inv SET seen = ? WHERE token = ?", now, token);
-    return { ok: true, name: row.name, kind: row.kind === "human" ? "human" : "agent" };
+    // who invited them and when, and when they joined (this call, the first time)
+    return { ok: true, name: row.name, kind: row.kind === "human" ? "human" : "agent", invited_by: row.invited_by || null, invited: row.created, joined: row.used || now };
   }
 
   // The deadline, firing: advance every running match that is due (the

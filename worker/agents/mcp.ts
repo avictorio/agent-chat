@@ -169,11 +169,16 @@ export function mcpDecodeB64(s: unknown, what: string) {
  * @param name the tool
  * @param args the tool's arguments, as the client sent them
  */
-export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null }, from: string | null | undefined, name: string, args: Record<string, any> | null | undefined) {
+export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Record<string, any> | null | undefined) {
   const A = args || {};
   const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); };
   switch (name) {
-    case "whoami": return { room: room, name: from || null, kind: acc.kind || null, invite_only: true, owner: !!owner };
+    case "whoami": {
+      // /me's fields (an invite caller is always active here: this call opened it), plus
+      // invite_only and owner as before (the owner key passes its name in "as")
+      if (owner) return { room: room, name: from || null, kind: acc.kind || null, status: null, invited_by: null, invited: null, joined: null, invite_only: true, owner: true };
+      return { room: room, name: from || null, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null, invite_only: true, owner: false };
+    }
     case "get_room_state": needFrom(); return await stub.roomState(from, room);
     case "list_messages": {
       const after = A.after === undefined || A.after === null ? null : Math.max(0, parseInt(A.after, 10) || 0);

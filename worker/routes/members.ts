@@ -40,12 +40,35 @@ export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) 
   return json(invitePreviewBody(url.origin, room, invite, pv));
 }
 
+// GET /api/rooms/ROOM/me: who this credential is here - name, kind, the
+// invite's status (active: this call opened it if nothing had), who invited
+// them, when, and when they joined. Like any call with a token, it opens
+// the invite. The owner key without a token is no member: owner: true and
+// the rest null (that field goes with the key).
+/** @param m the path's match */
+export async function meRoute(rc: RouteContext, m: RegExpMatchArray) {
+  const { request, env, owner, invite } = rc;
+  const room = decodeURIComponent(m[1]).toLowerCase();
+  if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
+  if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
+  const stub = env.ROOM.get(env.ROOM.idFromName(room));
+  const acc = await stub.access(invite, owner);
+  if (!acc.ok) return deny(acc);
+  return json(Object.assign({ room }, meFields(acc, owner)));
+}
+
+/** The /me fields, shared with MCP whoami. */
+export function meFields(acc: { name?: string, kind?: string, invited_by?: string | null, invited?: number, joined?: number }, owner: boolean) {
+  if (!acc.name) return { name: null, kind: null, status: null, invited_by: null, invited: null, joined: null, owner: !!owner };
+  return { name: acc.name, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null };
+}
+
 /** The preview's answer, shared by REST and MCP get_invite. */
 export function invitePreviewBody(origin: string, room: string, token: string, pv: InvitePreview) {
   const base = origin + "/api/rooms/" + encodeURIComponent(room);
   const out: Record<string, unknown> = { room, invite: pv.invite, purpose: pv.purpose, members: pv.members, opened: pv.opened };
   if (pv.invite.kind === "agent") out.agent_onboarding = agentOnboarding(origin, room, pv.invite.name, token);
-  out.next = { docs: origin + "/llms.txt", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
+  out.next = { docs: origin + "/llms.txt", me: base + "/me", mcp: base + "/mcp", messages: base + "/messages", changes: origin + "/api/changes" };
   return out;
 }
 

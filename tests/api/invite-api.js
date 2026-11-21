@@ -198,10 +198,46 @@ async function preview(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+async function me(ctx) {
+  const { req, check, SUF } = ctx;
+  const room = 'apitest-me-' + SUF;
+  const R = '/api/rooms/' + room;
+  await req('POST', R, { owner: true });
+  const H = (await req('POST', R + '/invites', { owner: true, json: { name: 'MeH', kind: 'human' } })).json.token;
+  await req('GET', R + '/messages?limit=1', { token: H });
+  const A = (await req('POST', R + '/invites', { token: H, json: { name: 'MeA', kind: 'agent' } })).json.token;
+  const t0 = Date.now();
+  let r = await req('GET', R + '/me', { token: A });
+  const j = r.json || {};
+  check('me: name, kind, status, invited_by, invited, joined', r.status === 200 && j.room === room && j.name === 'MeA' && j.kind === 'agent' && j.status === 'active' && j.invited_by === 'MeH' && typeof j.invited === 'number' && typeof j.joined === 'number' && !('owner' in j), JSON.stringify(j));
+  check('me: joined is this first call', j.joined >= t0 - 5000 && j.joined >= j.invited, j.joined + ' vs ' + t0);
+  r = await req('GET', R + '/me', { token: A });
+  check('me: joined stays the first time', r.json.joined === j.joined, r.json.joined + ' vs ' + j.joined);
+  r = await req('GET', R + '/me', { token: H });
+  check('me: an owner-made invite has invited_by null', r.status === 200 && r.json.invited_by === null && r.json.kind === 'human', JSON.stringify(r.json));
+  r = await req('GET', R + '/me', { owner: true });
+  check('me: the owner key alone is no member (owner: true, the rest null)', r.status === 200 && r.json.owner === true && r.json.name === null && r.json.status === null, JSON.stringify(r.json));
+  r = await req('GET', R + '/me');
+  check('me: no token -> 401 invite_missing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + r.json.code);
+  r = await req('POST', R + '/me', { token: A, json: {} });
+  check('me: only GET (for now)', r.status === 405, r.status);
+  r = await req('POST', R + '/mcp', { token: A, json: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'whoami', arguments: {} } } });
+  const w = (r.json && r.json.result && r.json.result.structuredContent) || {};
+  check('whoami: /me fields, and owner and invite_only as before', w.name === 'MeA' && w.kind === 'agent' && w.status === 'active' && w.invited_by === 'MeH' && w.joined === j.joined && w.invited === j.invited && w.owner === false && w.invite_only === true, JSON.stringify(w));
+  r = await req('POST', R + '/mcp', { owner: true, json: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: { as: 'Builder' } } } });
+  const wo = (r.json && r.json.result && r.json.result.structuredContent) || {};
+  check('whoami: the owner key keeps owner: true and its "as" name', wo.owner === true && wo.name === 'Builder' && wo.invite_only === true, JSON.stringify(wo));
+  r = await req('GET', R + '/invite', { token: A });
+  check('preview: next names /me', r.json && r.json.next && /\/me$/.test(r.json.next.me || ''), JSON.stringify(r.json && r.json.next));
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
   await codes(ctx);
   await changesFeed(ctx);
   await preview(ctx);
+  await me(ctx);
 }
 
 module.exports = { inviteApi };

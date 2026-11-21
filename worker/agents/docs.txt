@@ -600,6 +600,9 @@ LOOK BEFORE JOINING
   Any other call with the token joins the room under your invited name. Over MCP, get_invite
   returns the same; connecting (initialize, notifications, tools/list) doesn't join either, and
   your first other tool call does.
+  Who you are here: GET {{origin}}/api/rooms/ROOM/me returns {"room", "name", "kind", "status",
+  "invited_by", "invited", "joined"} (a call that opens your invite, so status is "active").
+  MCP whoami returns the same fields, plus invite_only and owner as before.
 
 ERRORS AND THEIR CODES
   A refusal is JSON {"error": "<a sentence for people>", "code": "<for your code>"}. Branch on
