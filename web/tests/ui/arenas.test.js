@@ -527,6 +527,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       await page.fill('#viewer .tq-panel .tq-input', 'Is it blue?');
       await shot(page, label + '.png');
+      // the question box is React (ctx.panel): a repaint keeps the half-made draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .tq-panel .tq-input', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .tq-panel .tq-input', (i) => i.value + '|' + document.querySelector('#viewer .tq-go').disabled);
       await page.click('#viewer .tq-go');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/28/moves')).pop() || '';
@@ -537,6 +542,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.pips !== '1/1/20') throw new Error('the budget lights spent questions by answer: ' + out.pips);
       if (out.log.length !== 3 || !/^1HenryIs it alive\?NO/.test(out.log[0]) || !/YES · much/.test(out.log[1]) || !/unanswerable/.test(out.log[2])) throw new Error('the public log: ' + JSON.stringify(out.log));
       if (!/Ask Ada a question · 18 of 20 left/.test(out.banner)) throw new Error('the banner asks for a question: ' + out.banner);
+      if (out.kept !== 'Is it blue?|false') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (!/"dir":"Is it blue\?"/.test(out.moveCall)) throw new Error('Ask sends the question: ' + out.moveCall);
       if (!/Waiting on Ada's answer/.test(out.after)) throw new Error('then waits on the answer: ' + out.after);
       return out;
@@ -583,6 +589,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       await page.fill('#viewer .ec-input', 'By midnight the gulls had formed a committee. Their first motion was bread.');
       out.ok = await page.$eval('#viewer .ec-go', (b) => b.disabled);
       await shot(page, label + '.png');
+      // the writer is React (ctx.panel): a repaint keeps the half-made draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .ec-writer', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .ec-input', (t) => t.value + '|' + document.querySelector('#viewer .ec-count').textContent + '|' + document.querySelector('#viewer .ec-go').disabled);
       await page.click('#viewer .ec-go');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/26/moves')).pop() || '';
@@ -595,6 +606,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.strip !== 'wrote,wrote,now,-,-,-') throw new Error('the strip shows who wrote, not what: ' + out.strip);
       if (!/Your turn to write · turn 3 of 6/.test(out.banner)) throw new Error('the banner asks for a segment: ' + out.banner);
       if (!/^true\|4 sentences/.test(out.over) || out.ok !== false) throw new Error('1 to 3 sentences: ' + JSON.stringify(out));
+      if (out.kept !== 'By midnight the gulls had formed a committee. Their first motion was bread.|2 sentences · 75/400|false') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (!/gulls had formed a committee\. Their first motion was bread\./.test(out.moveCall)) throw new Error('the segment goes as dir: ' + out.moveCall);
       if (!/Ada is writing/.test(out.after) || !out.writerGone) throw new Error('the turn passes on: ' + out.after);
       return out;
@@ -672,6 +684,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.kept = await page.$$eval('#viewer .tt-input', (els) => els.map((e) => e.value).join('|'));
       out.go1 = await page.$eval('#viewer .tt-go', (b) => b.disabled);
       await shot(page, label + '.png');
+      // the form is React (ctx.panel): a repaint keeps the half-made draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .tt-writer', { timeout: 10000 });
+      out.repainted = await page.$$eval('#viewer .tt-writer-row', (rows) => rows.map((r) => r.querySelector('.tt-input').value + (r.classList.contains('lie') ? ' (lie)' : '')).join('|') + '|' + document.querySelector('#viewer .tt-go').disabled);
       await page.click('#viewer .tt-go');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/24/moves')).pop() || '';
@@ -679,6 +696,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (!/Your turn to tell · round 3 of 3/.test(out.banner)) throw new Error('the banner asks the storyteller: ' + out.banner);
       if (out.go0 !== true || out.go1 !== false) throw new Error('send waits for three statements and a lie: ' + JSON.stringify(out));
       if (out.kept !== 'I have a cat named Pixel|I learned to swim at forty|I once sang on live radio') throw new Error('marking the lie keeps the text: ' + out.kept);
+      if (out.repainted !== 'I have a cat named Pixel|I learned to swim at forty|I once sang on live radio (lie)|false') throw new Error('a repaint keeps the draft: ' + out.repainted);
       if (!/lie[\\"]*:3/.test(out.moveCall) || !/I once sang on live radio/.test(out.moveCall)) throw new Error('the statements go as one structured move: ' + out.moveCall);
       if (!/your lie/.test(out.mine)) throw new Error('the storyteller sees their lie marked: ' + out.mine);
       return out;
@@ -757,9 +775,18 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.go0 = await page.$eval('#viewer .au-go', (b) => b.textContent);
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       await shot(page, label + '-bid.png');
+      // a typed amount counts on change (here the blur), held to the budget
+      await page.fill('#viewer .au-num', '150');
+      await page.$eval('#viewer .au-num', (i) => i.blur());
+      out.typed = await page.$eval('#viewer .au-go', (b) => b.textContent + '|' + document.querySelector('#viewer .au-num').value);
       await page.click('#viewer .au-acts button:has-text("25")');
       await page.click('#viewer .au-bid-row .fl-step[aria-label="5 more"]');
       out.go = await page.$eval('#viewer .au-go', (b) => b.textContent);
+      // the bid is React (ctx.panel): a repaint keeps the half-made draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .au-bid', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .au-go', (b) => b.textContent + '|' + document.querySelector('#viewer .au-num').value);
       await page.click('#viewer .au-go');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/20/moves')).pop() || '';
@@ -769,7 +796,9 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (!/Lot 3 of 6/.test(out.lot)) throw new Error('the lot under the hammer: ' + out.lot);
       if (!/Lot 2: “The last slice of pizza, still warm”Anthony · 20/.test(out.result) || !/pass/.test(out.result)) throw new Error('the last lot\'s opened bids: ' + out.result);
       if (out.go0 !== 'Pass') throw new Error('a zero bid reads as Pass: ' + out.go0);
+      if (out.typed !== 'Bid 80|80') throw new Error('a typed bid is held to the budget: ' + out.typed);
       if (out.go !== 'Bid 30' || !/"dir":"30"/.test(out.moveCall)) throw new Error('quick amounts and steps make the bid: ' + JSON.stringify(out));
+      if (out.kept !== 'Bid 30|30') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (out.after !== 'Bid in ✓|true') throw new Error('the bid reads sealed: ' + out.after);
       if (!/Your bid · lot 3 of 6/.test(out.banner)) throw new Error('the banner asks for a bid: ' + out.banner);
       return out;

@@ -3,7 +3,6 @@ import type { Root } from "react-dom/client";
 import type { BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
 import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
-import type { TtDraft } from "../twotruths/twotruths";
 import type { LgDraft, LgPanel } from "../lettergrid/lettergrid";
 import type { TvAnsDraft, TvAskDraft } from "../trivia/trivia";
 import type { SgPad } from "../sketch/sketch";
@@ -57,12 +56,7 @@ export type GameView = {
   r3dCommit?: (() => void) | null;
   // Code Race: the guess being made (kept across repaints, reset each round)
   crDraft?: { round: number; v: string } | null;
-  // Auction: the bid being made (kept across repaints, reset each lot)
-  auDraft?: { round: number; v: number } | null;
   ldDraft?: { turn: number; qty: number; face: number } | null;
-  ttDraft?: TtDraft | null;
-  ecDraft?: { turn: number; text: string } | null;
-  tqDraft?: { key: string; text: string } | null;
   wwDraft?: { town: string; den: string } | null;
   lgDraft?: LgDraft | null;
   tvAsk?: { key: string; d: TvAskDraft } | null;
