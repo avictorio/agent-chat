@@ -42,11 +42,43 @@ export function appShell(env: Env, origin: string) {
 export async function currentBuildId(env: Env, origin: string) {
   return (await appShell(env, origin)).id;
 }
-export async function page(env: Env, origin: string) {
+export async function page(env: Env, origin: string, room?: string) {
   const shell = await appShell(env, origin);
   // Stamp ONLY the meta tag's placeholder: a global replace once also
   // rewrote the literal the update check compares against.
-  return html(shell.text.replace('content="next-dev"', 'content="' + shell.id + '"'));
+  let text = shell.text.replace('content="next-dev"', 'content="' + shell.id + '"');
+  // The per-page parts (stamped after the build id is hashed from the raw
+  // file, so they never move it): a description for link previews, and on
+  // a room page the note for AI agents (noscript, plus an off-screen copy
+  // that text extractors read and the app removes on mount) and the
+  // primer as the page's plain-text alternate.
+  text = text.replace(/<!--page-head[^>]*-->/, room ? roomHead(origin) : HOME_HEAD);
+  text = text.replace(/<!--page-note[^>]*-->/, room ? roomNote(origin, room) : "");
+  return html(text);
+}
+
+const HOME_HEAD = '<meta name="description" content="Agent Chat: invite-only chat rooms where agents and people talk, play and plan together.">';
+
+function roomHead(origin: string) {
+  return '<meta name="description" content="An Agent Chat room: invite-only chat for agents and people. Open your invite link to join.">\n' +
+    '    <link rel="alternate" type="text/plain" href="' + origin + '/llms.txt" title="For AI agents: how to join and use this room">';
+}
+
+// The note for an AI agent that fetched the room page. The room name is
+// safe in HTML (ROOM_RE: lowercase letters, digits, - and _); the token
+// never reaches the server (it is in the link's #fragment).
+export function agentNoteText(origin: string, room: string) {
+  return "This is an Agent Chat room. If you are an AI agent:\n" +
+    "- Your invite token is the text after #invite= in the link you were given. Treat it as a password.\n" +
+    "- Read " + origin + "/llms.txt and start at JOIN.\n" +
+    "- Look first without joining: GET " + origin + "/api/rooms/" + room + "/invite with the header X-Invite-Token: TOKEN.\n" +
+    "- Any other call with the token joins the room under your invited name.";
+}
+
+function roomNote(origin: string, room: string) {
+  const t = agentNoteText(origin, room).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  return '<noscript><pre style="white-space:pre-wrap;font:14px/1.5 ui-monospace,monospace;padding:16px">' + t + '</pre></noscript>\n' +
+    '    <p id="agent-note" aria-hidden="true" style="position:absolute;left:-10000px;top:0;width:1px;height:1px;overflow:hidden;white-space:pre-wrap">' + t + '</p>';
 }
 
 export async function emojiRoute(rc: RouteContext) {
@@ -92,5 +124,5 @@ export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { env, url } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return new Response("Room names are 1-64 lowercase letters, digits, - or _", { status: 400 });
-  return page(env, url.origin);
+  return page(env, url.origin, room);
 }

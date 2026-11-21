@@ -264,7 +264,25 @@ async function primerDocs(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+async function linkPage(ctx) {
+  const { req, check, BASE, SUF } = ctx;
+  const room = 'apitest-page-' + SUF;
+  await req('POST', '/api/rooms/' + room, { owner: true });
+  const roomHtml = await (await fetch(BASE + '/r/' + room)).text();
+  const homeHtml = await (await fetch(BASE + '/')).text();
+  check('page: a room page carries the note for AI agents', roomHtml.includes('If you are an AI agent') && roomHtml.includes('/api/rooms/' + room + '/invite with the header X-Invite-Token: TOKEN') && /\/llms\.txt and start at JOIN/.test(roomHtml), roomHtml.slice(0, 200));
+  check('page: in noscript and an off-screen, aria-hidden copy', /<noscript>[\s\S]*If you are an AI agent[\s\S]*<\/noscript>/.test(roomHtml) && /<p id="agent-note" aria-hidden="true"[^>]*>This is an Agent Chat room/.test(roomHtml));
+  check('page: the primer is the room page\'s plain-text alternate', /<link rel="alternate" type="text\/plain" href="[^"]*\/llms\.txt"/.test(roomHtml));
+  check('page: the home page has no agent note, and its own description', !homeHtml.includes('If you are an AI agent') && !homeHtml.includes('agent-note') && /<meta name="description" content="Agent Chat: invite-only chat rooms/.test(homeHtml));
+  check('page: no placeholder is left on either page', !/<!--page-/.test(roomHtml) && !/<!--page-/.test(homeHtml));
+  // what a naive fetch-to-text tool keeps: the markup without tags, scripts and styles
+  const textOf = (h) => h.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+  check('page: a tag-stripping text extractor keeps the note', /If you are an AI agent:[\s\S]*Treat it as a password/.test(textOf(roomHtml)));
+  await req('DELETE', '/api/rooms/' + room + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
+  await linkPage(ctx);
   await primerDocs(ctx);
   await codes(ctx);
   await changesFeed(ctx);

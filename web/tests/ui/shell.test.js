@@ -95,6 +95,15 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     return { hits: hits.length };
   });
 
+  // The room page's note for AI agents (stamped by the Worker outside
+  // #root) is gone once the app runs: people never see or hear it.
+  await run('agent-note-removed', {}, async (page) => {
+    await settle(page);
+    const left = await page.evaluate(() => ({ el: !!document.getElementById('agent-note'), text: /If you are an AI agent/.test(document.body.innerText) }));
+    if (left.el || left.text) throw new Error('the agent note is still in the page: ' + JSON.stringify(left));
+    return left;
+  });
+
   // --- M2 shell scenarios (ported verbatim from tests/ui.test.js) ---
   for (const scheme of ['light', 'dark']) {
     await run('desktop-' + scheme, { scheme }, async (page) => {

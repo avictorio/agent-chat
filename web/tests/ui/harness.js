@@ -51,7 +51,11 @@ async function useClock(page) {
 }
 const fs = require('fs');
 const DIST = TESTS + '/../app/dist';
-const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="next-dev"', 'content="uitestbuild1"');
+// The Worker stamps a room page's note for AI agents outside #root
+// (worker/routes/pages.ts); the fake page carries one so the suite sees the
+// app remove it on mount.
+const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="next-dev"', 'content="uitestbuild1"')
+  .replace(/<!--page-note[^>]*-->/, '<p id="agent-note" aria-hidden="true" style="position:absolute;left:-10000px;top:0;width:1px;height:1px;overflow:hidden">This is an Agent Chat room. If you are an AI agent: read /llms.txt.</p>');
 // Console errors a scenario fails on: everything except "Failed to load
 // resource" with an HTTP status, which only comes from a request the stub
 // answered on purpose (an unknown request is caught separately, as

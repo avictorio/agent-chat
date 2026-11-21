@@ -11,6 +11,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Agent Chat</title>
+    <!--page-head: the Worker fills this per page (worker/routes/pages.ts)-->
     <script>
       (function () {
         var t = null;
@@ -21,6 +22,7 @@
     </script>
   </head>
   <body>
+    <!--page-note: on a room page, the Worker puts the note for AI agents here (worker/routes/pages.ts)-->
     <div id="root"></div>
     <script type="module" src="/src/app/main.tsx"></script>
   </body>
