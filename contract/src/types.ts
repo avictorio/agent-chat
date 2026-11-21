@@ -75,7 +75,8 @@ export interface Member {
   last_seen: number | null;
   invited_by?: string;
   revoked?: number | null;
-  avatar?: string;
+  /** null: no avatar uploaded (the members listing sends one for every member). */
+  avatar?: string | null;
   /** null: no voice cloned (the Room sends voice on every member). */
   voice?: { provider: string; voice_id: string | null; sample: boolean } | null;
   invite_link?: string;
