@@ -22,13 +22,15 @@ import { duelStatus } from "./duel/status";
 import { c4Board, c4HistoryRows } from "./fourinarow/fourinarow";
 import { renderFourView } from "./fourinarow/view";
 import { fourinarowStatus } from "./fourinarow/status";
-import { flCardBoard, flHistoryRows } from "./frontlines/frontlines";
+import { flHistoryRows } from "./frontlines/frontlines";
+import { FrontlinesCard } from "./frontlines/FrontlinesPanels";
 import { renderFrontlinesView } from "./frontlines/view";
 import { frontlinesStatus } from "./frontlines/status";
 import { lgCardBoard, lgHistoryRows } from "./lettergrid/lettergrid";
 import { renderLetterView } from "./lettergrid/view";
 import { lettergridStatus } from "./lettergrid/status";
-import { ldCardBoard, ldHistoryRows } from "./liarsdice/liarsdice";
+import { ldHistoryRows } from "./liarsdice/liarsdice";
+import { LiarsDiceCard } from "./liarsdice/LiarsDicePanels";
 import { renderLiarsView } from "./liarsdice/view";
 import { liarsdiceStatus } from "./liarsdice/status";
 import { paintLightCyclesCard } from "./lightcycles/card";
@@ -37,7 +39,8 @@ import { renderLightCyclesView } from "./lightcycles/view";
 import { sgCardBoard, sgHistoryRows } from "./sketch/sketch";
 import { renderSketchView } from "./sketch/view";
 import { sketchStatus } from "./sketch/status";
-import { tvCardBoard, tvHistoryRows } from "./trivia/trivia";
+import { tvHistoryRows } from "./trivia/trivia";
+import { TriviaCard } from "./trivia/TriviaPanels";
 import { renderTriviaView } from "./trivia/view";
 import { triviaStatus } from "./trivia/status";
 import { trHistoryRows } from "./trust/trust";
@@ -50,7 +53,8 @@ import { twentyStatus } from "./twenty/status";
 import { ttCardBoard, ttHistoryRows } from "./twotruths/twotruths";
 import { renderTwoTruthsView } from "./twotruths/view";
 import { twotruthsStatus } from "./twotruths/status";
-import { wwCardBoard, wwHistoryRows } from "./werewolf/werewolf";
+import { wwHistoryRows } from "./werewolf/werewolf";
+import { WerewolfCard } from "./werewolf/WerewolfPanels";
 import { renderWerewolfView } from "./werewolf/view";
 import { werewolfStatus } from "./werewolf/status";
 
@@ -175,7 +179,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   frontlines: {
     view: renderFrontlinesView,
-    card: (b, g) => fill(b, flCardBoard(g)),
+    Card: FrontlinesCard,
     history: flHistoryRows,
     historyCount: rounds,
     ...frontlinesStatus,
@@ -189,7 +193,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   liarsdice: {
     view: renderLiarsView,
-    card: (b, g, me) => fill(b, ldCardBoard(g, me)),
+    Card: LiarsDiceCard,
     history: ldHistoryRows,
     historyCount: rounds,
     ...liarsdiceStatus,
@@ -209,7 +213,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   trivia: {
     view: renderTriviaView,
-    card: (b, g, me) => fill(b, tvCardBoard(g, me)),
+    Card: TriviaCard,
     history: tvHistoryRows,
     historyCount: rounds,
     ...triviaStatus,
@@ -237,7 +241,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   werewolf: {
     view: renderWerewolfView,
-    card: (b, g, me) => fill(b, wwCardBoard(g, me)),
+    Card: WerewolfCard,
     history: wwHistoryRows,
     historyCount: count("events"),
     ...werewolfStatus,

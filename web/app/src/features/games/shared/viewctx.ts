@@ -5,7 +5,6 @@ import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
 import type { TtDraft } from "../twotruths/twotruths";
 import type { LgDraft, LgPanel } from "../lettergrid/lettergrid";
-import type { TvAnsDraft, TvAskDraft } from "../trivia/trivia";
 import type { SgPad } from "../sketch/sketch";
 
 // The game store's arena-view contract: what a game's
@@ -47,9 +46,6 @@ export type GameView = {
   duel3d?: Host3d | null;
   duel3dSeq?: number;
   duelCommit?: ((t: string) => void) | null;
-  // Frontlines: the split being planned (kept across repaints) and the
-  // number of rounds already shown (a new one plays its reveal)
-  flDraft?: { round: number; vals: number[] } | null;
   // a rounds game's 3D view (Frontlines, Code Race): its host, the paint
   // sequence, and the scene's seal-my-move-now hook
   r3d?: Host3d | null;
@@ -59,14 +55,10 @@ export type GameView = {
   crDraft?: { round: number; v: string } | null;
   // Auction: the bid being made (kept across repaints, reset each lot)
   auDraft?: { round: number; v: number } | null;
-  ldDraft?: { turn: number; qty: number; face: number } | null;
   ttDraft?: TtDraft | null;
   ecDraft?: { turn: number; text: string } | null;
   tqDraft?: { key: string; text: string } | null;
-  wwDraft?: { town: string; den: string } | null;
   lgDraft?: LgDraft | null;
-  tvAsk?: { key: string; d: TvAskDraft } | null;
-  tvAns?: { key: string; d: TvAnsDraft } | null;
   sgPad?: SgPad | null;
   sgGuess?: { key: string; d: string } | null;
   lgPanel?: LgPanel | null;

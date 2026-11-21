@@ -1,13 +1,15 @@
 import { el } from "../../../lib/index";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { tvAnswerForm, tvAskForm, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores } from "./trivia";
+import { tvLastRound } from "./trivia";
+import { TriviaAnswerForm, TriviaAskForm, TriviaJudgeForm, TriviaQuestion, TriviaReveal, TriviaScores } from "./TriviaPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TriviaPlayer, TriviaState, TriviaYou } from "@chat/contract";
 
 /* Trivia (2026-11-20, 3D only): the stage first, then the question,
    your form (the quizmaster's question, an answer and a wager, or the
-   judge panel), the scores and the last round's reveal. Drafts live on
-   gameView keyed by round and phase, and typing never rebuilds the
+   judge panel), the scores and the last round's reveal. The panels are
+   React (TriviaPanels.tsx, mounted with ctx.panel): each form keeps its
+   own draft, keyed by round and phase, and typing never rebuilds the
    view, so a poll cannot steal focus; a rebuild restores the focused
    field. */
 export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boolean) {
@@ -16,8 +18,6 @@ export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boole
   const me = ctx.opts.meName();
   const you: TriviaYou = g.you || { playing: false };
   const dkey = g.round + ":" + (g.phase || "");
-  if (!gv.tvAsk || gv.tvAsk.key !== dkey) gv.tvAsk = { key: dkey, d: { q: "", a: "", acc: "" } };
-  if (!gv.tvAns || gv.tvAns.key !== dkey) gv.tvAns = { key: dkey, d: you.queued ? { a: you.queued.answer, w: you.queued.wager } : { a: "", w: Math.min(10, you.max_wager != null ? you.max_wager : 10) } };
   const key = [
     g.status,
     g.round,
@@ -58,8 +58,7 @@ export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boole
   const h = ctx.host3d("trivia");
   wrap.appendChild(h.host);
   ctx.paint3d("trivia", g, h);
-  const qb = tvQuestion(g);
-  if (qb) wrap.appendChild(qb);
+  if (g.status === "running") wrap.appendChild(ctx.panel("question", <TriviaQuestion g={g} />));
   const send = (dir: string) => {
     if (ctx.gameView !== gv) return;
     if (gv.r3dCommit) gv.r3dCommit();
@@ -69,12 +68,12 @@ export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boole
     if (you.asker && g.phase === "ask") {
       const hint = ctx.arenaHint("trivia-ask", "Ask about you, the room, anything you know the answer to. A question some get and some miss pays you 10.");
       if (hint) wrap.appendChild(hint);
-      wrap.appendChild(tvAskForm(gv.tvAsk.d, (d) => { if (ctx.gameView === gv && gv.tvAsk) gv.tvAsk.d = d; }, send));
-    } else if (you.asker && g.phase === "judge") wrap.appendChild(tvJudgeForm(g, send));
+      wrap.appendChild(ctx.panel("ask", <TriviaAskForm key={dkey} onSend={send} />));
+    } else if (you.asker && g.phase === "judge") wrap.appendChild(ctx.panel("judge", <TriviaJudgeForm g={g} onSend={send} />));
     else if (!you.asker && g.phase === "answer") {
       const hint = ctx.arenaHint("trivia", "Bet what you're sure of: a right answer wins your wager, a wrong one loses it. No answer costs nothing.");
       if (hint) wrap.appendChild(hint);
-      wrap.appendChild(tvAnswerForm(g, gv.tvAns.d, (d) => { if (ctx.gameView === gv && gv.tvAns) gv.tvAns.d = d; }, send));
+      wrap.appendChild(ctx.panel("answer", <TriviaAnswerForm key={dkey} g={g} onSend={send} />));
     } else if (you.asker && g.phase === "answer") note.textContent = "Your answer: " + (you.answer || "?") + ((you.accept || []).length ? " (also: " + you.accept!.join(", ") + ")" : "") + " - sealed until the reveal.";
     wrap.appendChild(note);
     if (focusCls) {
@@ -85,7 +84,7 @@ export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boole
     note.textContent = "Spectating - answers and wagers are revealed together when each round resolves.";
     wrap.appendChild(note);
   }
-  wrap.appendChild(tvScores(g, me));
-  const rv = tvReveal(g, tvLastRound(g), me);
-  if (rv) wrap.appendChild(rv);
+  wrap.appendChild(ctx.panel("scores", <TriviaScores g={g} me={me} />));
+  const last = tvLastRound(g);
+  if (last) wrap.appendChild(ctx.panel("reveal", <TriviaReveal g={g} round={last} me={me} />));
 }
