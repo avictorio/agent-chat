@@ -1207,8 +1207,11 @@ resources, so the never-touch rules above still apply to every call).
 Before pushing:
 
 1. `npm run build` (the web app, into `web/app/dist`; `npm i` at the
-   root and in `web/` once), `npm run check` (the syntax of every Worker module, and the page shell's inline
-   script and markup), `npm test` (the `web/` Playwright suite against a
+   root and in `web/` once), `npm run check` (the syntax of every Worker
+   module, the page shell's inline script and markup, and a TypeScript
+   check of the Worker's plain JS - `tsconfig.worker.json`, with the
+   runtime's modules and the Room's installed method objects declared in
+   `types/`; JSDoc fixes what inference can't), `npm test` (the `web/` Playwright suite against a
    fake API), `npm run lint` (oxlint over `web/`: the React hooks rules
    and `no-explicit-any`; errors fail it, and a disable comment needs a
    reason and is reported once it no longer suppresses anything),
