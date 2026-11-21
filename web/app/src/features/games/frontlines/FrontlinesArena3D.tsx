@@ -29,7 +29,6 @@
    Reduced motion: no deploy, push or camera moves; a round lands at
    once with its title card, sound and buzz. The planner, the score and
    the numbers stay in the DOM: the scene shows, the page acts. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
@@ -38,6 +37,7 @@ import { ArenaFrame, FirstFrame, Framer, Ticker, TouchControls, goHome, useQuali
 import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, useFirstVisit, useJuice, useJuiceStore, type Impact } from "../three/juice";
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
+import type { FrontlinesPlayer, FrontlinesRound, FrontlinesState } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -501,7 +501,7 @@ function Beats({
   onVerdict,
   onDone,
 }: {
-  round: any;
+  round: FrontlinesRound;
   sides: Side[];
   t0: number;
   verdict: Impact;
@@ -543,7 +543,7 @@ function Beats({
 
 /* ---------- impacts from the viewer's seat ---------- */
 
-function verdictImpact(round: any, sides: Side[], final: boolean, matchWinner: string, scoreLine: string): Impact {
+function verdictImpact(round: FrontlinesRound, sides: Side[], final: boolean, matchWinner: string, scoreLine: string): Impact {
   const you = sides.find((s) => s.you);
   const w = round.winner as string | null;
   if (final && matchWinner) {
@@ -559,7 +559,7 @@ function verdictImpact(round: any, sides: Side[], final: boolean, matchWinner: s
   return { trauma: 0.2, stop: 70, sound: "clash", title: { big: "ROUND " + round.n, small: w + " takes it" + how + " · " + scoreLine, tone: "neutral" } };
 }
 
-function sayRound(round: any, sides: Side[], scoreLine: string): string {
+function sayRound(round: FrontlinesRound, sides: Side[], scoreLine: string): string {
   if (!round) return "";
   const by: Record<string, string[]> = {};
   (round.hills || []).forEach((h: string | null, i: number) => {
@@ -653,7 +653,7 @@ export default function FrontlinesArena3D({
   onReady,
   registerCommit,
 }: {
-  g: any;
+  g: FrontlinesState | null;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -669,8 +669,8 @@ export default function FrontlinesArena3D({
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const phone = hostW < PHONE_BELOW;
   const meL = me.toLowerCase();
-  const players: any[] = (g && g.players) || NO_ITEMS;
-  const rounds: any[] = (g && g.rounds) || NO_ITEMS;
+  const players: FrontlinesPlayer[] = (g && g.players) || NO_ITEMS;
+  const rounds: FrontlinesRound[] = (g && g.rounds) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const running = !!g && g.status === "running";
   const winner = String((g && g.winner) || "");
@@ -678,8 +678,8 @@ export default function FrontlinesArena3D({
   // You hold the near side; spectators see the order the match lists.
   const sides: Side[] = useMemo(() => {
     const list = players.slice(0, 2);
-    if (list.length === 2 && String(list[1].name).toLowerCase() === meL) list.reverse();
-    return list.map((p: any, i: number) => ({
+    if (list.length === 2 && String(list[1]!.name).toLowerCase() === meL) list.reverse();
+    return list.map((p: FrontlinesPlayer, i: number) => ({
       name: String(p.name),
       hex: String(p.hex || (i ? "#fb923c" : "#22d3ee")),
       you: String(p.name).toLowerCase() === meL,
@@ -718,7 +718,7 @@ export default function FrontlinesArena3D({
 
   const scoreLine = (upto: number) => {
     const sc: Record<string, number> = {};
-    rounds.slice(0, upto).forEach((r: any) => {
+    rounds.slice(0, upto).forEach((r: FrontlinesRound) => {
       if (r.winner) sc[r.winner] = (sc[r.winner] || 0) + 1;
     });
     return sides.map((s) => s.name + " " + (sc[s.name] || 0)).join(" – ");
