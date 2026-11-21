@@ -3,7 +3,7 @@
 // secret prompt; everyone else guesses what it shows, and the Referee
 // (Claude) rules on close calls.
 
-import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";
+import type { GamePlayerBase, GameYouBase, RotatingRoundsStateBase } from "./common";
 
 /** A seat (sgSummary's players). */
 export interface SketchPlayer extends GamePlayerBase {
@@ -67,11 +67,7 @@ export interface SketchYou extends GameYouBase {
 }
 
 /** sgSummary, plus sgStateFull's rounds, log, awaiting and you. */
-export interface SketchState extends GameStateBase<"sketch"> {
-  round: number;
-  rounds_total: number;
-  /** Times round the table (1-3): every player draws this often. */
-  rotations: number;
+export interface SketchState extends RotatingRoundsStateBase<"sketch"> {
   /** draw: the artist is drawing; guess: guesses come in; judging: the Referee is ruling. Null unless running. */
   phase: "draw" | "guess" | "judging" | null;
   /** This round's artist; null unless running. */
@@ -80,13 +76,7 @@ export interface SketchState extends GameStateBase<"sketch"> {
   image: SketchImage | null;
   draw_seconds: number;
   guess_seconds: number;
-  /** The artists' order, drawn at creation. */
-  order: string[];
   last_round: SketchRound | null;
-  /** A tie at the top (finished, no winner). */
-  draw: boolean;
-  /** Final standings, best first, once finished. */
-  places: string[] | null;
   players: SketchPlayer[];
   rounds?: SketchRound[];
   you?: SketchYou;

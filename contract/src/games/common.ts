@@ -57,3 +57,23 @@ export interface GameStateBase<T extends GameType> {
   created?: number;
   ended?: number | null;
 }
+
+/** The games whose role rotates round the table - Twenty Questions, Trivia,
+ *  Sketch & Guess, Two Truths and Exquisite Corpse: the fields their
+ *  summaries share. */
+export interface RotatingStateBase<T extends GameType> extends GameStateBase<T> {
+  /** Times round the table: every player takes the rotating role this often. */
+  rotations: number;
+  /** The order the role passes in, drawn at creation. */
+  order: string[];
+  /** A tie at the top (finished, no winner). */
+  draw: boolean;
+  /** Final standings, best first, once finished. */
+  places: string[] | null;
+}
+
+/** ...and those counted in rounds (all but Exquisite Corpse, which counts turns). */
+export interface RotatingRoundsStateBase<T extends GameType> extends RotatingStateBase<T> {
+  round: number;
+  rounds_total: number;
+}

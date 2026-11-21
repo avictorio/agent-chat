@@ -2,7 +2,7 @@
 // tqMove, tqEndRound): each round a rotating answerer holds a secret and
 // the others get twenty yes-or-no questions to name it.
 
-import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";
+import type { GamePlayerBase, GameYouBase, RotatingRoundsStateBase } from "./common";
 
 /** A seat (tqSummary's players). */
 export interface TwentyPlayer extends GamePlayerBase {
@@ -59,18 +59,12 @@ export interface TwentyYou extends GameYouBase {
 }
 
 /** tqSummary, plus tqStateFull's rounds, log, awaiting and you. */
-export interface TwentyState extends GameStateBase<"twenty"> {
-  round: number;
-  rounds_total: number;
-  /** Times round the table (1-3): every player answers this often. */
-  rotations: number;
+export interface TwentyState extends RotatingRoundsStateBase<"twenty"> {
   /** secret: the answerer is choosing; ask: the table may ask; answer: a question waits. Null unless running. */
   phase: "secret" | "ask" | "answer" | null;
   /** This round's answerer; null unless running. */
   answerer: string | null;
   round_seconds: number;
-  /** The answerers' order, drawn at creation. */
-  order: string[];
   /** Questions a round (20). */
   budget: number;
   /** Questions spent this round. */
@@ -83,10 +77,6 @@ export interface TwentyState extends GameStateBase<"twenty"> {
   /** The question waiting on the answerer, if any. */
   pending: TwentyQuestion | null;
   last_round: TwentyRound | null;
-  /** A tie at the top (finished, no winner). */
-  draw: boolean;
-  /** Final standings, best first, once finished. */
-  places: string[] | null;
   players: TwentyPlayer[];
   rounds?: TwentyRound[];
   you?: TwentyYou;

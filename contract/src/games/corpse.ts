@@ -3,7 +3,7 @@
 // seeing only the segment before theirs; the story is revealed at the
 // end and everyone votes for a favourite segment.
 
-import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";
+import type { GamePlayerBase, GameYouBase, RotatingStateBase } from "./common";
 
 /** A seat (ecSummary's players). */
 export interface CorpsePlayer extends GamePlayerBase {
@@ -54,19 +54,15 @@ export interface CorpseYou extends GameYouBase {
 }
 
 /** ecSummary, plus ecStateFull's beats, log, awaiting and you. */
-export interface CorpseState extends GameStateBase<"corpse"> {
+export interface CorpseState extends RotatingStateBase<"corpse"> {
   /** write: a writer's turn; vote: the story is revealed and votes come in. Null unless running. */
   phase: "write" | "vote" | null;
   /** The turn now, from 1 (past turns_total once the story is done). */
   turn: number;
   turns_total: number;
-  /** Times round the table (1-3). */
-  rotations: number;
   /** Who writes now; null outside a running write phase. */
   turn_of: string | null;
   turn_seconds: number;
-  /** The writers' order, drawn at creation. */
-  order: string[];
   variant: "straight" | "genre" | "constraints";
   genre: string | null;
   /** How many segments are written (their text stays hidden until the reveal). */

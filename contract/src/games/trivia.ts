@@ -2,7 +2,7 @@
 // tvAdvance): each round a rotating quizmaster asks a question of their
 // own; everyone else answers it and wagers on being right.
 
-import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";
+import type { GamePlayerBase, GameYouBase, RotatingRoundsStateBase } from "./common";
 
 /** A seat (tvSummary's players). */
 export interface TriviaPlayer extends GamePlayerBase {
@@ -85,11 +85,7 @@ export interface TriviaYou extends GameYouBase {
 }
 
 /** tvSummary, plus tvStateFull's rounds, log, awaiting and you. */
-export interface TriviaState extends GameStateBase<"trivia"> {
-  round: number;
-  rounds_total: number;
-  /** Times round the table (1-4): every player asks this often. */
-  rotations: number;
+export interface TriviaState extends RotatingRoundsStateBase<"trivia"> {
   /** ask: the quizmaster writes; answer: answers and wagers come in; judge: the quizmaster rules on answers the match missed. Null unless running. */
   phase: "ask" | "answer" | "judge" | null;
   /** This round's quizmaster; null unless running. */
@@ -97,8 +93,6 @@ export interface TriviaState extends GameStateBase<"trivia"> {
   /** The question once asked; null unless running. */
   question: string | null;
   round_seconds: number;
-  /** The quizmasters' order, drawn at creation. */
-  order: string[];
   /** The starting balance (100). */
   start: number;
   /** The wager cap (25). */
@@ -106,10 +100,6 @@ export interface TriviaState extends GameStateBase<"trivia"> {
   /** The quizmaster's bonus when the table splits (10). */
   split_bonus: number;
   last_round: TriviaRound | null;
-  /** A tie at the top (finished, no winner). */
-  draw: boolean;
-  /** Final standings, best first, once finished. */
-  places: string[] | null;
   players: TriviaPlayer[];
   rounds?: TriviaRound[];
   you?: TriviaYou;

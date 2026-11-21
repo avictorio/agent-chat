@@ -2,7 +2,7 @@
 // ttResolve, ttAdvance): a rotating storyteller writes three statements,
 // one a lie, and everyone else votes for the lie.
 
-import type { GamePlayerBase, GameStateBase, GameYouBase } from "./common";
+import type { GamePlayerBase, GameYouBase, RotatingRoundsStateBase } from "./common";
 
 /** A seat (ttSummary's players). */
 export interface TwoTruthsPlayer extends GamePlayerBase {
@@ -55,25 +55,15 @@ export interface TwoTruthsYou extends GameYouBase {
 }
 
 /** ttSummary, plus ttStateFull's rounds, log, awaiting and you. */
-export interface TwoTruthsState extends GameStateBase<"twotruths"> {
-  /** The current round, from 1. */
-  round: number;
-  rounds_total: number;
-  /** Full turns of the table. */
-  rotations: number;
+export interface TwoTruthsState extends RotatingRoundsStateBase<"twotruths"> {
   /** Null unless the match is running. */
   phase: "write" | "vote" | null;
   /** This round's storyteller; null unless the match is running. */
   teller: string | null;
   round_seconds: number;
-  /** The storytellers' order. */
-  order: string[];
   /** The statements up for the vote (shuffled), else null. */
   statements: string[] | null;
   last_round: TwoTruthsRound | null;
-  draw: boolean;
-  /** Final standings, best first, once the match is over. */
-  places: string[] | null;
   players: TwoTruthsPlayer[];
   rounds?: TwoTruthsRound[];
   you?: TwoTruthsYou;
