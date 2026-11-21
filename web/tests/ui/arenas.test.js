@@ -268,6 +268,16 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
     await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.5, { steps: 4 });
     await page.mouse.up();
     out.ink = await page.$eval('#viewer .sg-canvas', (c) => { const x = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < x.length; i += 4) if (x[i] < 200 || x[i + 1] < 200) n++; return n; });
+    // the pad is React (ctx.panel) drawing gameView's strokes: a repaint
+    // keeps the drawing, the pen colour and the eraser
+    await page.click('#viewer .sg-tool:has-text("Eraser")');
+    await page.click('#viewer .arena-tabs button:nth-child(2)');
+    await page.click('#viewer .arena-tabs button:nth-child(1)');
+    await page.waitForSelector('#viewer .sg-artist', { timeout: 10000 });
+    out.kept = await page.$eval('#viewer .sg-artist', (f) => { const c = f.querySelector('.sg-canvas'); const x = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < x.length; i += 4) if (x[i] < 200 || x[i + 1] < 200) n++; return n + '|' + f.querySelector('.sg-swatch.on').getAttribute('aria-label') + '|' + f.querySelector('.sg-tool.on').textContent; });
+    await page.click('#viewer .sg-tool:has-text("Eraser")');
+    out.kept += '|' + (await page.$$eval('#viewer .sg-tool.on', (n) => n.length));
+    await page.mouse.move(box.x + 10, box.y + 10);
     await shot(page, 'sketch-draw.png');
     await page.click('#viewer .sg-artist .sg-send');
     out.sending = await page.$eval('#viewer .lc-note', (e) => e.textContent);
@@ -278,9 +288,10 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
     if (out.touch !== 'none') throw new Error('strokes must not scroll the page: ' + out.touch);
     if (!/Draw something first/.test(out.empty)) throw new Error('an empty page is refused: ' + out.empty);
     if (out.ink < 200) throw new Error('the strokes land on the pad: ' + out.ink);
+    if (out.kept !== out.ink + '|Pen colour #ef4444|Eraser|0') throw new Error('a repaint keeps the drawing and the pen (and the eraser goes off again): ' + out.kept + ' (ink ' + out.ink + ')');
     if (/data:/.test(out.sending)) throw new Error('the status line must not echo the image: ' + out.sending.slice(0, 60));
     if (!/"dir":"data:image\/png;base64,/.test(out.call)) throw new Error('the pad goes out as a PNG data URL: ' + out.call);
-    return { banner: out.banner, ink: out.ink, sending: out.sending };
+    return { banner: out.banner, ink: out.ink, kept: out.kept, sending: out.sending };
   });
   await run('sketch-draw-mobile', { state: { sg: true, sgDraw: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
     const out = {};
@@ -313,6 +324,15 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.reveal = await page.$$eval('#viewer .sg-rv', (r) => r.map((x) => x.textContent));
       out.prompt = await page.$eval('#viewer .sg-rv-prompt', (e) => e.textContent);
       await page.fill('#viewer .sg-in', 'a lighthouse');
+      // the guess is React (ctx.panel): a repaint keeps the draft
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .sg-guess', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .sg-guess', (f) => f.querySelector('.sg-in').value + '|' + f.querySelector('.sg-send').disabled);
+      await page.focus('#viewer .sg-in');
+      await page.keyboard.type(' at sea');
+      out.typed = await page.$eval('#viewer .sg-in', (i) => i.value + '|' + (document.activeElement === i));
+      await page.fill('#viewer .sg-in', 'a lighthouse');
       await shot(page, label + '.png');
       await page.click('#viewer .sg-guess .sg-send');
       await settle(page);
@@ -323,6 +343,8 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.order.join(',') !== 'lc-board-big,sg-form,sg-scores,sg-reveal') throw new Error('the gallery, the guess, scores, the last round: ' + JSON.stringify(out.order));
       if (!/Guess Ada's drawing · round 2 of 3/.test(out.banner)) throw new Error('the banner: ' + out.banner);
       if (!/It was: a cat stuck in a tree/.test(out.prompt) || !/cat up a tree.*the Referee's call.*\+2/.test(out.reveal[0]) || !/a squirrel/.test(out.reveal[1]) || !/Henry.*the artist.*\+1/.test(out.reveal[2])) throw new Error('the last round: ' + JSON.stringify(out));
+      if (out.kept !== 'a lighthouse|false') throw new Error('a repaint keeps the draft: ' + out.kept);
+      if (out.typed !== 'a lighthouse at sea|true') throw new Error('typing keeps the field: ' + out.typed);
       if (!/"dir":"a lighthouse"/.test(out.call)) throw new Error('a guess goes out: ' + out.call);
       if (!/Your guess is in/.test(out.title)) throw new Error('the sealed guess shows: ' + out.title);
       return out;

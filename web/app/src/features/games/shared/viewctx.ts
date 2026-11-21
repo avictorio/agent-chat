@@ -53,8 +53,8 @@ export type GameView = {
   // Letter Grid: the word being made, shared by the word panel and the
   // scene (a tap on a tile traces it); kept across repaints, reset each round
   lgDraft?: LgDraft | null;
+  // Sketch & Guess: the pad's drawing for the round (its panel draws it)
   sgPad?: SgPad | null;
-  sgGuess?: { key: string; d: string } | null;
   // target: the rival in a free-for-all (the shot goes out "Name:Cell")
   bsFire?: ((label: string, target?: string) => void) | null;
   // fleet placement in the scene: the draft and its actions
@@ -82,7 +82,6 @@ export interface GameViewCtx {
   arenaHint(key: string, text: string): HTMLElement | null;
   arenaTabs(g: GL): HTMLElement;
   bsScene(g: BattleshipState, wrap: HTMLElement, under?: HTMLElement): void;
-  bsStrips3d(g: BattleshipState, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement;
   dropBs3d(): void;
   dropLc3d(): void;
   paintLc3d(g: LightCyclesState, h: Host3d): void;

@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 import type { GameState, GameType } from "@chat/contract";
 import type { GL } from "./shared/render";
-import { battleshipBoard } from "./shared/render";
 import type { HistRow, HistWho } from "./shared/history";
 import type { GameViewCtx } from "./shared/viewctx";
 import { auHistoryRows } from "./auction/auction";
 import { AuctionCard } from "./auction/AuctionPanels";
 import { renderAuctionView } from "./auction/view";
 import { auctionStatus } from "./auction/status";
+import { BattleshipCard } from "./battleship/BattleshipPanels";
 import { bsHistoryRows } from "./battleship/history";
 import { renderBattleshipView } from "./battleship/view";
 import { battleshipStatus } from "./battleship/status";
@@ -39,10 +39,11 @@ import { ldHistoryRows } from "./liarsdice/liarsdice";
 import { LiarsDiceCard } from "./liarsdice/LiarsDicePanels";
 import { renderLiarsView } from "./liarsdice/view";
 import { liarsdiceStatus } from "./liarsdice/status";
-import { paintLightCyclesCard } from "./lightcycles/card";
+import { LightCyclesCard } from "./lightcycles/LightCyclesPanels";
 import { lcHistoryCount, lcHistoryRows } from "./lightcycles/history";
 import { renderLightCyclesView } from "./lightcycles/view";
-import { sgCardBoard, sgHistoryRows } from "./sketch/sketch";
+import { sgHistoryRows } from "./sketch/sketch";
+import { SketchCard } from "./sketch/SketchPanels";
 import { renderSketchView } from "./sketch/view";
 import { sketchStatus } from "./sketch/status";
 import { tvHistoryRows } from "./trivia/trivia";
@@ -152,7 +153,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   battleship: {
     view: renderBattleshipView,
-    card: (b, g) => fill(b, battleshipBoard(g)),
+    Card: BattleshipCard,
     history: bsHistoryRows,
     historyCount: count("log"),
     ...battleshipStatus,
@@ -208,13 +209,13 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   lightcycles: {
     view: renderLightCyclesView,
-    card: (b, g) => paintLightCyclesCard(b, g),
+    Card: LightCyclesCard,
     history: lcHistoryRows,
     historyCount: lcHistoryCount,
   },
   sketch: {
     view: renderSketchView,
-    card: (b, g, me) => fill(b, sgCardBoard(g, me)),
+    Card: SketchCard,
     history: sgHistoryRows,
     historyCount: rounds,
     ...sketchStatus,
