@@ -75,6 +75,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       // a tap on a slot takes that peg out
       await page.click('#viewer .cr-slot:nth-child(2)');
       out.afterClear = await page.$$eval('#viewer .cr-slot .cr-peg', (p) => p.map((x) => x.textContent).join(''));
+      // the input is React (ctx.panel): a repaint keeps the half-made guess
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .cr-input', { timeout: 10000 });
+      out.kept = (await page.$$eval('#viewer .cr-slot .cr-peg', (p) => p.map((x) => x.textContent).join(''))) + '|' + (await page.$eval('#viewer .cr-go', (b) => b.disabled));
       await page.click('#viewer .cr-color[aria-label="Add green"]');
       out.goOn = await page.$eval('#viewer .cr-go', (b) => !b.disabled);
       await page.click('#viewer .cr-go');
@@ -89,6 +94,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.rivalPips !== 2) throw new Error('a rival\'s feedback shows (Ada round 2: 2 right place): ' + out.rivalPips);
       if (!out.goOff || !out.goOn) throw new Error('Guess waits for every slot: ' + JSON.stringify(out));
       if (out.slots !== 'RGBY' || out.afterClear !== 'RBY') throw new Error('the palette fills slots and a tap clears one: ' + JSON.stringify(out));
+      if (out.kept !== 'RBY|true') throw new Error('a repaint keeps the half-made guess: ' + out.kept);
       if (!/"dir":"R B Y G"/.test(out.moveCall)) throw new Error('the guess goes in order: ' + out.moveCall);
       if (out.sealed !== 'RBYG') throw new Error('the round\'s guess shows sealed in your lane: ' + out.sealed);
       if (!/Your guess · round 3 of 10/.test(out.banner)) throw new Error('the turn banner asks for a guess: ' + out.banner);
@@ -135,6 +141,11 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       await settle(page);
       out.refused = await page.$eval('#viewer .lc-note', (e) => e.textContent);
       await page.fill('#viewer .cr-word', 'crane');
+      // the input is React (ctx.panel): a repaint keeps the word being typed
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .cr-word', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .cr-word', (i) => i.value + '|' + document.querySelector('#viewer .cr-go').disabled);
       await page.press('#viewer .cr-word', 'Enter');
       await settle(page);
       out.moveCall = calls.filter((c) => c.includes('/games/14/moves')).pop() || '';
@@ -143,6 +154,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.myTiles !== 'C:n,R:n,A:g,N:n,E:y') throw new Error('your tiles carry letters and colours: ' + out.myTiles);
       if (out.rivalLetters !== '') throw new Error('rival tiles carry no letters: ' + out.rivalLetters);
       if (!/not in the word list/.test(out.refused)) throw new Error('a word not in the list is refused: ' + out.refused);
+      if (out.kept !== 'CRANE|false') throw new Error('a repaint keeps the word being typed: ' + out.kept);
       if (!/"dir":"crane"/.test(out.moveCall)) throw new Error('Enter sends the word: ' + out.moveCall);
       if (out.sealed !== 'CRANE') throw new Error('the sealed guess shows in your lane: ' + out.sealed);
       return out;
@@ -430,6 +442,12 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       out.preview = await page.$eval('#viewer .lg-preview', (e) => e.textContent);
       out.focus = await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('lg-word'));
       await shot(page, label + '.png');
+      // the panel is React (ctx.panel; the draft stays on the view, which
+      // the scene shares): a repaint keeps the word, its trace and Send
+      await page.click('#viewer .arena-tabs button:nth-child(2)');
+      await page.click('#viewer .arena-tabs button:nth-child(1)');
+      await page.waitForSelector('#viewer .lg-panel', { timeout: 10000 });
+      out.kept = await page.$eval('#viewer .lg-panel', (p) => p.querySelector('.lg-word').value + '|' + [...p.querySelectorAll('.lg-cell')].map((c) => c.textContent).join(',') + '|' + p.querySelector('.lg-send').disabled);
       await page.click('#viewer .lg-send');
       await settle(page);
       out.call = calls.filter((c) => c.includes('/games/34/moves')).pop() || '';
@@ -445,6 +463,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
       if (out.cells.join(',') !== 'S A1,T B1,O C1,N D1,E E1') throw new Error('the traced cells: ' + JSON.stringify(out.cells));
       if (!/\+5 · \+5 cells/.test(out.preview)) throw new Error('what it would score: ' + out.preview);
       if (!out.focus) throw new Error('typing keeps the field focused');
+      if (out.kept !== 'STONE|S A1,T B1,O C1,N D1,E E1|false') throw new Error('a repaint keeps the word: ' + out.kept);
       if (!/"dir":"stone A1 B1 C1 D1 E1"/.test(out.call)) throw new Error('Send carries the word and its cells: ' + out.call);
       if (!/Your word is in: STONE/.test(out.queued)) throw new Error('the sealed word shows: ' + out.queued);
       return out;

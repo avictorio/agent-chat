@@ -3,7 +3,7 @@ import type { Root } from "react-dom/client";
 import type { BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
 import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
-import type { LgDraft, LgPanel } from "../lettergrid/lettergrid";
+import type { LgDraft } from "../lettergrid/lettergrid";
 import type { SgPad } from "../sketch/sketch";
 
 // The game store's arena-view contract: what a game's
@@ -50,12 +50,11 @@ export type GameView = {
   r3d?: Host3d | null;
   r3dSeq?: number;
   r3dCommit?: (() => void) | null;
-  // Code Race: the guess being made (kept across repaints, reset each round)
-  crDraft?: { round: number; v: string } | null;
+  // Letter Grid: the word being made, shared by the word panel and the
+  // scene (a tap on a tile traces it); kept across repaints, reset each round
   lgDraft?: LgDraft | null;
   sgPad?: SgPad | null;
   sgGuess?: { key: string; d: string } | null;
-  lgPanel?: LgPanel | null;
   // target: the rival in a free-for-all (the shot goes out "Name:Cell")
   bsFire?: ((label: string, target?: string) => void) | null;
   // fleet placement in the scene: the draft and its actions

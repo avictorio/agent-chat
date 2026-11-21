@@ -1,12 +1,13 @@
 import type { FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { el } from "../../../lib/index";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { c4Board, c4Seats } from "./fourinarow";
+import { FourDrops, FourSeats } from "./FourInARowPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Four in a Row (2026-11-19): who plays which disc, then the board -
    on your turn the column heads are the drop buttons. A drop goes out
-   at once; the turn passes when the server answers. */
+   at once; the turn passes when the server answers. The seats and the
+   drop row are React (FourInARowPanels.tsx, mounted with ctx.panel). */
 export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
@@ -47,13 +48,11 @@ export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boo
   const h = ctx.host3d("fourinarow");
   wrap.appendChild(h.host);
   ctx.paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
-  wrap.appendChild(c4Seats(g, me));
+  wrap.appendChild(ctx.panel("seats", <FourSeats g={g} me={me} />));
   if (myTurn) {
     const hint = ctx.arenaHint("fourinarow", "Tap a column on the board (or a number) to drop your disc.");
     if (hint) wrap.appendChild(hint);
-    const under = el("div", "c4-under");
-    under.appendChild(c4Board(g, { open: you.legal_moves || [], onDrop: drop, headsOnly: true }));
-    wrap.appendChild(under);
+    wrap.appendChild(ctx.panel("drops", <FourDrops open={you.legal_moves || []} onDrop={drop} />));
   }
   if (g.status === "running" && !you.playing) note.textContent = "Spectating - the board updates as each disc drops.";
   else if (g.status === "running" && you.playing && !myTurn) note.textContent = "Your rival is thinking. You'll get a nudge when it's your turn.";

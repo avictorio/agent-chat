@@ -1,6 +1,6 @@
 import type { DuelPlayer, DuelRound, DuelState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { THROW_EMOJI } from "../shared/render";
+import { THROW_EMOJI } from "./duel";
 import { histPlayer, type HistRow, type HistWho } from "../shared/history";
 
 /** The Duel's History rows: one per round, each side's throw and who took it. */

@@ -1,8 +1,13 @@
 import type { DuelPlayer, DuelState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { duelBoard, duelScoreLine, duelTendencies, gameMetaText, roundVerdict, THROW_BEATS, THROW_EMOJI, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
+import { duelTendencies } from "./duel";
+import { DuelPad, DuelScoreboard, DuelTendencies, DuelVerdict } from "./DuelPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
+/* The Duel: the scene (two players), the scoreboard where there is no
+   scene, the tendency lines, the last round's verdict and the throw pad.
+   The panels are React (DuelPanels.tsx, mounted with ctx.panel). */
 export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) {
   if (!ctx.gameView) return;
   const key =
@@ -54,24 +59,9 @@ export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) 
   // The scene's name plates carry the score (win pips, a streak's
   // flame) and its record the rounds, so the scoreboard is for the
   // lobby and for devices without WebGL.
-  if (!in3d || !ctx.webglOk()) {
-    const big = el("div", "lc-board-big" + (in3d ? " duel-board-under" : ""));
-    big.appendChild(duelBoard(g, true));
-    wrap.appendChild(big);
-  }
+  if (!in3d || !ctx.webglOk()) wrap.appendChild(ctx.panel("board", <DuelScoreboard g={g} under={in3d} />));
   const tends = duelTendencies(g);
-  if (tends.length) {
-    const tw = el("div", "duel-tend");
-    tends.forEach((t) => {
-      const row = el("div", "duel-tend-row");
-      const nm = el("span", "duel-tend-name", t.name);
-      nm.style.color = t.hex;
-      row.appendChild(nm);
-      row.appendChild(el("span", "", t.line));
-      tw.appendChild(row);
-    });
-    wrap.appendChild(tw);
-  }
+  if (tends.length) wrap.appendChild(ctx.panel("tend", <DuelTendencies tends={tends} />));
   const note = el("div", "lc-note", "");
   const players = g.players || [];
   const rounds = g.rounds || [];
@@ -87,44 +77,17 @@ export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) 
     }
   }
   if (rounds.length) {
-    const last = rounds[rounds.length - 1]!;
-    const v = roundVerdict(last, players);
-    const banner = el("div", "duel-verdict" + (v.tie ? " clash" : ""));
-    const iconsWrap = el("span", "v-icons");
-    players.forEach((p: DuelPlayer) => {
-      const t = (last.throws || {})[p.name];
-      const cls = v.tie ? "tie" : last.winner === p.name ? "winner" : "loser";
-      iconsWrap.appendChild(el("span", "v-icon " + cls, t ? THROW_EMOJI[t] || "" : "—"));
-    });
-    banner.appendChild(iconsWrap);
-    banner.appendChild(el("span", "", v.text + " · " + duelScoreLine(g)));
-    if (!v.tie && last.winner) {
-      const wp = players.filter((p: DuelPlayer) => p.name === last.winner)[0];
-      if (wp) banner.style.borderColor = wp.hex;
-    }
-    if (ctx.gameView.lastRounds != null && rounds.length > ctx.gameView.lastRounds) {
-      banner.classList.add("reveal-in");
-      iconsWrap.classList.add("flip");
-    }
-    wrap.appendChild(banner);
+    // the throws flip in on the repaint that brings a new round
+    const reveal = ctx.gameView.lastRounds != null && rounds.length > ctx.gameView.lastRounds;
+    wrap.appendChild(ctx.panel("verdict", <DuelVerdict key={rounds.length} g={g} reveal={reveal} />));
   }
   ctx.gameView.lastRounds = rounds.length;
   if (g.you && g.you.playing && g.status === "running") {
-    const pad = el("div", "duel-pad2" + (!g.you.queued ? " your-move" : ""));
-    ["rock", "paper", "scissors"].forEach((t) => {
-      const b = el("button", "duel-tile" + (g.you!.queued === t ? " queued" : ""));
-      b.type = "button";
-      b.appendChild(el("span", "t-icon", THROW_EMOJI[t] || ""));
-      b.appendChild(el("span", "t-name", t));
-      b.appendChild(el("span", "t-beats", THROW_BEATS[t] || ""));
-      b.appendChild(el("span", "t-lock", g.you!.queued === t ? "LOCKED" : ""));
-      b.addEventListener("click", () => {
-        if (ctx.gameView && ctx.gameView.duelCommit) ctx.gameView.duelCommit(t);
-        void ctx.sendMove(g.id, t, note);
-      });
-      pad.appendChild(b);
-    });
-    put(pad);
+    const onThrow = (t: string) => {
+      if (ctx.gameView && ctx.gameView.duelCommit) ctx.gameView.duelCommit(t);
+      void ctx.sendMove(g.id, t, note);
+    };
+    put(ctx.panel("pad", <DuelPad g={g} onThrow={onThrow} />));
     note.textContent = g.you.queued
       ? "Thrown: " + g.you.queued + " - tap another to change it before the round resolves."
       : "Your throw: pick one. It stays hidden until your rival has thrown too.";

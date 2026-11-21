@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { GameState, GameType } from "@chat/contract";
 import type { GL } from "./shared/render";
-import { battleshipBoard, duelBoard } from "./shared/render";
+import { battleshipBoard } from "./shared/render";
 import type { HistRow, HistWho } from "./shared/history";
 import type { GameViewCtx } from "./shared/viewctx";
 import { auHistoryRows } from "./auction/auction";
@@ -11,7 +11,8 @@ import { auctionStatus } from "./auction/status";
 import { bsHistoryRows } from "./battleship/history";
 import { renderBattleshipView } from "./battleship/view";
 import { battleshipStatus } from "./battleship/status";
-import { crCardBoard, crHistoryRows } from "./coderace/coderace";
+import { crHistoryRows } from "./coderace/coderace";
+import { CodeRaceCard } from "./coderace/CodeRacePanels";
 import { renderCodeRaceView } from "./coderace/view";
 import { coderaceStatus } from "./coderace/status";
 import { ecHistoryRows } from "./corpse/corpse";
@@ -19,16 +20,19 @@ import { CorpseCard } from "./corpse/CorpsePanels";
 import { renderCorpseView } from "./corpse/view";
 import { corpseStatus } from "./corpse/status";
 import { duelHistoryRows } from "./duel/history";
+import { DuelCard } from "./duel/DuelPanels";
 import { renderDuelView } from "./duel/view";
 import { duelStatus } from "./duel/status";
-import { c4Board, c4HistoryRows } from "./fourinarow/fourinarow";
+import { c4HistoryRows } from "./fourinarow/fourinarow";
+import { FourInARowCard } from "./fourinarow/FourInARowPanels";
 import { renderFourView } from "./fourinarow/view";
 import { fourinarowStatus } from "./fourinarow/status";
 import { flHistoryRows } from "./frontlines/frontlines";
 import { FrontlinesCard } from "./frontlines/FrontlinesPanels";
 import { renderFrontlinesView } from "./frontlines/view";
 import { frontlinesStatus } from "./frontlines/status";
-import { lgCardBoard, lgHistoryRows } from "./lettergrid/lettergrid";
+import { lgHistoryRows } from "./lettergrid/lettergrid";
+import { LetterGridCard } from "./lettergrid/LetterGridPanels";
 import { renderLetterView } from "./lettergrid/view";
 import { lettergridStatus } from "./lettergrid/status";
 import { ldHistoryRows } from "./liarsdice/liarsdice";
@@ -155,7 +159,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   coderace: {
     view: renderCodeRaceView,
-    card: (b, g, me) => fill(b, crCardBoard(g, me)),
+    Card: CodeRaceCard,
     history: crHistoryRows,
     historyCount: rounds,
     ...coderaceStatus,
@@ -169,14 +173,14 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   duel: {
     view: renderDuelView,
-    card: (b, g) => fill(b, duelBoard(g)),
+    Card: DuelCard,
     history: duelHistoryRows,
     historyCount: rounds,
     ...duelStatus,
   },
   fourinarow: {
     view: renderFourView,
-    card: (b, g) => fill(b, c4Board(g, { compact: true })),
+    Card: FourInARowCard,
     history: c4HistoryRows,
     historyCount: count("moves"),
     ...fourinarowStatus,
@@ -190,7 +194,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   lettergrid: {
     view: renderLetterView,
-    card: (b, g, me) => fill(b, lgCardBoard(g, me)),
+    Card: LetterGridCard,
     history: lgHistoryRows,
     historyCount: rounds,
     ...lettergridStatus,
