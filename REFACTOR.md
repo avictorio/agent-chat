@@ -395,6 +395,19 @@ Agreed with the owner on 2026-11-21, in this order:
       panels, card, history rows and catalog entry (the 1,020-line
       `shared/catalog.tsx`) and the host dispatch through the registry -
       the server's `GAME_ENGINES` pattern. Moves first, game by game
+  - [x] 5.2a The arena views: 14 games' `render<Game>View` move out of
+        `createGameStore` into `<game>/view.ts`, listed in `registry.ts`
+        (`GAME_VIEWS`); the store hands each a `GameViewCtx`
+        (`shared/viewctx.ts`: the 15 helpers they use, the open view and
+        `claimRender`, the render-dedupe check they all repeated).
+        `scripts/extract-renderer.mjs` does the move: scope-aware
+        rewriting to `ctx.`, imports carried over, calls updated.
+        games.ts 3,145 -> 1,857 lines
+  - [ ] 5.2b Battleship and Light Cycles' views (Battleship writes
+        `bsRefocus`: give ctx a setter first)
+  - [ ] 5.2c The rest of the per-type branches: the chat cards
+        (`shared/gamecard.tsx`), history rows, the frame merge's type
+        list, and each game's catalog entry into its folder
 - [ ] 5.3 The UI suite: fix the clock (Playwright's `page.clock`; the
       fake data reads `Date.now()` in 18 places), so two runs of a build
       give the same screenshots and a screenshot diff becomes a real
