@@ -7,6 +7,8 @@
 // compare two runs with `node tests/ui/panelsnap.js diff a.json b.json`
 // (it compares the snapshots both files have). ONLY_GAMES=tr,au snapshots
 // just the states of those fixtures (the first key of each state).
+// STYLES=1 adds a hash of each element's full computed style, for CSS
+// moves that must not change how anything looks (the games.css split).
 // Not part of the suite: run it before and after a change.
 const { chromium, fresh, setup, useClock, settle, noGl } = require('./harness');
 const fs = require('fs');
@@ -18,7 +20,19 @@ const MODES = [
   { key: 'nogl-phone', gl: false, w: 390, h: 844, touch: true },
 ];
 
-function serialise() {
+function serialise(styles) {
+  const hash = (str) => {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+    return (h >>> 0).toString(36);
+  };
+  const css = (n) => {
+    if (!styles) return '';
+    const cs = getComputedStyle(n);
+    let all = '';
+    for (let i = 0; i < cs.length; i++) all += cs[i] + ':' + cs.getPropertyValue(cs[i]) + ';';
+    return ' css=' + hash(all);
+  };
   const SKIP = '.turn-banner, .duel-clockwrap, .lc-3d-host, .arena3d-frame, canvas, .gm-due, .turn-left';
   const walk = (n) => {
     if (n.nodeType === 3) return n.textContent.trim() ? JSON.stringify(n.textContent) : '';
@@ -34,7 +48,7 @@ function serialise() {
       if (n.checked) props.push('[checked]');
     }
     const kids = [...n.childNodes].map(walk).filter(Boolean).join('');
-    return '<' + n.tagName.toLowerCase() + (attrs ? ' ' + attrs : '') + props.join('') + '>' + kids + '</' + n.tagName.toLowerCase() + '>';
+    return '<' + n.tagName.toLowerCase() + (attrs ? ' ' + attrs : '') + props.join('') + css(n) + '>' + kids + '</' + n.tagName.toLowerCase() + '>';
   };
   return walk;
 }
@@ -51,7 +65,7 @@ async function snapOne(browser, state, mode) {
     await page.goto('https://chat.victorio.cloud/r/demo');
     await settle(page);
     const card = await page.waitForSelector('.game-card .game-board > *:not(.md-p)', { timeout: 10000 }).catch(() => null);
-    const snap = (sel) => page.evaluate(([sel, fn]) => { const walk = new Function('return ' + fn)()(); const el = document.querySelector(sel); return el ? walk(el) : null; }, [sel, serialise.toString()]);
+    const snap = (sel) => page.evaluate(([sel, fn, styles]) => { const walk = new Function('return ' + fn)()(styles); const el = document.querySelector(sel); return el ? walk(el) : null; }, [sel, serialise.toString(), !!process.env.STYLES]);
     if (card) {
       await settle(page);
       out.card = await snap('.game-card');
