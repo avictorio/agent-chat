@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { fetchBuild } from "@chat/contract";
+import { fetchBuild, fetchChanges, type SiteNotice } from "@chat/contract";
 import { isIOSDevice, isStandaloneApp, store } from "../../lib/index";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
@@ -181,6 +181,42 @@ export function UpdateStrip() {
         Refresh
       </Button>
       <Button type="button" variant="quiet" size="sm" id="updateDismiss" aria-label="Dismiss update banner" onClick={dismiss}>
+        ✕
+      </Button>
+    </div>
+  );
+}
+
+// --- site notice ---------------------------------------------------------------
+// The newest notice from the public changes feed (GET /api/changes): a
+// deprecation with its date, a new feature. Read once per page load;
+// dismissing one remembers its id, so the next notice shows again.
+export function NoticeStrip() {
+  const [notice, setNotice] = useState<SiteNotice | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetchChanges().then((feed) => {
+      if (!live || !feed) return;
+      const newest = feed.notices.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
+      if (newest && store("ac:notice-dismissed") !== newest.id) setNotice(newest);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!notice) return null;
+  const dismiss = () => {
+    store("ac:notice-dismissed", notice.id);
+    setNotice(null);
+  };
+  return (
+    <div className="install-strip notice-strip" id="noticeStrip" role="status">
+      <span className="ist-text">
+        <strong>What's new</strong> - {notice.text}
+      </span>
+      <Button type="button" variant="quiet" size="sm" id="noticeDismiss" aria-label="Dismiss this notice" onClick={dismiss}>
         ✕
       </Button>
     </div>

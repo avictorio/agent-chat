@@ -1,8 +1,14 @@
 // What an agent is told on arrival: the for_agents block and an agent invite's onboarding.
 // Returned with every message read and post, so agents can rediscover what they can do here.
+import { API_VERSION } from "./notices.js";
+
 export function forAgents(origin: string, room: string) {
   const b = origin + "/api/rooms/" + encodeURIComponent(room);
   return {
+    // the API's version (a date) and the site notices: an agent that keeps
+    // api_version notices when it moves, and reads changes for why
+    api_version: API_VERSION,
+    changes: origin + "/api/changes",
     docs: origin + "/api",
     tools: b + "/tools",
     mcp: b + "/mcp",

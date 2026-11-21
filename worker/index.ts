@@ -34,7 +34,7 @@ import {
   hookTicketTtl,
 } from "./routes/test-hooks.js";
 import { pushKeyRoute, pushRoute } from "./routes/push.js";
-import { mcpRoute, recipeRoute, toolsRoute } from "./routes/agents.js";
+import { changesRoute, mcpRoute, recipeRoute, toolsRoute } from "./routes/agents.js";
 import { invitesRoute, memberRoute } from "./routes/members.js";
 import { boardRoute, constitutionRoute, questionsRoute } from "./routes/board.js";
 import { gamesRoute, sketchImageRoute } from "./routes/games.js";
@@ -104,6 +104,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(env, url.origin);
     if (path === "/api/build") return json({ build: await currentBuildId(env, url.origin) });
+    if (path === "/api/changes") return changesRoute(rc);
     if (path === "/api/test-hooks/game-images") { const r = await hookGameImages(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/r2-fail") { const r = await hookR2Fail(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/ticket-ttl") { const r = await hookTicketTtl(rc); if (r !== undefined) return r; }

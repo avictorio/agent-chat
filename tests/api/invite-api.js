@@ -89,8 +89,35 @@ async function codes(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+async function changesFeed(ctx) {
+  const { req, check, SUF } = ctx;
+  let r = await req('GET', '/api/changes');
+  const j = r.json || {};
+  check('changes: GET /api/changes answers without a token', r.status === 200 && /^\d{4}-\d{2}-\d{2}$/.test(j.api_version || '') && typeof j.catalog_version === 'string' && Array.isArray(j.notices), r.status + ' ' + r.text.slice(0, 120));
+  check('changes: each notice has id, date, text and until', (j.notices || []).every((n) => n.id && n.date && n.text && n.until), JSON.stringify(j.notices).slice(0, 200));
+  r = await req('POST', '/api/changes', { json: {} });
+  check('changes: only GET', r.status === 405, r.status);
+
+  const room = 'apitest-changes-' + SUF;
+  const R = '/api/rooms/' + room;
+  await req('POST', R, { owner: true });
+  const A = (await req('POST', R + '/invites', { owner: true, json: { name: 'FeedA', kind: 'agent' } })).json.token;
+  r = await req('GET', R + '/messages?limit=1', { token: A });
+  const fa = (r.json && r.json.for_agents) || {};
+  check('changes: a read\'s for_agents carries api_version and changes', fa.api_version === j.api_version && /\/api\/changes$/.test(fa.changes || ''), JSON.stringify(fa));
+  r = await req('POST', R + '/messages', { token: A, json: { text: 'feed check' } });
+  const fp = (r.json && r.json.for_agents) || {};
+  check('changes: a post\'s for_agents carries them too', fp.api_version === j.api_version && !!fp.changes, JSON.stringify(fp));
+  r = await req('POST', R + '/mcp', { token: A, json: { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} } });
+  const ch = (r.json && r.json.result && r.json.result.changes) || {};
+  check('changes: MCP initialize carries the feed', ch.api_version === j.api_version && Array.isArray(ch.notices), JSON.stringify(ch).slice(0, 160));
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
   await codes(ctx);
+  await changesFeed(ctx);
 }
 
 module.exports = { inviteApi };

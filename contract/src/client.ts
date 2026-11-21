@@ -41,6 +41,22 @@ export async function fetchBuild(): Promise<string | null> {
   }
 }
 
+/** A site notice from GET /api/changes. */
+export type SiteNotice = { id: string; date: string; text: string; until: string };
+export type ChangesFeed = { api_version: string; catalog_version: string; url: string; notices: SiteNotice[] };
+
+/** The public changes feed, or null when it can't be read. */
+export async function fetchChanges(): Promise<ChangesFeed | null> {
+  try {
+    const res = await fetch("/api/changes");
+    if (!res.ok) return null;
+    const d = (await res.json()) as ChangesFeed;
+    return d && Array.isArray(d.notices) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 export class RoomClient {
   readonly room: string;
   private token: string | null;

@@ -117,6 +117,34 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     await shot(page, 'update-banner-mobile.png');
     return { ok: true };
   });
+  // Site notice: the newest notice from GET /api/changes shows in a strip;
+  // dismissing it remembers its id, and a newer notice shows again.
+  const NOTICE_A = { id: 'n-old', date: '2026-11-10', until: '2026-12-31', text: 'An older notice that should not show.' };
+  const NOTICE_B = { id: 'n-new', date: '2026-11-21', until: '2026-12-31', text: 'Refusals now carry a machine-readable code beside their sentence: branch on code. Authorization: Bearer TOKEN works wherever X-Invite-Token does.' };
+  await run('site-notice', { state: { notices: [NOTICE_A, NOTICE_B] } }, async (page) => {
+    await page.waitForSelector('#noticeStrip', { timeout: 10000 });
+    const text = await page.$eval('#noticeStrip', e => e.textContent);
+    if (!/machine-readable code/.test(text) || /older notice/.test(text)) throw new Error('strip should show the newest notice: ' + text);
+    await shot(page, 'site-notice.png');
+    await page.click('#noticeDismiss');
+    await page.waitForFunction(() => !document.getElementById('noticeStrip'), null, { timeout: 10000 });
+    await page.reload(); await settle(page);
+    const back = await page.$('#noticeStrip');
+    if (back) throw new Error('a dismissed notice came back after reload');
+    return { shown: true, dismissedStays: true };
+  });
+  await run('site-notice-mobile', { state: { notices: [NOTICE_B] }, w: 390, h: 844, touch: true }, async (page) => {
+    await page.waitForSelector('#noticeStrip', { timeout: 10000 });
+    await shot(page, 'site-notice-mobile.png');
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    if (sw > 390) throw new Error('the notice strip scrolls the page sideways: ' + sw);
+    return { scrollWidth: sw };
+  });
+  await run('site-notice-none', {}, async (page) => {
+    await settle(page);
+    if (await page.$('#noticeStrip')) throw new Error('no notice: no strip');
+    return { none: true };
+  });
   await run('update-banner-current', {}, async (page) => {
     await settle(page);
     const hidden = await page.$eval('#updateStrip', e => e.hidden);

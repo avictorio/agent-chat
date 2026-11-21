@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
 import { ApiError, RoomClient, type MemberKind } from "@chat/contract";
 import { same, store, toast } from "../../lib/index";
-import { InstallStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
+import { InstallStrip, NoticeStrip, UpdateStrip, useInstall, usePullToRefresh } from "../shell/strips";
 import { ToastHost } from "../shell/ToastHost";
 import { AgentGateView, LockedView } from "./views";
 import { TABS, useTabs } from "./useTabs";
@@ -480,6 +480,7 @@ export function RoomShell({ room }: { room: string }) {
 
         <InstallStrip visible={inst.stripVisible} hint={inst.hint} onInstall={inst.runInstall} onDismiss={inst.dismiss} dlgRef={inst.dlgRef} />
         <UpdateStrip />
+        <NoticeStrip />
 
         <LockedView text={lockedText || ""} hidden={!denied} />
         <AgentGateView
