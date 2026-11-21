@@ -352,6 +352,7 @@ export const MessageMethods = {
       if (r.kind in counts) { counts[r.kind] = r.n; counts.all += r.n; }
     }
     let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
+    /** @type {Array<string | number>} */
     const args = from ? [from, ...kinds] : [...kinds];
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
@@ -379,12 +380,12 @@ export const MessageMethods = {
     this.roomName = room;
     let rows = this.read(after, limit);
     if (rows.length || !wait || after === null) return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
-    await new Promise((resolve) => {
+    await /** @type {Promise<void>} */ (new Promise((resolve) => {
       let t;
       const done = () => { clearTimeout(t); this.waiters.delete(done); resolve(); };
       t = setTimeout(done, wait * 1000);
       this.waiters.add(done);
-    });
+    }));
     if (!this.ready) return { messages: [], last_id: 0, room_state: { v: 1 } };
     rows = this.read(after, limit);
     return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };

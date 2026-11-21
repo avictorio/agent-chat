@@ -111,7 +111,7 @@ export const FrontlinesMethods = {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
-    const alloc = this.flParse(raw);
+    const alloc = /** @type {any} */ (this.flParse(raw)); // the troops per hill, or { error }
     if (alloc.error) return { status: 400, error: alloc.error, legal_moves: ["30,20,20,15,15", "even", "random"] };
     const resolved = this.roundsCommit(g, who, alloc, room);
     await this.armGameAlarm();

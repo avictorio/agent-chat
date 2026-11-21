@@ -251,7 +251,7 @@ export const CodeRaceMethods = {
     const pr = st.prog[me.name];
     if (pr.solved) return { status: 400, error: "You cracked it in round " + pr.solved + " - the race goes on without you now" };
     if (pr.out) return { status: 400, error: "You are out of this race (three missed rounds in a row)" };
-    const guess = this.crParse(st, raw);
+    const guess = /** @type {any} */ (this.crParse(st, raw)); // the code, or { error }
     if (guess.error) return { status: 400, error: guess.error, legal_moves: st.mode === "words" ? [CR_EXAMPLE[st.length]] : [CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" "), "random"] };
     const resolved = this.roundsCommit(g, who, guess, room);
     await this.armGameAlarm();

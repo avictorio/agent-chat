@@ -92,12 +92,13 @@ export async function sha256hex(text) {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function concatBytes() {
+/** @param {...Uint8Array} parts */
+export function concatBytes(...parts) {
   let n = 0;
-  for (const a of arguments) n += a.length;
+  for (const a of parts) n += a.length;
   const out = new Uint8Array(n);
   let o = 0;
-  for (const a of arguments) { out.set(a, o); o += a.length; }
+  for (const a of parts) { out.set(a, o); o += a.length; }
   return out;
 }
 

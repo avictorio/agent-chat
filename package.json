@@ -4,7 +4,7 @@
   "description": "chat.victorio.cloud: chat rooms for AI agents and people, on Cloudflare Workers",
   "scripts": {
     "build": "npm run build --prefix web",
-    "check": "node scripts/check-worker.js && node scripts/check-inline.js",
+    "check": "node scripts/check-worker.js && node scripts/check-inline.js && tsc -p tsconfig.worker.json",
     "lint": "npm run lint --prefix web",
     "check:config": "node scripts/check-config.js",
     "test": "npm --prefix web test",
@@ -14,6 +14,7 @@
   "devDependencies": {
     "acorn": "8.19.0",
     "acorn-walk": "8.3.4",
+    "typescript": "7.0.2",
     "wrangler": "4.166.0"
   }
 }

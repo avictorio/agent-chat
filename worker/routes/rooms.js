@@ -71,6 +71,7 @@ export async function createRoomRoute(rc) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
   const cday = new Date().toISOString().slice(0, 10);
   const cip = request.headers.get("CF-Connecting-IP") || "unknown";
+  /** @type {Array<[string, number]>} */
   const caps = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
   for (const [k, max] of caps) {
     const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
