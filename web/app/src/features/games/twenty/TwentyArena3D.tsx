@@ -392,7 +392,7 @@ export default function TwentyArena3D({
   onReady,
   registerCommit,
 }: {
-  g: TwentyState | null;
+  g: TwentyState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -462,10 +462,10 @@ export default function TwentyArena3D({
     setPlaying(null);
     setShown(n);
     if (!rr) return;
-    const imp = isLast(n) ? finalImpact(g!, meName) : roundImpact(rr, meName);
+    const imp = isLast(n) ? finalImpact(g, meName) : roundImpact(rr, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(rr));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -631,8 +631,8 @@ export default function TwentyArena3D({
                   setSay(sayRound(r));
                   if (isLast(playing.n)) {
                     setTimeout(() => {
-                      juice.hit(finalImpact(g!, meName));
-                      if (g!.winner) setCeremony((c) => c + 1);
+                      juice.hit(finalImpact(g, meName));
+                      if (g.winner) setCeremony((c) => c + 1);
                     }, 1400);
                   }
                 }

@@ -341,7 +341,7 @@ function sgHome(aspect: number, width: number, n: number): Home {
 
 /* ---------- the arena ---------- */
 
-export default function SketchArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: SketchState | null; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
+export default function SketchArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: SketchState; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
   const still = useReducedMotion();
   const q = useQuality(still);
   const juice = useJuiceStore(still);
@@ -384,16 +384,16 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     const rd = rounds[k - 1];
     if (!rd) return "";
     if (rd.forfeit) return "Round " + k + ": " + rd.artist + " didn't draw. It was " + rd.prompt + ".";
-    return "Round " + k + ": it was " + rd.prompt + ". " + (rd.right.length ? rd.right.join(", ") + " got it." : "Nobody got it." + (rd.roast ? " " + rd.roast : "")) + (isLast(k) ? (g!.winner ? " " + g!.winner + " wins." : " A tie at the top.") : "");
+    return "Round " + k + ": it was " + rd.prompt + ". " + (rd.right.length ? rd.right.join(", ") + " got it." : "Nobody got it." + (rd.roast ? " " + rd.roast : "")) + (isLast(k) ? (g.winner ? " " + g.winner + " wins." : " A tie at the top.") : "");
   };
   const finish = (k: number, quiet: boolean) => {
     setPlaying(null);
     setBeat(-1);
     setShown(k);
-    const imp = roundImpact(g!, rounds[k - 1], seats, isLast(k));
+    const imp = roundImpact(g, rounds[k - 1], seats, isLast(k));
     if (imp) juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(k));
-    if (isLast(k) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(k) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -427,24 +427,24 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
   // the round on show: the one playing, else (between rounds) the live
   // drawing, else the last one shown
   const lastShown = rounds[shown - 1] || null;
-  const live = g!.status === "running" && !playing;
-  const imageUrl = playRound && playRound.image ? playRound.image.url : live && g!.image ? g!.image.url : !live && lastShown && lastShown.image ? lastShown.image.url : null;
+  const live = g.status === "running" && !playing;
+  const imageUrl = playRound && playRound.image ? playRound.image.url : live && g.image ? g.image.url : !live && lastShown && lastShown.image ? lastShown.image.url : null;
   const image = useImage(imageUrl);
   const blank = useMemo(
     () =>
       textTex(
         [
-          { text: live && g!.phase === "draw" ? (g!.artist || "The artist") + " is drawing…" : live && g!.phase === "judging" ? "The Referee is judging…" : finished ? "Fin." : "", font: "italic 700 44px Georgia, serif", color: "#57534e" },
+          { text: live && g.phase === "draw" ? (g.artist || "The artist") + " is drawing…" : live && g.phase === "judging" ? "The Referee is judging…" : finished ? "Fin." : "", font: "italic 700 44px Georgia, serif", color: "#57534e" },
         ],
         640,
         480,
         "#f5f1e8",
         null
       ),
-    [live, g!.phase, g!.artist, finished]
+    [live, g.phase, g.artist, finished]
   );
   useEffect(() => () => blank.dispose(), [blank]);
-  const plaqueText = playRound ? (beat >= 0 ? playRound.prompt : "Untitled · by " + playRound.artist) : live ? (g!.phase === "draw" ? "In progress · " + (g!.artist || "") : "Untitled · by " + (g!.artist || "")) : lastShown ? lastShown.prompt : "Sketch & Guess";
+  const plaqueText = playRound ? (beat >= 0 ? playRound.prompt : "Untitled · by " + playRound.artist) : live ? (g.phase === "draw" ? "In progress · " + (g.artist || "") : "Untitled · by " + (g.artist || "")) : lastShown ? lastShown.prompt : "Sketch & Guess";
   const plaque = useMemo(() => textTex([{ text: plaqueText, font: "700 40px Georgia, serif", color: "#1c1917" }], 600, 100, "#c9a227", "#7a5b12"), [plaqueText]);
   useEffect(() => () => plaque.dispose(), [plaque]);
 
@@ -469,8 +469,8 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     });
     if (beat > order.length) cards[playRound.artist] = { text: "the artist", sub: "+" + ((playRound.points || {})[playRound.artist] || 0), tone: "#fbbf24" };
   }
-  const artist = playRound ? playRound.artist : live ? g!.artist : null;
-  const sealed = (nm: string) => live && g!.phase === "guess" && nm !== g!.artist && !!(players.find((p: SketchPlayer) => p.name === nm) || {}).committed;
+  const artist = playRound ? playRound.artist : live ? g.artist : null;
+  const sealed = (nm: string) => live && g.phase === "guess" && nm !== g.artist && !!(players.find((p: SketchPlayer) => p.name === nm) || {}).committed;
 
   const home = (a: number, width: number) => sgHome(a, width, n);
   const first = home(aspect || 1.6, hostW);
@@ -478,7 +478,7 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
     "Sketch & Guess arena, 3D view: " +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " " + (scores[s.name] || 0) + " points").join("; ") +
     ". " +
-    (g!.status === "running" ? "Round " + g!.round + " of " + g!.rounds_total + ", " + (g!.artist || "?") + (g!.phase === "draw" ? " is drawing." : g!.phase === "guess" ? "'s drawing is up." : " - the Referee is judging.") : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
+    (g.status === "running" ? "Round " + g.round + " of " + g.rounds_total + ", " + (g.artist || "?") + (g.phase === "draw" ? " is drawing." : g.phase === "guess" ? "'s drawing is up." : " - the Referee is judging.") : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
   const intro = firstVisit ? { title: "Sketch & Guess", sub: seats.map((s) => s.name).join(" · ") || "Draw it, name it", color: "#fbbf24" } : null;
   return (
     <JuiceProvider juice={juice}>
@@ -552,10 +552,10 @@ export default function SketchArena3D({ g, me = "", aspect, onReady, registerCom
           {fx.map((f) => (
             <Burst key={f.id} at={f.at} hex={f.hex} box={[0.7, 0.4, 0.7]} count={18} power={1.4} piece={0.07} dur={1} onDone={() => setFx((l) => l.filter((x) => x.id !== f.id))} />
           ))}
-          {ceremony && g!.winner && !still ? (
+          {ceremony && g.winner && !still ? (
             <group key={"cer" + ceremony}>
-              <LightPillar at={[standX(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n), 0, standZ(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n)]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#fbbf24" }).hex} height={14} width={0.9} />
-              <Shockwave at={[0, 0.02, 0.8]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#fbbf24" }).hex} radius={9} dur={1.2} />
+              <LightPillar at={[standX(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n), 0, standZ(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n)]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#fbbf24" }).hex} height={14} width={0.9} />
+              <Shockwave at={[0, 0.02, 0.8]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#fbbf24" }).hex} radius={9} dur={1.2} />
             </group>
           ) : null}
           <CameraControls ref={ctl} makeDefault minDistance={5} maxDistance={40} maxPolarAngle={Math.PI / 2.05} />

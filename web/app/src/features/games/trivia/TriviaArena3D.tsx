@@ -427,7 +427,7 @@ function tvHome(aspect: number, width: number, n: number): Home {
 
 /* ---------- the arena ---------- */
 
-export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: TriviaState | null; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
+export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCommit }: { g: TriviaState; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void }) {
   const still = useReducedMotion();
   const q = useQuality(still);
   const juice = useJuiceStore(still);
@@ -471,16 +471,16 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
     const rd = rounds[k - 1];
     if (!rd) return "";
     if (rd.forfeit) return "Round " + k + ": " + rd.asker + " ran out of time to ask.";
-    return "Round " + k + ": the answer was " + rd.answer + ". " + (rd.right.length ? rd.right.join(", ") + " got it" : "Nobody got it") + (rd.split ? "; " + rd.asker + " split the table" : "") + "." + (isLast(k) ? (g!.winner ? " " + g!.winner + " wins." : " A tie at the top.") : "");
+    return "Round " + k + ": the answer was " + rd.answer + ". " + (rd.right.length ? rd.right.join(", ") + " got it" : "Nobody got it") + (rd.split ? "; " + rd.asker + " split the table" : "") + "." + (isLast(k) ? (g.winner ? " " + g.winner + " wins." : " A tie at the top.") : "");
   };
   const finish = (k: number, quiet: boolean) => {
     setPlaying(null);
     setBeat(-1);
     setShown(k);
-    const imp = roundImpact(g!, rounds[k - 1], seats, isLast(k));
+    const imp = roundImpact(g, rounds[k - 1], seats, isLast(k));
     if (imp) juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(k));
-    if (isLast(k) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(k) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -534,17 +534,17 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
   const chips = seats.map((s) => Math.max(0, Math.round((balances[s.name] || 0) / 10)));
 
   // the screen
-  const asker = playRound ? playRound.asker : g!.status === "running" ? g!.asker : null;
+  const asker = playRound ? playRound.asker : g.status === "running" ? g.asker : null;
   const accent = (seats.find((s) => s.name === asker) || { hex: "#c084fc" }).hex;
   const screen = useMemo(() => {
     if (playRound && beat >= 0) return screenTex("Round " + playRound.n + " · " + playRound.asker + " asked", playRound.question || "", "ANSWER: " + String(playRound.answer || "").toUpperCase(), "#facc15");
     if (playRound) return screenTex("Round " + playRound.n + " · " + playRound.asker + " asks", playRound.question || "", "", accent);
-    if (g!.status === "running") return screenTex("Round " + g!.round + " of " + g!.rounds_total + " · " + (g!.asker || "") + " asks", g!.question || (g!.asker || "The quizmaster") + " is writing a question…", g!.phase === "judge" ? "JUDGING…" : "", accent);
+    if (g.status === "running") return screenTex("Round " + g.round + " of " + g.rounds_total + " · " + (g.asker || "") + " asks", g.question || (g.asker || "The quizmaster") + " is writing a question…", g.phase === "judge" ? "JUDGING…" : "", accent);
     const last = rounds[rounds.length - 1];
     if (finished) return screenTex("Final", g.winner ? g.winner + " wins" : "A tie at the top", last && !last.forfeit ? "LAST ANSWER: " + String(last.answer).toUpperCase() : "", "#facc15");
     return screenTex("Trivia", "Waiting for everyone to take their seat", "", accent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playRound, beat >= 0, g!.status, g!.round, g!.question, g!.asker, g!.phase, finished, g!.winner, accent]);
+  }, [playRound, beat >= 0, g.status, g.round, g.question, g.asker, g.phase, finished, g.winner, accent]);
 
   const cards: Record<string, { text: string; sub: string; tone: string } | null> = {};
   if (playRound) {
@@ -560,8 +560,8 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
     const c = cards[nm];
     return c ? c.tone : null;
   };
-  const live = g!.status === "running" && !playing;
-  const sealed = (nm: string) => live && g!.phase === "answer" && nm !== g!.asker && !!(players.find((p: TriviaPlayer) => p.name === nm) || {}).committed;
+  const live = g.status === "running" && !playing;
+  const sealed = (nm: string) => live && g.phase === "answer" && nm !== g.asker && !!(players.find((p: TriviaPlayer) => p.name === nm) || {}).committed;
 
   const home = (a: number, width: number) => tvHome(a, width, n);
   const first = home(aspect || 1.6, hostW);
@@ -569,7 +569,7 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
     "Trivia arena, 3D view: " +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " " + (balances[s.name] != null ? balances[s.name] : 100) + " points").join("; ") +
     ". " +
-    (g!.status === "running" ? "Round " + g!.round + " of " + g!.rounds_total + ", " + (g!.asker || "?") + " asks" + (g!.question ? ": " + g!.question : "") + "." : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
+    (g.status === "running" ? "Round " + g.round + " of " + g.rounds_total + ", " + (g.asker || "?") + " asks" + (g.question ? ": " + g.question : "") + "." : finished ? (g.winner ? g.winner + " won." : "A tie at the top.") : "");
   const intro = firstVisit ? { title: "Trivia", sub: seats.map((s) => s.name).join(" · ") || "Ask one, bet on the rest", color: "#c084fc" } : null;
   return (
     <JuiceProvider juice={juice}>
@@ -642,10 +642,10 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
           {fx.map((f) => (
             <Burst key={f.id} at={f.at} hex={f.hex} box={[0.7, 0.4, 0.7]} count={18} power={1.4} piece={0.07} dur={1} onDone={() => setFx((l) => l.filter((x) => x.id !== f.id))} />
           ))}
-          {ceremony && g!.winner && !still ? (
+          {ceremony && g.winner && !still ? (
             <group key={"cer" + ceremony}>
-              <LightPillar at={[podX(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n), 0, podZ(Math.max(0, seats.findIndex((s) => s.name === g!.winner)), n)]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#c084fc" }).hex} height={14} width={0.9} />
-              <Shockwave at={[0, 0.02, 0.5]} hex={(seats.find((s) => s.name === g!.winner) || { hex: "#c084fc" }).hex} radius={9} dur={1.2} />
+              <LightPillar at={[podX(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n), 0, podZ(Math.max(0, seats.findIndex((s) => s.name === g.winner)), n)]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#c084fc" }).hex} height={14} width={0.9} />
+              <Shockwave at={[0, 0.02, 0.5]} hex={(seats.find((s) => s.name === g.winner) || { hex: "#c084fc" }).hex} radius={9} dur={1.2} />
             </group>
           ) : null}
           <CameraControls ref={ctl} makeDefault minDistance={5} maxDistance={40} maxPolarAngle={Math.PI / 2.05} />

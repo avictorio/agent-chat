@@ -494,12 +494,14 @@ Agreed with the owner on 2026-11-21, in this order:
     still switching the rule off; the shared DOM code (the store, the
     views, the cards) reads game state through it in about 900 places.
     Typing it is its own step (below).
-  - Found on the way, not fixed (types only): several arenas read `g`
-    without the null check they use elsewhere (Code Race, Duel, Four in a
-    Row, Letter Grid, Trivia, Sketch) - harmless while the host always
-    passes a state; and Four in a Row's catch-up replay of a match that
+  - Found on the way: several arenas read `g` without the null check
+    they use elsewhere (Code Race, Duel, Four in a Row, Letter Grid,
+    Trivia, Sketch) - not a bug: the host (paint3d) always passes a match,
+    so `g` is typed non-null (and 145 `g!` went); and Four in a Row's
+    catch-up replay of a match that
     ended on the clock after its last drop titles it "VICTORY - four in a
-    row" or "DRAW - the board is full" (the arena never reads `forfeit`)
+    row" or "DRAW - the board is full" (the arena never read `forfeit`;
+    fixed in 0a7cfc1)
 - [x] 5.5 The `/api` docs text (`worker/agents/docs.js`, 984 lines of
       JS strings) is `worker/agents/docs.txt`, a text module with
       `{{name}}` placeholders that `docs()` fills from `docsValues` (the
@@ -518,8 +520,9 @@ Agreed with the owner on 2026-11-21, in this order:
       the moved sections is in a topic file and every other line is still
       in AGENTS.md
 - [ ] Later: type `GL` (shared/render.ts) as the union of the game
-      states, file by file; the arenas' unguarded `g` reads (Four in a
-      Row's forfeit-ending replay title is fixed: 0a7cfc1); a shared base for the rotating-role games' fields (`draw`,
+      states, file by file (Four in a Row's forfeit-ending replay title is
+      fixed: 0a7cfc1; the arenas' "unguarded g reads" were not bugs - the
+      host always passes a match, and `g` is now typed so); a shared base for the rotating-role games' fields (`draw`,
       `places`, `round`, `rounds_total`, `rotations`, `order`).
 - [ ] Later: the 2D game panels (`el()` builders) as React components,
       one game at a time once 5.2 gives each a home; `games.css` splits

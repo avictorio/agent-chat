@@ -707,7 +707,7 @@ export default function LcArena3D({
   onReady,
   onSteer,
 }: {
-  g: LightCyclesState | null;
+  g: LightCyclesState;
   me?: string;
   aspect?: number;
   onReady?: () => void;

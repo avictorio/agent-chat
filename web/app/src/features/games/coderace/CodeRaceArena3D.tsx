@@ -662,7 +662,7 @@ export default function CodeRaceArena3D({
   onReady,
   registerCommit,
 }: {
-  g: CodeRaceState | null;
+  g: CodeRaceState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -746,7 +746,7 @@ export default function CodeRaceArena3D({
     rounds.slice(0, n - 1).forEach((r: CodeRaceRound) => {
       const x = (r.guesses || {})[you.name];
       if (!x) return;
-      const st = states(g!, x.fb);
+      const st = states(g, x.fb);
       best = Math.max(best, st.filter((s) => s === "hit" || s === "g").length * 10 + st.filter((s) => s === "near" || s === "y").length);
     });
     return best;
@@ -759,11 +759,11 @@ export default function CodeRaceArena3D({
     if (!r) return;
     const hits: Impact[] = [];
     const ci = crackImpact(r.solved || [], racers);
-    if (isLast(n)) hits.push(finalImpact(g!, racers));
+    if (isLast(n)) hits.push(finalImpact(g, racers));
     else if (ci) hits.push(ci);
-    else hits.push(roundImpact(g!, r, racers, bestBefore(n)));
+    else hits.push(roundImpact(g, r, racers, bestBefore(n)));
     hits.forEach((h) => juice.hit(quiet ? { ...h, trauma: 0, stop: 0, slow: 0, pulse: 0 } : h));
-    setSay(sayRound(g!, r, racers, isLast(n)));
+    setSay(sayRound(g, r, racers, isLast(n)));
     if (isLast(n)) {
       setOpen(1);
       setCeremony((c) => c + 1);
@@ -819,16 +819,16 @@ export default function CodeRaceArena3D({
   const fromStates = useMemo(() => {
     const m: Record<string, TState[]> = {};
     racers.forEach((r) => {
-      const l = latest(g!, r.name, fromN);
-      m[r.name] = l.cracked ? Array(len).fill(g!.mode === "words" ? "g" : "hit") : states(g!, l.fb);
+      const l = latest(g, r.name, fromN);
+      m[r.name] = l.cracked ? Array(len).fill(g.mode === "words" ? "g" : "hit") : states(g, l.fb);
     });
     return m;
   }, [g, racers, fromN, len]);
   const toStates = useMemo(() => {
     const m: Record<string, TState[]> = {};
     racers.forEach((r) => {
-      const l = latest(g!, r.name, fieldN);
-      m[r.name] = states(g!, l.fb);
+      const l = latest(g, r.name, fieldN);
+      m[r.name] = states(g, l.fb);
     });
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -864,7 +864,7 @@ export default function CodeRaceArena3D({
     const m: Record<string, LedgerRow[]> = {};
     racers.forEach((r) => {
       const sealedGuess = r.you && running && !playing && g.you && g.you.queued ? String(g.you.queued) : null;
-      m[r.name] = ledgerRows(g!, r.name, shown, sealedGuess);
+      m[r.name] = ledgerRows(g, r.name, shown, sealedGuess);
     });
     return m;
   }, [racers, g, shown, running, playing]);
@@ -872,7 +872,7 @@ export default function CodeRaceArena3D({
   const home = (a: number, width: number) => crHome(a, width, racers, len);
   const first = home(aspect || 1.6, hostW);
   const fbWords = (fb: CodeRaceFeedback | null) =>
-    g!.mode === "words"
+    g.mode === "words"
       ? String(fb || "")
           .split("")
           .map((c) => (c === "G" ? "green" : c === "Y" ? "amber" : "grey"))
@@ -882,7 +882,7 @@ export default function CodeRaceArena3D({
     .map((r) => {
       const rows = (ledgers[r.name] || []).filter((x) => !x.sealed);
       if (!rows.length) return "";
-      return (r.you ? "Your rounds: " : r.name + "'s rounds: ") + rows.map((x) => x.n + (x.guess ? " " + (g!.mode === "words" ? x.guess.toUpperCase() : x.guess.split("").join(" ")) : "") + " - " + fbWords(x.fb)).join("; ");
+      return (r.you ? "Your rounds: " : r.name + "'s rounds: ") + rows.map((x) => x.n + (x.guess ? " " + (g.mode === "words" ? x.guess.toUpperCase() : x.guess.split("").join(" ")) : "") + " - " + fbWords(x.fb)).join("; ");
     })
     .filter(Boolean)
     .join(". ");
@@ -976,8 +976,8 @@ export default function CodeRaceArena3D({
                 }
               }}
               onVerdict={() => {
-                setSay(sayRound(g!, playingRound, racers, last));
-                if (!last && !(playingRound.solved || []).length) juice.hit(roundImpact(g!, playingRound, racers, bestBefore(playing.n)));
+                setSay(sayRound(g, playingRound, racers, last));
+                if (!last && !(playingRound.solved || []).length) juice.hit(roundImpact(g, playingRound, racers, bestBefore(playing.n)));
               }}
               onOpen={() => {
                 setOpen(1);
@@ -985,7 +985,7 @@ export default function CodeRaceArena3D({
               }}
               onDone={() => {
                 if (last) {
-                  juice.hit(finalImpact(g!, racers));
+                  juice.hit(finalImpact(g, racers));
                   setCeremony((c) => c + 1);
                 }
                 setPlaying(null);

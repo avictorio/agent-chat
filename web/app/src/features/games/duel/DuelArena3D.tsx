@@ -1180,7 +1180,7 @@ export default function DuelArena3D({
   onReady,
   registerCommit,
 }: {
-  g: DuelState | null;
+  g: DuelState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -1280,7 +1280,7 @@ export default function DuelArena3D({
     const you = String(p.name).toLowerCase() === meL && youPlaying;
     const wins = shown === rounds.length ? p.wins || 0 : winsIn(shownRounds, p.name);
     const thrownIn = current ? !!(current.round.throws || {})[p.name] : false;
-    const running = g!.status === "running";
+    const running = g.status === "running";
     const own = you && running && !current ? pending?.t || queued : null;
     const locked = current ? thrownIn : running && (!!p.thrown || !!own);
     const out = endShown && !!winner && p.name !== winner;
@@ -1306,7 +1306,7 @@ export default function DuelArena3D({
   const scoreOf = (list: DuelRound[]) => ordered.map((p) => winsIn(list, p.name)).join("–");
   const realScore = ordered.map((p) => p.wins || 0).join("–");
   const mpOf = (list: DuelRound[]) => ordered.some((p) => winsIn(list, p.name) === target - 1);
-  const matchPointNow = !endShown || g!.status === "running" ? sides.some((s) => s.wins === target - 1) : false;
+  const matchPointNow = !endShown || g.status === "running" ? sides.some((s) => s.wins === target - 1) : false;
 
   /* New rounds while open queue up like the catch-up; the newest plays
      in full. A match that ends without a new round (nobody threw in

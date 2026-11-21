@@ -436,7 +436,7 @@ export default function CorpseArena3D({
   onReady,
   registerCommit,
 }: {
-  g: CorpseState | null;
+  g: CorpseState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -507,13 +507,13 @@ export default function CorpseArena3D({
     setPlaying(null);
     if (kind === "deal") {
       setDealt(true);
-      juice.hit(revealImpact(g!));
+      juice.hit(revealImpact(g));
       setSay("The story is revealed: " + story.length + " segments.");
     } else {
       setHonoured(true);
-      juice.hit(honoursImpact(g!, meName));
-      setSay(g!.honours && g!.honours.length ? "The honours go to segment " + g!.honours.join(" and ") + "." : "Nobody voted.");
-      if (g!.winner) setCeremony((c) => c + 1);
+      juice.hit(honoursImpact(g, meName));
+      setSay(g.honours && g.honours.length ? "The honours go to segment " + g.honours.join(" and ") + "." : "Nobody voted.");
+      if (g.winner) setCeremony((c) => c + 1);
     }
   };
 
@@ -667,8 +667,8 @@ export default function CorpseArena3D({
                 if (k === "start") sfx("whoosh");
                 else if (k === "stars") sfx("beat");
                 else if (k === "best") {
-                  juice.hit(honoursImpact(g!, meName));
-                  if (g!.winner) setCeremony((c) => c + 1);
+                  juice.hit(honoursImpact(g, meName));
+                  if (g.winner) setCeremony((c) => c + 1);
                 }
               }}
               onDone={() => {
@@ -676,7 +676,7 @@ export default function CorpseArena3D({
                 setPlaying(null);
                 if (kind === "deal") {
                   setDealt(true);
-                  juice.hit(revealImpact(g!));
+                  juice.hit(revealImpact(g));
                   setSay("The story is revealed: " + story.length + " segments.");
                 } else setHonoured(true);
               }}

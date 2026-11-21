@@ -653,7 +653,7 @@ export default function FrontlinesArena3D({
   onReady,
   registerCommit,
 }: {
-  g: FrontlinesState | null;
+  g: FrontlinesState;
   me?: string;
   aspect?: number;
   onReady?: () => void;

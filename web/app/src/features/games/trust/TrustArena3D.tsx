@@ -370,7 +370,7 @@ export default function TrustArena3D({
   onReady,
   registerCommit,
 }: {
-  g: TrustState | null;
+  g: TrustState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -433,10 +433,10 @@ export default function TrustArena3D({
     setShown(n);
     setScoredN(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g!, seats) : roundImpact(r, seats);
+    const imp = isLast(n) ? finalImpact(g, seats) : roundImpact(r, seats);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r, seats));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -593,9 +593,9 @@ export default function TrustArena3D({
                 setPulse(p);
                 setTimeout(() => setPulse({}), 500);
                 const last = isLast(playing.n);
-                juice.hit(last ? finalImpact(g!, seats) : roundImpact(round, seats));
+                juice.hit(last ? finalImpact(g, seats) : roundImpact(round, seats));
                 setSay(sayRound(round, seats));
-                if (last && g!.winner) setCeremony((c) => c + 1);
+                if (last && g.winner) setCeremony((c) => c + 1);
               }}
               onDone={() => {
                 setPlaying(null);

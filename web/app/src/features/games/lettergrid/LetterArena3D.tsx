@@ -440,7 +440,7 @@ export default function LetterArena3D({
   draft,
   onCell,
 }: {
-  g: LetterGridState | null;
+  g: LetterGridState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -492,17 +492,17 @@ export default function LetterArena3D({
   const isLast = (k: number) => finished && k === rounds.length;
   const sayRound = (k: number) => {
     const ws = wordsOf(rounds[k - 1]);
-    return "Round " + k + ": " + (ws.length ? ws.slice().reverse().map((w) => w.by + " " + w.word.toUpperCase() + " +" + w.points).join(", ") : "no words") + "." + (isLast(k) ? (g!.winner ? " " + g!.winner + " wins the grid." : " A tie at the top.") : "");
+    return "Round " + k + ": " + (ws.length ? ws.slice().reverse().map((w) => w.by + " " + w.word.toUpperCase() + " +" + w.points).join(", ") : "no words") + "." + (isLast(k) ? (g.winner ? " " + g.winner + " wins the grid." : " A tie at the top.") : "");
   };
   const finish = (k: number, quiet: boolean) => {
     setPlaying(null);
     setProg([]);
     setLanded(0);
     setShown(k);
-    const imp = roundImpact(g!, k, wordsOf(rounds[k - 1]), seats, isLast(k));
+    const imp = roundImpact(g, k, wordsOf(rounds[k - 1]), seats, isLast(k));
     if (imp) juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(k));
-    if (isLast(k) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(k) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -575,7 +575,7 @@ export default function LetterArena3D({
       })
       .join("; ") +
     ". " +
-    (g!.status === "running" ? "Round " + g!.round + " of " + g!.rounds_total + ". " : finished ? (g.winner ? g.winner + " won. " : "A tie at the top. ") : "") +
+    (g.status === "running" ? "Round " + g.round + " of " + g.rounds_total + ". " : finished ? (g.winner ? g.winner + " won. " : "A tie at the top. ") : "") +
     claimedCount +
     " cells claimed.";
   const intro = firstVisit ? { title: "Letter Grid", sub: seats.map((s) => s.name).join(" · ") || "Trace a word, claim the cells", color: "#2dd4bf" } : null;
@@ -673,10 +673,10 @@ export default function LetterArena3D({
           {fx.map((f) => (
             <Burst key={f.id} at={f.at} hex={f.hex} box={[0.7, 0.3, 0.7]} count={f.small ? 10 : 18} power={f.small ? 0.9 : 1.3} piece={0.06} dur={0.9} onDone={() => setFx((l) => l.filter((x) => x.id !== f.id))} />
           ))}
-          {ceremony && g!.winner && !still ? (
+          {ceremony && g.winner && !still ? (
             <group key={"cer" + ceremony}>
-              <LightPillar at={[0, 0, 0]} hex={hexOf(g!.winner)} height={14} width={0.9} />
-              <Shockwave at={[0, 0.02, 0]} hex={hexOf(g!.winner)} radius={12} dur={1.2} />
+              <LightPillar at={[0, 0, 0]} hex={hexOf(g.winner)} height={14} width={0.9} />
+              <Shockwave at={[0, 0.02, 0]} hex={hexOf(g.winner)} radius={12} dur={1.2} />
             </group>
           ) : null}
           <CameraControls ref={ctl} makeDefault minDistance={4} maxDistance={40} maxPolarAngle={Math.PI / 2.1} />

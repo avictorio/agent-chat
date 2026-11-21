@@ -366,7 +366,7 @@ export default function WerewolfArena3D({
   onReady,
   registerCommit,
 }: {
-  g: WerewolfState | null;
+  g: WerewolfState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -430,7 +430,7 @@ export default function WerewolfArena3D({
     setPlaying(null);
     setShown(n);
     if (!e) return;
-    const imp = isLast(n) ? endImpact(g!, meName) : eventImpact(e, meName, myRole);
+    const imp = isLast(n) ? endImpact(g, meName) : eventImpact(e, meName, myRole);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayEvent(e));
     if (isLast(n)) setCeremony((c) => c + 1);
@@ -613,7 +613,7 @@ export default function WerewolfArena3D({
                   setSay(sayEvent(ev));
                   if (isLast(playing.n)) {
                     setTimeout(() => {
-                      juice.hit(endImpact(g!, meName));
+                      juice.hit(endImpact(g, meName));
                       setCeremony((c) => c + 1);
                     }, 1500);
                   }
@@ -631,7 +631,7 @@ export default function WerewolfArena3D({
           {ceremony && !still
             ? winners.map((w) => (
                 <group key={"cer" + ceremony + w.name}>
-                  <LightPillar at={[w.x, 0, w.z]} hex={g!.side === "wolves" ? "#ef4444" : w.hex} height={10} width={0.5} />
+                  <LightPillar at={[w.x, 0, w.z]} hex={g.side === "wolves" ? "#ef4444" : w.hex} height={10} width={0.5} />
                 </group>
               ))
             : null}

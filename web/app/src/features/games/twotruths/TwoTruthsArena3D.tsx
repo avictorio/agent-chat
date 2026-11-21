@@ -468,7 +468,7 @@ export default function TwoTruthsArena3D({
   onReady,
   registerCommit,
 }: {
-  g: TwoTruthsState | null;
+  g: TwoTruthsState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -529,10 +529,10 @@ export default function TwoTruthsArena3D({
     setPlaying(null);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g!, meName) : roundImpact(r, meName);
+    const imp = isLast(n) ? finalImpact(g, meName) : roundImpact(r, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -733,8 +733,8 @@ export default function TwoTruthsArena3D({
                   }
                 } else if (k === "pts" && isLast(playing.n)) {
                   setTimeout(() => {
-                    juice.hit(finalImpact(g!, meName));
-                    if (g!.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g, meName));
+                    if (g.winner) setCeremony((c) => c + 1);
                   }, 700);
                 }
               }}

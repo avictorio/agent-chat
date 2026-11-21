@@ -388,7 +388,7 @@ export default function FourArena3D({
   registerCommit,
   onDrop,
 }: {
-  g: FourInARowState | null;
+  g: FourInARowState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -436,16 +436,16 @@ export default function FourArena3D({
 
   const isLast = (n: number) => finished && n === moves.length;
   const sayMove = (mv: FourInARowMove, last: boolean) =>
-    mv.by + " drops in column " + mv.col + "." + (last ? (g!.draw ? ((g!.board || []).every((row) => row.indexOf(".") < 0) ? " The board is full - a draw." : " Then the turns ran out on the clock - a draw.") : g!.winner ? (g!.forfeit ? " Then " + g!.forfeit + " timed out a third time - " + g!.winner + " wins by forfeit." : " " + g!.winner + " connects four and wins.") : "") : "");
+    mv.by + " drops in column " + mv.col + "." + (last ? (g.draw ? ((g.board || []).every((row) => row.indexOf(".") < 0) ? " The board is full - a draw." : " Then the turns ran out on the clock - a draw.") : g.winner ? (g.forfeit ? " Then " + g.forfeit + " timed out a third time - " + g.winner + " wins by forfeit." : " " + g.winner + " connects four and wins.") : "") : "");
   const land = (n: number, quiet: boolean) => {
     const mv = moves[n - 1];
     setPlaying(null);
     setShown(n);
     if (!mv) return;
-    const imp = landImpact(g!, mv, seats, isLast(n));
+    const imp = landImpact(g, mv, seats, isLast(n));
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayMove(mv, isLast(n)));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -485,7 +485,7 @@ export default function FourArena3D({
   const fall = fallMove ? { disc: { col: fallMove.col, row: fallMove.row, piece: pieceOf(fallMove.by), n: fallMove.n }, t0: playing!.t0 } : null;
   const showWin = finished && !!g.line && shown === moves.length && !playing;
   const winCells = useMemo(() => new Set<string>(showWin ? (g.line as number[][]).map((c) => c[0] + ":" + c[1]) : []), [showWin, g]);
-  const winner = seats.find((s) => s.name === g!.winner) || null;
+  const winner = seats.find((s) => s.name === g.winner) || null;
   const you = seats.find((s) => s.you) || null;
   const myTurn = !!(g && g.status === "running" && you && g.turn_of === you.name && !playing);
   const open = useMemo(() => {
@@ -499,7 +499,7 @@ export default function FourArena3D({
     "Four in a Row arena, 3D view: " +
     seats.map((s) => s.name + (s.you ? " (you)" : "") + " plays " + (s.piece === "X" ? "solid" : "ringed") + " discs").join("; ") +
     ". " +
-    (g!.status === "running" ? (g!.turn_of ? g!.turn_of + " to move, turn " + g!.turn + "." : "") : finished ? (g.draw ? "A draw." : g.winner ? g.winner + " won." : "") : "") +
+    (g.status === "running" ? (g.turn_of ? g.turn_of + " to move, turn " + g.turn + "." : "") : finished ? (g.draw ? "A draw." : g.winner ? g.winner + " won." : "") : "") +
     " " +
     moves.length +
     " discs on the board.";
@@ -564,18 +564,18 @@ export default function FourArena3D({
               last={isLast(playing.n)}
               onLand={() => {
                 const last = isLast(playing.n);
-                juice.hit(landImpact(g!, fallMove, seats, last));
+                juice.hit(landImpact(g, fallMove, seats, last));
                 setSay(sayMove(fallMove, last));
-                if (last && g!.winner && g!.line && !q.lite) {
+                if (last && g.winner && g.line && !q.lite) {
                   const hex = (winner || { hex: "#fb7185" }).hex;
-                  (g!.line as number[][]).forEach((c) => setFx((l) => [...l.slice(-6), { id: ++fxId.current, at: [cellX(c[0]!), cellY(c[1]!), 0.2], hex }]));
+                  (g.line as number[][]).forEach((c) => setFx((l) => [...l.slice(-6), { id: ++fxId.current, at: [cellX(c[0]!), cellY(c[1]!), 0.2], hex }]));
                 }
               }}
               onDone={() => {
                 const last = isLast(playing.n);
                 setPlaying(null);
                 setShown(playing.n);
-                if (last && g!.winner) setCeremony((c) => c + 1);
+                if (last && g.winner) setCeremony((c) => c + 1);
               }}
             />
           ) : null}

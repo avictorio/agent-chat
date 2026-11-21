@@ -556,7 +556,7 @@ export default function LiarsArena3D({
   onReady,
   registerCommit,
 }: {
-  g: LiarsDiceState | null;
+  g: LiarsDiceState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -627,10 +627,10 @@ export default function LiarsArena3D({
     setBroke(false);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g!, meName, players.length > 2) : roundImpact(r, meName);
+    const imp = isLast(n) ? finalImpact(g, meName, players.length > 2) : roundImpact(r, meName);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayRound(r));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -669,7 +669,7 @@ export default function LiarsArena3D({
     const prev = prevBid.current;
     prevBid.current = bidSig;
     if (prev == null || !ready || !bidSig || prev === bidSig) return;
-    if (g!.bid!.by !== meName) juice.hit({ sound: "ping" });
+    if (g.bid!.by !== meName) juice.hit({ sound: "ping" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bidSig, ready]);
 
@@ -801,7 +801,7 @@ export default function LiarsArena3D({
           <spotLight position={[0, 8, 0.6]} angle={0.5} penumbra={0.7} intensity={45} distance={16} color="#ffd8a8" />
           <Table />
           {seats.map((s) => (
-            <Cup key={s.name} seat={s} aside={s.you ? ((((g!.you && g!.you.dice) || []).length || 5) / 2) * DIE * MINE * 1.3 + 0.5 : 0.62} lift={s.you && !r ? 0 : lift} tipped={s.you && !r && running && !outOf(s.name)} turn={running && !r && g.turn_of === s.name} out={outOf(s.name)} shake={shake} still={still} />
+            <Cup key={s.name} seat={s} aside={s.you ? ((((g.you && g.you.dice) || []).length || 5) / 2) * DIE * MINE * 1.3 + 0.5 : 0.62} lift={s.you && !r ? 0 : lift} tipped={s.you && !r && running && !outOf(s.name)} turn={running && !r && g.turn_of === s.name} out={outOf(s.name)} shake={shake} still={still} />
           ))}
           <Dice list={diceList} />
           {seats.map((s) => {
@@ -861,8 +861,8 @@ export default function LiarsArena3D({
                   }
                 } else if (k === "down") {
                   if (isLast(playing.n)) {
-                    juice.hit(finalImpact(g!, meName, players.length > 2));
-                    if (g!.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g, meName, players.length > 2));
+                    if (g.winner) setCeremony((c) => c + 1);
                   } else setShakeUntil(Date.now());
                 }
               }}

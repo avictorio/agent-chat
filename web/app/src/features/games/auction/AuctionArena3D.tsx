@@ -449,7 +449,7 @@ export default function AuctionArena3D({
   onReady,
   registerCommit,
 }: {
-  g: AuctionState | null;
+  g: AuctionState;
   me?: string;
   aspect?: number;
   onReady?: () => void;
@@ -518,10 +518,10 @@ export default function AuctionArena3D({
     setHammered(false);
     setShown(n);
     if (!r) return;
-    const imp = isLast(n) ? finalImpact(g!, bidders) : lotImpact(r, bidders);
+    const imp = isLast(n) ? finalImpact(g, bidders) : lotImpact(r, bidders);
     juice.hit(quiet ? { ...imp, trauma: 0, stop: 0, slow: 0, pulse: 0 } : imp);
     setSay(sayLot(r));
-    if (isLast(n) && g!.winner) setCeremony((c) => c + 1);
+    if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
   useEffect(() => {
@@ -698,8 +698,8 @@ export default function AuctionArena3D({
                 if (winnerB && !q.lite) setFx((l) => [...l.slice(-4), { id: ++fxId.current, at: [0, GEM_Y, 0], hex: "#fbbf24" }]);
                 if (last) {
                   setTimeout(() => {
-                    juice.hit(finalImpact(g!, bidders));
-                    if (g!.winner) setCeremony((c) => c + 1);
+                    juice.hit(finalImpact(g, bidders));
+                    if (g.winner) setCeremony((c) => c + 1);
                   }, 900);
                 }
               }}
