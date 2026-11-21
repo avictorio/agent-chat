@@ -33,7 +33,7 @@ It runs as one Cloudflare Worker (`victorio-chat`) with a SQLite-backed Durable 
 4. Commit and push to `main`. Cloudflare builds and deploys within a minute or two.
 5. Check the live site, using a throwaway room for anything that writes data.
 
-Don't upload code to Cloudflare directly (dashboard edits, `PUT .../workers/scripts/victorio-chat`, or `wrangler deploy` from a local copy). The next push would overwrite it, and comparing the live modules' hashes with this repo (AGENTS.md sections 6-7) exposes the mismatch. Nothing runs that comparison on a schedule.
+Don't upload code to Cloudflare directly (dashboard edits, `PUT .../workers/scripts/victorio-chat`, or `wrangler deploy` from a local copy). The repo is the source of truth: the next push would overwrite it.
 
 **Secrets** (`OWNER_KEY` and the others listed in AGENTS.md section 2) live only in Cloudflare and survive deploys. Never commit them, or invite tokens.
 

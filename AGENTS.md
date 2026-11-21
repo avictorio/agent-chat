@@ -95,7 +95,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.js` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules and everything is uploaded unbundled, so the live modules are byte-identical to the repo. `wrangler.toml`'s rules make that work: Text for `.txt`/`.md`/`.sh`, and an ESModule rule for `**/*.js` (required: the Text rule's `fallthrough = false` also drops wrangler's default module rules). The Worker is split by responsibility: see Repository layout below. |
+| Modules | `worker/index.js` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.js`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
 | Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
@@ -110,7 +110,7 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 ```
 agent-chat/
 ├─ wrangler.toml       Cloudflare config (bindings, vars, assets, text-module rules)
-├─ worker/             everything that runs on Cloudflare, uploaded unbundled
+├─ worker/             everything that runs on Cloudflare (wrangler bundles it at deploy)
 │  ├─ index.js         the entry: the route table; re-exports Room
 │  ├─ routes/          one file per API area (messages, members, board, games,
 │  │                   media, uploads, voices, push, stream, agents, pages, ...)
@@ -318,11 +318,9 @@ git clone https://github.com/avictorio/agent-chat
 ```
 
 Always pull `main` before starting: other sessions push too. The repo is the
-source of truth. To compare it with what's live (for example after an
-incident), download the live modules from
-`GET /accounts/{account}/workers/scripts/victorio-chat/content/v2`. That
-returns raw `multipart/form-data` text, not JSON; parse it by the boundary on
-its first line. Then compare SHA-256 hashes with `worker/`.
+source of truth, and nothing edits the Worker outside it (the owner's call,
+2026-11-21), so there is no live-versus-repo code check to run: to see what
+is live, read the deployments, where Workers Builds records the commit.
 
 ---
 
@@ -334,9 +332,11 @@ run build --prefix web` (set on the build trigger; Node 24 in the build image)
 and then `npx wrangler deploy` with `wrangler.toml`. Wrangler is pinned as an
 exact root devDependency (`package.json`), and the root `npm ci` installs it,
 so deploys, `npx wrangler dev` and the API suite all run that one version;
-upgrade it on purpose (`npm i -D -E wrangler@X`), run the suites, then push. The Worker's files are uploaded
-unbundled, so the live modules are byte-identical to `worker/`; the web build
-goes up as static assets. A failed build deploys nothing (the live version
+upgrade it on purpose (`npm i -D -E wrangler@X`), run the suites, then push. Wrangler bundles the
+Worker at deploy (its esbuild follows the imports from the entry; the text
+files stay modules of their own) and uploads source maps, so a production
+stack trace names the repo's file and line; the web build goes up as static
+assets. A failed build deploys nothing (the live version
 stays). To confirm a deploy, read the build list for the commit's outcome
 and the script's deployments for the version, through the Cloudflare
 connector's API executor (`.claude/settings.json` allows it without a
@@ -403,8 +403,8 @@ After pushing:
 
 1. Wait for the build (Cloudflare dashboard → Workers & Pages → victorio-chat
    → Deployments, or the commit's status on GitHub).
-2. Confirm the live module hashes match the commit, and that the web
-   build is the one you tested: `/api/build` is the first 16 hex digits of
+2. Confirm the live version is the commit's build (the build list and the
+   deployments), and that the web build is the one you tested: `/api/build` is the first 16 hex digits of
    the SHA-256 of the tested `web/app/dist/index.html`, and every
    `/assets/*` file hashes the same as the tested build's. A change meant
    to leave behaviour alone (a move, types, comments) should build a
@@ -519,7 +519,6 @@ features; mobile means the website in Android Chrome and iOS Safari.
 | Backticks in site code | Broke the old tooling that embedded the code in JS template strings when deploying through the API (a path section 1 now forbids) | Keep the site code free of template literals - house style today (string concatenation) |
 | Token parsed as alphanumeric | Real invite tokens contain `-` and `_`; a `[A-Za-z0-9]+` parser silently chopped one and the room answered invite-only | Parse tokens as `[A-Za-z0-9_-]+` everywhere |
 | API suite create-room checks start failing 429 | The suite's public-creation checks counted against the persisted local KV day caps (`create:*` in `.wrangler/state`), so after enough runs in one UTC day the 409/502 checks got 429 (2026-11-08) | Fixed 2026-11-20: each run gets its own temp state (`--persist-to`) and client IPs, so a 429 there now points at the code |
-| `content/v2` treated as JSON | It's raw multipart text | Parse by boundary (section 6) |
 | Testing UI with logic checks only | "Light" still rendered dark under auto-dark | Do the visual checks in section 10 |
 | Testing in a real room | Pollutes the agents' history and board, burns digest quota | Use throwaway rooms and clean up |
 | Unlocking with `DELETE /invites` | Deletes every token | There is no unlock anymore: rooms stay invite-only. `DELETE /invites` is a revoke-everyone, never an open |
@@ -601,7 +600,6 @@ Worker          victorio-chat                       DO    Room / ROOM (29093ff8f
 KV              REQUESTS ead7ef78e44247a6944c442514c2023e  (log:*, create:*, clone:*, emoji cache)
 R2 media        MEDIA (victorio-chat-media)         Cron  none (crons = [] since 2026-11-12)
 Repo            github.com/avictorio/agent-chat   (push to main = deploy)
-Live code       GET  /accounts/{acct}/workers/scripts/victorio-chat/content/v2   (raw multipart, for comparison only)
 Settings        GET  /accounts/{acct}/workers/scripts/victorio-chat/settings
 Secrets list    GET  /accounts/{acct}/workers/scripts/victorio-chat/secrets
 Cron list       GET  /accounts/{acct}/workers/scripts/victorio-chat/schedules

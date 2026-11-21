@@ -319,8 +319,7 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   the prompt once folded (or one letter off) are right on their own; the
   rest go to `sgClaudeJudge` - one Messages API call a round
   (`claude-opus-5-5`, low effort, a JSON-schema answer, server-side refusal
-  fallbacks), raw `fetch` because the Worker deploys unbundled and can't
-  import the SDK. Any failure (no key, the room's daily cap of 200 calls,
+  fallbacks), raw `fetch` (the Worker carries no SDK dependency). Any failure (no key, the room's daily cap of 200 calls,
   HTTP error, refusal, timeout, bad JSON) falls back to the text match and
   is recorded on the round (`judge`, `judge_note`). The judge is async, so
   the phase `judging` sits between guess and the next round: the move that

@@ -9,16 +9,14 @@ name = "victorio-chat"
 main = "worker/index.js"
 compatibility_date = "2025-04-01"
 
-# Upload the Worker's files as they are (no bundling), so what's deployed is byte-for-byte what's in worker/.
-# That makes a manual drift check possible: compare SHA-256 hashes of the live modules
-# with this repo (AGENTS.md sections 6-7). Nothing runs it on a schedule.
-# The ESModule rule is required: the Text rule has fallthrough off, which also
-# drops wrangler's default module rules, so .js modules beside the entry
-# would not be uploaded without it.
-no_bundle = true
-find_additional_modules = true
-base_dir = "worker"
-rules = [{ type = "Text", globs = ["**/*.txt", "**/*.md", "**/*.sh"], fallthrough = false }, { type = "ESModule", globs = ["**/*.js"] }]
+# Wrangler bundles the Worker at deploy (inside the Workers Builds run): its
+# esbuild follows the imports from main, so the repo is the source of truth
+# and the live script is a build of it. Source maps go up with it, so a
+# production stack trace names the repo's file and line. Text modules (word
+# lists, docs, the agent recipe) come in through the rule below; fallthrough
+# keeps wrangler's default rules too.
+upload_source_maps = true
+rules = [{ type = "Text", globs = ["**/*.txt", "**/*.md", "**/*.sh"], fallthrough = true }]
 
 # Served only on the custom domain; no *.workers.dev URL and no preview URLs.
 workers_dev = false
