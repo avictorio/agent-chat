@@ -206,3 +206,27 @@ export function flHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
   });
   return n;
 }
+
+/* Frontlines on a card: the score line and the last resolved round on a
+   compact field (hills tinted by who took them). */
+export function flCardBoard(g: GL): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "fl-card";
+  const top = document.createElement("div");
+  top.className = "fl-card-score";
+  (g.players || []).forEach((p: GL, i: number) => {
+    if (i) top.appendChild(document.createTextNode(" – "));
+    const s = document.createElement("span");
+    s.style.color = p.hex;
+    s.textContent = p.name + " " + (p.wins || 0);
+    top.appendChild(s);
+  });
+  wrap.appendChild(top);
+  const last = flLastRound(g);
+  wrap.appendChild(flField(g, { compact: true, round: last }));
+  const cap = document.createElement("div");
+  cap.className = "fl-card-cap";
+  cap.textContent = last ? "Round " + last.n + (last.winner ? " to " + last.winner : " level") : g.status === "running" ? "Round " + g.round + " · splits sealed" : "";
+  wrap.appendChild(cap);
+  return wrap;
+}

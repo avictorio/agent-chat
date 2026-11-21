@@ -1,43 +1,12 @@
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
-import type { RoomClient } from "@chat/contract";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../../lib/index";
 import { matchTitle } from "./shared/catalog";
-import { flField, flHistoryRows, flLastRound, flPlanner } from "./frontlines/frontlines";
-import { crBoard, crHistoryRows, crInput, crSecretEl } from "./coderace/coderace";
-import { c4Board, c4HistoryRows, c4Seats } from "./fourinarow/fourinarow";
-import { trGrid, trHistoryRows, trLastRound, trPlanner, trScores, type TrDraft } from "./trust/trust";
-import { auBid, auHistoryRows, auLastRound, auLot, auPlayers, auResult } from "./auction/auction";
-import { ldBidNow, ldBidder, ldCounts, ldCup, ldHistoryRows, ldLastRound, ldRound, ldTable } from "./liarsdice/liarsdice";
-import { ttHistoryRows, ttLastRound, ttReveal, ttScores, ttStatements, ttWriter, type TtDraft } from "./twotruths/twotruths";
-import { ecHistoryRows, ecStory, ecStrip, ecWriter, ecWriters } from "./corpse/corpse";
-import { tqAnswerer, tqAsker, tqBudget, tqHistoryRows, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty/twenty";
-import { wwAction, wwEvents, wwHistoryRows, wwPlayers, wwRoleCard, wwTalk, wwVerb } from "./werewolf/werewolf";
-import { sgArtistPanel, sgGuessForm, sgHistoryRows, sgLastRound, sgMakePad, sgReveal, sgScores, type SgPad } from "./sketch/sketch";
-import { tvAnswerForm, tvAskForm, tvHistoryRows, tvJudgeForm, tvLastRound, tvQuestion, tvReveal, tvScores, type TvAnsDraft, type TvAskDraft } from "./trivia/trivia";
-import { lgDir, lgHistoryRows, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours, type LgDraft, type LgPanel } from "./lettergrid/lettergrid";
-import {
-  battleshipBoard,
-  bsGrid,
-  duelBoard,
-  duelScoreLine,
-  duelTendencies,
-  fleetStrip,
-  gameMetaText,
-  lastMoveText,
-  roundVerdict,
-  setClockBar,
-  setTurnClock,
-  formatLeft,
-  winnerBanner,
-  THROW_BEATS,
-  THROW_EMOJI,
-  type GL,
-} from "./shared/render";
-import type { ViewerApi } from "../shell/viewer";
+import { wwVerb } from "./werewolf/werewolf";
+import { fleetStrip, formatLeft, setClockBar, setTurnClock, type GL } from "./shared/render";
 import type { Arena3dProps, GameStoreOptions, GameView, GameViewCtx, Host3d, Kind3d } from "./shared/viewctx";
-import { GAME_VIEWS } from "./registry";
+import { GAMES } from "./registry";
 
 
 // Games: the chat cards and the arena views for all sixteen games. Both
@@ -614,20 +583,13 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // tabs - Game and History - and the History tab renders one row
   // grammar for every kind: an index chip (Turn/Round/Tick N), the
   // actors as color-dot chips, their action, and an outcome pill.
-  // Battleship rows come from the log's structured shot entries,
-  // duel rows from rounds, cycles rows from the move log grouped
-  // by tick; narrative log lines ride along as note rows.
-  const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
+  // Each game's rows and count live in its folder (GAMES in
+  // registry.ts; the row types in shared/history.ts).
 
   function histCount(g: GL): number {
-    if (g.type === "duel" || g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "auction" || g.type === "liarsdice" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" || g.type === "trivia" || g.type === "sketch") return (g.rounds || []).length;
-    if (g.type === "battleship") return (g.log || []).length;
-    if (g.type === "fourinarow") return (g.moves || []).length;
-    if (g.type === "corpse") return (g.beats || []).length;
-    if (g.type === "werewolf") return (g.events || []).length;
-    const ticks = new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick));
-    return ticks.size;
+    return (GAMES[g.type] || GAMES.lightcycles)!.historyCount(g);
   }
+
 
   function arenaTabs(g: GL): HTMLElement {
     const tabs = el("div", "arena-tabs");
@@ -661,114 +623,12 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   function historyList(g: GL): HTMLElement {
     const list = el("div", "hist-list");
-    const players = g.players || [];
-    const byName = (n: string): GL => players.filter((p: GL) => p.name === n)[0] || { name: n, hex: "#94a3b8" };
     const row = (idx: string): HTMLElement => {
       const r = el("div", "hist-row");
       r.appendChild(el("span", "hist-idx", idx));
       return r;
     };
-    let n = 0;
-    if (g.type === "frontlines") {
-      n = flHistoryRows(g, row, histWho, list);
-    } else if (g.type === "coderace") {
-      n = crHistoryRows(g, row, histWho, list);
-    } else if (g.type === "fourinarow") {
-      n = c4HistoryRows(g, row, histWho, list);
-    } else if (g.type === "trust") {
-      n = trHistoryRows(g, row, histWho, list);
-    } else if (g.type === "auction") {
-      n = auHistoryRows(g, row, histWho, list);
-    } else if (g.type === "liarsdice") {
-      n = ldHistoryRows(g, row, histWho, list);
-    } else if (g.type === "twotruths") {
-      n = ttHistoryRows(g, row, histWho, list);
-    } else if (g.type === "corpse") {
-      n = ecHistoryRows(g, row, histWho, list);
-    } else if (g.type === "twenty") {
-      n = tqHistoryRows(g, row, histWho, list);
-    } else if (g.type === "werewolf") {
-      n = wwHistoryRows(g, row, histWho, list);
-    } else if (g.type === "lettergrid") {
-      n = lgHistoryRows(g, row, histWho, list);
-    } else if (g.type === "trivia") {
-      n = tvHistoryRows(g, row, histWho, list);
-    } else if (g.type === "sketch") {
-      n = sgHistoryRows(g, row, histWho, list);
-    } else if (g.type === "duel") {
-      (g.rounds || []).forEach((r: GL) => {
-        n++;
-        const rw = row("Round " + r.n);
-        players.forEach((p: GL) => {
-          const seg = el("span", "hist-seg");
-          seg.appendChild(histWho(p));
-          const t = (r.throws || {})[p.name];
-          seg.appendChild(el("span", "hist-act", t ? (THROW_EMOJI[t] || "") + " " + t : "— no throw"));
-          rw.appendChild(seg);
-        });
-        if (r.winner) {
-          const pill = el("span", "hist-pill win", r.winner + " takes it");
-          pill.style.borderColor = byName(r.winner).hex;
-          pill.style.color = byName(r.winner).hex;
-          rw.appendChild(pill);
-        } else rw.appendChild(el("span", "hist-pill tie", "Tie"));
-        list.appendChild(rw);
-      });
-    } else if (g.type === "battleship") {
-      (g.log || []).forEach((ln: GL) => {
-        n++;
-        if (ln.by) {
-          const rw = row("Turn " + ln.tick);
-          const seg = el("span", "hist-seg");
-          seg.appendChild(histWho(byName(ln.by)));
-          seg.appendChild(el("span", "hist-act", "fires"));
-          rw.appendChild(seg);
-          rw.appendChild(el("span", "hist-cell", ln.cell || ""));
-          if (ln.sunk) rw.appendChild(el("span", "hist-pill sunk", "Sunk · " + ln.sunk));
-          else if (ln.result === "hit") rw.appendChild(el("span", "hist-pill hit", "Hit"));
-          else rw.appendChild(el("span", "hist-pill miss", "Miss"));
-          list.appendChild(rw);
-        } else {
-          const rw = row("Turn " + ln.tick);
-          rw.appendChild(el("span", "hist-note", ln.text || ""));
-          list.appendChild(rw);
-        }
-      });
-    } else {
-      const byTick = new Map<number, GL[]>();
-      (g.move_log || []).forEach((m: GL) => {
-        if (!byTick.has(m.tick)) byTick.set(m.tick, []);
-        (byTick.get(m.tick) as GL[]).push(m);
-      });
-      const notes = new Map<number, string[]>();
-      (g.log || []).forEach((ln: GL) => {
-        if (/^Tick \d+:/.test(ln.text || "")) return;
-        if (!notes.has(ln.tick)) notes.set(ln.tick, []);
-        (notes.get(ln.tick) as string[]).push(ln.text || "");
-      });
-      const ticks = Array.from(new Set([...byTick.keys(), ...notes.keys()])).sort((a, b) => a - b);
-      ticks.forEach((t) => {
-        const moves = byTick.get(t) || [];
-        if (moves.length) {
-          n++;
-          const rw = row("Tick " + t);
-          moves.forEach((m: GL) => {
-            const seg = el("span", "hist-seg");
-            seg.appendChild(histWho(byName(m.name)));
-            seg.appendChild(el("span", "hist-act", (DIR_ARROW[m.dir] || "") + " " + (m.dir || "")));
-            if (!m.submitted) seg.appendChild(el("span", "hist-src", "clock"));
-            rw.appendChild(seg);
-          });
-          list.appendChild(rw);
-        }
-        (notes.get(t) || []).forEach((txt) => {
-          n++;
-          const rw = row("Tick " + t);
-          rw.appendChild(el("span", "hist-note", txt));
-          list.appendChild(rw);
-        });
-      });
-    }
+    const n = (GAMES[g.type] || GAMES.lightcycles)!.history(g, row, histWho, list);
     if (!n) list.appendChild(el("div", "hist-empty", "No history yet - the record writes itself as the match plays."));
     return list;
   }
@@ -1141,7 +1001,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     if (!gameView || gameView.id !== g.id) return;
     // Each game's arena view, from the registry (registry.ts); a match
     // from before the type field is Light Cycles, the first game.
-    (GAME_VIEWS[g.type] || GAME_VIEWS.lightcycles)!(ctx, g, force);
+    (GAMES[g.type] || GAMES.lightcycles)!.view(ctx, g, force);
   }
 
 
@@ -1223,7 +1083,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     fetch: fetchGame,
     onFrame(game: GL) {
       if (!game || !game.id) return;
-      if (game.trails || game.type === "duel" || game.type === "battleship" || game.type === "frontlines" || game.type === "coderace" || game.type === "fourinarow" || game.type === "trust" || game.type === "lettergrid" || game.type === "trivia" || game.type === "sketch" || game.type === "auction" || game.type === "liarsdice" || game.type === "twotruths" || game.type === "corpse" || game.type === "twenty" || game.type === "werewolf") {
+      // A frame of any registered game; Light Cycles once it carries trails.
+      if (game.trails || (game.type !== "lightcycles" && GAMES[game.type])) {
         // A frame carries the public summary, not the full state.
         // Merge it over the cached entry instead of replacing it:
         // replacing wiped the per-viewer fields (you, rounds, log)

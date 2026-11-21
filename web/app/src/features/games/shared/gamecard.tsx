@@ -1,23 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { useFeed } from "../../room/ctx";
 import type { GameSummary } from "@chat/contract";
-import { battleshipBoard, boardSvg, duelBoard, gameMetaText } from "./render";
+import { gameMetaText } from "./render";
+import type { GL } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { pressable } from "../../../lib/index";
 import { matchTitle } from "./catalog";
-import { flField, flLastRound } from "../frontlines/frontlines";
-import { crCardBoard } from "../coderace/coderace";
-import { c4Board } from "../fourinarow/fourinarow";
-import { trCardBoard } from "../trust/trust";
-import { auCardBoard } from "../auction/auction";
-import { ldCardBoard } from "../liarsdice/liarsdice";
-import { ttCardBoard } from "../twotruths/twotruths";
-import { ecCardBoard } from "../corpse/corpse";
-import { tqCardBoard } from "../twenty/twenty";
-import { lgCardBoard } from "../lettergrid/lettergrid";
-import { tvCardBoard } from "../trivia/trivia";
-import { sgCardBoard } from "../sketch/sketch";
-import { wwCardBoard } from "../werewolf/werewolf";
+import { GAMES } from "../registry";
 
 // The game card in the feed: header (kind, name, live meta line) and
 // the board — the Light Cycles SVG or the Duel scoreboard — rendered
@@ -31,63 +20,17 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const g = store.cache.get(id) || null;
 
   useEffect(() => {
-    const cur = store.cache.get(id);
-    if (!cur || (cur.type !== "duel" && cur.type !== "battleship" && cur.type !== "frontlines" && cur.type !== "coderace" && cur.type !== "fourinarow" && cur.type !== "trust" && cur.type !== "auction" && cur.type !== "liarsdice" && cur.type !== "twotruths" && cur.type !== "corpse" && cur.type !== "twenty" && cur.type !== "werewolf" && cur.type !== "lettergrid" && cur.type !== "trivia" && cur.type !== "sketch" && !cur.trails)) void store.fetch(id);
+    if (!isLoaded(store.cache.get(id))) void store.fetch(id);
   }, [store, id, version]);
 
   const boardRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const board = boardRef.current;
     if (!board || !g) return;
-    if (g.type === "duel") {
-      board.textContent = "";
-      board.appendChild(duelBoard(g));
-    } else if (g.type === "battleship") {
-      board.textContent = "";
-      board.appendChild(battleshipBoard(g));
-    } else if (g.type === "frontlines") {
-      board.textContent = "";
-      board.appendChild(flCardBoard(g));
-    } else if (g.type === "coderace") {
-      board.textContent = "";
-      board.appendChild(crCardBoard(g, store.meName()));
-    } else if (g.type === "fourinarow") {
-      board.textContent = "";
-      board.appendChild(c4Board(g, { compact: true }));
-    } else if (g.type === "trust") {
-      board.textContent = "";
-      board.appendChild(trCardBoard(g, store.meName()));
-    } else if (g.type === "auction") {
-      board.textContent = "";
-      board.appendChild(auCardBoard(g, store.meName()));
-    } else if (g.type === "liarsdice") {
-      board.textContent = "";
-      board.appendChild(ldCardBoard(g, store.meName()));
-    } else if (g.type === "twotruths") {
-      board.textContent = "";
-      board.appendChild(ttCardBoard(g, store.meName()));
-    } else if (g.type === "corpse") {
-      board.textContent = "";
-      board.appendChild(ecCardBoard(g, store.meName()));
-    } else if (g.type === "twenty") {
-      board.textContent = "";
-      board.appendChild(tqCardBoard(g, store.meName()));
-    } else if (g.type === "werewolf") {
-      board.textContent = "";
-      board.appendChild(wwCardBoard(g, store.meName()));
-    } else if (g.type === "lettergrid") {
-      board.textContent = "";
-      board.appendChild(lgCardBoard(g, store.meName()));
-    } else if (g.type === "trivia") {
-      board.textContent = "";
-      board.appendChild(tvCardBoard(g, store.meName()));
-    } else if (g.type === "sketch") {
-      board.textContent = "";
-      board.appendChild(sgCardBoard(g, store.meName()));
-    } else if (g.trails) {
-      board.innerHTML = boardSvg(g);
-      board.appendChild(lcCardFoot(g));
-    }
+    // Each game's card board, from the registry (registry.ts); a match
+    // without a type is Light Cycles (its painter wants trails).
+    const plugin = GAMES[g.type] || GAMES.lightcycles;
+    if (plugin) plugin.card(board, g, store.meName());
   }, [g, store]);
 
   // Spectator pulse: when the cached game actually advances (a shot,
@@ -174,38 +117,13 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   );
 }
 
-// Under the Light Cycles board: whose trail is whose (the colours were
-// only named in the message text) and, for a rider who still owes the
-// tick, the same YOUR MOVE pill the Duel and Battleship cards carry -
-// on a phone the old "your move" at the end of the meta line was the
-// part that got clipped.
-const ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
-/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-function lcCardFoot(g: any): HTMLElement {
-  const foot = document.createElement("div");
-  foot.className = "lc-card-foot";
-  const key = document.createElement("div");
-  key.className = "lc-card-key";
-  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  (g.players || []).forEach((p: any) => {
-    const item = document.createElement("span");
-    item.className = "lc-card-rider" + (p.alive || g.status === "lobby" ? "" : " out");
-    const dot = document.createElement("span");
-    dot.className = "lc-dot";
-    dot.style.background = p.hex;
-    item.appendChild(dot);
-    item.appendChild(document.createTextNode(p.name));
-    key.appendChild(item);
-  });
-  foot.appendChild(key);
-  const you = g.you;
-  if (you && you.playing && you.alive && g.status === "running") {
-    const pill = document.createElement("span");
-    pill.className = "duel-pill " + (you.queued ? "locked" : "your-throw");
-    pill.textContent = you.queued ? "✓ LOCKED · " + (ARROW[you.queued] || you.queued) : "YOUR MOVE";
-    foot.appendChild(pill);
-  }
-  return foot;
+// Whether the cache holds the whole match: any registered game but Light
+// Cycles counts once cached; Light Cycles (and a match without a known
+// type) needs its trails, which the summary lacks.
+function isLoaded(g: GL | undefined): boolean {
+  if (!g) return false;
+  if (g.type && g.type !== "lightcycles" && GAMES[g.type]) return true;
+  return !!g.trails;
 }
 
 // A compact fingerprint of "the match moved": status plus the
@@ -263,26 +181,3 @@ function gameMoverHex(g: any): string | null {
   return p ? p.hex : null;
 }
 
-/* Frontlines on a card: the score line and the last resolved round on a
-   compact field (hills tinted by who took them). */
-function flCardBoard(g: any): HTMLElement {
-  const wrap = document.createElement("div");
-  wrap.className = "fl-card";
-  const top = document.createElement("div");
-  top.className = "fl-card-score";
-  (g.players || []).forEach((p: any, i: number) => {
-    if (i) top.appendChild(document.createTextNode(" – "));
-    const s = document.createElement("span");
-    s.style.color = p.hex;
-    s.textContent = p.name + " " + (p.wins || 0);
-    top.appendChild(s);
-  });
-  wrap.appendChild(top);
-  const last = flLastRound(g);
-  wrap.appendChild(flField(g, { compact: true, round: last }));
-  const cap = document.createElement("div");
-  cap.className = "fl-card-cap";
-  cap.textContent = last ? "Round " + last.n + (last.winner ? " to " + last.winner : " level") : g.status === "running" ? "Round " + g.round + " · splits sealed" : "";
-  wrap.appendChild(cap);
-  return wrap;
-}
