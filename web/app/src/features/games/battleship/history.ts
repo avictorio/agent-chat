@@ -1,12 +1,12 @@
+import type { BattleshipLogLine, BattleshipState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
 import { histPlayer, type HistRow, type HistWho } from "../shared/history";
 
 /** Battleship's History rows, from the log: each shot (who, the cell, hit,
  * miss or sunk) and the narrative lines as notes. */
-export function bsHistoryRows(g: GL, row: HistRow, who: HistWho, list: HTMLElement): number {
+export function bsHistoryRows(g: BattleshipState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  (g.log || []).forEach((ln: GL) => {
+  (g.log || []).forEach((ln: BattleshipLogLine) => {
     n++;
     if (ln.by) {
       const rw = row("Turn " + ln.tick);

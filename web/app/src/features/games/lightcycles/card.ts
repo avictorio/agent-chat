@@ -1,4 +1,5 @@
-import { boardSvg, type GL } from "../shared/render";
+import type { LightCyclesPlayer, LightCyclesState } from "@chat/contract";
+import { boardSvg } from "../shared/render";
 
 // Under the Light Cycles board: whose trail is whose (the colours were
 // only named in the message text) and, for a rider who still owes the
@@ -6,12 +7,12 @@ import { boardSvg, type GL } from "../shared/render";
 // on a phone the old "your move" at the end of the meta line was the
 // part that got clipped.
 const ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
-export function lcCardFoot(g: GL): HTMLElement {
+export function lcCardFoot(g: LightCyclesState): HTMLElement {
   const foot = document.createElement("div");
   foot.className = "lc-card-foot";
   const key = document.createElement("div");
   key.className = "lc-card-key";
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: LightCyclesPlayer) => {
     const item = document.createElement("span");
     item.className = "lc-card-rider" + (p.alive || g.status === "lobby" ? "" : " out");
     const dot = document.createElement("span");
@@ -34,7 +35,7 @@ export function lcCardFoot(g: GL): HTMLElement {
 
 /* The Light Cycles card: the board (an SVG of the trails) and its foot.
    Only for a match with trails, as before the registry. */
-export function paintLightCyclesCard(board: HTMLElement, g: GL): void {
+export function paintLightCyclesCard(board: HTMLElement, g: LightCyclesState): void {
   if (!g.trails) return;
   board.innerHTML = boardSvg(g);
   board.appendChild(lcCardFoot(g));

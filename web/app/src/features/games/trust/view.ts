@@ -1,13 +1,14 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { trGrid, trLastRound, trPlanner, trScores, type TrDraft } from "./trust";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { TrustPlayer, TrustState } from "@chat/contract";
 
 /* Trust (2026-11-19): the scoreboard, your choices (a Cooperate /
    Defect pair per rival), then the last round's who-trusted-whom grid.
    The draft lives on gameView so a poll never wipes it; it resets each
    round. */
-export function renderTrustView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
@@ -18,7 +19,7 @@ export function renderTrustView(ctx: GameViewCtx, g: GL, force?: boolean) {
     g.status,
     g.round,
     (g.rounds || []).length,
-    (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+    (g.players || []).map((p: TrustPlayer) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
     JSON.stringify(queued || {}),
     JSON.stringify(gv.trDraft.d),
     ctx.youSig(g),

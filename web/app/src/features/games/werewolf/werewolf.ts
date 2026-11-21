@@ -1,5 +1,6 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { WerewolfCheck, WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
+import type { HistRow, HistWho } from "../shared/history";
 
 /* Werewolf in the page (2026-11-20), under the 3D village: your role,
    your night action or your day vote, the discussion panel (the owner's
@@ -20,7 +21,7 @@ export function wwRole(r?: string | null): RoleInfo {
   return (r && WW_ROLE[r]) || VILLAGER;
 }
 export const WW_TALK_MAX = 400;
-const hexOf = (g: GL, n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+const hexOf = (g: WerewolfState, n: string) => (((g && g.players) || []).find((p: WerewolfPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 const VERB_LABEL: Record<string, string> = { kill: "Kill", check: "Check", guard: "Guard", vote: "Vote out" };
 
 export function wwVerb(role: string | undefined): string | null {
@@ -28,8 +29,8 @@ export function wwVerb(role: string | undefined): string | null {
 }
 
 /* Your role card: who you are, your pack, what you have learned. */
-export function wwRoleCard(g: GL): HTMLElement {
-  const you = g.you || {};
+export function wwRoleCard(g: WerewolfState): HTMLElement {
+  const you: Partial<WerewolfYou> = g.you || {};
   const r = wwRole(you.role);
   const box = el("div", "ww-role" + (you.role === "werewolf" ? " wolf" : "") + (you.alive === false ? " dead" : ""));
   box.appendChild(el("span", "ww-role-icon", r.icon));
@@ -37,7 +38,7 @@ export function wwRoleCard(g: GL): HTMLElement {
   body.appendChild(el("div", "ww-role-name", (you.alive === false ? "You were the " : "You are the ") + r.name));
   body.appendChild(el("div", "ww-role-blurb", you.alive === false ? "You're out - you can watch, but not speak or act." : r.blurb));
   if (you.pack && you.pack.length) body.appendChild(el("div", "ww-role-extra", "Your pack: " + you.pack.join(", ")));
-  if (you.checks && you.checks.length) body.appendChild(el("div", "ww-role-extra", "Your checks: " + you.checks.map((c: GL) => c.target + (c.wolf ? " is a werewolf" : " is not a werewolf") + " (night " + c.night + ")").join(" · ")));
+  if (you.checks && you.checks.length) body.appendChild(el("div", "ww-role-extra", "Your checks: " + you.checks.map((c: WerewolfCheck) => c.target + (c.wolf ? " is a werewolf" : " is not a werewolf") + " (night " + c.night + ")").join(" · ")));
   if (you.role === "guardian" && you.last_guard) body.appendChild(el("div", "ww-role-extra", "Last night you guarded " + you.last_guard + " - not them again tonight."));
   box.appendChild(body);
   return box;
@@ -45,8 +46,8 @@ export function wwRoleCard(g: GL): HTMLElement {
 
 /* Your move: tonight's target (by role), or today's vote with the public
    tallies. */
-export function wwAction(g: GL, me: string, onSend: (dir: string) => void): HTMLElement | null {
-  const you = g.you || {};
+export function wwAction(g: WerewolfState, me: string, onSend: (dir: string) => void): HTMLElement | null {
+  const you: Partial<WerewolfYou> = g.you || {};
   if (g.status !== "running" || !you.playing || you.alive === false) return null;
   const night = g.phase === "night";
   const verb = night ? wwVerb(you.role) : "vote";
@@ -81,12 +82,12 @@ export function wwAction(g: GL, me: string, onSend: (dir: string) => void): HTML
 
 /* The discussion panel: the town square (everyone by day; the dead and
    spectators read), and for wolves the den. */
-export function wwTalk(g: GL, draft: { town: string; den: string }, onSay: (dir: string) => void): HTMLElement {
-  const you = g.you || {};
+export function wwTalk(g: WerewolfState, draft: { town: string; den: string }, onSay: (dir: string) => void): HTMLElement {
+  const you: Partial<WerewolfYou> = g.you || {};
   const wolf = you.role === "werewolf";
   const alive = you.playing && you.alive !== false && g.status === "running";
   const box = el("div", "ww-talk");
-  const section = (title: string, lines: GL[], ch: "town" | "den") => {
+  const section = (title: string, lines: WerewolfTalk[], ch: "town" | "den") => {
     const sec = el("div", "ww-talk-sec" + (ch === "den" ? " den" : ""));
     sec.appendChild(el("div", "ww-talk-title", title));
     const list = el("div", "ww-talk-list");
@@ -129,15 +130,15 @@ export function wwTalk(g: GL, draft: { town: string; den: string }, onSay: (dir:
     } else if (ch === "town" && alive && g.phase === "night") sec.appendChild(el("div", "ww-talk-empty", "The village sleeps - talk resumes at dawn."));
     box.appendChild(sec);
   };
-  section("The village square", (g.talk || []) as GL[], "town");
-  if (wolf || (g.status !== "running" && (g.den || []).length)) section(wolf && g.status === "running" ? "The den (only your pack hears this)" : "The den (revealed)", (g.den || []) as GL[], "den");
+  section("The village square", g.talk || [], "town");
+  if (wolf || (g.status !== "running" && (g.den || []).length)) section(wolf && g.status === "running" ? "The den (only your pack hears this)" : "The den (revealed)", g.den || [], "den");
   return box;
 }
 
 /* The timeline: every dawn and every vote. */
-export function wwEvents(g: GL): HTMLElement {
+export function wwEvents(g: WerewolfState): HTMLElement {
   const box = el("div", "ww-events");
-  const evs: GL[] = g.events || [];
+  const evs: WerewolfEvent[] = g.events || [];
   if (!evs.length) {
     box.appendChild(el("div", "ww-talk-empty", g.status === "running" ? "The first night has fallen." : "Nothing has happened yet."));
     return box;
@@ -146,7 +147,7 @@ export function wwEvents(g: GL): HTMLElement {
   return box;
 }
 
-export function wwEventText(e: GL): string {
+export function wwEventText(e: WerewolfEvent): string {
   if (e.kind === "death") return "Dawn " + e.night + ": " + e.who + " was killed in the night - " + wwRole(e.role).name.toLowerCase() + ".";
   if (e.kind === "saved") return "Dawn " + e.night + ": someone was attacked and survived.";
   if (e.kind === "quiet") return "Dawn " + e.night + ": the night passed quietly.";
@@ -155,7 +156,7 @@ export function wwEventText(e: GL): string {
   return "Day " + e.day + ": nobody voted.";
 }
 
-function wwEventRow(g: GL, e: GL): HTMLElement {
+function wwEventRow(g: WerewolfState, e: WerewolfEvent): HTMLElement {
   const row = el("div", "ww-ev " + e.kind);
   row.appendChild(el("span", "ww-ev-icon", e.kind === "death" ? "🌙" : e.kind === "saved" ? "🛡️" : e.kind === "quiet" ? "🌙" : e.kind === "eliminated" ? "⚖️" : "☀️"));
   row.appendChild(el("span", "ww-ev-text", wwEventText(e)));
@@ -164,10 +165,10 @@ function wwEventRow(g: GL, e: GL): HTMLElement {
 }
 
 /* The villagers: alive or dead (and, once dead, what they were). */
-export function wwPlayers(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function wwPlayers(g: WerewolfState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "ww-players" + (compact ? " compact" : ""));
   const order: string[] = g.order || [];
-  const ps: GL[] = ((g.players || []) as GL[]).slice().sort((a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0) || order.indexOf(a.name) - order.indexOf(b.name));
+  const ps: WerewolfPlayer[] = (g.players || []).slice().sort((a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0) || order.indexOf(a.name) - order.indexOf(b.name));
   ps.forEach((p) => {
     const row = el("div", "ww-prow" + (p.alive ? "" : " dead") + (me && p.name === me ? " mine" : "") + ((g.winners || []).indexOf(p.name) >= 0 ? " won" : ""));
     const d = el("span", "hist-dot");
@@ -181,11 +182,11 @@ export function wwPlayers(g: GL, me?: string, compact?: boolean): HTMLElement {
   return box;
 }
 
-export function wwHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function wwHistoryRows(g: WerewolfState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.events || []) as GL[]).forEach((e: GL) => {
+  const players: WerewolfPlayer[] = g.players || [];
+  const byName = (nm: string): Pick<WerewolfPlayer, "name" | "hex"> => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  (g.events || []).forEach((e: WerewolfEvent) => {
     n++;
     const rw = row(e.night ? "Night " + e.night : "Day " + e.day);
     if (e.who) {
@@ -199,13 +200,13 @@ export function wwHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
   return n;
 }
 
-export function wwSideText(g: GL): string {
+export function wwSideText(g: WerewolfState): string {
   return g.side === "wolves" ? "The wolves win" : g.side === "village" ? "The village wins" : "";
 }
 
-export function wwCardBoard(g: GL, me?: string): HTMLElement {
+export function wwCardBoard(g: WerewolfState, me?: string): HTMLElement {
   const wrap = el("div", "ww-card");
-  const alive = ((g.players || []) as GL[]).filter((p) => p.alive).length;
+  const alive = (g.players || []).filter((p) => p.alive).length;
   const line = g.status === "running" ? (g.phase === "night" ? "Night " + g.night + " · the village sleeps" : "Day " + g.day + " · " + alive + " alive · talking and voting") : g.status === "finished" ? wwSideText(g) : (g.players || []).length + " players";
   wrap.appendChild(el("div", "ww-card-line" + (g.phase === "night" ? " night" : ""), line));
   wrap.appendChild(wwPlayers(g, me, true));

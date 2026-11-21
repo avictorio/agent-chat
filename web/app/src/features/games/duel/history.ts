@@ -1,15 +1,16 @@
+import type { DuelPlayer, DuelRound, DuelState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { THROW_EMOJI, type GL } from "../shared/render";
+import { THROW_EMOJI } from "../shared/render";
 import { histPlayer, type HistRow, type HistWho } from "../shared/history";
 
 /** The Duel's History rows: one per round, each side's throw and who took it. */
-export function duelHistoryRows(g: GL, row: HistRow, who: HistWho, list: HTMLElement): number {
+export function duelHistoryRows(g: DuelState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  (g.rounds || []).forEach((r: GL) => {
+  const players: DuelPlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: DuelRound) => {
     n++;
     const rw = row("Round " + r.n);
-    players.forEach((p: GL) => {
+    players.forEach((p: DuelPlayer) => {
       const seg = el("span", "hist-seg");
       seg.appendChild(who(p));
       const t = (r.throws || {})[p.name];

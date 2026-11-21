@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { TriviaPlayer, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 
 /* Trivia in the DOM (2026-11-20): the scoreboard (balances), the
    quizmaster's question form, the answer-and-wager form, the judge panel,
@@ -12,12 +12,12 @@ import type { GL } from "../shared/render";
 export type TvAskDraft = { q: string; a: string; acc: string };
 export type TvAnsDraft = { a: string; w: number };
 
-export function tvLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function tvLastRound(g: TriviaState): TriviaRound | null {
+  const rs: TriviaRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
-function status(g: GL, p: GL): string {
+function status(g: TriviaState, p: TriviaPlayer): string {
   if (g.status !== "running") return "";
   if (p.name === g.asker) return g.phase === "judge" ? "judging…" : g.phase === "ask" ? "asking…" : "quizmaster";
   if (g.phase === "answer") return p.committed ? "answered ✓" : "thinking…";
@@ -25,10 +25,10 @@ function status(g: GL, p: GL): string {
 }
 
 /* The scoreboard, highest balance first, with right answers. */
-export function tvScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function tvScores(g: TriviaState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "tv-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g && g.players) || []).slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0) || (b.right || 0) - (a.right || 0) || (a.name < b.name ? -1 : 1));
-  ps.forEach((p: GL, i: number) => {
+  const ps: TriviaPlayer[] = ((g && g.players) || []).slice().sort((a: TriviaPlayer, b: TriviaPlayer) => (b.balance || 0) - (a.balance || 0) || (b.right || 0) - (a.right || 0) || (a.name < b.name ? -1 : 1));
+  ps.forEach((p: TriviaPlayer, i: number) => {
     const row = el("div", "tv-row" + (me && p.name === me ? " mine" : "") + (p.name === g.asker ? " asker" : ""));
     row.style.setProperty("--who", p.hex || "#94a3b8");
     row.appendChild(el("span", "tv-rank", String(i + 1)));
@@ -46,10 +46,10 @@ export function tvScores(g: GL, me?: string, compact?: boolean): HTMLElement {
 }
 
 /* The question as it stands this round (also shown in the scene). */
-export function tvQuestion(g: GL): HTMLElement | null {
+export function tvQuestion(g: TriviaState): HTMLElement | null {
   if (g.status !== "running") return null;
   const box = el("div", "tv-q");
-  const who = (g.players || []).find((p: GL) => p.name === g.asker);
+  const who = (g.players || []).find((p: TriviaPlayer) => p.name === g.asker);
   const tag = el("div", "tv-q-tag", "Round " + g.round + " of " + g.rounds_total + " · " + (g.asker || "?") + " asks");
   if (who) tag.style.setProperty("--who", who.hex);
   box.appendChild(tag);
@@ -105,8 +105,8 @@ export function tvAskForm(draft: TvAskDraft, onDraft: (d: TvAskDraft) => void, o
 }
 
 /* An answer and a wager: the stake as a slider and steps of 5. */
-export function tvAnswerForm(g: GL, draft: TvAnsDraft, onDraft: (d: TvAnsDraft) => void, onSend: (dir: string) => void): HTMLElement {
-  const you = g.you || {};
+export function tvAnswerForm(g: TriviaState, draft: TvAnsDraft, onDraft: (d: TvAnsDraft) => void, onSend: (dir: string) => void): HTMLElement {
+  const you: Partial<TriviaYou> = g.you || {};
   const max: number = you.max_wager != null ? you.max_wager : 25;
   const box = el("div", "tv-form tv-answer");
   box.appendChild(el("div", "tv-form-title", you.queued ? "Your answer is in - change it until the round resolves" : "Your answer"));
@@ -175,11 +175,11 @@ export function tvAnswerForm(g: GL, draft: TvAnsDraft, onDraft: (d: TvAnsDraft) 
 }
 
 /* The quizmaster's ruling on answers the match missed. */
-export function tvJudgeForm(g: GL, onSend: (dir: string) => void): HTMLElement {
-  const you = g.you || {};
+export function tvJudgeForm(g: TriviaState, onSend: (dir: string) => void): HTMLElement {
+  const you: Partial<TriviaYou> = g.you || {};
   const box = el("div", "tv-form tv-judge");
   box.appendChild(el("div", "tv-form-title", "Judge these answers - the answer is " + (you.answer || "?")));
-  ((you.to_judge || []) as GL[]).forEach((x: GL) => {
+  ((you.to_judge || []) as TriviaToJudge[]).forEach((x: TriviaToJudge) => {
     const row = el("div", "tv-judge-row" + (x.accepted ? " ok" : ""));
     row.appendChild(el("span", "tv-judge-name", x.name));
     row.appendChild(el("span", "tv-judge-ans", "“" + x.answer + "”"));
@@ -203,17 +203,17 @@ export function tvJudgeForm(g: GL, onSend: (dir: string) => void): HTMLElement {
 
 /* One round's reveal: the question, the answer, each answer with its
    wager and the swing, and the quizmaster's split bonus. */
-export function tvReveal(g: GL, round: GL | null, me?: string): HTMLElement | null {
+export function tvReveal(g: TriviaState, round: TriviaRound | null, me?: string): HTMLElement | null {
   if (!round) return null;
   const box = el("div", "tv-reveal");
-  const players: GL[] = g.players || [];
-  const hexOf = (n: string) => (players.find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+  const players: TriviaPlayer[] = g.players || [];
+  const hexOf = (n: string) => (players.find((p: TriviaPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
   box.appendChild(el("div", "fl-cap", "Round " + round.n + " · " + round.asker + " asked"));
   if (round.forfeit) {
     box.appendChild(el("div", "tv-rv-q", round.asker + " ran out of time - no question this round."));
     return box;
   }
-  box.appendChild(el("div", "tv-rv-q", round.question));
+  box.appendChild(el("div", "tv-rv-q", round.question!));
   box.appendChild(el("div", "tv-rv-a", "Answer: " + round.answer + ((round.accept || []).length ? " (also: " + round.accept.join(", ") + ")" : "")));
   const names = Object.keys(round.answers || {}).concat(round.missed || []);
   names.forEach((n: string) => {
@@ -240,11 +240,11 @@ export function tvReveal(g: GL, round: GL | null, me?: string): HTMLElement | nu
   return box;
 }
 
-export function tvHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function tvHistoryRows(g: TriviaState, row: (idx: string) => HTMLElement, who: (p: Pick<TriviaPlayer, "name" | "hex">) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p: GL) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: TriviaPlayer[] = g.players || [];
+  const byName = (nm: string): Pick<TriviaPlayer, "name" | "hex"> => players.find((p: TriviaPlayer) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  ((g.rounds || []) as TriviaRound[]).forEach((r: TriviaRound) => {
     n++;
     const rw = row("Round " + r.n);
     const seg = el("span", "hist-seg");
@@ -252,7 +252,7 @@ export function tvHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
     seg.appendChild(el("span", "hist-act", r.forfeit ? "no question" : "asked · " + r.answer + (r.split ? " · split +" + (r.bonus || 10) : "")));
     rw.appendChild(seg);
     Object.keys(r.answers || {}).forEach((nm: string) => {
-      const a = r.answers[nm];
+      const a = r.answers[nm]!;
       const s2 = el("span", "hist-seg");
       s2.appendChild(who(byName(nm)));
       const d = (r.deltas || {})[nm] || 0;
@@ -265,7 +265,7 @@ export function tvHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: the question (or the last answer) and the balances. */
-export function tvCardBoard(g: GL, me?: string): HTMLElement {
+export function tvCardBoard(g: TriviaState, me?: string): HTMLElement {
   const wrap = el("div", "tv-card");
   let cap = "";
   if (g.status === "running") cap = g.question ? "“" + g.question + "” - " + g.asker + " asks" : (g.asker || "The quizmaster") + " is writing a question";

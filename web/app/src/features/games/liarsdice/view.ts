@@ -1,11 +1,12 @@
 import { ldBidder, ldBidNow, ldCounts, ldCup, ldLastRound, ldRound, ldTable } from "./liarsdice";
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { LiarsDicePlayer, LiarsDiceState } from "@chat/contract";
 
 /* Liar's Dice: the standing bid, your cup, the bid builder on your
    turn, the table, and the last round with every cup opened. */
-export function renderLiarsView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderLiarsView(ctx: GameViewCtx, g: LiarsDiceState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
@@ -40,7 +41,7 @@ export function renderLiarsView(ctx: GameViewCtx, g: GL, force?: boolean) {
     gv.ldDraft = { turn: g.turn, qty: Math.max(1, Math.min(total, qty)), face };
   }
   const dr = gv.ldDraft;
-  const key = [g.status, g.turn, g.round, g.turn_of || "", g.bid ? g.bid.qty + "x" + g.bid.face + g.bid.by : "", (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.dice || 0) + (p.out ? 1 : 0) + (p.timeouts || 0)).join(""), ((you.dice || []) as number[]).join(""), (g.rounds || []).length, ctx.youSig(g), gv.tab || "game", dr ? dr.qty + "x" + dr.face : ""].join("|");
+  const key = [g.status, g.turn, g.round, g.turn_of || "", g.bid ? g.bid.qty + "x" + g.bid.face + g.bid.by : "", (g.players || []).map((p: LiarsDicePlayer) => (p.accepted ? 1 : 0) + "" + (p.dice || 0) + (p.out ? 1 : 0) + (p.timeouts || 0)).join(""), ((you.dice || []) as number[]).join(""), (g.rounds || []).length, ctx.youSig(g), gv.tab || "game", dr ? dr.qty + "x" + dr.face : ""].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   wrap.textContent = "";

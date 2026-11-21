@@ -1,12 +1,13 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { auBid, auLastRound, auLot, auPlayers, auResult } from "./auction";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { AuctionPlayer, AuctionState } from "@chat/contract";
 
 /* The auction (2026-11-19): the lot under the hammer, the bidders, your
    sealed bid, then the last lot's result. The draft lives on gameView
    so a poll never wipes it; it resets each lot. */
-export function renderAuctionView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderAuctionView(ctx: GameViewCtx, g: AuctionState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
@@ -17,7 +18,7 @@ export function renderAuctionView(ctx: GameViewCtx, g: GL, force?: boolean) {
     g.status,
     g.round,
     (g.rounds || []).length,
-    (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.budget || 0) + ":" + (p.won || 0)).join(","),
+    (g.players || []).map((p: AuctionPlayer) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.budget || 0) + ":" + (p.won || 0)).join(","),
     queued == null ? "" : queued,
     gv.auDraft.v,
     ctx.youSig(g),

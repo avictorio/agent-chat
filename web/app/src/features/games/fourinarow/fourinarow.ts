@@ -1,5 +1,5 @@
+import type { FourInARowMove, FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
 
 /* Four in a Row in the DOM (2026-11-19): the board (card and arena),
    the drop row a player taps on their turn, and the move history. The
@@ -12,19 +12,19 @@ import type { GL } from "../shared/render";
 export const C4_COLS = 7;
 export const C4_ROWS = 6;
 
-function seatHex(g: GL, piece: string): string {
-  const p = ((g && g.players) || []).find((x: GL) => x.piece === piece);
+function seatHex(g: FourInARowState, piece: string): string {
+  const p = ((g && g.players) || []).find((x: FourInARowPlayer) => x.piece === piece);
   return (p && p.hex) || (piece === "X" ? "#22d3ee" : "#fb923c");
 }
 
-function seatName(g: GL, piece: string): string {
-  const p = ((g && g.players) || []).find((x: GL) => x.piece === piece);
+function seatName(g: FourInARowState, piece: string): string {
+  const p = ((g && g.players) || []).find((x: FourInARowPlayer) => x.piece === piece);
   return (p && p.name) || piece;
 }
 
 /* The board. opts.onDrop makes the column heads buttons (your turn);
    opts.compact draws the card's small board. */
-export function c4Board(g: GL, opts?: { compact?: boolean; onDrop?: (col: number) => void; open?: string[]; headsOnly?: boolean }): HTMLElement {
+export function c4Board(g: FourInARowState, opts?: { compact?: boolean; onDrop?: (col: number) => void; open?: string[]; headsOnly?: boolean }): HTMLElement {
   const compact = !!(opts && opts.compact);
   const wrap = el("div", "c4-wrap" + (compact ? " compact" : ""));
   const board: string[] = (g && g.board) || Array(C4_ROWS).fill(".".repeat(C4_COLS));
@@ -69,9 +69,9 @@ export function c4Board(g: GL, opts?: { compact?: boolean; onDrop?: (col: number
 }
 
 /* Who plays which disc, and whose turn it is. */
-export function c4Seats(g: GL, me?: string): HTMLElement {
+export function c4Seats(g: FourInARowState, me?: string): HTMLElement {
   const row = el("div", "c4-seats");
-  ((g && g.players) || []).forEach((p: GL, i: number) => {
+  ((g && g.players) || []).forEach((p: FourInARowPlayer, i: number) => {
     if (i) row.appendChild(el("span", "fl-vs", "vs"));
     const s = el("span", "c4-seat" + (g.status === "running" && g.turn_of === p.name ? " up" : ""));
     const d = el("span", "c4-disc mini " + (p.piece === "X" ? "x" : "o"));
@@ -85,10 +85,10 @@ export function c4Seats(g: GL, me?: string): HTMLElement {
 }
 
 /* History: a row per move. */
-export function c4HistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function c4HistoryRows(g: FourInARowState, row: (idx: string) => HTMLElement, who: (p: { name: string; hex: string }) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.moves || []) as GL[]).forEach((m: GL) => {
+  const players: FourInARowPlayer[] = g.players || [];
+  (g.moves || []).forEach((m: FourInARowMove) => {
     n++;
     const rw = row("Move " + m.n);
     const p = players.find((x) => x.name === m.by) || { name: m.by, hex: "#94a3b8" };

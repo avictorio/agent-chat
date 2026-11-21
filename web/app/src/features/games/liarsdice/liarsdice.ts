@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { LiarsDiceBid, LiarsDicePlayer, LiarsDiceRound, LiarsDiceState, LiarsDiceYou } from "@chat/contract";
 
 /* Liar's Dice in the DOM (2026-11-19): dice drawn with pips, the standing
    bid, your own cup, the bid builder (count, face, Bid or Liar), the
@@ -23,7 +23,8 @@ export function ldFaceWord(f: number, plural: boolean): string {
   return plural ? (f === 6 ? "sixes" : w + "s") : w;
 }
 
-export function ldBidText(b: GL): string {
+// a bid, or the bid builder's draft
+export function ldBidText(b: Pick<LiarsDiceBid, "qty" | "face">): string {
   return b.qty + " " + ldFaceWord(b.face, b.qty !== 1);
 }
 
@@ -45,13 +46,13 @@ export function ldCounts(d: number, face: number, wild: boolean): boolean {
   return d === face || (wild && d === 1 && face !== 1);
 }
 
-export function ldLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : g && g.last_round ? g.last_round : null;
+export function ldLastRound(g: LiarsDiceState): LiarsDiceRound | null {
+  const rs: LiarsDiceRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : g && g.last_round ? g.last_round : null;
 }
 
 /* The standing bid (or who opens), and the dice on the table. */
-export function ldBidNow(g: GL): HTMLElement {
+export function ldBidNow(g: LiarsDiceState): HTMLElement {
   const box = el("div", "ld-now");
   if (g.status === "finished") {
     box.appendChild(el("div", "ld-now-k", "The table is cleared · " + ((g.rounds || []).length || g.round || 0) + " rounds"));
@@ -64,7 +65,7 @@ export function ldBidNow(g: GL): HTMLElement {
     line.appendChild(el("span", "ld-now-q", b.qty + " ×"));
     line.appendChild(ldDie(b.face, "big"));
     const who = el("span", "ld-now-by", "by " + b.by);
-    const p = ((g.players || []) as GL[]).find((x) => x.name === b.by);
+    const p = (g.players || []).find((x) => x.name === b.by);
     if (p) who.style.color = p.hex;
     line.appendChild(who);
     box.appendChild(line);
@@ -78,8 +79,8 @@ export function ldBidNow(g: GL): HTMLElement {
 }
 
 /* Your cup: your own dice (ones marked wild when they are). */
-export function ldCup(g: GL): HTMLElement {
-  const you = g.you || {};
+export function ldCup(g: LiarsDiceState): HTMLElement {
+  const you: Partial<LiarsDiceYou> = g.you || {};
   const box = el("div", "ld-cup");
   box.appendChild(el("div", "ld-cup-k", "Your cup"));
   const row = el("div", "ld-cup-dice");
@@ -91,7 +92,7 @@ export function ldCup(g: GL): HTMLElement {
 
 /* The bid builder: a count, a face, and Bid - or Liar! when there is a
    bid to call. The draft lives with the caller so a repaint keeps it. */
-export function ldBidder(g: GL, draft: { qty: number; face: number }, onDraft: (d: { qty: number; face: number }) => void, onBid: (dir: string) => void, onLiar: () => void): HTMLElement {
+export function ldBidder(g: LiarsDiceState, draft: { qty: number; face: number }, onDraft: (d: { qty: number; face: number }) => void, onBid: (dir: string) => void, onLiar: () => void): HTMLElement {
   const wild = !!g.ones_wild;
   const total = g.dice_total || 0;
   const b = g.bid;
@@ -156,10 +157,10 @@ export function ldBidder(g: GL, draft: { qty: number; face: number }, onDraft: (
 
 /* The table: every seat in turn order, dice left, whose turn, their bid
    this round; the players who are out at the end. */
-export function ldTable(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function ldTable(g: LiarsDiceState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "ld-table" + (compact ? " compact" : ""));
   const order: string[] = g.order || [];
-  const ps: GL[] = ((g.players || []) as GL[]).slice().sort((a, b) => {
+  const ps: LiarsDicePlayer[] = (g.players || []).slice().sort((a, b) => {
     const ia = order.indexOf(a.name);
     const ib = order.indexOf(b.name);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -180,8 +181,8 @@ export function ldTable(g: GL, me?: string, compact?: boolean): HTMLElement {
       cups.appendChild(c);
     }
     row.appendChild(cups);
-    const mineBids = ((g.bids || []) as GL[]).filter((x) => x.by === p.name);
-    const st = p.out ? "out" : turn ? (compact ? "to bid" : "thinking…") : mineBids.length ? ldBidText(mineBids[mineBids.length - 1]) : "";
+    const mineBids = (g.bids || []).filter((x) => x.by === p.name);
+    const st = p.out ? "out" : turn ? (compact ? "to bid" : "thinking…") : mineBids.length ? ldBidText(mineBids[mineBids.length - 1]!) : "";
     if (st) row.appendChild(el("span", "ld-st", st));
     box.appendChild(row);
   });
@@ -190,13 +191,13 @@ export function ldTable(g: GL, me?: string, compact?: boolean): HTMLElement {
 
 /* A closed round: what happened, the verdict, and every cup opened with
    the dice that counted lit. */
-export function ldRound(g: GL, r: GL | null): HTMLElement {
+export function ldRound(g: LiarsDiceState, r: LiarsDiceRound | null): HTMLElement {
   const box = el("div", "ld-reveal");
   if (!r) {
     box.appendChild(el("div", "ld-reveal-empty", "No cup has been opened yet - a call of liar opens them all."));
     return box;
   }
-  const hexOf = (n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+  const hexOf = (n: string) => (((g && g.players) || []).find((p: LiarsDicePlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
   const head = el("div", "ld-reveal-head");
   const call = r.call || null;
   if (r.reason === "call" && call) head.appendChild(el("span", "ld-reveal-what", "Round " + r.n + ": " + call.by + " called liar on " + call.bid.by + "'s " + ldBidText(call.bid)));
@@ -224,14 +225,15 @@ export function ldRound(g: GL, r: GL | null): HTMLElement {
 }
 
 /* History: a row per closed round - the bids, the call, who lost a die. */
-export function ldHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function ldHistoryRows(g: LiarsDiceState, row: (idx: string) => HTMLElement, who: (p: Pick<LiarsDicePlayer, "name" | "hex">) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: LiarsDicePlayer[] = g.players || [];
+  // a seat, or a grey stand-in for one who left the roster
+  const byName = (nm: string): Pick<LiarsDicePlayer, "name" | "hex"> => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  (g.rounds || []).forEach((r: LiarsDiceRound) => {
     n++;
     const rw = row("Round " + r.n);
-    const bids: GL[] = r.bids || [];
+    const bids: LiarsDiceBid[] = r.bids || [];
     if (bids.length) {
       const seg = el("span", "hist-seg");
       seg.appendChild(el("span", "hist-act", bids.map((b) => b.by + " " + b.qty + "×" + b.face).join(" → ")));
@@ -254,7 +256,7 @@ export function ldHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: the standing bid and the table. */
-export function ldCardBoard(g: GL, me?: string): HTMLElement {
+export function ldCardBoard(g: LiarsDiceState, me?: string): HTMLElement {
   const wrap = el("div", "ld-card");
   wrap.appendChild(ldBidNow(g));
   wrap.appendChild(ldTable(g, me, true));

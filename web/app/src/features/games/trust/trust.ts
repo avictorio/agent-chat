@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { TrustPlayer, TrustRound, TrustState, TrustYou } from "@chat/contract";
 
 /* Trust in the DOM (2026-11-19): the scoreboard, the choices you make
    (one Cooperate / Defect pair per rival), the round's who-trusted-whom
@@ -12,26 +12,26 @@ export type TrDraft = Record<string, "C" | "D">;
 
 const MARK = { C: "✓", D: "✗" } as const;
 
-export function trLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function trLastRound(g: TrustState): TrustRound | null {
+  const rs: TrustRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
-function rate(p: GL): string {
+function rate(p: TrustPlayer): string {
   return p.coop == null ? "–" : Math.round(p.coop * 100) + "%";
 }
 
-export function trStatus(g: GL, p: GL): string {
+export function trStatus(g: TrustState, p: TrustPlayer): string {
   if (p.out) return "out";
   if (g.status === "running") return p.committed ? "chosen ✓" : "thinking…";
   return "";
 }
 
 /* The scoreboard, highest first, with each player's share of C given. */
-export function trScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function trScores(g: TrustState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "tr-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g && g.players) || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0) || (a.name < b.name ? -1 : 1));
-  ps.forEach((p: GL, i: number) => {
+  const ps: TrustPlayer[] = ((g && g.players) || []).slice().sort((a: TrustPlayer, b: TrustPlayer) => (b.score || 0) - (a.score || 0) || (a.name < b.name ? -1 : 1));
+  ps.forEach((p: TrustPlayer, i: number) => {
     const row = el("div", "tr-row" + (p.out ? " out" : "") + (me && p.name === me ? " mine" : ""));
     row.style.setProperty("--who", p.hex || "#94a3b8");
     row.appendChild(el("span", "tr-rank", String(i + 1)));
@@ -57,14 +57,14 @@ export function trScores(g: GL, me?: string, compact?: boolean): HTMLElement {
 }
 
 /* Who trusted whom in one round: rows choose, columns receive. */
-export function trGrid(g: GL, round: GL | null, me?: string): HTMLElement {
+export function trGrid(g: TrustState, round: TrustRound | null, me?: string): HTMLElement {
   const wrap = el("div", "tr-grid-wrap");
   if (!round) {
     wrap.appendChild(el("div", "tr-grid-empty", "No round has resolved yet - choices are revealed together."));
     return wrap;
   }
-  const names: string[] = ((g && g.players) || []).map((p: GL) => p.name).filter((n: string) => (round.moves || {})[n]);
-  const hexOf = (n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+  const names: string[] = ((g && g.players) || []).map((p: TrustPlayer) => p.name).filter((n: string) => (round.moves || {})[n]);
+  const hexOf = (n: string) => (((g && g.players) || []).find((p: TrustPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
   const t = el("table", "tr-grid");
   t.setAttribute("aria-label", "Round " + round.n + ": who cooperated with whom");
   const head = el("tr", "");
@@ -103,8 +103,8 @@ export function trGrid(g: GL, round: GL | null, me?: string): HTMLElement {
 /* Your choices: a Cooperate / Defect pair per rival, the quick fills,
    and Lock in once every rival has one. The draft lives with the caller
    so a repaint never wipes it. */
-export function trPlanner(g: GL, draft: TrDraft, onDraft: (d: TrDraft) => void, onCommit: (dir: string) => void): HTMLElement {
-  const you = g.you || {};
+export function trPlanner(g: TrustState, draft: TrDraft, onDraft: (d: TrDraft) => void, onCommit: (dir: string) => void): HTMLElement {
+  const you: Partial<TrustYou> = g.you || {};
   const rivals: string[] = you.rivals || [];
   const queued: TrDraft | null = you.queued || null;
   const wrap = el("div", "tr-plan" + (queued ? "" : " your-move"));
@@ -113,7 +113,7 @@ export function trPlanner(g: GL, draft: TrDraft, onDraft: (d: TrDraft) => void, 
   wrap.appendChild(head);
   rivals.forEach((n) => {
     const row = el("div", "tr-choice");
-    const p = ((g && g.players) || []).find((x: GL) => x.name === n) || { hex: "#94a3b8" };
+    const p = ((g && g.players) || []).find((x: TrustPlayer) => x.name === n) || { hex: "#94a3b8" };
     const name = el("span", "tr-choice-name", n);
     name.style.color = p.hex;
     row.appendChild(name);
@@ -154,13 +154,13 @@ export function trPlanner(g: GL, draft: TrDraft, onDraft: (d: TrDraft) => void, 
 
 /* History: a row per round - each player's points and how many rivals
    they trusted. */
-export function trHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function trHistoryRows(g: TrustState, row: (idx: string) => HTMLElement, who: (p: TrustPlayer) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: TrustPlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: TrustRound) => {
     n++;
     const rw = row("Round " + r.n);
-    players.forEach((p: GL) => {
+    players.forEach((p: TrustPlayer) => {
       const mv = (r.moves || {})[p.name];
       if (!mv) return;
       const seg = el("span", "hist-seg");
@@ -177,13 +177,13 @@ export function trHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: the scores and the last round in one line. */
-export function trCardBoard(g: GL, me?: string): HTMLElement {
+export function trCardBoard(g: TrustState, me?: string): HTMLElement {
   const wrap = el("div", "tr-card");
   wrap.appendChild(trScores(g, me, true));
   const last = trLastRound(g);
   let cap = "";
   if (last) {
-    const all = Object.values(last.moves || {}).flatMap((m) => Object.values(m as GL) as string[]);
+    const all = Object.values(last.moves || {}).flatMap((m) => Object.values(m) as string[]);
     const cs = all.filter((v) => v === "C").length;
     cap = "Round " + last.n + ": " + cs + " of " + all.length + " choices were trust";
   } else if (g.status === "running") cap = "Round " + g.round + " · choices sealed";

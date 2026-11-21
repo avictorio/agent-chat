@@ -1,19 +1,20 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { tqAnswerer, tqAsker, tqBudget, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { TwentyPlayer, TwentyQuestion, TwentyState, TwentyYou } from "@chat/contract";
 
 /* Twenty Questions: the box and candles (3D only), then the answerer's
    or the questioner's controls, the budget, the Q/A log, the scores
    and the last reveal. */
-export function renderTwentyView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderTwentyView(ctx: GameViewCtx, g: TwentyState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
-  const you = g.you || { playing: false };
+  const you: TwentyYou = g.you || { playing: false };
   const dkey = g.round + ":" + (g.asked || 0);
   if (!gv.tqDraft || gv.tqDraft.key !== dkey) gv.tqDraft = { key: dkey, text: "" };
-  const key = [g.status, g.round, g.phase || "", g.answerer || "", g.asked || 0, (g.qa || []).map((x: GL) => (x.a || "") + (x.flagged ? "f" : "")).join(","), (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.score || 0)).join(","), ctx.youSig(g), you.secret || "", (g.rounds || []).length, gv.tab || "game"].join("|");
+  const key = [g.status, g.round, g.phase || "", g.answerer || "", g.asked || 0, (g.qa || []).map((x: TwentyQuestion) => (x.a || "") + (x.flagged ? "f" : "")).join(","), (g.players || []).map((p: TwentyPlayer) => (p.accepted ? 1 : 0) + "" + (p.score || 0)).join(","), ctx.youSig(g), you.secret || "", (g.rounds || []).length, gv.tab || "game"].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   wrap.textContent = "";

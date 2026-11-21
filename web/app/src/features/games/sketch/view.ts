@@ -1,18 +1,19 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { sgArtistPanel, sgGuessForm, sgLastRound, sgMakePad, sgReveal, sgScores } from "./sketch";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { SketchPlayer, SketchState, SketchYou } from "@chat/contract";
 
 /* Sketch & Guess (2026-11-20, 3D only): the gallery first, then your
    part - the artist's prompt and sketch pad (or an image of their own),
    or the guess form - the scores and the last round's reveal. The pad
    lives on gameView for the round, so a poll never wipes a half-drawn
    picture; the guess draft too, and typing never rebuilds the view. */
-export function renderSketchView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderSketchView(ctx: GameViewCtx, g: SketchState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
-  const you = g.you || { playing: false };
+  const you: SketchYou = g.you || { playing: false };
   const gkey = g.round + ":" + (g.phase || "");
   if (!gv.sgGuess || gv.sgGuess.key !== gkey) gv.sgGuess = { key: gkey, d: you.queued || "" };
   if (!gv.sgPad || gv.sgPad.round !== g.round) gv.sgPad = null;
@@ -22,7 +23,7 @@ export function renderSketchView(ctx: GameViewCtx, g: GL, force?: boolean) {
     g.phase || "",
     (g.image && g.image.url) || "",
     (g.rounds || []).length,
-    (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+    (g.players || []).map((p: SketchPlayer) => (p.committed ? 1 : 0) + "" + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
     String(you.queued || ""),
     ctx.youSig(g),
     gv.tab || "game",

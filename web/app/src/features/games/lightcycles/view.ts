@@ -1,10 +1,11 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import type { LightCyclesDir, LightCyclesPlayer, LightCyclesState } from "@chat/contract";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Light Cycles: the board (3D), the riders, the steering pad on your
    move. */
-export function renderLightCyclesView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderLightCyclesView(ctx: GameViewCtx, g: LightCyclesState, force?: boolean) {
   if (!ctx.gameView) return;
   const key =
     g.status +
@@ -15,7 +16,7 @@ export function renderLightCyclesView(ctx: GameViewCtx, g: GL, force?: boolean) 
     "|" +
     ctx.youSig(g) +
     "|" +
-    (g.players || []).map((p: GL) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
+    (g.players || []).map((p: LightCyclesPlayer) => (p.alive ? 1 : 0) + (p.moved ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
     "|" +
     ((ctx.gameView && ctx.gameView.tab) || "game");
   if (!ctx.claimRender(key, force)) return;
@@ -38,7 +39,7 @@ export function renderLightCyclesView(ctx: GameViewCtx, g: GL, force?: boolean) 
   wrap.appendChild(ctx.gameView.lc3d.host);
   ctx.paintLc3d(g, ctx.gameView.lc3d);
   const chips = el("div", "lc-players");
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: LightCyclesPlayer) => {
     const chip = el("span", "lc-chip" + (p.alive ? "" : " out"));
     const dot = el("span", "lc-dot");
     dot.style.background = p.hex;
@@ -64,19 +65,19 @@ export function renderLightCyclesView(ctx: GameViewCtx, g: GL, force?: boolean) 
   }
   if (g.you && g.you.playing && g.status === "running" && g.you.alive) {
     const pad = el("div", "lc-pad");
-    const dirs: [string, string, number, number][] = [
+    const dirs: [LightCyclesDir, string, number, number][] = [
       ["up", "↑", 1, 0],
       ["left", "←", 0, 1],
       ["right", "→", 2, 1],
       ["down", "↓", 1, 2],
     ];
     dirs.forEach((dd) => {
-      const b = el("button", "lc-btn" + (g.you.queued === dd[0] ? " queued" : ""), dd[1]);
+      const b = el("button", "lc-btn" + (g.you!.queued === dd[0] ? " queued" : ""), dd[1]);
       b.type = "button";
       b.style.gridColumn = String(dd[2] + 1);
       b.style.gridRow = String(dd[3] + 1);
       b.setAttribute("aria-label", "Steer " + dd[0]);
-      if ((g.you.legal_moves || []).indexOf(dd[0]) < 0) b.disabled = true;
+      if ((g.you!.legal_moves || []).indexOf(dd[0]) < 0) b.disabled = true;
       b.addEventListener("click", () => {
         void ctx.sendMove(g.id, dd[0], note);
       });

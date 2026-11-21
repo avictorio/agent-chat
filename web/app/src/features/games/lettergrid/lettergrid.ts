@@ -1,5 +1,6 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { LetterGridPlayer, LetterGridRound, LetterGridState, LetterGridYou } from "@chat/contract";
+import type { HistRow, HistWho } from "../shared/history";
 
 /* Letter Grid in the DOM (2026-11-20): the scoreboard, the word panel
    under the scene (type a word or tap tiles in the scene; the path is
@@ -12,9 +13,9 @@ export type LgDraft = { round: number; word: string; path: number[][] | null; ta
 
 export const lgLabel = (r: number, c: number) => String.fromCharCode(65 + c) + (r + 1);
 
-export function lgLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function lgLastRound(g: LetterGridState): LetterGridRound | null {
+  const rs: LetterGridRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
 const touches = (a: number[], b: number[]) => Math.abs(a[0]! - b[0]!) <= 1 && Math.abs(a[1]! - b[1]!) <= 1;
@@ -47,7 +48,7 @@ function paths(grid: string[], word: string, cap: number): number[][][] {
 
 /* The path that claims the most free cells, as the claims stand (the
    server's rule for a word sent without one), or null. */
-export function lgTrace(g: GL, word: string): number[][] | null {
+export function lgTrace(g: LetterGridState, word: string): number[][] | null {
   const grid: string[] = g.grid || [];
   if (!word || !grid.length) return null;
   const n = grid.length;
@@ -60,7 +61,7 @@ export function lgTrace(g: GL, word: string): number[][] | null {
 
 /* A tap on a tile: extend the path when it touches the last cell and is
    unused, step back when it is the last cell, or start over there. */
-export function lgTap(g: GL, d: LgDraft, r: number, c: number): LgDraft {
+export function lgTap(g: LetterGridState, d: LgDraft, r: number, c: number): LgDraft {
   const grid: string[] = g.grid || [];
   const cur = d.path && d.tapped ? d.path : [];
   const last = cur[cur.length - 1];
@@ -77,17 +78,17 @@ export function lgDir(d: LgDraft): string {
   return d.word + (d.path ? " " + d.path.map(([r, c]) => lgLabel(r!, c!)).join(" ") : "");
 }
 
-function status(g: GL, p: GL): string {
+function status(g: LetterGridState, p: LetterGridPlayer): string {
   if (p.out) return "out";
   if (g.status === "running") return p.committed ? "word in ✓" : "thinking…";
   return "";
 }
 
 /* The scoreboard, highest first: cells claimed beside the score. */
-export function lgScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function lgScores(g: LetterGridState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "lg-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g && g.players) || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0) || (b.cells || 0) - (a.cells || 0) || (a.name < b.name ? -1 : 1));
-  ps.forEach((p: GL, i: number) => {
+  const ps: LetterGridPlayer[] = ((g && g.players) || []).slice().sort((a: LetterGridPlayer, b: LetterGridPlayer) => (b.score || 0) - (a.score || 0) || (b.cells || 0) - (a.cells || 0) || (a.name < b.name ? -1 : 1));
+  ps.forEach((p: LetterGridPlayer, i: number) => {
     const row = el("div", "lg-row" + (p.out ? " out" : "") + (me && p.name === me ? " mine" : ""));
     row.style.setProperty("--who", p.hex || "#94a3b8");
     row.appendChild(el("span", "lg-rank", String(i + 1)));
@@ -111,7 +112,7 @@ export function lgScores(g: GL, me?: string, compact?: boolean): HTMLElement {
    in place (no rebuild, so the field keeps focus) and tells the scene
    through onDraft; a tap in the scene comes back through setDraft. */
 export type LgPanel = { el: HTMLElement; input: HTMLInputElement; setDraft: (d: LgDraft) => void };
-export function lgPanel(g: GL, draft: LgDraft, onDraft: (d: LgDraft) => void, onSend: (d: LgDraft) => void): LgPanel {
+export function lgPanel(g: LetterGridState, draft: LgDraft, onDraft: (d: LgDraft) => void, onSend: (d: LgDraft) => void): LgPanel {
   const n: number = g.size || 5;
   const min: number = g.min_len || 3;
   const claims: (string | null)[] = g.claims || [];
@@ -195,8 +196,8 @@ export function lgPanel(g: GL, draft: LgDraft, onDraft: (d: LgDraft) => void, on
 }
 
 /* Your sealed word, and the words you've played. */
-export function lgYours(g: GL): HTMLElement | null {
-  const you = g.you || {};
+export function lgYours(g: LetterGridState): HTMLElement | null {
+  const you: Partial<LetterGridYou> = g.you || {};
   const played: string[] = you.played || [];
   if (!you.playing || (!you.queued && !played.length)) return null;
   const box = el("div", "lg-yours");
@@ -212,15 +213,15 @@ export function lgYours(g: GL): HTMLElement | null {
 
 /* One round's words, best first: the word, its points, and what happened
    to its cells. */
-export function lgReveal(g: GL, round: GL | null, me?: string): HTMLElement | null {
+export function lgReveal(g: LetterGridState, round: LetterGridRound | null, me?: string): HTMLElement | null {
   if (!round) return null;
   const box = el("div", "lg-reveal");
   box.appendChild(el("div", "fl-cap", "Round " + round.n + " · the words"));
-  const players: GL[] = g.players || [];
-  const names = players.map((p: GL) => p.name).filter((nm: string) => (round.words || {})[nm] || (round.missed || []).indexOf(nm) >= 0);
+  const players: LetterGridPlayer[] = g.players || [];
+  const names = players.map((p: LetterGridPlayer) => p.name).filter((nm: string) => (round.words || {})[nm] || (round.missed || []).indexOf(nm) >= 0);
   names.sort((a: string, b: string) => ((round.points || {})[b] || 0) - ((round.points || {})[a] || 0) || (a < b ? -1 : 1));
   names.forEach((nm: string) => {
-    const p = players.find((x: GL) => x.name === nm) || { name: nm, hex: "#94a3b8" };
+    const p = players.find((x: LetterGridPlayer) => x.name === nm) || { name: nm, hex: "#94a3b8" };
     const w = (round.words || {})[nm];
     const row = el("div", "lg-rv" + (me && nm === me ? " mine" : ""));
     row.style.setProperty("--who", p.hex || "#94a3b8");
@@ -246,7 +247,7 @@ export function lgReveal(g: GL, round: GL | null, me?: string): HTMLElement | nu
 }
 
 /* The end: the grid's longest words, which nobody may have found. */
-export function lgTopWords(g: GL): HTMLElement | null {
+export function lgTopWords(g: LetterGridState): HTMLElement | null {
   const top: string[] = g.top_words || [];
   if (!top.length) return null;
   const box = el("div", "lg-top");
@@ -256,13 +257,13 @@ export function lgTopWords(g: GL): HTMLElement | null {
   return box;
 }
 
-export function lgHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function lgHistoryRows(g: LetterGridState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: LetterGridPlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: LetterGridRound) => {
     n++;
     const rw = row("Round " + r.n);
-    players.forEach((p: GL) => {
+    players.forEach((p: LetterGridPlayer) => {
       const w = (r.words || {})[p.name];
       const missed = (r.missed || []).indexOf(p.name) >= 0;
       if (!w && !missed) return;
@@ -278,13 +279,13 @@ export function lgHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 
 /* The card: a small flat grid (claims in their owner's colour), the
    scores, and the last round's best word. */
-export function lgCardBoard(g: GL, me?: string): HTMLElement {
+export function lgCardBoard(g: LetterGridState, me?: string): HTMLElement {
   const wrap = el("div", "lg-card");
   const grid: string[] = g.grid || [];
   const n = grid.length;
   const claims: (string | null)[] = g.claims || [];
   const hexOf: Record<string, string> = {};
-  (g.players || []).forEach((p: GL) => (hexOf[p.name] = p.hex));
+  (g.players || []).forEach((p: LetterGridPlayer) => (hexOf[p.name] = p.hex));
   if (n) {
     const mini = el("div", "lg-mini");
     mini.style.gridTemplateColumns = "repeat(" + n + ", 1fr)";
@@ -303,7 +304,7 @@ export function lgCardBoard(g: GL, me?: string): HTMLElement {
   let cap = "";
   if (last) {
     const best = Object.keys(last.words || {}).sort((a, b) => ((last.points || {})[b] || 0) - ((last.points || {})[a] || 0))[0];
-    if (best) cap = "Round " + last.n + ": " + String(last.words[best].word).toUpperCase() + " (" + best + ", +" + ((last.points || {})[best] || 0) + ")";
+    if (best) cap = "Round " + last.n + ": " + String(last.words[best]!.word).toUpperCase() + " (" + best + ", +" + ((last.points || {})[best] || 0) + ")";
   } else if (g.status === "running") cap = "Round " + g.round + " · words sealed";
   if (cap) side.appendChild(el("div", "lg-card-cap", cap));
   wrap.appendChild(side);

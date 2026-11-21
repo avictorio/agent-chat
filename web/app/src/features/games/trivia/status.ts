@@ -1,58 +1,59 @@
 import type { GameStatus, TurnLine } from "../registry";
-import { finalScore, type GL, recordLine, tickLen } from "../shared/render";
+import { finalScore, recordLine, tickLen } from "../shared/render";
+import type { TriviaPlayer, TriviaState, TriviaYou } from "@chat/contract";
 
 // The status hooks for Trivia (GameStatus in registry.ts):
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
 export const triviaStatus: GameStatus = {
-  finalScore(g: GL): string {
-    return (g.players || []).slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0)).map((p: GL) => p.balance || 0).join("–");
+  finalScore(g: TriviaState): string {
+    return (g.players || []).slice().sort((a: TriviaPlayer, b: TriviaPlayer) => (b.balance || 0) - (a.balance || 0)).map((p: TriviaPlayer) => p.balance || 0).join("–");
   },
 
-  recordLine(g: GL): string {
+  recordLine(g: TriviaState): string {
     const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
     return "Final · " + finalScore(g) + " points · " + n + (n === 1 ? " question" : " questions");
   },
 
-  metaText(g: GL): string {
+  metaText(g: TriviaState): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      const waiting = (g.players || []).filter((p: TriviaPlayer) => !p.accepted).map((p: TriviaPlayer) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " questions";
     }
     return "Round " + g.round + " of " + g.rounds_total + " · " + (g.asker || "?") + " asks · " + tickLen(g.round_seconds || 3600) + " a phase";
   },
 
-  stateLine(g: GL): string {
+  stateLine(g: TriviaState): string {
     const ps = g.players || [];
-    return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.asker ? " · " + g.asker + (g.phase === "ask" ? " writing" : g.phase === "judge" ? " judging" : " asked") : "") + " · " + ps.slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0)).map((p: GL) => p.name + " " + (p.balance != null ? p.balance : 100)).join(" · ");
+    return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.asker ? " · " + g.asker + (g.phase === "ask" ? " writing" : g.phase === "judge" ? " judging" : " asked") : "") + " · " + ps.slice().sort((a: TriviaPlayer, b: TriviaPlayer) => (b.balance || 0) - (a.balance || 0)).map((p: TriviaPlayer) => p.name + " " + (p.balance != null ? p.balance : 100)).join(" · ");
   },
 
-  waitingOn(g: GL): string[] {
-    const ps: GL[] = g.players || [];
+  waitingOn(g: TriviaState): string[] {
+    const ps: TriviaPlayer[] = g.players || [];
     return g.phase === "answer" ? ps.filter((p) => p.name !== g.asker && !p.committed).map((p) => p.name) : g.asker ? [g.asker] : [];
   },
 
-  youLabel(g: GL): string {
+  youLabel(g: TriviaState): string {
     return g.phase === "ask" ? "Your question" : g.phase === "judge" ? "Your ruling" : "Your answer";
   },
 
-  lengthLine(g: GL): string {
+  lengthLine(g: TriviaState): string {
     return ((g.rounds && g.rounds.length) || g.rounds_total || 0) + " questions";
   },
 
-  signature(g: GL): string | null {
+  signature(g: TriviaState): string | null {
     return ["tv", g.status, g.round || 0, g.phase || "", (g.rounds || []).length].join("|");
   },
 
-  turnLine(g: GL, me: string): TurnLine {
-    const you = g.you || {};
-    const players: GL[] = g.players || [];
+  turnLine(g: TriviaState, me: string): TurnLine {
+    const you: Partial<TriviaYou> = g.you || {};
+    const players: TriviaPlayer[] = g.players || [];
     let text = "";
     let sub = "";
     let mine = false;
-    const waiting = players.filter((p: GL) => !p.committed && p.name !== g.asker && p.name !== me).map((p: GL) => p.name);
+    const waiting = players.filter((p: TriviaPlayer) => !p.committed && p.name !== g.asker && p.name !== me).map((p: TriviaPlayer) => p.name);
     if (you.playing && you.asker) {
       if (g.phase === "ask") {
         mine = true;
@@ -74,15 +75,15 @@ export const triviaStatus: GameStatus = {
     return { text, sub, mine };
   },
 
-  clockSeconds(g: GL): number {
+  clockSeconds(g: TriviaState): number {
     return g.round_seconds || 3600;
   },
 
-  awaiting(g: GL, mine: GL, me: string): boolean {
+  awaiting(g: TriviaState, mine: TriviaPlayer, me: string): boolean {
     return g.phase === "answer" ? g.asker !== me && !mine.committed : g.asker === me;
   },
 
-  mover(g: GL): string | null | undefined {
+  mover(g: TriviaState): string | null | undefined {
     return g.status === "running" ? g.asker || null : undefined;
   },
 };

@@ -1,5 +1,6 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import type { LetterGridMove, LetterGridPlayer, LetterGridState } from "@chat/contract";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { lgDir, lgLastRound, lgPanel, lgReveal, lgScores, lgTap, lgTopWords, lgYours } from "./lettergrid";
 import type { GameViewCtx } from "../shared/viewctx";
 
@@ -9,19 +10,19 @@ import type { GameViewCtx } from "../shared/viewctx";
    typing updates the panel in place and repaints only the scene, so
    the field keeps focus. A sent word clears the draft once the server
    shows it sealed. */
-export function renderLetterView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderLetterView(ctx: GameViewCtx, g: LetterGridState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
   const you = g.you || { playing: false };
-  const queued: GL = you.queued || null;
+  const queued: LetterGridMove | null = you.queued || null;
   if (!gv.lgDraft || gv.lgDraft.round !== g.round) gv.lgDraft = { round: g.round, word: "", path: null, tapped: false };
   if (queued && gv.lgDraft.word && gv.lgDraft.word === queued.word) gv.lgDraft = { round: g.round, word: "", path: null, tapped: false };
   const key = [
     g.status,
     g.round,
     (g.rounds || []).length,
-    (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
+    (g.players || []).map((p: LetterGridPlayer) => (p.committed ? 1 : 0) + "" + (p.out ? 1 : 0) + (p.accepted ? 1 : 0) + ":" + (p.score || 0)).join(","),
     JSON.stringify(queued || {}),
     ctx.youSig(g),
     gv.tab || "game",

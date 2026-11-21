@@ -1,19 +1,20 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { ecStory, ecStrip, ecWriter, ecWriters } from "./corpse";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { CorpsePlayer, CorpseState, CorpseYou } from "@chat/contract";
 
 /* Exquisite Corpse: the desk (3D only), then your turn (the fold and
    your segment), the turn strip, the story once revealed (with the
    favourite vote), and the writers. */
-export function renderCorpseView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderCorpseView(ctx: GameViewCtx, g: CorpseState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
-  const you = g.you || { playing: false };
+  const you: CorpseYou = g.you || { playing: false };
   const writing = g.status === "running" && g.phase === "write" && you.playing && you.writer;
   if (writing && (!gv.ecDraft || gv.ecDraft.turn !== g.turn)) gv.ecDraft = { turn: g.turn, text: "" };
-  const key = [g.status, g.phase || "", g.turn, g.turn_of || "", g.segments || 0, (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.committed ? 1 : 0) + (p.out ? 1 : 0) + (p.skips || 0) + "." + (p.segments || 0)).join(","), (you.tail || "").length, ctx.youSig(g), you.vote == null ? "" : you.vote, (g.story || []).length, (g.honours || []).join("-"), (g.beats || []).length, gv.tab || "game"].join("|");
+  const key = [g.status, g.phase || "", g.turn, g.turn_of || "", g.segments || 0, (g.players || []).map((p: CorpsePlayer) => (p.accepted ? 1 : 0) + "" + (p.committed ? 1 : 0) + (p.out ? 1 : 0) + (p.skips || 0) + "." + (p.segments || 0)).join(","), (you.tail || "").length, ctx.youSig(g), you.vote == null ? "" : you.vote, (g.story || []).length, (g.honours || []).join("-"), (g.beats || []).length, gv.tab || "game"].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   wrap.textContent = "";

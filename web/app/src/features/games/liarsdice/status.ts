@@ -1,53 +1,54 @@
 import type { GameStatus, TurnLine } from "../registry";
-import { type GL, recordLine, tickLen, winnerOf } from "../shared/render";
+import { recordLine, tickLen, winnerOf } from "../shared/render";
+import type { LiarsDicePlayer, LiarsDiceState, LiarsDiceYou } from "@chat/contract";
 
 // The status hooks for Liar's Dice (GameStatus in registry.ts):
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
 export const liarsdiceStatus: GameStatus = {
-  finalScore(g: GL): string {
+  finalScore(g: LiarsDiceState): string {
     const w = winnerOf(g);
     return w ? (w.dice || 0) + (w.dice === 1 ? " die left" : " dice left") : "";
   },
 
-  recordLine(g: GL): string {
+  recordLine(g: LiarsDiceState): string {
     const n = (g.rounds && g.rounds.length) || g.round || 0;
     return "Last with dice" + (g.forfeit ? " · " + g.forfeit + " timed out" : "") + " · " + n + (n === 1 ? " round" : " rounds");
   },
 
-  metaText(g: GL): string {
+  metaText(g: LiarsDiceState): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      const waiting = (g.players || []).filter((p: LiarsDicePlayer) => !p.accepted).map((p: LiarsDicePlayer) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.dice_each || 5) + " dice each · ones " + (g.ones_wild ? "wild" : "not wild");
     }
     return "Round " + g.round + " · " + (g.dice_total || 0) + " dice on the table · " + tickLen(g.turn_seconds || 3600) + " per turn";
   },
 
-  stateLine(g: GL): string {
+  stateLine(g: LiarsDiceState): string {
     const ps = g.players || [];
-    return "Round " + (g.round || 1) + (g.turn_of ? " · " + g.turn_of + " to bid" : "") + " · " + ps.filter((p: GL) => !p.out).map((p: GL) => p.name + " " + (p.dice || 0)).join(" · ");
+    return "Round " + (g.round || 1) + (g.turn_of ? " · " + g.turn_of + " to bid" : "") + " · " + ps.filter((p: LiarsDicePlayer) => !p.out).map((p: LiarsDicePlayer) => p.name + " " + (p.dice || 0)).join(" · ");
   },
 
-  waitingOn(g: GL): string[] {
+  waitingOn(g: LiarsDiceState): string[] {
     return g.turn_of ? [g.turn_of] : [];
   },
 
-  youLabel(g: GL): string {
+  youLabel(g: LiarsDiceState): string {
     return "Your bid";
   },
 
-  lengthLine(g: GL): string {
+  lengthLine(g: LiarsDiceState): string {
     return ((g.rounds && g.rounds.length) || g.round || 0) + " rounds";
   },
 
-  signature(g: GL): string | null {
+  signature(g: LiarsDiceState): string | null {
     return ["ld", g.status, g.turn || 0, g.round || 0, g.bid ? g.bid.qty + "x" + g.bid.face : ""].join("|");
   },
 
-  turnLine(g: GL, me: string): TurnLine {
-    const you = g.you || {};
+  turnLine(g: LiarsDiceState, me: string): TurnLine {
+    const you: Partial<LiarsDiceYou> = g.you || {};
     let text = "";
     let sub = "";
     let mine = false;
@@ -62,15 +63,15 @@ export const liarsdiceStatus: GameStatus = {
     return { text, sub, mine };
   },
 
-  clockSeconds(g: GL): number {
+  clockSeconds(g: LiarsDiceState): number {
     return g.turn_seconds || 3600;
   },
 
-  awaiting(g: GL, mine: GL, me: string): boolean {
+  awaiting(g: LiarsDiceState, mine: LiarsDicePlayer, me: string): boolean {
     return g.turn_of === me;
   },
 
-  mover(g: GL): string | null | undefined {
+  mover(g: LiarsDiceState): string | null | undefined {
     return g.status !== "finished" ? (g.bid ? g.bid.by : g.last_round ? g.last_round.loser : null) || null : undefined;
   },
 };

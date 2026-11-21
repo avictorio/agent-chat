@@ -1,59 +1,60 @@
+import type { DuelPlayer, DuelState, DuelYou } from "@chat/contract";
 import type { GameStatus, TurnLine } from "../registry";
-import { finalScore, type GL, recordLine, tickLen, winnerFirst } from "../shared/render";
+import { finalScore, recordLine, tickLen, winnerFirst } from "../shared/render";
 
 // The status hooks for Duel (GameStatus in registry.ts):
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
 export const duelStatus: GameStatus = {
-  finalScore(g: GL): string {
+  finalScore(g: DuelState): string {
     const sc = g.score || {};
-    const wins = (p: GL) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);
+    const wins = (p: DuelPlayer) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);
     return winnerFirst(g).map(wins).join("–");
   },
 
-  recordLine(g: GL): string {
+  recordLine(g: DuelState): string {
     return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
   },
 
-  metaText(g: GL): string {
+  metaText(g: DuelState): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      const waiting = (g.players || []).filter((p: DuelPlayer) => !p.accepted).map((p: DuelPlayer) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
     }
     // 180 s is the server's default round deadline (since 2026-11-12)
     return "Round " + g.round + " · first to " + g.target + " · ties replay · " + tickLen(g.round_seconds || 180) + " per round";
   },
 
-  stateLine(g: GL): string {
+  stateLine(g: DuelState): string {
     const ps = g.players || [];
-    return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
+    return "Round " + (g.round || 1) + " · " + ps.map((p: DuelPlayer) => p.name + " " + (p.wins || 0)).join(" · ");
   },
 
-  waitingOn(g: GL): string[] {
-    const ps: GL[] = g.players || [];
+  waitingOn(g: DuelState): string[] {
+    const ps: DuelPlayer[] = g.players || [];
     return ps.filter((p) => !p.thrown).map((p) => p.name);
   },
 
-  youLabel(g: GL): string {
+  youLabel(g: DuelState): string {
     return "Your throw";
   },
 
-  lengthLine(g: GL): string {
+  lengthLine(g: DuelState): string {
     return (g.round || 0) + " rounds";
   },
 
-  signature(g: GL): string | null {
+  signature(g: DuelState): string | null {
     const rounds = g.rounds || [];
     const sc = g.score || {};
     return [g.type, g.status, g.round || 0, rounds.length, Object.values(sc).join("-")].join("|");
   },
 
-  turnLine(g: GL, me: string): TurnLine {
-    const you = g.you || {};
-    const players: GL[] = g.players || [];
-    const opp = players.filter((p: GL) => p.name !== me)[0];
+  turnLine(g: DuelState, me: string): TurnLine {
+    const you: Partial<DuelYou> = g.you || {};
+    const players: DuelPlayer[] = g.players || [];
+    const opp = players.filter((p: DuelPlayer) => p.name !== me)[0];
     let text = "";
     let sub = "";
     let mine = false;
@@ -64,19 +65,19 @@ export const duelStatus: GameStatus = {
         text = opp.thrown ? opp.name + " is in · your throw decides the round" : "Your throw · round " + g.round;
         sub = "If the clock runs out, a lone throw takes the round.";
       }
-    } else text = players.map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
+    } else text = players.map((p: DuelPlayer) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
     return { text, sub, mine };
   },
 
-  clockSeconds(g: GL): number {
+  clockSeconds(g: DuelState): number {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: GL, mine: GL, me: string): boolean {
+  awaiting(g: DuelState, mine: DuelPlayer, me: string): boolean {
     return !mine.thrown;
   },
 
-  mover(g: GL): string | null | undefined {
-    return g.rounds && g.rounds.length ? g.rounds[g.rounds.length - 1].winner || null : undefined;
+  mover(g: DuelState): string | null | undefined {
+    return g.rounds && g.rounds.length ? g.rounds[g.rounds.length - 1]!.winner || null : undefined;
   },
 };

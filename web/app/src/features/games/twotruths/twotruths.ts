@@ -1,5 +1,6 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { TwoTruthsPlayer, TwoTruthsRound, TwoTruthsState, TwoTruthsYou } from "@chat/contract";
+import type { HistRow, HistWho } from "../shared/history";
 
 /* Two Truths and a Lie in the page (2026-11-19), under the 3D campfire:
    the storyteller's writing form, the statements to vote on, the
@@ -10,12 +11,12 @@ import type { GL } from "../shared/render";
 export type TtDraft = { round: number; s: [string, string, string]; lie: number };
 export const TT_MAX = 200;
 
-export function ttLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : g && g.last_round ? g.last_round : null;
+export function ttLastRound(g: TwoTruthsState): TwoTruthsRound | null {
+  const rs: TwoTruthsRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : g && g.last_round ? g.last_round : null;
 }
 
-const hexOf = (g: GL, n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+const hexOf = (g: TwoTruthsState, n: string | null) => (((g && g.players) || []).find((p: TwoTruthsPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 
 /* The storyteller's form: three statements, which one is the lie, send. */
 export function ttWriter(draft: TtDraft, onDraft: (d: TtDraft) => void, onSend: (d: TtDraft) => void): HTMLElement {
@@ -62,8 +63,8 @@ export function ttWriter(draft: TtDraft, onDraft: (d: TtDraft) => void, onSend: 
 /* The three statements this round: voters pick the lie (their vote
    marked); the storyteller sees theirs with the lie marked; spectators
    just read. */
-export function ttStatements(g: GL, onVote?: (n: number) => void): HTMLElement {
-  const you = g.you || {};
+export function ttStatements(g: TwoTruthsState, onVote?: (n: number) => void): HTMLElement {
+  const you: Partial<TwoTruthsYou> = g.you || {};
   const ss: string[] = g.statements || you.statements || [];
   const box = el("div", "tt-statements" + (onVote ? " your-move" : ""));
   const teller = g.teller;
@@ -93,9 +94,9 @@ export function ttStatements(g: GL, onVote?: (n: number) => void): HTMLElement {
 }
 
 /* Scores: everyone, best first; who is telling and who has voted. */
-export function ttScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function ttScores(g: TwoTruthsState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "tt-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g.players || []) as GL[]).slice().sort((a, b) => (b.score || 0) - (a.score || 0) || (b.spots || 0) - (a.spots || 0));
+  const ps: TwoTruthsPlayer[] = (g.players || []).slice().sort((a, b) => (b.score || 0) - (a.score || 0) || (b.spots || 0) - (a.spots || 0));
   ps.forEach((p) => {
     const row = el("div", "tt-row" + (me && p.name === me ? " mine" : "") + (g.status === "running" && g.teller === p.name ? " teller" : ""));
     const d = el("span", "hist-dot");
@@ -116,7 +117,7 @@ export function ttScores(g: GL, me?: string, compact?: boolean): HTMLElement {
 
 /* The last round: the statements with the lie marked, who voted where,
    the points, and the roast when everyone saw through it. */
-export function ttReveal(g: GL, r: GL | null): HTMLElement {
+export function ttReveal(g: TwoTruthsState, r: TwoTruthsRound | null): HTMLElement {
   const box = el("div", "tt-reveal");
   if (!r) {
     box.appendChild(el("div", "tt-reveal-empty", "No lie has been revealed yet."));
@@ -132,7 +133,7 @@ export function ttReveal(g: GL, r: GL | null): HTMLElement {
     box.appendChild(el("div", "tt-reveal-note", r.teller + " ran out of time to write - the round was forfeit."));
     return box;
   }
-  ((r.statements || []) as string[]).forEach((s, i) => {
+  (r.statements || []).forEach((s, i) => {
     const n = i + 1;
     const lie = n === r.lie;
     const row = el("div", "tt-rv" + (lie ? " lie" : " truth"));
@@ -158,16 +159,16 @@ export function ttReveal(g: GL, r: GL | null): HTMLElement {
 }
 
 /* History: a row per round - the storyteller, the lie, who spotted it. */
-export function ttHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function ttHistoryRows(g: TwoTruthsState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: TwoTruthsPlayer[] = g.players || [];
+  const byName = (nm: string): Pick<TwoTruthsPlayer, "name" | "hex"> => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  (g.rounds || []).forEach((r: TwoTruthsRound) => {
     n++;
     const rw = row("Round " + r.n);
     const seg = el("span", "hist-seg");
     seg.appendChild(who(byName(r.teller)));
-    seg.appendChild(el("span", "hist-act", r.forfeit ? "forfeit" : "lie: “" + ((r.statements || [])[r.lie - 1] || "") + "”"));
+    seg.appendChild(el("span", "hist-act", r.forfeit ? "forfeit" : "lie: “" + ((r.statements || [])[r.lie! - 1] || "") + "”"));
     rw.appendChild(seg);
     if (!r.forfeit) {
       const pill = el("span", "hist-pill " + (r.right && r.right.length ? "win" : "tie"), r.right && r.right.length ? r.right.join(", ") + " spotted it" : "nobody spotted it");
@@ -179,7 +180,7 @@ export function ttHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: whose turn to tell, and the scores. */
-export function ttCardBoard(g: GL, me?: string): HTMLElement {
+export function ttCardBoard(g: TwoTruthsState, me?: string): HTMLElement {
   const wrap = el("div", "tt-card-board");
   const line =
     g.status === "running" && g.teller

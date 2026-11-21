@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { GameLogLine, LightCyclesMove, LightCyclesState } from "@chat/contract";
 import { histPlayer, type HistRow, type HistWho } from "../shared/history";
 
 const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
@@ -7,15 +7,15 @@ const DIR_ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←",
 /** Light Cycles' History rows: the move log grouped by tick (each rider's
  * turn, "clock" when the timer moved them), with the log's narrative lines
  * as notes. */
-export function lcHistoryRows(g: GL, row: HistRow, who: HistWho, list: HTMLElement): number {
+export function lcHistoryRows(g: LightCyclesState, row: HistRow, who: HistWho, list: HTMLElement): number {
   let n = 0;
-  const byTick = new Map<number, GL[]>();
-  (g.move_log || []).forEach((m: GL) => {
+  const byTick = new Map<number, LightCyclesMove[]>();
+  (g.move_log || []).forEach((m: LightCyclesMove) => {
     if (!byTick.has(m.tick)) byTick.set(m.tick, []);
-    (byTick.get(m.tick) as GL[]).push(m);
+    (byTick.get(m.tick) as LightCyclesMove[]).push(m);
   });
   const notes = new Map<number, string[]>();
-  (g.log || []).forEach((ln: GL) => {
+  (g.log || []).forEach((ln: GameLogLine) => {
     if (/^Tick \d+:/.test(ln.text || "")) return;
     if (!notes.has(ln.tick)) notes.set(ln.tick, []);
     (notes.get(ln.tick) as string[]).push(ln.text || "");
@@ -26,7 +26,7 @@ export function lcHistoryRows(g: GL, row: HistRow, who: HistWho, list: HTMLEleme
     if (moves.length) {
       n++;
       const rw = row("Tick " + t);
-      moves.forEach((m: GL) => {
+      moves.forEach((m: LightCyclesMove) => {
         const seg = el("span", "hist-seg");
         seg.appendChild(who(histPlayer(g, m.name)));
         seg.appendChild(el("span", "hist-act", (DIR_ARROW[m.dir] || "") + " " + (m.dir || "")));
@@ -46,6 +46,6 @@ export function lcHistoryRows(g: GL, row: HistRow, who: HistWho, list: HTMLEleme
 }
 
 /** The History tab's count: ticks with moves. */
-export function lcHistoryCount(g: GL): number {
-  return new Set(((g.move_log || []) as GL[]).map((m: GL) => m.tick)).size;
+export function lcHistoryCount(g: LightCyclesState): number {
+  return new Set((g.move_log || []).map((m: LightCyclesMove) => m.tick)).size;
 }

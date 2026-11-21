@@ -1,5 +1,6 @@
+import type { BattleshipBoard, BattleshipPlayer, BattleshipShip, BattleshipState, BattleshipSunkShip, BattleshipTarget } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { battleshipBoard, bsGrid, fleetStrip, gameMetaText, type GL, lastMoveText, winnerBanner } from "../shared/render";
+import { battleshipBoard, bsGrid, fleetStrip, gameMetaText, lastMoveText, winnerBanner } from "../shared/render";
 import type { GameViewCtx } from "../shared/viewctx";
 
 // Battleship impact dressing: the newest shot (by turn) is animated
@@ -25,7 +26,7 @@ function bsShipCells(start: string, dir: string, size: number, bw?: number, bh?:
   }
   return cells;
 }
-function bsIsNewMove(g: GL): boolean {
+function bsIsNewMove(g: BattleshipState): boolean {
   const lm = g && g.last_move;
   if (!lm) return false;
   const seen = bsSeenMove.get(g.id) || 0;
@@ -56,7 +57,7 @@ function bsCellAt(frame: HTMLElement, label: string): HTMLElement | null {
 
 // Ring (and, on first sight, burst or splash) the cell the last shot
 // landed on, in the grid of the captain whose waters took it.
-function markLastShot(grid: HTMLElement, g: GL, ownerName: string, fresh: boolean) {
+function markLastShot(grid: HTMLElement, g: BattleshipState, ownerName: string, fresh: boolean) {
   const lm = g && g.last_move;
   if (!lm || lm.by === ownerName) return;
   // In a free-for-all the shot names its target: ring it only on
@@ -70,10 +71,10 @@ function markLastShot(grid: HTMLElement, g: GL, ownerName: string, fresh: boolea
 
 // On first sight of a sinking, play the sinking on the ship the last
 // shot just finished: its cells flash and settle into the wreck.
-function markSinking(grid: HTMLElement, ships: GL[], g: GL, ownerName: string, fresh: boolean) {
+function markSinking(grid: HTMLElement, ships: BattleshipSunkShip[], g: BattleshipState, ownerName: string, fresh: boolean) {
   const lm = g && g.last_move;
   if (!fresh || !lm || !lm.sunk || lm.by === ownerName) return;
-  const ship = (ships || []).filter((s: GL) => s.size === lm.sunk && (s.cells || []).indexOf(lm.cell) >= 0)[0];
+  const ship = (ships || []).filter((s: BattleshipSunkShip) => s.size === lm.sunk && (s.cells || []).indexOf(lm.cell) >= 0)[0];
   if (!ship) return;
   ship.cells.forEach((c: string) => {
     const cell = bsCellAt(grid, c);
@@ -82,7 +83,7 @@ function markSinking(grid: HTMLElement, ships: GL[], g: GL, ownerName: string, f
 }
 
 // The arena banner announcing the last shot, duel-verdict style.
-function bsBanner(g: GL, fresh: boolean): HTMLElement | null {
+function bsBanner(g: BattleshipState, fresh: boolean): HTMLElement | null {
   const lm = g && g.last_move;
   if (!lm) return null;
   const b = el("div", "duel-verdict bs-verdict" + (lm.result === "hit" ? "" : " clash"));
@@ -93,7 +94,7 @@ function bsBanner(g: GL, fresh: boolean): HTMLElement | null {
   return b;
 }
 
-export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force?: boolean) {
   if (!ctx.gameView) return;
   const you = g.you || { playing: false };
   const key =
@@ -105,13 +106,13 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
     "|" +
     (g.turn_of || "") +
     "|" +
-    (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.placed ? 1 : 0) + "" + (p.shots || 0) + "" + (p.afloat || 0) + "" + (p.eliminated ? 1 : 0)).join("") +
+    (g.players || []).map((p: BattleshipPlayer) => (p.accepted ? 1 : 0) + "" + (p.placed ? 1 : 0) + "" + (p.shots || 0) + "" + (p.afloat || 0) + "" + (p.eliminated ? 1 : 0)).join("") +
     "|" +
     (you.fleet ? "fleet" : "") +
     "|" +
     (you.shots ? Object.keys(you.shots).length : 0) +
     "|" +
-    (you.targets ? you.targets.map((t: GL) => Object.keys(t.shots || {}).length + "/" + (t.afloat || 0) + (t.eliminated ? "x" : "")).join(",") : "") +
+    (you.targets ? you.targets.map((t: BattleshipTarget) => Object.keys(t.shots || {}).length + "/" + (t.afloat || 0) + (t.eliminated ? "x" : "")).join(",") : "") +
     "|" +
     ctx.youSig(g) +
     "|" +
@@ -150,8 +151,8 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
   }
   const players = g.players || [];
   const myName = ctx.opts.meName();
-  const me = players.filter((p: GL) => p.name === myName)[0];
-  const opp = players.filter((p: GL) => p.name !== myName)[0];
+  const me = players.filter((p: BattleshipPlayer) => p.name === myName)[0];
+  const opp = players.filter((p: BattleshipPlayer) => p.name !== myName)[0];
   const freshMove = bsIsNewMove(g);
   if (!(you.playing && me && opp && g.phase === "setup" && !you.fleet)) bsDrafts.delete(g.id);
   if (ctx.gameView) ctx.gameView.bsPlace = null;
@@ -177,19 +178,19 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
       // follow it.
       ctx.bsScene(g, wrap);
       const boards = el("div", "bs-boards");
-      if (!ctx.webglOk()) g.boards.forEach((b: GL) => {
+      if (!ctx.webglOk()) g.boards.forEach((b: BattleshipBoard) => {
         const states: Record<string, string> = {};
         Object.keys(b.incoming || {}).forEach((c) => {
-          states[c] = b.incoming[c];
+          states[c] = b.incoming[c]!;
         });
-        (b.sunk_ships || []).forEach((s: GL) => {
+        (b.sunk_ships || []).forEach((s: BattleshipSunkShip) => {
           s.cells.forEach((c: string) => {
             states[c] = "sunk";
           });
         });
         const side = el("div", "bs-side" + (b.eliminated ? " bs-wreck" : ""));
         side.appendChild(el("div", "bs-title", b.name + "'s waters" + (b.eliminated ? " — wreck" : "")));
-        side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
+        side.appendChild(fleetStrip(b.hex, (b.sunk_ships || []).map((s: BattleshipSunkShip) => s.size), undefined, g.fleet_sizes));
         const grid = bsGrid(states, b.hex, null, b.sunk_ships || [], undefined, g);
         markLastShot(grid, g, b.name, freshMove);
         markSinking(grid, b.sunk_ships || [], g, b.name, freshMove);
@@ -218,7 +219,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
     }
     const FLEET: number[] = g.fleet_sizes && g.fleet_sizes.length ? g.fleet_sizes : [5, 4, 3, 3, 2];
     const placedCells = new Set<string>();
-    const ships: GL[] = [];
+    const ships: { size: number; cells: string[] }[] = [];
     draft.placed.forEach((p) => {
       const cells = bsShipCells(p.start, p.dir, p.size, g.w, g.h) || [];
       cells.forEach((c) => placedCells.add(c));
@@ -320,13 +321,13 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
       g,
       wrap,
       ctx.bsStrips3d(g, [
-        { label: "Your fleet" + (you.eliminated ? " — wreck" : ""), hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
-        ...(you.targets || []).map((t: GL) => ({ label: t.name + (t.eliminated ? " — wreck" : ""), hex: t.hex, sunk: (t.sunk_ships || []).map((s: GL) => s.size) })),
+        { label: "Your fleet" + (you.eliminated ? " — wreck" : ""), hex: me.hex, sunk: (you.fleet || []).filter((s: BattleshipShip) => s.sunk).map((s: BattleshipShip) => s.size) },
+        ...(you.targets || []).map((t: BattleshipTarget) => ({ label: t.name + (t.eliminated ? " — wreck" : ""), hex: t.hex, sunk: (t.sunk_ships || []).map((s: BattleshipSunkShip) => s.size) })),
       ])
     );
     const boards = el("div", "bs-boards");
     const ownStates: Record<string, string> = {};
-    (you.fleet || []).forEach((s: GL) => {
+    (you.fleet || []).forEach((s: BattleshipShip) => {
       s.cells.forEach((c: string) => {
         ownStates[c] = s.hits.indexOf(c) >= 0 ? (s.sunk ? "sunk" : "hit") : "ship";
       });
@@ -337,18 +338,18 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
     const flat = !ctx.webglOk();
     const ownWrap = el("div", "bs-side");
     ownWrap.appendChild(el("div", "bs-title", "Your waters" + (you.eliminated ? " — wreck" : "")));
-    ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size), undefined, g.fleet_sizes));
+    ownWrap.appendChild(fleetStrip(me.hex, (you.fleet || []).filter((s: BattleshipShip) => s.sunk).map((s: BattleshipShip) => s.size), undefined, g.fleet_sizes));
     const ownGrid = bsGrid(ownStates, me.hex, null, you.fleet || [], undefined, g);
     markLastShot(ownGrid, g, myName, freshMove);
     markSinking(ownGrid, you.fleet || [], g, myName, freshMove);
     ownWrap.appendChild(ownGrid);
     if (flat) boards.appendChild(ownWrap);
-    if (flat) (you.targets || []).forEach((t: GL) => {
+    if (flat) (you.targets || []).forEach((t: BattleshipTarget) => {
       const tStates: Record<string, string> = {};
       Object.keys(t.shots || {}).forEach((c) => {
-        tStates[c] = t.shots[c];
+        tStates[c] = t.shots[c]!;
       });
-      (t.sunk_ships || []).forEach((s: GL) => {
+      (t.sunk_ships || []).forEach((s: BattleshipSunkShip) => {
         s.cells.forEach((c: string) => {
           tStates[c] = "sunk";
         });
@@ -357,7 +358,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
       tWrap.appendChild(
         el("div", "bs-title", t.name + "'s waters" + (t.eliminated ? " — wreck" : canFire ? " - tap a cell to fire" : ""))
       );
-      tWrap.appendChild(fleetStrip(t.hex, (t.sunk_ships || []).map((s: GL) => s.size), undefined, g.fleet_sizes));
+      tWrap.appendChild(fleetStrip(t.hex, (t.sunk_ships || []).map((s: BattleshipSunkShip) => s.size), undefined, g.fleet_sizes));
       const tGrid = bsGrid(
         tStates,
         t.hex,
@@ -383,7 +384,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
         )
       );
     if (g.status === "running" && g.phase === "play") {
-      (g.players || []).forEach((p: GL) => {
+      (g.players || []).forEach((p: BattleshipPlayer) => {
         const m = (g.misses || {})[p.name] || 0;
         if (m >= 2) wrap.appendChild(el("div", "bs-warn", "⚠ " + p.name + " has missed " + m + " turns in a row — one more and they're eliminated."));
         else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row eliminates them."));
@@ -411,8 +412,8 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
       g,
       wrap,
       ctx.bsStrips3d(g, [
-        { label: "Your fleet", hex: me.hex, sunk: (you.fleet || []).filter((s: GL) => s.sunk).map((s: GL) => s.size) },
-        { label: opp.name + "'s fleet", hex: opp.hex, sunk: (you.sunk_ships || []).map((s: GL) => s.size) },
+        { label: "Your fleet", hex: me.hex, sunk: (you.fleet || []).filter((s: BattleshipShip) => s.sunk).map((s: BattleshipShip) => s.size) },
+        { label: opp.name + "'s fleet", hex: opp.hex, sunk: (you.sunk_ships || []).map((s: BattleshipSunkShip) => s.size) },
       ])
     );
     // No WebGL: the scene is a note, and their waters are the only
@@ -420,9 +421,9 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
     if (!ctx.webglOk()) {
       const oppStates: Record<string, string> = {};
       Object.keys(you.shots || {}).forEach((c) => {
-        oppStates[c] = you.shots[c];
+        oppStates[c] = you.shots![c]!;
       });
-      (you.sunk_ships || []).forEach((s: GL) => {
+      (you.sunk_ships || []).forEach((s: BattleshipSunkShip) => {
         s.cells.forEach((c: string) => {
           oppStates[c] = "sunk";
         });
@@ -438,7 +439,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: GL, force?: boolean) {
     if (g.sonar && g.phase === "play" && g.status === "running")
       wrap.appendChild(el("div", "bs-sonar", "📡 Sonar for " + g.sonar.for + ": a hull cell of the last ship sits in " + g.sonar.label + "."));
     if (g.status === "running" && g.phase === "play") {
-      (g.players || []).forEach((p: GL) => {
+      (g.players || []).forEach((p: BattleshipPlayer) => {
         const m = (g.misses || {})[p.name] || 0;
         if (m >= 2) wrap.appendChild(el("div", "bs-warn", "⚠ " + p.name + " has missed " + m + " turns in a row — one more forfeits the match."));
         else if (m === 1) wrap.appendChild(el("div", "bs-warn soft", p.name + " has missed a turn — three in a row forfeits the match."));

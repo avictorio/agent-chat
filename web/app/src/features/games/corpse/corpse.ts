@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { CorpseBeat, CorpsePlayer, CorpseSegment, CorpseState, CorpseYou } from "@chat/contract";
 
 /* Exquisite Corpse in the page (2026-11-20), under the 3D desk: your turn
    (the fold - only the segment before yours - and your segment), the
@@ -9,7 +9,7 @@ import type { GL } from "../shared/render";
    writer's own tail. */
 
 export const EC_MAX = 400;
-const hexOf = (g: GL, n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+const hexOf = (g: CorpseState, n: string) => (((g && g.players) || []).find((p: CorpsePlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 
 export function ecSentences(text: string): number {
   return String(text)
@@ -19,8 +19,8 @@ export function ecSentences(text: string): number {
 
 /* Your turn: the fold and the form. The draft lives with the caller and
    is kept in place as you type (a repaint would drop the focus). */
-export function ecWriter(g: GL, draft: { turn: number; text: string }, onSend: (text: string) => void): HTMLElement {
-  const you = g.you || {};
+export function ecWriter(g: CorpseState, draft: { turn: number; text: string }, onSend: (text: string) => void): HTMLElement {
+  const you: Partial<CorpseYou> = g.you || {};
   const wrap = el("div", "ec-writer your-move");
   wrap.appendChild(el("div", "ec-writer-title", "Your turn - carry the story on"));
   const fold = el("div", "ec-fold");
@@ -64,9 +64,9 @@ export function ecWriter(g: GL, draft: { turn: number; text: string }, onSend: (
 
 /* The turn strip: a chip per turn - written (the author's colour), a
    silent beat (dashed), the turn now (pulsing), the ones to come. */
-export function ecStrip(g: GL): HTMLElement {
+export function ecStrip(g: CorpseState): HTMLElement {
   const box = el("div", "ec-strip");
-  const beats: GL[] = g.beats || [];
+  const beats: CorpseBeat[] = g.beats || [];
   const total = g.turns_total || 0;
   box.setAttribute("aria-label", beats.filter((b) => b.wrote).length + " segments written of " + total + " turns");
   for (let t = 1; t <= total; t++) {
@@ -84,12 +84,12 @@ export function ecStrip(g: GL): HTMLElement {
 /* The revealed story: the seed, then every segment with its author (and
    constraint card), the favourite vote, and at the end the votes and
    the honours. */
-export function ecStory(g: GL, onVote?: (n: number) => void): HTMLElement {
-  const you = g.you || {};
+export function ecStory(g: CorpseState, onVote?: (n: number) => void): HTMLElement {
+  const you: Partial<CorpseYou> = g.you || {};
   const box = el("div", "ec-story" + (onVote ? " your-move" : ""));
   if (g.seed) box.appendChild(el("div", "ec-seed", g.seed));
   const honours: number[] = g.honours || [];
-  ((g.story || []) as GL[]).forEach((s) => {
+  ((g.story || []) as CorpseSegment[]).forEach((s) => {
     const mine = s.by === you.name || (you.segments || []).indexOf(s.n) >= 0;
     const voted = you.vote === s.n;
     const best = honours.indexOf(s.n) >= 0;
@@ -118,10 +118,10 @@ export function ecStory(g: GL, onVote?: (n: number) => void): HTMLElement {
 }
 
 /* The writers: segments written, who is writing, who is out, who voted. */
-export function ecWriters(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function ecWriters(g: CorpseState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "ec-writers" + (compact ? " compact" : ""));
   const order: string[] = g.order || [];
-  const ps: GL[] = ((g.players || []) as GL[]).slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+  const ps: CorpsePlayer[] = ((g.players || []) as CorpsePlayer[]).slice().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
   ps.forEach((p) => {
     const row = el("div", "ec-row" + (me && p.name === me ? " mine" : "") + (g.status === "running" && g.turn_of === p.name ? " turn" : "") + (p.out ? " out" : ""));
     const d = el("span", "hist-dot");
@@ -143,13 +143,13 @@ export function ecWriters(g: GL, me?: string, compact?: boolean): HTMLElement {
 
 /* History: a row per turn - who wrote (and, once revealed, what), or a
    silent beat. */
-export function ecHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function ecHistoryRows(g: CorpseState, row: (idx: string) => HTMLElement, who: (p: Pick<CorpsePlayer, "name" | "hex">) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  const story: GL[] = g.story || [];
+  const players: CorpsePlayer[] = g.players || [];
+  const byName = (nm: string): Pick<CorpsePlayer, "name" | "hex"> => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  const story: CorpseSegment[] = g.story || [];
   let k = 0;
-  ((g.beats || []) as GL[]).forEach((b: GL) => {
+  ((g.beats || []) as CorpseBeat[]).forEach((b: CorpseBeat) => {
     n++;
     const rw = row("Turn " + b.turn);
     const seg = el("span", "hist-seg");
@@ -165,7 +165,7 @@ export function ecHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: where the story is, and the writers. */
-export function ecCardBoard(g: GL, me?: string): HTMLElement {
+export function ecCardBoard(g: CorpseState, me?: string): HTMLElement {
   const wrap = el("div", "ec-card");
   let line = "";
   if (g.status === "running" && g.phase === "write") line = "Turn " + g.turn + " of " + g.turns_total + " · " + g.turn_of + " is writing";

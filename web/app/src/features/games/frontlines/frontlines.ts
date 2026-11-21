@@ -1,5 +1,5 @@
+import type { FrontlinesPlayer, FrontlinesRound, FrontlinesState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
 
 /* Frontlines in the DOM (2026-11-19): the field as a board (card and
    arena), the troop planner a commander fills in, and the round
@@ -13,13 +13,13 @@ export const FL_HILLS = 5;
 export const FL_TROOPS = 100;
 const LETTERS = ["A", "B", "C", "D", "E"];
 
-export function flLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function flLastRound(g: FrontlinesState): FrontlinesRound | null {
+  const rs: FrontlinesRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
-function hexOf(g: GL, name: string | null | undefined): string {
-  const p = ((g && g.players) || []).filter((x: GL) => x.name === name)[0];
+function hexOf(g: FrontlinesState, name: string | null | undefined): string {
+  const p = ((g && g.players) || []).filter((x: FrontlinesPlayer) => x.name === name)[0];
   return (p && p.hex) || "#94a3b8";
 }
 
@@ -27,10 +27,10 @@ function hexOf(g: GL, name: string | null | undefined): string {
    bars (longest bar = 100 troops), the hill's winner flagged in their
    colour, a level hill marked level. Before any round has resolved it
    shows the empty field (and, for the viewer, their own sealed split). */
-export function flField(g: GL, opts?: { compact?: boolean; round?: GL | null; me?: string }): HTMLElement {
+export function flField(g: FrontlinesState, opts?: { compact?: boolean; round?: FrontlinesRound | null; me?: string }): HTMLElement {
   const compact = !!(opts && opts.compact);
   const round = opts && opts.round !== undefined ? opts.round : flLastRound(g);
-  const players: GL[] = (g && g.players) || [];
+  const players: FrontlinesPlayer[] = (g && g.players) || [];
   const values: number[] | null = round && round.values ? round.values : g && g.variant === "valued" ? g.values || null : null;
   const mine = g && g.you && g.you.playing && Array.isArray(g.you.queued) ? (g.you.queued as number[]) : null;
   const field = el("div", "fl-field" + (compact ? " compact" : ""));
@@ -44,7 +44,7 @@ export function flField(g: GL, opts?: { compact?: boolean; round?: GL | null; me
     hill.appendChild(head);
     const owner = round && round.hills ? round.hills[i] : undefined;
     if (round && round.hills) {
-      players.forEach((p: GL) => {
+      players.forEach((p: FrontlinesPlayer) => {
         const n = ((round.alloc || {})[p.name] || [])[i] || 0;
         const bar = el("div", "fl-bar" + (owner === p.name ? " won" : ""));
         const fill = el("span", "fl-fill");
@@ -78,7 +78,7 @@ export function flField(g: GL, opts?: { compact?: boolean; round?: GL | null; me
   }
   if (round && round.hills && !compact) {
     const sum = el("div", "fl-sum");
-    players.forEach((p: GL) => {
+    players.forEach((p: FrontlinesPlayer) => {
       const s = el("span", "fl-sum-p");
       s.style.color = p.hex;
       const k = values ? (round.points || {})[p.name] || 0 : (round.held || {})[p.name] || 0;
@@ -97,13 +97,13 @@ export function flField(g: GL, opts?: { compact?: boolean; round?: GL | null; me
    up to 100. The draft lives with the caller so a repaint (a poll, the
    rival committing) never wipes a half-made plan. */
 export function flPlanner(
-  g: GL,
+  g: FrontlinesState,
   draft: number[],
   onDraft: (v: number[]) => void,
   onCommit: (v: number[]) => void
 ): HTMLElement {
   const wrap = el("div", "fl-plan" + (g.you && g.you.queued ? "" : " your-move"));
-  const queued: number[] | null = Array.isArray(g.you && g.you.queued) ? g.you.queued : null;
+  const queued: number[] | null = Array.isArray(g.you && g.you.queued) ? g.you!.queued! : null;
   const values: number[] | null = g.variant === "valued" ? g.values || null : null;
   const total = draft.reduce((a, b) => a + b, 0);
   const left = FL_TROOPS - total;
@@ -182,13 +182,13 @@ export function flPlanner(
 
 /* History: one row per round - both splits, the hills each took, the
    round's winner. */
-export function flHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function flHistoryRows(g: FrontlinesState, row: (idx: string) => HTMLElement, who: (p: FrontlinesPlayer) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: FrontlinesPlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: FrontlinesRound) => {
     n++;
     const rw = row("Round " + r.n);
-    players.forEach((p: GL) => {
+    players.forEach((p: FrontlinesPlayer) => {
       const seg = el("span", "hist-seg");
       seg.appendChild(who(p));
       const a = (r.alloc || {})[p.name];
@@ -209,12 +209,12 @@ export function flHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 
 /* Frontlines on a card: the score line and the last resolved round on a
    compact field (hills tinted by who took them). */
-export function flCardBoard(g: GL): HTMLElement {
+export function flCardBoard(g: FrontlinesState): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "fl-card";
   const top = document.createElement("div");
   top.className = "fl-card-score";
-  (g.players || []).forEach((p: GL, i: number) => {
+  (g.players || []).forEach((p: FrontlinesPlayer, i: number) => {
     if (i) top.appendChild(document.createTextNode(" – "));
     const s = document.createElement("span");
     s.style.color = p.hex;

@@ -1,17 +1,18 @@
+import type { FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { c4Board, c4Seats } from "./fourinarow";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Four in a Row (2026-11-19): who plays which disc, then the board -
    on your turn the column heads are the drop buttons. A drop goes out
    at once; the turn passes when the server answers. */
-export function renderFourView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
   const you = g.you || { playing: false };
-  const key = [g.status, g.turn, g.turn_of || "", (g.board || []).join("/"), (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.timeouts || 0)).join(""), ctx.youSig(g), gv.tab || "game"].join("|");
+  const key = [g.status, g.turn, g.turn_of || "", (g.board || []).join("/"), (g.players || []).map((p: FourInARowPlayer) => (p.accepted ? 1 : 0) + "" + (p.timeouts || 0)).join(""), ctx.youSig(g), gv.tab || "game"].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   wrap.textContent = "";

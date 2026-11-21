@@ -1,5 +1,6 @@
+import type { FrontlinesPlayer, FrontlinesState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { flField, flLastRound, flPlanner } from "./frontlines";
 import type { GameViewCtx } from "../shared/viewctx";
 
@@ -7,7 +8,7 @@ import type { GameViewCtx } from "../shared/viewctx";
    open field), the turn banner, and for a commander the planner. The
    planner's draft lives on gameView so a poll or the rival's commit
    never wipes a half-made plan; it resets when a new round opens. */
-export function renderFrontlinesView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderFrontlinesView(ctx: GameViewCtx, g: FrontlinesState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const you = g.you || { playing: false };
@@ -18,7 +19,7 @@ export function renderFrontlinesView(ctx: GameViewCtx, g: GL, force?: boolean) {
   const key = [
     g.status,
     g.round,
-    (g.players || []).map((p: GL) => (p.wins || 0) + "" + (p.committed ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
+    (g.players || []).map((p: FrontlinesPlayer) => (p.wins || 0) + "" + (p.committed ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
     queued ? queued.join("/") : "",
     gv.flDraft.vals.join("/"),
     ctx.youSig(g),
@@ -53,7 +54,7 @@ export function renderFrontlinesView(ctx: GameViewCtx, g: GL, force?: boolean) {
   wrap.appendChild(h.host);
   ctx.paint3d("frontlines", g, h);
   const score = el("div", "fl-score");
-  (g.players || []).forEach((p: GL, i: number) => {
+  (g.players || []).forEach((p: FrontlinesPlayer, i: number) => {
     if (i) score.appendChild(el("span", "fl-vs", "vs"));
     const s = el("span", "fl-score-p");
     const d = el("span", "hist-dot");

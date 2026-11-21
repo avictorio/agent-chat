@@ -1,15 +1,16 @@
+import type { DuelPlayer, DuelState } from "@chat/contract";
 import { el } from "../../../lib/index";
-import { duelBoard, duelScoreLine, duelTendencies, gameMetaText, type GL, roundVerdict, THROW_BEATS, THROW_EMOJI, winnerBanner } from "../shared/render";
+import { duelBoard, duelScoreLine, duelTendencies, gameMetaText, roundVerdict, THROW_BEATS, THROW_EMOJI, winnerBanner } from "../shared/render";
 import type { GameViewCtx } from "../shared/viewctx";
 
-export function renderDuelView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) {
   if (!ctx.gameView) return;
   const key =
     g.status +
     "|" +
     g.round +
     "|" +
-    (g.players || []).map((p: GL) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
+    (g.players || []).map((p: DuelPlayer) => (p.wins || 0) + (p.thrown ? 1 : 0) + (p.accepted ? 1 : 0)).join("") +
     "|" +
     ((g.you && g.you.queued) || "") +
     "|" +
@@ -27,7 +28,7 @@ export function renderDuelView(ctx: GameViewCtx, g: GL, force?: boolean) {
   const tb = ctx.turnBanner(g);
   if (tb) wrap.appendChild(tb);
   if (g.status === "finished" && g.h2h && g.h2h.tally) {
-    const h2hline = (g.players || []).map((p: GL) => p.name + " " + (g.h2h.tally[p.name] || 0)).join(" · ");
+    const h2hline = (g.players || []).map((p: DuelPlayer) => p.name + " " + (g.h2h!.tally[p.name] || 0)).join(" · ");
     wrap.appendChild(el("div", "duel-h2h", "Head-to-head in this room — " + h2hline));
   }
   wrap.appendChild(ctx.arenaTabs(g));
@@ -86,11 +87,11 @@ export function renderDuelView(ctx: GameViewCtx, g: GL, force?: boolean) {
     }
   }
   if (rounds.length) {
-    const last = rounds[rounds.length - 1];
+    const last = rounds[rounds.length - 1]!;
     const v = roundVerdict(last, players);
     const banner = el("div", "duel-verdict" + (v.tie ? " clash" : ""));
     const iconsWrap = el("span", "v-icons");
-    players.forEach((p: GL) => {
+    players.forEach((p: DuelPlayer) => {
       const t = (last.throws || {})[p.name];
       const cls = v.tie ? "tie" : last.winner === p.name ? "winner" : "loser";
       iconsWrap.appendChild(el("span", "v-icon " + cls, t ? THROW_EMOJI[t] || "" : "—"));
@@ -98,7 +99,7 @@ export function renderDuelView(ctx: GameViewCtx, g: GL, force?: boolean) {
     banner.appendChild(iconsWrap);
     banner.appendChild(el("span", "", v.text + " · " + duelScoreLine(g)));
     if (!v.tie && last.winner) {
-      const wp = players.filter((p: GL) => p.name === last.winner)[0];
+      const wp = players.filter((p: DuelPlayer) => p.name === last.winner)[0];
       if (wp) banner.style.borderColor = wp.hex;
     }
     if (ctx.gameView.lastRounds != null && rounds.length > ctx.gameView.lastRounds) {
@@ -111,12 +112,12 @@ export function renderDuelView(ctx: GameViewCtx, g: GL, force?: boolean) {
   if (g.you && g.you.playing && g.status === "running") {
     const pad = el("div", "duel-pad2" + (!g.you.queued ? " your-move" : ""));
     ["rock", "paper", "scissors"].forEach((t) => {
-      const b = el("button", "duel-tile" + (g.you.queued === t ? " queued" : ""));
+      const b = el("button", "duel-tile" + (g.you!.queued === t ? " queued" : ""));
       b.type = "button";
       b.appendChild(el("span", "t-icon", THROW_EMOJI[t] || ""));
       b.appendChild(el("span", "t-name", t));
       b.appendChild(el("span", "t-beats", THROW_BEATS[t] || ""));
-      b.appendChild(el("span", "t-lock", g.you.queued === t ? "LOCKED" : ""));
+      b.appendChild(el("span", "t-lock", g.you!.queued === t ? "LOCKED" : ""));
       b.addEventListener("click", () => {
         if (ctx.gameView && ctx.gameView.duelCommit) ctx.gameView.duelCommit(t);
         void ctx.sendMove(g.id, t, note);

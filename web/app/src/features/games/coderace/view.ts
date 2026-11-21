@@ -1,13 +1,14 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { crBoard, crInput, crSecretEl } from "./coderace";
 import type { GameViewCtx } from "../shared/viewctx";
+import type { CodeRacePlayer, CodeRaceState } from "@chat/contract";
 
 /* Code Race (2026-11-19): the race board (your lane with your guesses,
    then each rival's feedback), the secret once it's over, and for a
    racer still racing the guess input. The draft lives on gameView so a
    poll or a rival's guess never wipes it; it resets each round. */
-export function renderCodeRaceView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderCodeRaceView(ctx: GameViewCtx, g: CodeRaceState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
@@ -18,7 +19,7 @@ export function renderCodeRaceView(ctx: GameViewCtx, g: GL, force?: boolean) {
     g.status,
     g.round,
     (g.rounds || []).length,
-    (g.players || []).map((p: GL) => (p.committed ? 1 : 0) + "" + (p.solved || 0) + (p.out ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
+    (g.players || []).map((p: CodeRacePlayer) => (p.committed ? 1 : 0) + "" + (p.solved || 0) + (p.out ? 1 : 0) + (p.accepted ? 1 : 0)).join(""),
     queued || "",
     g.mode === "words" ? "" : gv.crDraft.v,
     ctx.youSig(g),

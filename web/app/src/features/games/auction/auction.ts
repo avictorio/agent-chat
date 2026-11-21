@@ -1,18 +1,18 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { AuctionPlayer, AuctionRound, AuctionState, AuctionYou } from "@chat/contract";
 
 /* The sealed-bid auction in the DOM (2026-11-19): the lot under the
    hammer, the bidders (budget left, lots won, who has bid), your bid,
    the last lot's result and the history. Pending bids are secret (the
    server sends only your own); resolved lots show every bid. */
 
-export function auLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function auLastRound(g: AuctionState): AuctionRound | null {
+  const rs: AuctionRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
 /* The lot under the hammer (or, once it's over, the season's end). */
-export function auLot(g: GL): HTMLElement {
+export function auLot(g: AuctionState): HTMLElement {
   const box = el("div", "au-lot");
   if (g.status === "running" && g.lot) {
     box.appendChild(el("div", "au-lot-n", "Lot " + g.round + " of " + g.lots_total));
@@ -21,17 +21,17 @@ export function auLot(g: GL): HTMLElement {
   return box;
 }
 
-export function auStatus(g: GL, p: GL): string {
+export function auStatus(g: AuctionState, p: AuctionPlayer): string {
   if (g.status !== "running") return "";
   if ((p.budget || 0) <= 0) return "spent out";
   return p.committed ? "bid ✓" : "thinking…";
 }
 
 /* The bidders: budget left as a bar, lots won, who has bid. */
-export function auPlayers(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function auPlayers(g: AuctionState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "au-players" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g && g.players) || []).slice().sort((a: GL, b: GL) => (b.won || 0) - (a.won || 0) || (b.budget || 0) - (a.budget || 0));
-  ps.forEach((p: GL) => {
+  const ps: AuctionPlayer[] = ((g && g.players) || []).slice().sort((a: AuctionPlayer, b: AuctionPlayer) => (b.won || 0) - (a.won || 0) || (b.budget || 0) - (a.budget || 0));
+  ps.forEach((p: AuctionPlayer) => {
     const row = el("div", "au-row" + (me && p.name === me ? " mine" : ""));
     const d = el("span", "hist-dot");
     d.style.background = p.hex;
@@ -55,8 +55,8 @@ export function auPlayers(g: GL, me?: string, compact?: boolean): HTMLElement {
 
 /* Your bid: a number box with steps, quick amounts, and Bid. The draft
    lives with the caller so a repaint never wipes it. */
-export function auBid(g: GL, draft: number, onDraft: (v: number) => void, onCommit: (v: number) => void): HTMLElement {
-  const you = g.you || {};
+export function auBid(g: AuctionState, draft: number, onDraft: (v: number) => void, onCommit: (v: number) => void): HTMLElement {
+  const you: Partial<AuctionYou> = g.you || {};
   const max = you.budget || 0;
   const queued: number | null = you.queued == null ? null : Number(you.queued);
   const wrap = el("div", "au-bid" + (queued == null ? " your-move" : ""));
@@ -110,13 +110,13 @@ export function auBid(g: GL, draft: number, onDraft: (v: number) => void, onComm
 }
 
 /* The last lot's result: who won it and for how much, and every bid. */
-export function auResult(g: GL, round: GL | null): HTMLElement {
+export function auResult(g: AuctionState, round: AuctionRound | null): HTMLElement {
   const box = el("div", "au-result");
   if (!round) {
     box.appendChild(el("div", "au-result-empty", "No lot has sold yet - bids are opened together."));
     return box;
   }
-  const hexOf = (n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+  const hexOf = (n: string) => (((g && g.players) || []).find((p: AuctionPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
   const head = el("div", "au-result-head");
   head.appendChild(el("span", "au-result-lot", "Lot " + round.n + ": “" + round.lot + "”"));
   const verdict = el("span", "au-result-v", round.winner ? round.winner + " · " + round.price : "unsold");
@@ -145,14 +145,14 @@ export function auResult(g: GL, round: GL | null): HTMLElement {
 }
 
 /* History: a row per lot - its winner and price, every bid. */
-export function auHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function auHistoryRows(g: AuctionState, row: (idx: string) => HTMLElement, who: (p: AuctionPlayer) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: AuctionPlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: AuctionRound) => {
     n++;
     const rw = row("Lot " + r.n);
     rw.appendChild(el("span", "hist-act au-hist-lot", "“" + r.lot + "”"));
-    players.forEach((p: GL) => {
+    players.forEach((p: AuctionPlayer) => {
       if ((r.bids || {})[p.name] === undefined) return;
       const seg = el("span", "hist-seg");
       seg.appendChild(who(p));
@@ -172,7 +172,7 @@ export function auHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: the lot under the hammer and the bidders. */
-export function auCardBoard(g: GL, me?: string): HTMLElement {
+export function auCardBoard(g: AuctionState, me?: string): HTMLElement {
   const wrap = el("div", "au-card");
   wrap.appendChild(auLot(g));
   wrap.appendChild(auPlayers(g, me, true));

@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { CodeRaceFeedback, CodeRaceGuess, CodeRacePlayer, CodeRaceRound, CodeRaceState } from "@chat/contract";
 
 /* Code Race in the DOM (2026-11-19): the race board (card and arena),
    the guess input and the round history. Everyone races on the same
@@ -17,7 +17,7 @@ export type Pal = { k: string; name: string; hex: string }[];
 
 const TILE_LABEL: Record<string, string> = { G: "right place", Y: "in the word", ".": "not in it" };
 
-export function crPalette(g: GL): Pal {
+export function crPalette(g: CodeRaceState): Pal {
   return (g && g.palette) || [];
 }
 
@@ -36,7 +36,7 @@ function pegEl(pal: Pal, k: string | null, cls = ""): HTMLElement {
 /* Feedback for one guess. Colors: [black, white] as dots and rings in a
    little block. Words: the tile colours (with letters when we have the
    guess). */
-export function crFeedbackEl(g: GL, fb: GL, guess?: string | null): HTMLElement {
+export function crFeedbackEl(g: CodeRaceState, fb: CodeRaceFeedback, guess?: string | null): HTMLElement {
   if (g.mode === "words") {
     const row = el("span", "cr-tiles");
     const s = String(fb || "");
@@ -48,8 +48,9 @@ export function crFeedbackEl(g: GL, fb: GL, guess?: string | null): HTMLElement 
     }
     return row;
   }
-  const b = (fb && fb[0]) || 0;
-  const w = (fb && fb[1]) || 0;
+  // colors mode: fb is the [black, white] pair
+  const b = (fb && (fb as [number, number])[0]) || 0;
+  const w = (fb && (fb as [number, number])[1]) || 0;
   const box = el("span", "cr-pips");
   box.setAttribute("aria-label", b + " right place, " + w + " right colour wrong place");
   box.title = b + " right place · " + w + " right colour, wrong place";
@@ -60,7 +61,7 @@ export function crFeedbackEl(g: GL, fb: GL, guess?: string | null): HTMLElement 
 }
 
 /* One guess row: the guess (pegs or tiles) and its feedback. */
-function guessRow(g: GL, n: number | string, guess: string | null, fb: GL | null, opts?: { sealed?: boolean; cracked?: boolean }): HTMLElement {
+function guessRow(g: CodeRaceState, n: number | string, guess: string | null, fb: CodeRaceFeedback | null, opts?: { sealed?: boolean; cracked?: boolean }): HTMLElement {
   const row = el("div", "cr-row" + (opts && opts.sealed ? " sealed" : "") + (opts && opts.cracked ? " cracked" : ""));
   row.appendChild(el("span", "cr-n", String(n)));
   if (g.mode === "words") {
@@ -82,7 +83,7 @@ function guessRow(g: GL, n: number | string, guess: string | null, fb: GL | null
   return row;
 }
 
-export function crStatus(g: GL, p: GL): string {
+export function crStatus(g: CodeRaceState, p: CodeRacePlayer): string {
   if (p.solved) return "cracked it · round " + p.solved;
   if (p.out) return "out";
   if (g.status === "running") return p.committed ? "guessed ✓" : "thinking…";
@@ -91,7 +92,7 @@ export function crStatus(g: GL, p: GL): string {
 }
 
 /* The secret, once the race is over. */
-export function crSecretEl(g: GL): HTMLElement | null {
+export function crSecretEl(g: CodeRaceState): HTMLElement | null {
   if (!g || g.secret == null) return null;
   const box = el("div", "cr-secret");
   box.appendChild(el("span", "cr-secret-label", g.mode === "words" ? "The word" : "The code"));
@@ -112,7 +113,7 @@ export function crSecretEl(g: GL): HTMLElement | null {
 /* A racer's lane: name, status, and their rounds. Yours carries your
    guesses (and the sealed one for this round); a rival's carries only
    feedback while the race runs. */
-export function crLane(g: GL, p: GL, opts?: { me?: string; compact?: boolean; place?: number }): HTMLElement {
+export function crLane(g: CodeRaceState, p: CodeRacePlayer, opts?: { me?: string; compact?: boolean; place?: number }): HTMLElement {
   const mine = !!(opts && opts.me && p.name === opts.me);
   const compact = !!(opts && opts.compact);
   const lane = el("div", "cr-lane" + (mine ? " mine" : "") + (p.solved ? " solved" : "") + (p.out ? " out" : "") + (compact ? " compact" : ""));
@@ -126,7 +127,7 @@ export function crLane(g: GL, p: GL, opts?: { me?: string; compact?: boolean; pl
   head.appendChild(el("span", "cr-lane-st", crStatus(g, p)));
   lane.appendChild(head);
   const rows = el("div", "cr-rows");
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  (g.rounds || []).forEach((r: CodeRaceRound) => {
     const x = (r.guesses || {})[p.name];
     if (!x) return;
     rows.appendChild(guessRow(g, r.n, x.guess || null, x.fb, { cracked: (r.solved || []).indexOf(p.name) >= 0 }));
@@ -139,10 +140,10 @@ export function crLane(g: GL, p: GL, opts?: { me?: string; compact?: boolean; pl
 
 /* The board: the viewer's lane first, then the rivals (in place order
    once the race is over). */
-export function crBoard(g: GL, opts?: { me?: string; compact?: boolean }): HTMLElement {
+export function crBoard(g: CodeRaceState, opts?: { me?: string; compact?: boolean }): HTMLElement {
   const board = el("div", "cr-board" + (opts && opts.compact ? " compact" : ""));
   const me = opts && opts.me;
-  let ps: GL[] = ((g && g.players) || []).slice();
+  let ps: CodeRacePlayer[] = ((g && g.players) || []).slice();
   const places: string[] | null = Array.isArray(g.places) ? g.places : null;
   if (places) ps.sort((a, b) => places.indexOf(a.name) - places.indexOf(b.name));
   else if (me) ps = ps.filter((p) => p.name === me).concat(ps.filter((p) => p.name !== me));
@@ -154,7 +155,7 @@ export function crBoard(g: GL, opts?: { me?: string; compact?: boolean }): HTMLE
    slot to clear it; Random and Clear; Guess once every slot is set.
    Words: type the word (the server checks it is in the list). The draft
    lives with the caller so a repaint never wipes it. */
-export function crInput(g: GL, draft: string, onDraft: (v: string) => void, onCommit: (v: string) => void, onType?: (v: string) => void): HTMLElement {
+export function crInput(g: CodeRaceState, draft: string, onDraft: (v: string) => void, onCommit: (v: string) => void, onType?: (v: string) => void): HTMLElement {
   const wrap = el("div", "cr-input" + (g.you && g.you.queued ? "" : " your-move"));
   const queued: string | null = (g.you && g.you.queued) || null;
   const len = g.length || (g.mode === "words" ? 5 : 4);
@@ -247,13 +248,13 @@ export function crInput(g: GL, draft: string, onDraft: (v: string) => void, onCo
 
 /* History: a row per round - each racer's feedback (and guess, when the
    viewer may see it), who cracked it. */
-export function crHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function crHistoryRows(g: CodeRaceState, row: (idx: string) => HTMLElement, who: (p: CodeRacePlayer) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: CodeRacePlayer[] = g.players || [];
+  (g.rounds || []).forEach((r: CodeRaceRound) => {
     n++;
     const rw = row("Round " + r.n);
-    players.forEach((p: GL) => {
+    players.forEach((p: CodeRacePlayer) => {
       const x = (r.guesses || {})[p.name];
       if (!x && (r.missed || []).indexOf(p.name) < 0) return;
       const seg = el("span", "hist-seg");
@@ -280,14 +281,14 @@ export function crHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 
 /* The card: the race as compact lanes (latest feedback per racer), and
    the secret once it's over. */
-export function crCardBoard(g: GL, me?: string): HTMLElement {
+export function crCardBoard(g: CodeRaceState, me?: string): HTMLElement {
   const wrap = el("div", "cr-card");
   const what = g.mode === "words" ? (g.length || 5) + "-letter word" : (g.length || 4) + " pegs · " + (g.colors || 6) + " colours";
   wrap.appendChild(el("div", "cr-card-cap", what + (g.status === "running" ? " · round " + g.round + " of " + (g.max_rounds || "?") : "")));
   const s = crSecretEl(g);
   if (s) wrap.appendChild(s);
   const list = el("div", "cr-card-list");
-  let ps: GL[] = ((g && g.players) || []).slice();
+  let ps: CodeRacePlayer[] = ((g && g.players) || []).slice();
   const places: string[] | null = Array.isArray(g.places) ? g.places : null;
   if (places) ps.sort((a, b) => places.indexOf(a.name) - places.indexOf(b.name));
   ps.forEach((p) => {
@@ -296,8 +297,8 @@ export function crCardBoard(g: GL, me?: string): HTMLElement {
     dot.style.background = p.hex;
     line.appendChild(dot);
     line.appendChild(el("span", "cr-card-name", p.name + (me && p.name === me ? " (you)" : "")));
-    let last: GL = null;
-    ((g.rounds || []) as GL[]).forEach((r) => {
+    let last = null as CodeRaceGuess | null;
+    (g.rounds || []).forEach((r) => {
       const x = (r.guesses || {})[p.name];
       if (x) last = x;
     });

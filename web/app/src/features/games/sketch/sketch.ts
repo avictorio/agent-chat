@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { SketchPlayer, SketchRound, SketchState, SketchYou } from "@chat/contract";
 
 /* Sketch & Guess in the DOM (2026-11-20): the scoreboard, the artist's
    prompt and sketch pad (or an image of their own), the guess form, the
@@ -16,12 +16,12 @@ const H = 480;
 const COLORS = ["#111827", "#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#a855f7", "#8b5a2b"];
 const SIZES = [4, 10, 22];
 
-export function sgLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : null;
+export function sgLastRound(g: SketchState): SketchRound | null {
+  const rs: SketchRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : null;
 }
 
-function status(g: GL, p: GL): string {
+function status(g: SketchState, p: SketchPlayer): string {
   if (g.status !== "running") return "";
   if (p.name === g.artist) return g.phase === "draw" ? "drawing…" : "artist";
   if (g.phase === "guess") return p.committed ? "guessed ✓" : "thinking…";
@@ -29,10 +29,10 @@ function status(g: GL, p: GL): string {
   return "";
 }
 
-export function sgScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function sgScores(g: SketchState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "sg-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g && g.players) || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0) || (a.name < b.name ? -1 : 1));
-  ps.forEach((p: GL, i: number) => {
+  const ps: SketchPlayer[] = ((g && g.players) || []).slice().sort((a: SketchPlayer, b: SketchPlayer) => (b.score || 0) - (a.score || 0) || (a.name < b.name ? -1 : 1));
+  ps.forEach((p: SketchPlayer, i: number) => {
     const row = el("div", "sg-row" + (me && p.name === me ? " mine" : ""));
     row.style.setProperty("--who", p.hex || "#94a3b8");
     row.appendChild(el("span", "sg-rank", String(i + 1)));
@@ -162,8 +162,8 @@ export function sgMakePad(round: number): SgPad {
 
 /* The artist's panel: the secret prompt, the pad, and an image of your
    own as the other way in. */
-export function sgArtistPanel(g: GL, pad: SgPad, onSend: (image: string) => void, onError: (msg: string) => void): HTMLElement {
-  const you = g.you || {};
+export function sgArtistPanel(g: SketchState, pad: SgPad, onSend: (image: string) => void, onError: (msg: string) => void): HTMLElement {
+  const you: Partial<SketchYou> = g.you || {};
   const box = el("div", "sg-form sg-artist");
   const pr = el("div", "sg-prompt");
   pr.appendChild(el("span", "sg-prompt-cap", "Your prompt (secret)"));
@@ -208,8 +208,8 @@ export function sgArtistPanel(g: GL, pad: SgPad, onSend: (image: string) => void
 }
 
 /* The guess form: one line, changeable until the guesses close. */
-export function sgGuessForm(g: GL, draft: string, onDraft: (s: string) => void, onSend: (s: string) => void): HTMLElement {
-  const you = g.you || {};
+export function sgGuessForm(g: SketchState, draft: string, onDraft: (s: string) => void, onSend: (s: string) => void): HTMLElement {
+  const you: Partial<SketchYou> = g.you || {};
   const box = el("div", "sg-form sg-guess");
   box.appendChild(el("div", "sg-form-title", you.queued ? "Your guess is in - change it until the guesses close" : "What does the drawing show?"));
   const row = el("div", "sg-guess-row");
@@ -246,11 +246,11 @@ export function sgGuessForm(g: GL, draft: string, onDraft: (s: string) => void, 
 }
 
 /* One round's reveal: the prompt, each guess and who judged it. */
-export function sgReveal(g: GL, round: GL | null, me?: string): HTMLElement | null {
+export function sgReveal(g: SketchState, round: SketchRound | null, me?: string): HTMLElement | null {
   if (!round) return null;
   const box = el("div", "sg-reveal");
-  const players: GL[] = g.players || [];
-  const hexOf = (n: string) => (players.find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+  const players: SketchPlayer[] = g.players || [];
+  const hexOf = (n: string) => (players.find((p: SketchPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
   box.appendChild(el("div", "fl-cap", "Round " + round.n + " · " + round.artist + " drew"));
   if (round.image && round.image.url) {
     const img = el("img", "sg-rv-img") as HTMLImageElement;
@@ -261,7 +261,7 @@ export function sgReveal(g: GL, round: GL | null, me?: string): HTMLElement | nu
   }
   box.appendChild(el("div", "sg-rv-prompt", (round.forfeit ? "No drawing - the prompt was: " : "It was: ") + round.prompt));
   Object.keys(round.guesses || {}).forEach((n: string) => {
-    const x = round.guesses[n];
+    const x = round.guesses[n]!;
     const row = el("div", "sg-rv " + (x.right ? "right" : "wrong") + (me && n === me ? " mine" : ""));
     const d = el("span", "hist-dot");
     d.style.background = hexOf(n);
@@ -296,11 +296,11 @@ export function sgReveal(g: GL, round: GL | null, me?: string): HTMLElement | nu
   return box;
 }
 
-export function sgHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function sgHistoryRows(g: SketchState, row: (idx: string) => HTMLElement, who: (p: Pick<SketchPlayer, "name" | "hex">) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p: GL) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: SketchPlayer[] = g.players || [];
+  const byName = (nm: string): Pick<SketchPlayer, "name" | "hex"> => players.find((p: SketchPlayer) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  ((g.rounds || []) as SketchRound[]).forEach((r: SketchRound) => {
     n++;
     const rw = row("Round " + r.n);
     const seg = el("span", "hist-seg");
@@ -308,7 +308,7 @@ export function sgHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
     seg.appendChild(el("span", "hist-act", (r.forfeit ? "no drawing · " : "drew · ") + r.prompt));
     rw.appendChild(seg);
     Object.keys(r.guesses || {}).forEach((nm: string) => {
-      const x = r.guesses[nm];
+      const x = r.guesses[nm]!;
       const s2 = el("span", "hist-seg");
       s2.appendChild(who(byName(nm)));
       s2.appendChild(el("span", "hist-act", (x.right ? "✓ " : "✗ ") + x.guess));
@@ -320,7 +320,7 @@ export function sgHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
 }
 
 /* The card: the current drawing (or the last one) and the scores. */
-export function sgCardBoard(g: GL, me?: string): HTMLElement {
+export function sgCardBoard(g: SketchState, me?: string): HTMLElement {
   const wrap = el("div", "sg-card");
   const last = sgLastRound(g);
   const img = g.image && g.image.url ? g.image.url : last && last.image ? last.image.url : null;

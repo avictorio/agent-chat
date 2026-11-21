@@ -1,58 +1,59 @@
 import type { GameStatus, TurnLine } from "../registry";
-import { finalScore, type GL, recordLine, tickLen } from "../shared/render";
+import { finalScore, recordLine, tickLen } from "../shared/render";
+import type { TrustPlayer, TrustState, TrustYou } from "@chat/contract";
 
 // The status hooks for Trust (GameStatus in registry.ts):
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
 export const trustStatus: GameStatus = {
-  finalScore(g: GL): string {
-    return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
+  finalScore(g: TrustState): string {
+    return (g.players || []).slice().sort((a: TrustPlayer, b: TrustPlayer) => (b.score || 0) - (a.score || 0)).map((p: TrustPlayer) => p.score || 0).join("–");
   },
 
-  recordLine(g: GL): string {
+  recordLine(g: TrustState): string {
     const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
     return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
   },
 
-  metaText(g: GL): string {
+  metaText(g: TrustState): string {
     if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
     if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+      const waiting = (g.players || []).filter((p: TrustPlayer) => !p.accepted).map((p: TrustPlayer) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
     }
     return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
   },
 
-  stateLine(g: GL): string {
+  stateLine(g: TrustState): string {
     const ps = g.players || [];
-    return "Round " + (g.round || 1) + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
+    return "Round " + (g.round || 1) + " · " + ps.slice().sort((a: TrustPlayer, b: TrustPlayer) => (b.score || 0) - (a.score || 0)).map((p: TrustPlayer) => p.name + " " + (p.score || 0)).join(" · ");
   },
 
-  waitingOn(g: GL): string[] {
-    const ps: GL[] = g.players || [];
+  waitingOn(g: TrustState): string[] {
+    const ps: TrustPlayer[] = g.players || [];
     return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
   },
 
-  youLabel(g: GL): string {
+  youLabel(g: TrustState): string {
     return "Your choices";
   },
 
-  lengthLine(g: GL): string {
+  lengthLine(g: TrustState): string {
     return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
   },
 
-  signature(g: GL): string | null {
+  signature(g: TrustState): string | null {
     return ["tr", g.status, g.round || 0, (g.rounds || []).length].join("|");
   },
 
-  turnLine(g: GL, me: string): TurnLine {
-    const you = g.you || {};
-    const players: GL[] = g.players || [];
+  turnLine(g: TrustState, me: string): TurnLine {
+    const you: Partial<TrustYou> = g.you || {};
+    const players: TrustPlayer[] = g.players || [];
     let text = "";
     let sub = "";
     let mine = false;
-    const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
+    const waiting = players.filter((p: TrustPlayer) => !p.committed && !p.out && p.name !== me).map((p: TrustPlayer) => p.name);
     if (you.playing && you.out) text = "You're out of this match" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
     else if (you.playing && you.queued) text = "Your choices are in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
     else if (you.playing) {
@@ -63,11 +64,11 @@ export const trustStatus: GameStatus = {
     return { text, sub, mine };
   },
 
-  clockSeconds(g: GL): number {
+  clockSeconds(g: TrustState): number {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: GL, mine: GL, me: string): boolean {
+  awaiting(g: TrustState, mine: TrustPlayer, me: string): boolean {
     return !mine.committed && !mine.out;
   },
 };

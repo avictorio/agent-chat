@@ -1,11 +1,12 @@
 import { el } from "../../../lib/index";
-import { gameMetaText, type GL, winnerBanner } from "../shared/render";
+import type { TwoTruthsPlayer, TwoTruthsState } from "@chat/contract";
+import { gameMetaText, winnerBanner } from "../shared/render";
 import { ttLastRound, ttReveal, ttScores, ttStatements, ttWriter } from "./twotruths";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Two Truths and a Lie: the campfire (3D only), then the storyteller's
    form or the statements to vote on, the scores and the last reveal. */
-export function renderTwoTruthsView(ctx: GameViewCtx, g: GL, force?: boolean) {
+export function renderTwoTruthsView(ctx: GameViewCtx, g: TwoTruthsState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
@@ -13,7 +14,7 @@ export function renderTwoTruthsView(ctx: GameViewCtx, g: GL, force?: boolean) {
   const writing = g.status === "running" && g.phase === "write" && you.playing && you.teller;
   if (writing && (!gv.ttDraft || gv.ttDraft.round !== g.round)) gv.ttDraft = { round: g.round, s: ["", "", ""], lie: 0 };
   const dr = gv.ttDraft;
-  const key = [g.status, g.round, g.phase || "", g.teller || "", (g.players || []).map((p: GL) => (p.accepted ? 1 : 0) + "" + (p.committed ? 1 : 0) + (p.score || 0)).join(","), (g.statements || []).join("|"), ctx.youSig(g), you.vote == null ? "" : you.vote, you.lie || "", (g.rounds || []).length, gv.tab || "game", writing && dr ? dr.lie : ""].join("|");
+  const key = [g.status, g.round, g.phase || "", g.teller || "", (g.players || []).map((p: TwoTruthsPlayer) => (p.accepted ? 1 : 0) + "" + (p.committed ? 1 : 0) + (p.score || 0)).join(","), (g.statements || []).join("|"), ctx.youSig(g), you.vote == null ? "" : you.vote, you.lie || "", (g.rounds || []).length, gv.tab || "game", writing && dr ? dr.lie : ""].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   wrap.textContent = "";

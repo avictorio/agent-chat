@@ -1,5 +1,5 @@
 import { el } from "../../../lib/index";
-import type { GL } from "../shared/render";
+import type { TwentyPlayer, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 
 /* Twenty Questions in the page (2026-11-20), under the 3D candle ring:
    the answerer's controls (choose a secret; answer the waiting question),
@@ -7,16 +7,16 @@ import type { GL } from "../shared/render";
    scores, the last round's reveal, the history and the chat card. The
    secret shows only to the answerer until the round ends. */
 
-const hexOf = (g: GL, n: string) => (((g && g.players) || []).find((p: GL) => p.name === n) || { hex: "#94a3b8" }).hex;
+const hexOf = (g: TwentyState, n: string) => (((g && g.players) || []).find((p: TwentyPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 
-export function tqLastRound(g: GL): GL | null {
-  const rs: GL[] = (g && g.rounds) || [];
-  return rs.length ? rs[rs.length - 1] : g && g.last_round ? g.last_round : null;
+export function tqLastRound(g: TwentyState): TwentyRound | null {
+  const rs: TwentyRound[] = (g && g.rounds) || [];
+  return rs.length ? rs[rs.length - 1]! : g && g.last_round ? g.last_round : null;
 }
 
 /* The answerer: choose a secret (or draw one), then answer what waits. */
-export function tqAnswerer(g: GL, onSend: (dir: string) => void): HTMLElement {
-  const you = g.you || {};
+export function tqAnswerer(g: TwentyState, onSend: (dir: string) => void): HTMLElement {
+  const you: Partial<TwentyYou> = g.you || {};
   const wrap = el("div", "tq-panel" + (g.phase !== "ask" ? " your-move" : ""));
   if (g.phase === "secret") {
     wrap.appendChild(el("div", "tq-title", "You're the answerer - choose a secret"));
@@ -77,7 +77,7 @@ export function tqAnswerer(g: GL, onSend: (dir: string) => void): HTMLElement {
 }
 
 /* A questioner: ask a yes/no question, or guess. */
-export function tqAsker(g: GL, draft: { text: string }, onSend: (dir: string) => void): HTMLElement {
+export function tqAsker(g: TwentyState, draft: { text: string }, onSend: (dir: string) => void): HTMLElement {
   const wrap = el("div", "tq-panel your-move");
   wrap.appendChild(el("div", "tq-title", "Ask " + g.answerer + " a yes/no question - or guess"));
   const inp = el("input", "tq-input") as HTMLInputElement;
@@ -110,10 +110,10 @@ export function tqAsker(g: GL, draft: { text: string }, onSend: (dir: string) =>
 }
 
 /* The budget: twenty pips, spent ones lit by their answer. */
-export function tqBudget(g: GL): HTMLElement {
+export function tqBudget(g: TwentyState): HTMLElement {
   const box = el("div", "tq-budget");
   box.setAttribute("aria-label", (g.asked || 0) + " of 20 questions asked");
-  const spent = ((g.qa || []) as GL[]).filter((x) => !x.flagged && x.a);
+  const spent = ((g.qa || []) as TwentyQuestion[]).filter((x) => !x.flagged && x.a);
   for (let i = 0; i < 20; i++) {
     const e = spent[i];
     box.appendChild(el("span", "tq-pip" + (e ? " " + (e.a === "yes" || e.a === "right" ? "yes" : "no") : "")));
@@ -122,9 +122,9 @@ export function tqBudget(g: GL): HTMLElement {
 }
 
 /* The public Q/A log. */
-export function tqLog(g: GL): HTMLElement {
+export function tqLog(g: TwentyState): HTMLElement {
   const box = el("div", "tq-log");
-  const qa: GL[] = g.qa || [];
+  const qa: TwentyQuestion[] = g.qa || [];
   if (!qa.length) {
     box.appendChild(el("div", "tq-log-empty", g.phase === "secret" ? (g.answerer || "The answerer") + " is choosing a secret." : "No questions yet."));
     return box;
@@ -144,9 +144,9 @@ export function tqLog(g: GL): HTMLElement {
   return box;
 }
 
-export function tqScores(g: GL, me?: string, compact?: boolean): HTMLElement {
+export function tqScores(g: TwentyState, me?: string, compact?: boolean): HTMLElement {
   const box = el("div", "tq-scores" + (compact ? " compact" : ""));
-  const ps: GL[] = ((g.players || []) as GL[]).slice().sort((a, b) => (b.score || 0) - (a.score || 0));
+  const ps: TwentyPlayer[] = ((g.players || []) as TwentyPlayer[]).slice().sort((a, b) => (b.score || 0) - (a.score || 0));
   ps.forEach((p) => {
     const row = el("div", "tq-srow" + (me && p.name === me ? " mine" : "") + (g.status === "running" && g.answerer === p.name ? " answerer" : ""));
     const d = el("span", "hist-dot");
@@ -161,7 +161,7 @@ export function tqScores(g: GL, me?: string, compact?: boolean): HTMLElement {
 }
 
 /* The last round: the secret, how it ended, the points. */
-export function tqReveal(r: GL | null): HTMLElement {
+export function tqReveal(r: TwentyRound | null): HTMLElement {
   const box = el("div", "tq-reveal");
   if (!r) {
     box.appendChild(el("div", "tq-log-empty", "No secret has been revealed yet."));
@@ -181,11 +181,11 @@ export function tqReveal(r: GL | null): HTMLElement {
   return box;
 }
 
-export function tqHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p: GL) => HTMLElement, list: HTMLElement): number {
+export function tqHistoryRows(g: TwentyState, row: (idx: string) => HTMLElement, who: (p: Pick<TwentyPlayer, "name" | "hex">) => HTMLElement, list: HTMLElement): number {
   let n = 0;
-  const players: GL[] = g.players || [];
-  const byName = (nm: string): GL => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
-  ((g.rounds || []) as GL[]).forEach((r: GL) => {
+  const players: TwentyPlayer[] = g.players || [];
+  const byName = (nm: string): Pick<TwentyPlayer, "name" | "hex"> => players.find((p) => p.name === nm) || { name: nm, hex: "#94a3b8" };
+  ((g.rounds || []) as TwentyRound[]).forEach((r: TwentyRound) => {
     n++;
     const rw = row("Round " + r.n);
     const seg = el("span", "hist-seg");
@@ -198,7 +198,7 @@ export function tqHistoryRows(g: GL, row: (idx: string) => HTMLElement, who: (p:
   return n;
 }
 
-export function tqCardBoard(g: GL, me?: string): HTMLElement {
+export function tqCardBoard(g: TwentyState, me?: string): HTMLElement {
   const wrap = el("div", "tq-card");
   const line =
     g.status === "running" && g.answerer
