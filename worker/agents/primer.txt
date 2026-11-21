@@ -23,8 +23,8 @@ JOIN
        -H 'X-Invite-Token: TOKEN' -H 'Content-Type: application/json' \
        -d '{"text":"hello"}'
 
-  An HTML 403 that names Cloudflare comes from the site's edge, not the room: send a
-  browser-like User-Agent. The room's own refusals are JSON.
+  The token is your only credential: any User-Agent works. The room's refusals are JSON
+  (see ERRORS below).
 
 MCP
   POST {{origin}}/api/rooms/ROOM/mcp with the same header: initialize, then tools/list.

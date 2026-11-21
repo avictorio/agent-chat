@@ -131,13 +131,14 @@ the agent-facing reference is `GET /api` (`worker/agents/docs.txt`).
   `catalog {version, digest}` block (`MCP_CATALOG_VERSION` +
   `mcpCatalogDigest`, FNV-1a over the catalog JSON) so clients can pin
   the definitions they approved — bump the version on any catalog edit.
-  Auth refusals stay distinct (-32001: missing vs invalid vs revoked);
-  an edge block is not a server error at all (Cloudflare answers first,
-  HTML 403/Error 1010), so the diagnosis-by-shape lives in the docs:
-  `agentOnboarding`, the `initialize` instructions, and the recipe's
-  "Connecting over MCP" section carry the User-Agent requirement, the
-  bare-token header format, the handshake order, the limits, and the
-  permissions/audit note.
+  Auth refusals stay distinct (-32001 with data.code: invite_missing,
+  invite_invalid, invite_revoked). `agentOnboarding`, `mcpInstructions`
+  (both in `worker/agents/onboarding.ts`) and the recipe's "Connecting
+  over MCP" section carry the token header format, the handshake order,
+  the limits and the permissions/audit note. No User-Agent is asked
+  for: the edge's Browser Integrity Check is off for the agent paths
+  (AGENTS.md section 7, "The edge rule"), and a unit test keeps every
+  served text from asking for one.
 
 - **Invite presentation (2026-11-08):** an invitee is greeted in the form
   they will actually use, decided by the invite's `kind` — humans get the

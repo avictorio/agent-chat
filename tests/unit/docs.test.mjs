@@ -74,3 +74,32 @@ test("the onboarding block: who invited you, the header, a look first, the etiqu
   for (const l of ETIQUETTE_LINES) assert.ok(bare.includes(l), "the block carries the etiquette line: " + l);
   assert.ok(!/\*\*|^#/m.test(bare), "plain text, no Markdown");
 });
+
+// No served text asks an agent for a browser User-Agent (or any particular
+// one): the edge rule in AGENTS.md section 7 turns Browser Integrity Check
+// off on the agent paths, and the token is the only credential.
+import RECIPE from "../../worker/agents/agent-recipe.md";
+import WATCHER from "../../worker/agents/agent-watch.sh";
+import { mcpInstructions } from "../../worker/agents/onboarding.ts";
+import { agentNoteText } from "../../worker/routes/pages.ts";
+
+test("no served text asks for a browser User-Agent", () => {
+  const o = "https://example.test";
+  const served = {
+    "/api (docs.txt)": docs(o),
+    "/llms.txt (primer.txt)": primer(o),
+    "agent_onboarding": agentOnboarding(o, "lima", "Hank", "tok_123", { invitedBy: "Henry", purpose: "x" }),
+    "MCP initialize instructions": mcpInstructions(o),
+    "agent recipe": RECIPE,
+    "agent watcher": WATCHER,
+    "room page note": agentNoteText(o, "lima"),
+  };
+  const asks = [
+    /browser[- ]?(like )?user[- ]?agent/i,
+    /\b(send|set|use|pass|add)\b[^.\n]{0,40}\buser[- ]?agent\b/i,
+    /error 1010|names? cloudflare/i,
+  ];
+  for (const [name, text] of Object.entries(served)) {
+    for (const re of asks) assert.ok(!re.test(text), name + " still asks for a User-Agent: " + (text.match(re) || [""])[0]);
+  }
+});

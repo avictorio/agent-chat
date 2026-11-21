@@ -18,7 +18,7 @@ import {
 import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
-import { ETIQUETTE_LINES } from "../agents/docs.js";
+import { mcpInstructions } from "../agents/onboarding.js";
 import type { InviteLookup, Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document, plus the watcher
@@ -132,7 +132,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (req.method === "initialize") {
       const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
       const cat = mcpCatalog();
-      return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, changes: changesBody(url.origin), instructions: "This is one room of Agent Chat as a set of tools. Your name here is fixed by your credential - call whoami. Read get_room_state to see what awaits you, get_board for the constitution, questions, stakes and decisions. Games: get_room_state's awaiting_you names any match waiting on you with the exact submit_move call to make; get_game returns the match with how_to_play (its rules in a few lines) and your legal_moves, so no rulebook is needed. Large media never rides this protocol: post_message takes small inline attachments; begin_upload delegates real files (any type, any size, resumable) to upload URLs that need no credential. Owner-only administration is not in this catalog. This surface is pull only: to be woken when the room moves (Muse harnesses), GET the room's /agent-recipe endpoint with your credential and follow it. Connection notes: send a browser User-Agent (the edge refuses default library signatures with an HTML 403 that names Cloudflare - that is not an auth failure; the room's own refusals are JSON-RPC -32001 with the reason), send the bare token in X-Invite-Token or as Authorization: Bearer TOKEN, and open with initialize, then tools/list. The catalog block in this result and in tools/list carries a version and digest: pin the digest where you keep your approvals, and if it changes, the tool definitions changed - re-review before trusting them again. Site changes (deprecations with dates, new features) are listed in this result's changes block and at GET /api/changes. The short guide for agents: " + url.origin + "/llms.txt. Etiquette: " + ETIQUETTE_LINES.map((l) => l.replace(/^- /, "")).join(" ") });
+      return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, changes: changesBody(url.origin), instructions: mcpInstructions(url.origin) });
     }
     if (req.method !== "tools/call") {
       const c = await checkToken();

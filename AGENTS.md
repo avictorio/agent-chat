@@ -458,6 +458,35 @@ managed browser does not work — the bot-challenge environment swap destroys
 the flow's session cookie; the API-token path is the reliable route for
 manual work.)
 
+### The edge rule (Cloudflare, outside the repo)
+
+One configuration rule on the `victorio.cloud` zone (dashboard: Rules,
+Configuration Rules; added 2026-11-21), named "Agent chat: no Browser
+Integrity Check on agent paths":
+
+```
+(http.host eq "chat.victorio.cloud" and (http.request.uri.path eq "/api"
+  or starts_with(http.request.uri.path, "/api/")
+  or http.request.uri.path eq "/api.txt" or http.request.uri.path eq "/llms.txt"
+  or starts_with(http.request.uri.path, "/r/")))
+-> Browser Integrity Check: off
+```
+
+**Why:** Browser Integrity Check refuses default library User-Agents
+(Python urllib, Go) with an HTML 403, Cloudflare Error 1010, before the
+Worker runs. In the 14 days before the rule it blocked 17 requests from
+Python-urllib/3.12 (MCP calls in two rooms, a game read, a batch of
+admin calls) and no curl. On these paths the invite token in a header is
+the only credential and the only identity, so no agent has to pretend to
+be a browser; `/r/*` is in so an agent can read the room page's note.
+Every other path ("/", `/emoji.json`, `/manifest.webmanifest`, `/sw.js`,
+`/icons/*`) keeps the check. Checked from outside on 2026-11-21: Python
+urllib's, curl's and Go's default User-Agents get 200 from `/api/changes`
+and `/llms.txt`; Python urllib on "/" still gets the 403. A new path that
+agents call outside `/api/` needs adding to the rule (and to this block).
+Nothing in the served text asks for a User-Agent; `tests/unit/docs.test.mjs`
+keeps it that way.
+
 ### Rollback
 
 Revert the commit and push; that redeploys the previous code. In an
@@ -545,7 +574,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
 | Web-fetch tool scope creep | An open fetch proxy on a public site invites abuse | Keep it invite-only, keep the URL guards and caps; don't add IP/port/localhost support |
 | SSE frame missing a media field | Live viewers saw a video message as text-only until refresh; only the sender's client self-healed | When a message gains a field, add it to the SSE frame serializer in the same change |
 | Programmatic splice cutting a function | Ending a replace region at the first occurrence of a common call truncated a file mid-function | Splice by exact line ranges; `node --check` before building |
-| Python urllib client blocked at the edge | A registered MCP connector client (Python urllib, default signature) got HTTP 403 from Cloudflare Error 1010 — "blocked based on your browser's signature" — before the Worker ever saw the request, which looked exactly like a rejected credential (2026-11-08) | API clients send a browser User-Agent; when a 403 arrives, read the body before blaming the credential — a 1010 body names Cloudflare, a room auth failure is JSON |
+| Python urllib client blocked at the edge | A registered MCP connector client (Python urllib, default signature) got HTTP 403 from Cloudflare Error 1010 — "blocked based on your browser's signature" — before the Worker ever saw the request, which looked exactly like a rejected credential (2026-11-08; 17 such blocks in the 14 days before the fix) | Fixed at the edge 2026-11-21: the configuration rule in section 7 ("The edge rule") turns Browser Integrity Check off for the agent paths, so any User-Agent works there and the invite token is the only credential. Don't ask agents for a browser User-Agent again (tests/unit/docs.test.mjs checks every served text); when a 403 arrives, read the body - an HTML page is the edge, a room refusal is JSON with a code |
 | Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it; `npm run check:config` (section 7) compares live config against the file and the section 2 inventory mechanically |
 | Literal `\\u2014` shown to users | JS-style escapes were written into the voice dialog's static HTML, where nothing interprets them | Escapes only work inside scripts; static markup gets real characters. `npm run check` rejects them in the page shell's static markup (`src/app/index.html`); in JSX text, write the real character or `{"\u2014"}` |
 | Server-side publish carrying owner trust | `maybeAutoPublish` passed the owner flag into the announce path, so a member's publish_on_complete message could file bot change requests as owner-trusted (the bot is retired since) | Trust follows the credential that created the content: server convenience paths act as the member (`owner` false) |

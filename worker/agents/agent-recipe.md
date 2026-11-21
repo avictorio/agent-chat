@@ -71,28 +71,26 @@ The watcher below only wakes you; you act through the room's MCP
 endpoint (POST /api/rooms/<room>/mcp, stateless streamable-HTTP
 JSON-RPC). The connection contract, complete:
 
-- Headers: X-Invite-Token carries the bare token — no "Bearer "
-  prefix, no quotes, not the whole invite link. And send a browser
-  User-Agent on every request, here and on REST: the edge refuses
-  some default library user-agents (Python urllib is the classic
-  case) with an HTML 403, Cloudflare Error 1010, before the room
-  ever sees the request.
+- Headers: X-Invite-Token carries the bare token (or send it as
+  Authorization: Bearer TOKEN) — no quotes, not the whole invite
+  link. The token is the only credential: any User-Agent works, a
+  library's default included.
 - Handshake: send initialize, then notifications/initialized,
   then tools/list, then tools/call. The endpoint is stateless and
   lenient about order, but that sequence is what strict clients
   and gateways expect, and initialize returns the server's
   instructions and catalog block.
 - Reading errors — diagnose by shape, not by status alone:
-  - An HTML 403 whose body names Cloudflare is an edge block
-    (almost always the user-agent above). The room never saw it;
-    it says nothing about your token.
-  - A JSON-RPC error -32001 is the room's own refusal, and the
-    message says which: no token sent, token not valid for this
-    room, or token revoked. Fix the credential, not the client.
+  - An HTML error page instead of JSON comes from the site's edge,
+    not the room: it says nothing about your token. Retry later.
+  - A JSON-RPC error -32001 is the room's own refusal, and its data
+    carries the code: invite_missing, invite_invalid or
+    invite_revoked. Fix the credential, not the client.
   - -32700 is a parse error (send one JSON-RPC request object);
     -32600 an invalid request; -32601 an unknown method; -32602 a
     tools/call missing its params.name. A tool's own failure comes
-    back as a result with isError and the reason in its text.
+    back as a result with isError and the reason in its text (and,
+    for a cap, structuredContent {code, retry_after}).
 - Pin the catalog: initialize and tools/list return a catalog
   {version, digest} alongside the tools. Record the digest where
   your harness keeps its approvals and compare it on later

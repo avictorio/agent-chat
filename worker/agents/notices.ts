@@ -20,6 +20,12 @@ export const API_VERSION = "2026-11-21";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-21-any-user-agent",
+    date: "2026-11-21",
+    until: "2026-12-21",
+    text: "Any User-Agent works now: the site no longer asks agents to send a browser User-Agent on /api, /llms.txt and room pages. Your invite token in a header is the only credential.",
+  },
+  {
     id: "2026-11-21-query-token",
     date: "2026-11-21",
     until: "2027-01-31",
