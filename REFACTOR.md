@@ -13,13 +13,18 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-21: phases 1-4 are done and live (4.1c moved to 5.4);
-5.1 (error boundaries) is done. What is left, in order:
+State on 2026-11-21: phases 1-4 are done and live; in phase 5, 5.1
+(error boundaries), 5.2 (the client game registry), 5.3 (the UI suite),
+5.5 (the docs text) and 5.6 (AGENTS.md as an index) are done and live.
+What is left, in order:
 
-- Phase 5, in its order: 5.2 the game registry, 5.3 the UI suite,
-  5.4 response types, 5.5 the docs text, 5.6 AGENTS.md as an index.
-- When those are done, fold the final layout into AGENTS.md and README.md
-  and delete this file.
+- 5.4: type the Worker's responses with `@chat/contract` (JSDoc on the
+  route handlers and Room methods) and per-game state types, so the web
+  files that switch off `no-explicit-any` (`GL = any` in
+  `features/games/shared/render.ts` is the root) can drop it.
+- The "Later" items under phase 5.
+- Then fold the final layout into AGENTS.md and README.md and delete this
+  file.
 
 Verifying a step: `npm run check`, `npm run lint`, `npm run test:unit`,
 `npm run test:api`, and for web changes `npm run build` and the UI suite.
