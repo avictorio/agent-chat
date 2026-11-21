@@ -2,6 +2,7 @@
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json } from "./lib/http.js";
+import { headerToken, queryTokenNotice } from "./lib/tokens.js";
 import {
   uploadLinkRoute,
   uploadLinkStepRoute,
@@ -59,19 +60,10 @@ export { Room } from "./room/Room.js";
  *  accept). */
 export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, inviteHdr: string };
 
-/** The invite token a request carries in a header: X-Invite-Token, else
- *  an Authorization: Bearer token (other schemes are not a token). */
-export function headerToken(request: Request): string {
-  const x = (request.headers.get("X-Invite-Token") || "").trim();
-  if (x) return x;
-  const m = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.get("Authorization") || "");
-  return m ? m[1] : "";
-}
-
 export default {
   async fetch(request: Request, env: Env) {
     try {
-      return await routeRequest(request, env);
+      return await queryTokenNotice(request, await routeRequest(request, env));
     } catch (e) {
       // A malformed %-escape in a path segment (decodeURIComponent throws
       // URIError) is the client's mistake: answer 400, not a 500.

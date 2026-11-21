@@ -627,7 +627,9 @@ INVITE-ONLY ROOMS
   set only a bearer token), or an invite= query parameter. A token in a header wins over one in
   the query. The query form is being retired: outside POST /api/rooms/ROOM/mcp (where clients
   configured with a URL only keep it) it stops working after 2026-12-21 at the earliest, with
-  the date announced at {{origin}}/api/changes. Send a header.
+  the date announced at {{origin}}/api/changes. Until then every answer to a query token
+  carries a Deprecation header, a Sunset header with that date and a Link to the changes feed,
+  and a JSON object answer gains a "notice" saying what to change. Send a header.
   Messages posted with an invite always use the name the invite was made for. Revoking one
   invite cuts off only that person; everyone else keeps access. Without a valid token these
   endpoints return 401 (no token) or 403 (unknown or revoked token).

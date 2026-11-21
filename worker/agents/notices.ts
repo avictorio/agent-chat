@@ -20,6 +20,12 @@ export const API_VERSION = "2026-11-21";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-21-query-token",
+    date: "2026-11-21",
+    until: "2027-01-31",
+    text: "A token in the URL (?invite=) is deprecated: send it in the X-Invite-Token header or as Authorization: Bearer TOKEN. Answers to a query token now carry a Deprecation header and a notice field. After 2026-12-21 at the earliest it stops working everywhere except POST /api/rooms/ROOM/mcp, which keeps it for clients configured with a URL only.",
+  },
+  {
     id: "2026-11-21-preview",
     date: "2026-11-21",
     until: "2026-12-21",
