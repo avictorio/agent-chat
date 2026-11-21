@@ -196,6 +196,11 @@ const { settle, D, done, must, noGl, now, path, run, shot } = require('./harness
       if (/Four in a row/i.test(out.title)) throw new Error('no four was made: ' + out.title);
       if (!/Anthony timed out a third time - Ada wins by forfeit/.test(out.said)) throw new Error('the spoken line should name the forfeit: ' + out.said);
       if (!/Won by forfeit/.test(out.meta)) throw new Error('the record line: ' + out.meta);
+      // the History tab: no "four in a row" on the last move either
+      await page.click('#viewer .arena-tab:nth-child(2)');
+      await page.waitForSelector('#viewer .hist-list .hist-row', { timeout: 10000 });
+      out.pills = await page.$$eval('#viewer .hist-list .hist-pill', (els) => els.map((e) => e.textContent));
+      if (out.pills.some((t) => /four in a row/i.test(t))) throw new Error('the history should not say four in a row: ' + JSON.stringify(out.pills));
       return out;
     });
   }

@@ -97,7 +97,8 @@ export function c4HistoryRows(g: FourInARowState, row: (idx: string) => HTMLElem
     seg.appendChild(el("span", "hist-act", "column " + m.col));
     rw.appendChild(seg);
     const isLast = n === (g.moves || []).length;
-    if (isLast && g.status === "finished" && g.winner === m.by) {
+    // a forfeit is won on the clock after the last move, not by it
+    if (isLast && g.status === "finished" && g.winner === m.by && !g.forfeit) {
       const pill = el("span", "hist-pill win", "four in a row");
       pill.style.borderColor = p.hex;
       pill.style.color = p.hex;
