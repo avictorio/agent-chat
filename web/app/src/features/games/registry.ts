@@ -4,7 +4,8 @@ import type { GL } from "./shared/render";
 import { battleshipBoard, duelBoard } from "./shared/render";
 import type { HistRow, HistWho } from "./shared/history";
 import type { GameViewCtx } from "./shared/viewctx";
-import { auCardBoard, auHistoryRows } from "./auction/auction";
+import { auHistoryRows } from "./auction/auction";
+import { AuctionCard } from "./auction/AuctionPanels";
 import { renderAuctionView } from "./auction/view";
 import { auctionStatus } from "./auction/status";
 import { bsHistoryRows } from "./battleship/history";
@@ -13,7 +14,8 @@ import { battleshipStatus } from "./battleship/status";
 import { crCardBoard, crHistoryRows } from "./coderace/coderace";
 import { renderCodeRaceView } from "./coderace/view";
 import { coderaceStatus } from "./coderace/status";
-import { ecCardBoard, ecHistoryRows } from "./corpse/corpse";
+import { ecHistoryRows } from "./corpse/corpse";
+import { CorpseCard } from "./corpse/CorpsePanels";
 import { renderCorpseView } from "./corpse/view";
 import { corpseStatus } from "./corpse/status";
 import { duelHistoryRows } from "./duel/history";
@@ -44,10 +46,12 @@ import { trHistoryRows } from "./trust/trust";
 import { TrustCard } from "./trust/TrustPanels";
 import { renderTrustView } from "./trust/view";
 import { trustStatus } from "./trust/status";
-import { tqCardBoard, tqHistoryRows } from "./twenty/twenty";
+import { tqHistoryRows } from "./twenty/twenty";
+import { TwentyCard } from "./twenty/TwentyPanels";
 import { renderTwentyView } from "./twenty/view";
 import { twentyStatus } from "./twenty/status";
-import { ttCardBoard, ttHistoryRows } from "./twotruths/twotruths";
+import { ttHistoryRows } from "./twotruths/twotruths";
+import { TwoTruthsCard } from "./twotruths/TwoTruthsPanels";
 import { renderTwoTruthsView } from "./twotruths/view";
 import { twotruthsStatus } from "./twotruths/status";
 import { wwCardBoard, wwHistoryRows } from "./werewolf/werewolf";
@@ -133,7 +137,7 @@ const rounds = count("rounds");
 export const GAMES: Record<string, GamePlugin> = {
   auction: {
     view: renderAuctionView,
-    card: (b, g, me) => fill(b, auCardBoard(g, me)),
+    Card: AuctionCard,
     history: auHistoryRows,
     historyCount: rounds,
     ...auctionStatus,
@@ -154,7 +158,7 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   corpse: {
     view: renderCorpseView,
-    card: (b, g, me) => fill(b, ecCardBoard(g, me)),
+    Card: CorpseCard,
     history: ecHistoryRows,
     historyCount: count("beats"),
     ...corpseStatus,
@@ -223,14 +227,14 @@ export const GAMES: Record<string, GamePlugin> = {
   },
   twenty: {
     view: renderTwentyView,
-    card: (b, g, me) => fill(b, tqCardBoard(g, me)),
+    Card: TwentyCard,
     history: tqHistoryRows,
     historyCount: rounds,
     ...twentyStatus,
   },
   twotruths: {
     view: renderTwoTruthsView,
-    card: (b, g, me) => fill(b, ttCardBoard(g, me)),
+    Card: TwoTruthsCard,
     history: ttHistoryRows,
     historyCount: rounds,
     ...twotruthsStatus,

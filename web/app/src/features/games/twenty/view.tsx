@@ -1,19 +1,20 @@
 import { el } from "../../../lib/index";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { tqAnswerer, tqAsker, tqBudget, tqLastRound, tqLog, tqReveal, tqScores } from "./twenty";
+import { tqLastRound } from "./twenty";
+import { TwentyAnswerer, TwentyAsker, TwentyBudget, TwentyLog, TwentyReveal, TwentyScores } from "./TwentyPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TwentyPlayer, TwentyQuestion, TwentyState, TwentyYou } from "@chat/contract";
 
 /* Twenty Questions: the box and candles (3D only), then the answerer's
    or the questioner's controls, the budget, the Q/A log, the scores
-   and the last reveal. */
+   and the last reveal. The panels are React (TwentyPanels.tsx, mounted
+   with ctx.panel): the question box keeps its own draft across repaints,
+   keyed by round and questions asked. */
 export function renderTwentyView(ctx: GameViewCtx, g: TwentyState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
   const you: TwentyYou = g.you || { playing: false };
-  const dkey = g.round + ":" + (g.asked || 0);
-  if (!gv.tqDraft || gv.tqDraft.key !== dkey) gv.tqDraft = { key: dkey, text: "" };
   const key = [g.status, g.round, g.phase || "", g.answerer || "", g.asked || 0, (g.qa || []).map((x: TwentyQuestion) => (x.a || "") + (x.flagged ? "f" : "")).join(","), (g.players || []).map((p: TwentyPlayer) => (p.accepted ? 1 : 0) + "" + (p.score || 0)).join(","), ctx.youSig(g), you.secret || "", (g.rounds || []).length, gv.tab || "game"].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
@@ -46,16 +47,17 @@ export function renderTwentyView(ctx: GameViewCtx, g: TwentyState, force?: boole
     if (gv.r3dCommit) gv.r3dCommit();
     void ctx.sendMove(g.id, dir, note);
   };
-  if (g.status === "running" && you.playing && you.answerer) wrap.appendChild(tqAnswerer(g, send));
-  else if (g.status === "running" && you.playing && g.phase === "ask" && gv.tqDraft) {
+  const dkey = g.round + ":" + (g.asked || 0);
+  if (g.status === "running" && you.playing && you.answerer) wrap.appendChild(ctx.panel("answerer", <TwentyAnswerer key={dkey + ":" + (g.phase || "")} g={g} onSend={send} />));
+  else if (g.status === "running" && you.playing && g.phase === "ask") {
     const hint = ctx.arenaHint("twenty", "Halve the possibilities each time: is it alive, is it bigger than a breadbox, is it made by people?");
     if (hint) wrap.appendChild(hint);
-    wrap.appendChild(tqAsker(g, gv.tqDraft, send));
+    wrap.appendChild(ctx.panel("asker", <TwentyAsker key={dkey} g={g} onSend={send} />));
   }
-  if (g.status === "running" && g.phase !== "secret") wrap.appendChild(tqBudget(g));
-  if (g.status === "running") wrap.appendChild(tqLog(g));
-  wrap.appendChild(tqScores(g, me));
-  wrap.appendChild(tqReveal(tqLastRound(g)));
+  if (g.status === "running" && g.phase !== "secret") wrap.appendChild(ctx.panel("budget", <TwentyBudget g={g} />));
+  if (g.status === "running") wrap.appendChild(ctx.panel("log", <TwentyLog g={g} />));
+  wrap.appendChild(ctx.panel("scores", <TwentyScores g={g} me={me} />));
+  wrap.appendChild(ctx.panel("reveal", <TwentyReveal r={tqLastRound(g)} />));
   if (g.status === "running" && !you.playing) note.textContent = "Spectating - the secret stays in the box until the round ends.";
   if (note.textContent) wrap.appendChild(note);
 }
