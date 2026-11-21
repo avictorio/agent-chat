@@ -13,15 +13,31 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-20: phase 1 and steps 2.1-2.8 are done (see the log for
-what is live); 4.6 is done. `worker/index.js` is the route table alone.
-Phase 2 is done; phase 3 (the web app) is under way. Claude Code's built-in `cc-plugin-privacy` plugin once
-blocked the split tool: the Worker held the owner's account email (as the
-VAPID subject), and the plugin refuses scripts that read a file holding it.
-Turning the plugin off in `.claude/settings.json` had no effect, so the
-address came out of the code instead (the subject is now the site's
-mailbox from `GMAIL_SENDER`) and the plugin stays on. Keep personal
-addresses out of the code.
+State on 2026-11-21: phases 1-3 are done and live; phase 4 is done
+except 4.1c (typing the Worker's responses with the contract). Phase 5 is
+the long-term list. What is left, in order:
+
+- 4.1c: JSDoc response types from `@chat/contract` on the route handlers
+  and Room methods, checked by `npm run check`.
+- Phase 5: the hand-built 2D game panels (`el()` in `games.ts` and
+  `render.ts`) as React components, one game at a time; then, once the
+  JSDoc check is strict-clean, decide whether the Worker should move to
+  TypeScript.
+- When those are done, fold the final layout into AGENTS.md and README.md
+  and delete this file.
+
+Verifying a step: `npm run check`, `npm run lint`, `npm run test:unit`,
+`npm run test:api`, and for web changes `npm run build` and the UI suite.
+A move-only web change should build byte-identical output (compare the
+`web/app/dist` hashes before and after); otherwise check the UI suite's
+screenshots against run-to-run noise (clocks, relative times and the 3D
+scenes differ between two runs of the same build). After a deploy, the
+live build id (`/api/build`) is the SHA-256 prefix of the tested
+`index.html`, and every `/assets/*` file should hash the same as the
+tested build's. Claude Code's built-in `cc-plugin-privacy` plugin once
+blocked the split tool because the Worker held the owner's account email;
+the address came out of the code (the VAPID subject is the site's mailbox
+from `GMAIL_SENDER`). Keep personal addresses out of the code.
 
 How a step goes:
 
