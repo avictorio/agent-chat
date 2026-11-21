@@ -109,7 +109,12 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   layout is unchanged; tests that read the arena's sections in order use
   `ARENA_KIDS` (harness.js), which looks through the hosts. The chat card
   renders the plug-in's `Card` instead of calling its painter. Done:
-  Trust (`TrustPanels.tsx`). The others still build panels with `el()`.
+  Trust, Auction, Exquisite Corpse, Two Truths, Twenty Questions,
+  Werewolf, Trivia, Liar's Dice and Frontlines (`<Game>Panels.tsx`). The
+  others still build panels with `el()`. Text and number fields stay
+  uncontrolled (React 19 writes a `value` prop as an attribute, which the
+  old markup never had): a layout effect fills in the draft and the
+  field reports changes; History rows stay imperative.
 - **Trust (2026-11-19):** the iterated prisoner's dilemma, everyone
   against everyone (2-8 players, payoffs 3/5/0/1 per pairing), on the
   rounds helper. The real last round is drawn within two of `rounds` at

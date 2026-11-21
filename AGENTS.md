@@ -617,7 +617,9 @@ Left open by the 2026-11 restructure, in rough order of value:
 
 - **The 2D game panels as React components.** The arenas' DOM panels
   (planners, forms, scores) are moving to React one game at a time
-  (`ctx.panel`, docs/agents/games.md "React panels"; Trust is done), and
+  (`ctx.panel`, docs/agents/games.md "React panels"; nine games are done,
+  Code Race, Four in a Row, Duel, Letter Grid, Sketch, Light Cycles and
+  Battleship are left), and
   `games.css` splits with them.
 - **TypeScript for the Worker**, once its JSDoc check passes under
   full `strict`. Since 2026-11-21 the check is strict except
