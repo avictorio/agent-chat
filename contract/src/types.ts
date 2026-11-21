@@ -1,3 +1,4 @@
+import type { GameState } from "./games";
 // The API contract between the web front end and the Worker (worker/):
 // what the Worker actually sends. The Worker's typecheck (npm run check)
 // reads these too, so the Room methods that build a response are checked
@@ -26,9 +27,8 @@ export type GameType =
   | "trust" | "auction" | "liarsdice" | "twotruths" | "corpse" | "twenty"
   | "werewolf" | "lettergrid" | "trivia" | "sketch";
 
-/** A full match state (GET /games/ID). Its shape depends on the game -
- *  every one carries how_to_play - and the arenas read it loosely. */
-export type Game = { id: number; type: GameType; status: GameSummary["status"] } & Record<string, unknown>;
+/** A full match state (GET /games/ID): its game's <Game>State (games/). */
+export type Game = GameState;
 
 /** The light game summary embedded in a message listing. */
 export interface GameSummary {

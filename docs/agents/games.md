@@ -25,8 +25,15 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   from its engine. The arenas read those types, and `npm run check` holds
   the engine's summary and full-state builders to them (`@returns` on
   each), so a field added on one side and not the other fails a check.
-  The shared DOM code still reads game state as `GL` (`any`, in
-  `features/games/shared/render.ts`).
+  The shared code (the store, registry, chat card, Games tab and
+  `shared/render.ts`) handles every game, so it reads a match as `GL`:
+  the contract's `AnyGameState`, every field some game sends, typed as
+  the union of what the games send under that name (required only when
+  every game always sends it). It reads with fallbacks and still gets
+  field names and types checked; `GLPlayer` and `GLYou` are its seats.
+  Every `<Game>State` is assignable to it. The Games list's items are
+  `GameListItem` (a summary without Battleship's boards, plus `targets`,
+  `created` and `ended`).
 - **Game plug-ins on the client (2026-11-21):** `GAMES`
   in `web/app/src/features/games/registry.ts` mirrors the server's
   `GAME_ENGINES`: one entry per game type pointing into the game's folder,
@@ -38,7 +45,12 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   banner's words, the clock length, the your-move test, the card's pulse
   signature and mover). The store (`games.ts`), the chat card
   (`shared/gamecard.tsx`), `shared/render.ts` and the Games tab look a
-  game up there instead of branching on its type. Every status hook is
+  game up there instead of branching on its type. `GamePlugin<S>` and
+  `GameStatus<S>` take the game's state type: each status file is a
+  `GameStatus<<Game>State>`, and `GAMES` is checked with `satisfies`
+  against `{ [K in GameType]: GamePlugin<StateOf<K>> }`, so a hook that
+  reads the wrong game's fields, or a plug-in filed under the wrong
+  type, fails the typecheck. Every status hook is
   optional: where one is called, the default (Light Cycles, and a match
   without a type, as on the server) is written beside the call. A
   rematch's settings are the catalog entry's `rematch(g)`. Adding a game

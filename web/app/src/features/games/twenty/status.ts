@@ -6,7 +6,7 @@ import type { TwentyPlayer, TwentyState, TwentyYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const twentyStatus: GameStatus = {
+export const twentyStatus: GameStatus<TwentyState> = {
   finalScore(g: TwentyState): string {
     return (g.players || []).slice().sort((a: TwentyPlayer, b: TwentyPlayer) => (b.score || 0) - (a.score || 0)).map((p: TwentyPlayer) => p.score || 0).join("–");
   },

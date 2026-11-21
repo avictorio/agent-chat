@@ -1,7 +1,8 @@
+import type { GameState, GameType } from "@chat/contract";
 import type { GL } from "./shared/render";
 import { battleshipBoard, duelBoard } from "./shared/render";
-import type { HistoryRows } from "./shared/history";
-import type { GameViewRenderer } from "./shared/viewctx";
+import type { HistRow, HistWho } from "./shared/history";
+import type { GameViewCtx } from "./shared/viewctx";
 import { auCardBoard, auHistoryRows } from "./auction/auction";
 import { renderAuctionView } from "./auction/view";
 import { auctionStatus } from "./auction/status";
@@ -57,52 +58,60 @@ import { werewolfStatus } from "./werewolf/status";
 // view; the chat card (shared/gamecard.tsx) paints its board. A match from
 // before the type field is Light Cycles, as on the server.
 
-/** Paints a match's board into its chat card (board is emptied first). */
-export type GameCardPainter = (board: HTMLElement, g: GL, me: string) => void;
-export type GamePlugin = {
-  /** The open match's arena view. */
-  view: GameViewRenderer;
-  /** The board in the match's chat card. */
-  card: GameCardPainter;
-  /** The History tab's rows. */
-  history: HistoryRows;
+/** A game's own state, by its type. */
+export type StateOf<K extends GameType> = Extract<GameState, { type?: K }>;
+/** A seat in a match with state S. */
+export type PlayerOf<S> = S extends { players?: (infer P)[] } ? P : never;
+
+/** One game's plug-in, for matches with state S. The registry below checks
+ * each game's against its own <Game>State; the shared code calls them with
+ * GL, the match it holds, after picking the plug-in by the match's type. */
+export interface GamePlugin<S = GL> extends GameStatus<S> {
+  /** The open match's arena view: paints g into ctx.gameView (when it is
+   * still the open view), skipping the work when nothing it shows changed
+   * unless force. */
+  view(ctx: GameViewCtx, g: S, force?: boolean): void;
+  /** Paints a match's board into its chat card (board is emptied first). */
+  card(board: HTMLElement, g: S, me: string): void;
+  /** Appends the History tab's rows to the list and returns how many it added. */
+  history(g: S, row: HistRow, who: HistWho, list: HTMLElement): number;
   /** The number on the History tab. */
-  historyCount: (g: GL) => number;
-} & GameStatus;
+  historyCount(g: S): number;
+}
 
 /** What the app says about a match's state, in the game's own words: each
  * game's <game>/status.ts. Every hook is optional; where one is called,
  * a game without it (Light Cycles, a match without a type) gets the
  * default written there. */
-export interface GameStatus {
+export interface GameStatus<S = GL> {
   /** The final score, winner first ("3–1"); default none (shared/render.ts finalScore). */
-  finalScore?(g: GL): string;
+  finalScore?(g: S): string;
   /** A finished match's record line ("Final · 3–1 · 5 rounds"); default the tick (recordLine). */
-  recordLine?(g: GL): string;
+  recordLine?(g: S): string;
   /** The card's meta line in every state (gameMetaText). */
-  metaText?(g: GL): string;
+  metaText?(g: S): string;
   /** The Games tab's line for a running match (GamesView.tsx stateLine). */
-  stateLine?(g: GL): string;
+  stateLine?(g: S): string;
   /** Who a running match waits on, when the list carries no targets (waitingOn). */
-  waitingOn?(g: GL): string[];
+  waitingOn?(g: S): string[];
   /** What a match waiting on you wants ("Your throw"; youLabel). */
-  youLabel?(g: GL): string;
+  youLabel?(g: S): string;
   /** How long a finished match ran, in its own unit (lengthLine). */
-  lengthLine?(g: GL): string;
+  lengthLine?(g: S): string;
   /** The card's "the match moved" fingerprint (shared/gamecard.tsx gameSignature). */
-  signature?(g: GL): string | null;
+  signature?(g: S): string | null;
   /** The running clock's length in seconds; default Light Cycles' tick (shared/render.ts clockSeconds). */
-  clockSeconds?(g: GL): number;
+  clockSeconds?(g: S): number;
   /** Whether a running match waits on me, from my seat (`mine`); the title
    * badge and the chime count these (games.ts awaitingCount). Default: a
    * Light Cycles rider still alive who has not moved. */
-  awaiting?(g: GL, mine: GL, me: string): boolean;
+  awaiting?(g: S, mine: PlayerOf<S>, me: string): boolean;
   /** Who made the latest move, for the card's pulse colour: a name, null for
    * nobody, or undefined for "no mover of its own" - then a finished
    * match's winner (shared/gamecard.tsx gameMoverHex). */
-  mover?(g: GL): string | null | undefined;
+  mover?(g: S): string | null | undefined;
   /** The arena's turn banner for a running match, as seen by me (games.ts turnBanner). */
-  turnLine?(g: GL, me: string): TurnLine;
+  turnLine?(g: S, me: string): TurnLine;
 }
 
 /** A turn banner's words: the line, the stakes under it, and whether it is me who is up. */
@@ -112,7 +121,8 @@ const fill = (board: HTMLElement, el: HTMLElement) => {
   board.textContent = "";
   board.appendChild(el);
 };
-const count = (key: string) => (g: GL) => (g[key] || []).length;
+/* the length of a list the match keeps, checked per game */
+const count = <K extends string>(key: K) => (g: GL & { [k in K]?: unknown[] }) => (g[key] || []).length;
 const rounds = count("rounds");
 
 export const GAMES: Record<string, GamePlugin> = {
@@ -227,4 +237,4 @@ export const GAMES: Record<string, GamePlugin> = {
     historyCount: count("events"),
     ...werewolfStatus,
   },
-};
+} satisfies { [K in GameType]: GamePlugin<StateOf<K>> };

@@ -8,6 +8,7 @@ import {
 import { store } from "../../lib/index";
 import type { useMessages } from "../feed/useMessages";
 import type { useBoardData } from "../board/useBoardData";
+import type { GameState } from "@chat/contract";
 import type { GameStore } from "../games/games";
 import type { Speaker } from "./speak";
 import type { Status } from "./Sidebar";
@@ -86,7 +87,7 @@ export function useRoomStream(opts: {
               arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
             );
           } else if (kind === "game") {
-            const d = JSON.parse(data) as { game?: unknown };
+            const d = JSON.parse(data) as { game?: GameState };
             if (d.game) gamesRef.current?.onFrame(d.game);
           } else if (kind === "state") {
             const d = JSON.parse(data) as { room_state?: RoomState };

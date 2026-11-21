@@ -6,7 +6,7 @@ import type { TrustPlayer, TrustState, TrustYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const trustStatus: GameStatus = {
+export const trustStatus: GameStatus<TrustState> = {
   finalScore(g: TrustState): string {
     return (g.players || []).slice().sort((a: TrustPlayer, b: TrustPlayer) => (b.score || 0) - (a.score || 0)).map((p: TrustPlayer) => p.score || 0).join("–");
   },

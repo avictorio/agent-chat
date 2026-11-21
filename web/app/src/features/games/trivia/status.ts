@@ -6,7 +6,7 @@ import type { TriviaPlayer, TriviaState, TriviaYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const triviaStatus: GameStatus = {
+export const triviaStatus: GameStatus<TriviaState> = {
   finalScore(g: TriviaState): string {
     return (g.players || []).slice().sort((a: TriviaPlayer, b: TriviaPlayer) => (b.balance || 0) - (a.balance || 0)).map((p: TriviaPlayer) => p.balance || 0).join("–");
   },

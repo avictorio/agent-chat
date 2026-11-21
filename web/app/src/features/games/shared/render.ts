@@ -8,13 +8,23 @@ import { GAMES } from "../registry";
 
 // GL is the shared code's view of a match: this file, the store
 // (games.ts), the registry, the chat card and the Games tab handle every
-// game, and read it untyped. Each game's own code - its status hooks,
-// view, history rows, card board and 3D arena - takes its precise state
-// type from @chat/contract (<Game>State; GameState is their union) at the
-// plug-in boundary. Typing GL as GameState is possible but costs ~470
-// narrowing casts in the shared code for little safety (AGENTS.md section 15).
-/* eslint-disable @typescript-eslint/no-explicit-any -- the shared, all-game view of a match; see above */
-export type GL = any;
+// game. It is the contract's AnyGameState: every field some game sends,
+// typed as the union of what the games send under that name, so the shared
+// code reads whatever a match has, with fallbacks, and still gets its field
+// names and types checked. Each game's own code - its status hooks, view,
+// history rows, card board and 3D arena - takes its precise state type from
+// @chat/contract (<Game>State; GameState is their union), and the registry
+// checks each game's plug-in against it. The game-specific helpers below
+// take their game's types too.
+import type {
+  AnyGameState, BattleshipBoard, BattleshipMove, BattleshipPlayer, BattleshipState, BattleshipSunkShip, CodeRaceState,
+  DuelPlayer, DuelRound, DuelState, LightCyclesPlayer, LightCyclesState, LightCyclesTrail,
+} from "@chat/contract";
+export type GL = AnyGameState;
+/** A seat in any match. */
+export type GLPlayer = NonNullable<GL["players"]>[number];
+/** What any match tells its viewer about their own seat. */
+export type GLYou = NonNullable<GL["you"]>;
 
 export function tickLen(ts: number): string {
   return ts >= 3600 ? Math.round(ts / 3600) + " h" : Math.max(1, Math.round(ts / 60)) + " min";
@@ -33,13 +43,14 @@ export function sideWin(g: GL): { icon: string; text: string; hex: string } | nu
   return g.side === "wolves" ? { icon: "🐺", text: "The wolves win", hex: "#ef4444" } : { icon: "🏡", text: "The village wins", hex: "#fbbf24" };
 }
 
-export function winnerOf(g: GL): GL | null {
+/** The winner's seat, in the match's own player type. */
+export function winnerOf<P extends { name: string }>(g: { winner?: string | null; players?: P[] }): P | null {
   if (!g || !g.winner) return null;
-  return (g.players || []).find((p: GL) => p.name === g.winner) || null;
+  return (g.players || []).find((p: P) => p.name === g.winner) || null;
 }
 
-export function winnerFirst(g: GL): GL[] {
-  return (g.players || []).slice().sort((a: GL, b: GL) => (b.name === g.winner ? 1 : 0) - (a.name === g.winner ? 1 : 0));
+export function winnerFirst<P extends { name: string }>(g: { winner?: string | null; players?: P[] }): P[] {
+  return (g.players || []).slice().sort((a: P, b: P) => (b.name === g.winner ? 1 : 0) - (a.name === g.winner ? 1 : 0));
 }
 
 // Final score, winner first, in each game's own unit (its finalScore hook in
@@ -112,7 +123,7 @@ export function clockSeconds(g: GL): number {
 }
 
 // "4 pegs · 6 colours" or "5-letter word": a Code Race's secret, in brief.
-export function crWhat(g: GL): string {
+export function crWhat(g: CodeRaceState): string {
   return g.mode === "words" ? (g.length || 5) + "-letter word" : (g.length || 4) + " pegs · " + (g.colors || 6) + " colours";
 }
 
@@ -122,16 +133,16 @@ export function gameMetaText(g: GL): string {
   if (own) return own(g);
   if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
-    const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+    const waiting = (g.players || []).filter((p: GLPlayer) => !p.accepted).map((p: GLPlayer) => p.name);
     return "Lobby · waiting on " + (waiting.join(", ") || "no one") + (g.mode === "async" ? " · async · resolves on everyone's move" : " · " + tickLen(g.tick_seconds || 120) + " ticks");
   }
-  const alive = (g.players || []).filter((p: GL) => p.alive).length;
+  const alive = (g.players || []).filter((p: GLPlayer) => p.alive).length;
   // "your move" is the card's pill and the arena's turn banner now: at
   // the end of this line it was the part a phone clipped off.
   return "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : tickLen(g.tick_seconds || 120) + " ticks");
 }
 
-export function boardSvg(g: GL): string {
+export function boardSvg(g: LightCyclesState): string {
   let s =
     '<svg class="lc-svg" viewBox="0 0 ' + g.w + " " + g.h + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Light Cycles board">';
   s += '<rect x="0" y="0" width="' + g.w + '" height="' + g.h + '" fill="#04060d"/>';
@@ -139,21 +150,21 @@ export function boardSvg(g: GL): string {
   for (let x = 1; x < g.w; x++) grid += "M" + x + " 0V" + g.h;
   for (let y = 1; y < g.h; y++) grid += "M0 " + y + "H" + g.w;
   s += '<path d="' + grid + '" stroke="rgba(56,189,248,0.07)" stroke-width="0.04" fill="none"/>';
-  const byColor: Record<number, GL[]> = {};
-  (g.trails || []).forEach((c: GL) => {
+  const byColor: Record<number, LightCyclesTrail[]> = {};
+  (g.trails || []).forEach((c: LightCyclesTrail) => {
     (byColor[c[2]] = byColor[c[2]] || []).push(c);
   });
   // The last trail cell per rider: the growth point, and for a dead
   // rider the end of the wreck.
-  const lastCell: Record<number, GL> = {};
-  (g.trails || []).forEach((c: GL) => {
+  const lastCell: Record<number, LightCyclesTrail> = {};
+  (g.trails || []).forEach((c: LightCyclesTrail) => {
     lastCell[c[2]] = c;
   });
-  (g.players || []).forEach((p: GL, i: number) => {
+  (g.players || []).forEach((p: LightCyclesPlayer, i: number) => {
     // A wreck sits dimmer than a live trail - the board remembers
     // the crash without competing with the riders still moving.
     const op = p.alive ? "0.45" : "0.25";
-    (byColor[i] || []).forEach((c: GL) => {
+    (byColor[i] || []).forEach((c: LightCyclesTrail) => {
       s += '<rect x="' + c[0] + '" y="' + c[1] + '" width="1" height="1" fill="' + p.hex + '" opacity="' + op + '"/>';
     });
     const lc = lastCell[i];
@@ -164,7 +175,7 @@ export function boardSvg(g: GL): string {
         // the trail visibly extends instead of appearing whole.
         const cells = byColor[i] || [];
         if (cells.length >= 2) {
-          const a = cells[cells.length - 2];
+          const a = cells[cells.length - 2]!;
           if (Math.abs(a[0] - lc[0]) + Math.abs(a[1] - lc[1]) === 1)
             s += '<line class="lc-draw" x1="' + (a[0] + 0.5) + '" y1="' + (a[1] + 0.5) + '" x2="' + (lc[0] + 0.5) + '" y2="' + (lc[1] + 0.5) + '" stroke="' + p.hex + '" stroke-width="0.62" stroke-linecap="round" pathLength="1"/>';
         }
@@ -178,7 +189,7 @@ export function boardSvg(g: GL): string {
       }
     }
   });
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: LightCyclesPlayer) => {
     if (p.alive && typeof p.x === "number")
       s += '<rect class="lc-head" x="' + p.x + '" y="' + p.y + '" width="1" height="1" fill="' + p.hex + '" stroke="#e0faff" stroke-width="0.14"/>';
   });
@@ -194,14 +205,14 @@ function capThrow(t: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
 }
 
-export function roundVerdict(r: GL, players: GL[]): { tie: boolean; text: string } {
-  const t0 = (r.throws || {})[players[0].name];
-  const t1 = (r.throws || {})[players[1].name];
+export function roundVerdict(r: DuelRound, players: DuelPlayer[]): { tie: boolean; text: string } {
+  const t0 = (r.throws || {})[players[0]!.name];
+  const t1 = (r.throws || {})[players[1]!.name];
   if (!r.winner) {
     if (t0 && t0 === t1) return { tie: true, text: "CLASH · identical throws, no score" };
     return { tie: true, text: "Level · no score" };
   }
-  const loser = players.filter((p: GL) => p.name !== r.winner)[0];
+  const loser = players.filter((p: DuelPlayer) => p.name !== r.winner)[0];
   const tw = (r.throws || {})[r.winner];
   const tl = loser ? (r.throws || {})[loser.name] : null;
   if (!tw || !tl) return { tie: false, text: r.winner + " takes it by forfeit" };
@@ -244,7 +255,7 @@ export function setClockBar(bar: HTMLElement) {
   bar.classList.toggle("low", pct < 20 && left > 0);
 }
 
-export function clockBar(g: GL): HTMLElement {
+export function clockBar(g: DuelState): HTMLElement {
   const w = el("div", "duel-clockwrap");
   const bar = el("div", "duel-clockbar");
   bar.setAttribute("data-duel-deadline", String(g.deadline));
@@ -259,20 +270,20 @@ export function clockBar(g: GL): HTMLElement {
 // throw mix over the match's rounds plus the clearest habit the
 // record supports (switching after a loss, staying after a win).
 // Lines appear only once a player has thrown at least three times.
-export function duelTendencies(g: GL): { name: string; hex: string; line: string }[] {
-  const rounds = (g.rounds || []).filter((r: GL) => r.throws);
+export function duelTendencies(g: DuelState): { name: string; hex: string; line: string }[] {
+  const rounds = (g.rounds || []).filter((r: DuelRound) => r.throws);
   const out: { name: string; hex: string; line: string }[] = [];
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: DuelPlayer) => {
     const counts: Record<string, number> = { rock: 0, paper: 0, scissors: 0 };
     let n = 0;
     let lossOpp = 0, lossSwitch = 0, winOpp = 0, winStay = 0;
     for (let i = 0; i < rounds.length; i++) {
-      const t = rounds[i].throws[p.name];
+      const t = rounds[i]!.throws[p.name];
       if (!t || !(t in counts)) continue;
       counts[t] = (counts[t] || 0) + 1;
       n++;
       if (i > 0) {
-        const prev = rounds[i - 1];
+        const prev = rounds[i - 1]!;
         const pt = prev.throws ? prev.throws[p.name] : null;
         if (pt && prev.winner && prev.winner !== p.name) {
           lossOpp++;
@@ -302,20 +313,20 @@ export function duelTendencies(g: GL): { name: string; hex: string; line: string
 // Consecutive round wins counting back from the latest round;
 // a tie or a loss ends the run. Two or more is a streak worth
 // showing - streaks are the room's mythology.
-export function duelStreak(g: GL, name: string): number {
+export function duelStreak(g: DuelState, name: string): number {
   const rounds = g.rounds || [];
   let n = 0;
   for (let i = rounds.length - 1; i >= 0; i--) {
-    if (rounds[i].winner === name) n++;
+    if (rounds[i]!.winner === name) n++;
     else break;
   }
   return n;
 }
 
-export function duelBoard(g: GL, slim?: boolean): HTMLElement {
+export function duelBoard(g: DuelState, slim?: boolean): HTMLElement {
   const wrap = el("div", "duel-board");
   const sc = g.score || {};
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: DuelPlayer) => {
     const row = el("div", "duel-row");
     const dot = el("span", "lc-dot");
     dot.style.background = p.hex;
@@ -338,19 +349,19 @@ export function duelBoard(g: GL, slim?: boolean): HTMLElement {
     // clock bar around the board; in slim mode the board is just
     // the score rows, so nothing shows twice.
   } else if (g.status === "running") {
-    const states = (g.players || []).map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
+    const states = (g.players || []).map((p: DuelPlayer) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
     wrap.appendChild(el("div", "duel-stateline", states));
   } else if (g.status === "lobby") {
-    const states = (g.players || []).map((p: GL) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
+    const states = (g.players || []).map((p: DuelPlayer) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
     wrap.appendChild(el("div", "duel-stateline", states));
   }
   const rounds = g.rounds || [];
   if (rounds.length && !slim) {
-    const last = rounds[rounds.length - 1];
+    const last = rounds[rounds.length - 1]!;
     const v = roundVerdict(last, g.players || []);
     const fo = el("div", "duel-faceoff-line ribbon-in");
     const icons = (g.players || [])
-      .map((p: GL) => {
+      .map((p: DuelPlayer) => {
         const t = (last.throws || {})[p.name];
         return t ? THROW_EMOJI[t] || "" : "—";
       })
@@ -377,14 +388,14 @@ export function bsCellXY(label: string): [number, number] {
 
 // The latest shot, in words: "Ada fires A6 · HIT · Henry's 4-ship is
 // sunk". Empty until somebody has fired.
-export function lastMoveText(g: GL): string {
+export function lastMoveText(g: BattleshipState): string {
   const lm = g && g.last_move;
   if (!lm) return "";
   let t = lm.by + " fires " + lm.cell + " · " + (lm.result === "hit" ? "HIT" : "miss");
   if (lm.sunk) {
     const foe = lm.target
-      ? (g.players || []).filter((p: GL) => p.name === lm.target)[0]
-      : (g.players || []).filter((p: GL) => p.name !== lm.by)[0];
+      ? (g.players || []).filter((p: BattleshipPlayer) => p.name === lm.target)[0]
+      : (g.players || []).filter((p: BattleshipPlayer) => p.name !== lm.by)[0];
     t += " · " + (foe ? foe.name + "'s " : "a ") + lm.sunk + "-ship is sunk";
   }
   return t;
@@ -399,11 +410,11 @@ export function escHtml(v: unknown): string {
 // One captain's public waters as a tiny SVG for the feed card: every
 // shot that has landed on them, sunk hulls filled dark red. The last
 // shot fired at this board wears a white ring.
-export function bsMiniSvg(board: GL, lastMove: GL, w?: number, h?: number): string {
+export function bsMiniSvg(board: BattleshipBoard, lastMove: BattleshipMove | null, w?: number, h?: number): string {
   const bw = w || 10, bh = h || 10;
   let s = '<svg class="bs-mini-svg" viewBox="0 0 ' + bw + " " + bh + '" role="img" aria-label="' + escHtml(board.name) + ' waters">';
   s += '<rect x="0" y="0" width="' + bw + '" height="' + bh + '" fill="#04060d"/>';
-  (board.sunk_ships || []).forEach((sh: GL) => {
+  (board.sunk_ships || []).forEach((sh: BattleshipSunkShip) => {
     // The ship the last shot just sank flashes once, so a spectator
     // sees the sinking happen instead of finding it already sunk.
     const fresh = !!(lastMove && lastMove.sunk && lastMove.by !== board.name && sh.cells.indexOf(lastMove.cell) >= 0);
@@ -428,11 +439,11 @@ export function bsMiniSvg(board: GL, lastMove: GL, w?: number, h?: number): stri
 
 // The pair of mini boards the card shows once the shooting starts,
 // so the battle plays out in the feed, not only in the arena.
-export function bsMiniBoards(g: GL): HTMLElement | null {
+export function bsMiniBoards(g: BattleshipState): HTMLElement | null {
   if (!g.boards || !g.boards.length) return null;
   if (!(g.phase === "play" || g.status === "finished")) return null;
   const wrap = el("div", "bs-minis");
-  g.boards.forEach((b: GL) => {
+  g.boards.forEach((b: BattleshipBoard) => {
     const side = el("div", "bs-mini");
     side.appendChild(el("div", "bs-mini-name", b.name));
     const holder = el("div", "");
@@ -447,9 +458,9 @@ export function bsMiniBoards(g: GL): HTMLElement | null {
 // fleet positions are secret, so the feed shows counts and whose
 // turn it is. The boards live in the arena, and only for the player
 // they belong to.
-export function battleshipBoard(g: GL): HTMLElement {
+export function battleshipBoard(g: BattleshipState): HTMLElement {
   const wrap = el("div", "duel-board");
-  (g.players || []).forEach((p: GL) => {
+  (g.players || []).forEach((p: BattleshipPlayer) => {
     const row = el("div", "duel-row");
     const dot = el("span", "lc-dot");
     dot.style.background = p.hex;
@@ -458,17 +469,17 @@ export function battleshipBoard(g: GL): HTMLElement {
     const stats = el("span", "duel-state", (p.afloat != null ? p.afloat : 5) + " afloat · " + (p.hits || 0) + " hits · " + (p.sunk || 0) + " sunk" + (p.eliminated ? " · 💀 eliminated" : ""));
     stats.style.marginLeft = "8px";
     row.appendChild(stats);
-    const bd = (g.boards || []).filter((b: GL) => b.name === p.name)[0];
+    const bd = (g.boards || []).filter((b: BattleshipBoard) => b.name === p.name)[0];
     if (bd) {
-      const strip = fleetStrip(p.hex, (bd.sunk_ships || []).map((s: GL) => s.size), 6, g.fleet_sizes);
+      const strip = fleetStrip(p.hex, (bd.sunk_ships || []).map((s: BattleshipSunkShip) => s.size), 6, g.fleet_sizes);
       strip.style.marginLeft = "auto";
       row.appendChild(strip);
     }
     wrap.appendChild(row);
   });
   let state = "";
-  if (g.status === "lobby") state = (g.players || []).map((p: GL) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
-  else if (g.status === "running" && g.phase === "setup") state = (g.players || []).map((p: GL) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
+  if (g.status === "lobby") state = (g.players || []).map((p: BattleshipPlayer) => p.name + (p.accepted ? " in ✓" : " invited…")).join(" · ");
+  else if (g.status === "running" && g.phase === "setup") state = (g.players || []).map((p: BattleshipPlayer) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
   else if (g.status === "running") state = "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "");
   else if (g.status === "finished") state = recordLine(g);
   if (state) wrap.appendChild(el("div", "duel-stateline", state));
@@ -509,10 +520,10 @@ export function fleetStrip(hex: string, sunkSizes: number[], unit?: number, size
 // ships (optional) groups cells into hulls so a ship reads as one
 // tapered shape - bow at its first cell, stern at its last - instead
 // of a row of squares.
-export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null, ships?: GL[], verb?: string, dims?: GL): HTMLElement {
+export function bsGrid(states: Record<string, string>, shipHex: string, onFire: ((label: string) => void) | null, ships?: { cells: string[] }[], verb?: string, dims?: { w?: number; h?: number }): HTMLElement {
   const bw = (dims && dims.w) || 10, bh = (dims && dims.h) || 10;
   const seg: Record<string, string> = {};
-  (ships || []).forEach((s: GL) => {
+  (ships || []).forEach((s: { cells: string[] }) => {
     const cells: string[] = s.cells || [];
     if (cells.length < 2) return;
     const horiz = (cells[0] || "").slice(1) === (cells[1] || "").slice(1);
@@ -559,7 +570,7 @@ export function bsGrid(states: Record<string, string>, shipHex: string, onFire: 
   return frame;
 }
 
-export function duelScoreLine(g: GL): string {
+export function duelScoreLine(g: DuelState): string {
   const sc = g.score || {};
-  return (g.players || []).map((p: GL) => p.name + " " + (sc[p.name] != null ? sc[p.name] : p.wins || 0)).join(" · ");
+  return (g.players || []).map((p: DuelPlayer) => p.name + " " + (sc[p.name] != null ? sc[p.name] : p.wins || 0)).join(" · ");
 }

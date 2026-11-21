@@ -6,7 +6,7 @@ import type { AuctionPlayer, AuctionState, AuctionYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const auctionStatus: GameStatus = {
+export const auctionStatus: GameStatus<AuctionState> = {
   finalScore(g: AuctionState): string {
     return winnerFirst(g).map((p: AuctionPlayer) => p.won || 0).join("–");
   },

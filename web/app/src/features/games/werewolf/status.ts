@@ -7,7 +7,7 @@ import { wwVerb } from "./werewolf";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const werewolfStatus: GameStatus = {
+export const werewolfStatus: GameStatus<WerewolfState> = {
   finalScore(g: WerewolfState): string {
     return "";
   },

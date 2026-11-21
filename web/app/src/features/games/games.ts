@@ -1,11 +1,13 @@
+import type { BattleshipState, DuelState, LightCyclesState } from "@chat/contract";
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../../lib/index";
 import { gameDef, matchTitle } from "./shared/catalog";
-import { clockSeconds, fleetStrip, formatLeft, setClockBar, setTurnClock, type GL } from "./shared/render";
+import { clockSeconds, fleetStrip, formatLeft, setClockBar, setTurnClock, type GL, type GLPlayer, type GLYou } from "./shared/render";
 import type { Arena3dProps, GameStoreOptions, GameView, GameViewCtx, Host3d, Kind3d } from "./shared/viewctx";
 import { GAMES } from "./registry";
+import type { HistPlayer } from "./shared/history";
 
 
 // Games: the chat cards and the arena views for all sixteen games. Both
@@ -18,8 +20,12 @@ import { GAMES } from "./registry";
 
 /* ---------- the store ---------- */
 
+/** A cached match; __frameOnly marks one known only from a stream frame
+ * (the public summary) until its full state arrives. */
+export type CachedGame = GL & { __frameOnly?: boolean };
+
 export interface GameStore {
-  cache: Map<number, GL>;
+  cache: Map<number, CachedGame>;
   subscribe(fn: () => void): () => void;
   getVersion(): number;
   fetch(id: number): Promise<void>;
@@ -34,7 +40,7 @@ export interface GameStore {
 
 export function createGameStore(opts: GameStoreOptions): GameStore {
   const { client } = opts;
-  const cache = new Map<number, GL>();
+  const cache = new Map<number, CachedGame>();
   const listeners = new Set<() => void>();
   let version = 0;
   const notify = () => {
@@ -118,8 +124,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   function turnBanner(g: GL): HTMLElement | null {
     if (!g || g.status !== "running") return null;
     const me = opts.meName();
-    const you = g.you || {};
-    const players: GL[] = g.players || [];
+    const you: Partial<GLYou> = g.you || {};
+    const players: GLPlayer[] = g.players || [];
     let text = "";
     let sub = "";
     let mine = false;
@@ -133,7 +139,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       mine = !!line.mine;
     } else {
       // Light Cycles, and a match without a type
-      const waiting = players.filter((p: GL) => p.alive && !p.moved && p.name !== me).map((p: GL) => p.name);
+      const waiting = players.filter((p: GLPlayer) => p.alive && !p.moved && p.name !== me).map((p: GLPlayer) => p.name);
       if (g.mode === "async") prefix = "cap in ";
       if (you.playing && you.alive && !you.queued) {
         mine = true;
@@ -197,7 +203,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     // or called-off match with its original players.
     if (rematchInFlight.has(g.id)) return;
     rematchInFlight.add(g.id);
-    const body: Record<string, unknown> = { players: (g.players || []).map((p: GL) => p.name) };
+    const body: Record<string, unknown> = { players: (g.players || []).map((p: GLPlayer) => p.name) };
     const own = gameDef(g.type)?.rematch;
     if (own) Object.assign(body, own(g));
     else {
@@ -256,10 +262,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // here is urgent except honesty about who is actually at the table.
   function lobbyPanel(g: GL, note: HTMLElement): HTMLElement {
     const wrap = el("div", "lobby-panel");
-    const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
+    const waiting = (g.players || []).filter((p: GLPlayer) => !p.accepted).map((p: GLPlayer) => p.name);
     const mine = !!(g.you && g.you.playing);
     let line: string;
-    if (mine && !g.you.accepted)
+    if (mine && !g.you!.accepted)
       line = "You've been invited to this match. Accept to take your seat - the clock starts when everyone is in.";
     else if (mine) line = "You're in. Waiting on " + waiting.join(", ") + ".";
     else line = "Lobby - waiting on " + waiting.join(", ") + " to accept.";
@@ -268,7 +274,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       line += left > 0 ? " The lobby closes in " + formatLeft(left) + "." : " The lobby is closing.";
     }
     wrap.appendChild(el("div", "duel-statusline", line));
-    if (mine && !g.you.accepted) {
+    if (mine && !g.you!.accepted) {
       const row = el("div", "duel-pad");
       const acc = el("button", "duel-btn", "Accept");
       acc.type = "button";
@@ -336,7 +342,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return tabs;
   }
 
-  function histWho(p: GL): HTMLElement {
+  function histWho(p: HistPlayer): HTMLElement {
     const s = el("span", "hist-who");
     const d = el("span", "hist-dot");
     d.style.background = (p && p.hex) || "#94a3b8";
@@ -417,7 +423,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     if (!gv.r3d) gv.r3d = makeHost3d("lc-board-big lc-3d-host " + KIND3D[kind]!.cls);
     return gv.r3d;
   }
-  function paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Arena3dProps>) {
+  function paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Omit<Arena3dProps, "g">>) {
     const gv = gameView;
     if (!gv || h.failed) return;
     const seq = (gv.r3dSeq = (gv.r3dSeq || 0) + 1);
@@ -426,7 +432,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       (Comp) => {
         if (!current() || h.failed) return;
         h.root.render(
-          createElement(Comp, {
+          // the kind was picked by this match's type: the scene takes it
+          createElement(Comp as ComponentType<Arena3dProps>, {
             g,
             me: opts.meName(),
             aspect: h.host.clientWidth / Math.max(1, h.host.clientHeight),
@@ -524,7 +531,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     h.status.hidden = false;
   }
 
-  let lc3dComp: Promise<ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; onSteer?: (dir: string) => void }>> | null = null;
+  let lc3dComp: Promise<ComponentType<{ g: LightCyclesState; me?: string; aspect?: number; onReady?: () => void; onSteer?: (dir: string) => void }>> | null = null;
   function loadLc3d() {
     // A failed import is not remembered: the next paint tries again.
     if (!lc3dComp)
@@ -544,7 +551,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       m.root.unmount();
     }
   }
-  function paintLc3d(g: GL, h: Host3d) {
+  function paintLc3d(g: LightCyclesState, h: Host3d) {
     const gv = gameView;
     if (!gv || h.failed) return;
     const seq = (gv.lc3dSeq = (gv.lc3dSeq || 0) + 1);
@@ -582,7 +589,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
      alive across repaints. The component receives the per-viewer state
      plus a fire callback wired to sendMove. */
   let bs3dComp: Promise<
-    ComponentType<{ g: GL; me: string; aspect?: number; onFire?: (label: string, target?: string) => void; onReady?: () => void; placing?: BsPlacing }>
+    ComponentType<{ g: BattleshipState; me: string; aspect?: number; onFire?: (label: string, target?: string) => void; onReady?: () => void; placing?: BsPlacing }>
   > | null = null;
   function loadBs3d() {
     // A failed import is not remembered: the next paint tries again.
@@ -605,7 +612,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       m.root.unmount();
     }
   }
-  function paintBs3d(g: GL, h: Host3d) {
+  function paintBs3d(g: BattleshipState, h: Host3d) {
     const gv = gameView;
     if (!gv || h.failed) return;
     const seq = (gv.bs3dSeq = (gv.bs3dSeq || 0) + 1);
@@ -633,7 +640,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     );
   }
   /* The fleet strips under the scene: each captain's sizes still afloat. */
-  function bsStrips3d(g: GL, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement {
+  function bsStrips3d(g: BattleshipState, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement {
     const strips = el("div", "bs-strips3d");
     fleets.forEach((f) => {
       const item = el("div", "bs-strip3d");
@@ -651,7 +658,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   }
   /* The scene (two captains side by side, a free-for-all in rows),
      with what follows it right under it. */
-  function bsScene(g: GL, wrap: HTMLElement, under?: HTMLElement) {
+  function bsScene(g: BattleshipState, wrap: HTMLElement, under?: HTMLElement) {
     if (!gameView) return;
     if (!gameView.bs3d) gameView.bs3d = makeHost3d("lc-board-big lc-3d-host bs-3d-host");
     wrap.appendChild(gameView.bs3d.host);
@@ -673,7 +680,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
      sides; the throw pad, the verdict banner and the scoreboard stay
      in the page - the scene shows, the page acts. */
   let duel3dComp: Promise<
-    ComponentType<{ g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: ((t: string) => void) | null) => void }>
+    ComponentType<{ g: DuelState; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: ((t: string) => void) | null) => void }>
   > | null = null;
   function loadDuel3d() {
     if (!duel3dComp)
@@ -694,7 +701,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       m.root.unmount();
     }
   }
-  function paintDuel3d(g: GL, h: Host3d) {
+  function paintDuel3d(g: DuelState, h: Host3d) {
     const gv = gameView;
     if (!gv || h.failed) return;
     const seq = (gv.duel3dSeq = (gv.duel3dSeq || 0) + 1);
@@ -823,7 +830,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         cache.set(game.id, prev ? Object.assign({}, prev, game) : Object.assign({ __frameOnly: true }, game));
         notify();
         const me = (opts.meName() || "").toLowerCase();
-        const playing = !!me && (game.players || []).some((p: GL) => String(p.name || "").toLowerCase() === me);
+        const playing = !!me && (game.players || []).some((p: GLPlayer) => String(p.name || "").toLowerCase() === me);
         if (!prev || prev.__frameOnly || playing) {
           void fetchGame(game.id);
           return;
@@ -845,7 +852,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       if (!me) return 0;
       let n = 0;
       cache.forEach((g) => {
-        const mine = (g.players || []).find((p: GL) => p.name === me);
+        const mine = (g.players || []).find((p: GLPlayer) => p.name === me);
         if (!mine) return;
         if (g.status === "lobby") {
           if (!mine.accepted) n++;

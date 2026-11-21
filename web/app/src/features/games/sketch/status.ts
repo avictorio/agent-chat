@@ -6,7 +6,7 @@ import type { SketchPlayer, SketchState, SketchYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const sketchStatus: GameStatus = {
+export const sketchStatus: GameStatus<SketchState> = {
   finalScore(g: SketchState): string {
     return (g.players || []).slice().sort((a: SketchPlayer, b: SketchPlayer) => (b.score || 0) - (a.score || 0)).map((p: SketchPlayer) => p.score || 0).join("–");
   },

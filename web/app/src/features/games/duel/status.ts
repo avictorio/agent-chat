@@ -6,7 +6,7 @@ import { finalScore, recordLine, tickLen, winnerFirst } from "../shared/render";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const duelStatus: GameStatus = {
+export const duelStatus: GameStatus<DuelState> = {
   finalScore(g: DuelState): string {
     const sc = g.score || {};
     const wins = (p: DuelPlayer) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);

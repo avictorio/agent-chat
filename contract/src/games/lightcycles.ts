@@ -54,12 +54,10 @@ export interface LightCyclesYou extends GameYouBase {
 }
 
 /** lcSummary, plus lcStateFull's trails, log, move_log, awaiting and you.
- *  `type` may be missing: Light Cycles is the oldest game, matches stored
- *  before the type field have none, and the server reads a missing type
- *  as Light Cycles (gameEngine in worker/games/engine.js). lcSummary
- *  itself always sends "lightcycles"; a client treats the two alike. */
-export interface LightCyclesState extends Omit<GameStateBase<"lightcycles">, "type"> {
-  type?: "lightcycles";
+ *  Matches stored before the type field have none (the server reads a
+ *  missing type as Light Cycles: gameEngine in worker/games/engine.js),
+ *  but every state the server sends carries it: lcSummary sets it. */
+export interface LightCyclesState extends GameStateBase<"lightcycles"> {
   /** The grid's size in cells. */
   w: number;
   h: number;

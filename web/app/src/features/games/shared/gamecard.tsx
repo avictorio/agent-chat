@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties }
 import { useFeed } from "../../room/ctx";
 import type { GameSummary } from "@chat/contract";
 import { gameMetaText } from "./render";
-import type { GL } from "./render";
+import type { GL, GLPlayer } from "./render";
 import { WinnerBanner } from "./WinnerBanner";
 import { pressable } from "../../../lib/index";
 import { matchTitle } from "./catalog";
@@ -129,23 +129,23 @@ function isLoaded(g: GL | undefined): boolean {
 // A compact fingerprint of "the match moved": status plus the
 // per-kind progress counters and the latest event. Null until the
 // full game has loaded (the summary alone never pulses).
-function gameSignature(g: GL): string | null {
+function gameSignature(g: GL | null): string | null {
   if (!g || !g.type) return null;
   const own = GAMES[g.type]?.signature;
   if (own) return own(g);
-  const alive = (g.players || []).filter((p: GL) => p.alive).length;
+  const alive = (g.players || []).filter((p: GLPlayer) => p.alive).length;
   return ["lc", g.status, g.tick || 0, alive].join("|");
 }
 
 // The colour of whoever made the latest move, for the pulse ring.
-function gameMoverHex(g: GL): string | null {
+function gameMoverHex(g: GL | null): string | null {
   if (!g || !g.players) return null;
   // the game's own mover (registry.ts); without one, a finished match's winner
   const own = GAMES[g.type]?.mover;
   const moved = own ? own(g) : undefined;
-  const name: string | null = moved !== undefined ? moved : g.status === "finished" ? g.winner : null;
+  const name: string | null | undefined = moved !== undefined ? moved : g.status === "finished" ? g.winner : null;
   if (!name) return null;
-  const p = (g.players || []).find((x: GL) => x.name === name);
+  const p = (g.players || []).find((x: GLPlayer) => x.name === name);
   return p ? p.hex : null;
 }
 

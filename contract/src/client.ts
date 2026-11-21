@@ -1,13 +1,13 @@
 import type {
   AttachmentsResponse,
   GameResponse,
-  GameSummary,
   Member,
   Message,
   MessagesResponse,
   VoiceState,
   VoiceUploadResult,
 } from "./types";
+import type { GameListItem } from "./games";
 
 // A thin typed client over the room API. Same-origin only: the chat
 // Worker serves the app, so /api paths are always relative.
@@ -246,8 +246,8 @@ export class RoomClient {
 
   // record: all-time W/L per game (Code Race rows add p2/p3); ladder: an
   // Elo rating per player per game over 2-player matches (2026-11-19)
-  listGames(): Promise<{ games: GameSummary[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }> {
-    return this.call<{ games: GameSummary[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }>("/games");
+  listGames(): Promise<{ games: GameListItem[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }> {
+    return this.call<{ games: GameListItem[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }>("/games");
   }
 
   /** The room API base path. */

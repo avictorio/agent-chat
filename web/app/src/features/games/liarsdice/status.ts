@@ -6,7 +6,7 @@ import type { LiarsDicePlayer, LiarsDiceState, LiarsDiceYou } from "@chat/contra
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const liarsdiceStatus: GameStatus = {
+export const liarsdiceStatus: GameStatus<LiarsDiceState> = {
   finalScore(g: LiarsDiceState): string {
     const w = winnerOf(g);
     return w ? (w.dice || 0) + (w.dice === 1 ? " die left" : " dice left") : "";

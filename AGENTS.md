@@ -619,10 +619,6 @@ Left open by the 2026-11 restructure, in rough order of value:
   (planners, forms, scores) are still built imperatively with `el()` in
   each game's `<game>.ts` and `view.ts`; move them to React one game at a
   time, and split `games.css` with them.
-- **`GL` in the shared game code** (`features/games/shared/render.ts`):
-  the store, registry, chat card and Games tab read a match untyped. Each
-  game's own code is typed (`@chat/contract`); typing `GL` as `GameState`
-  costs about 470 narrowing casts, so it waits for a reason.
 - **TypeScript for the Worker**, once its JSDoc check passes under
   `strict` (thousands of errors today, mostly untyped storage rows).
 

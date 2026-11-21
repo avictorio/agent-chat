@@ -6,7 +6,7 @@ import { finalScore, recordLine, tickLen, winnerFirst } from "../shared/render";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const battleshipStatus: GameStatus = {
+export const battleshipStatus: GameStatus<BattleshipState> = {
   finalScore(g: BattleshipState): string {
     return winnerFirst(g).map((p: BattleshipPlayer) => p.sunk || 0).join("–");
   },

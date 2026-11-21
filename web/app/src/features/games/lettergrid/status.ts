@@ -6,7 +6,7 @@ import { finalScore, recordLine, tickLen } from "../shared/render";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const lettergridStatus: GameStatus = {
+export const lettergridStatus: GameStatus<LetterGridState> = {
   finalScore(g: LetterGridState): string {
     return (g.players || []).slice().sort((a: LetterGridPlayer, b: LetterGridPlayer) => (b.score || 0) - (a.score || 0)).map((p: LetterGridPlayer) => p.score || 0).join("–");
   },

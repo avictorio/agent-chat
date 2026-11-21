@@ -6,7 +6,7 @@ import type { CodeRacePlayer, CodeRaceRound, CodeRaceState, CodeRaceYou } from "
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const coderaceStatus: GameStatus = {
+export const coderaceStatus: GameStatus<CodeRaceState> = {
   finalScore(g: CodeRaceState): string {
     const w = winnerOf(g);
     return w && w.solved ? "round " + w.solved : "";

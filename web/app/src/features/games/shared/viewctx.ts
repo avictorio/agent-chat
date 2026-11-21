@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { Root } from "react-dom/client";
-import type { RoomClient } from "@chat/contract";
+import type { BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
 import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
 import type { TrDraft } from "../trust/trust";
@@ -25,8 +25,12 @@ export type GameStoreOptions = {
    (see makeHost3d). */
 export type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean };
 
-export type Arena3dProps = { g: GL; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void; draft?: { word: string; path: number[][] | null } | null; onCell?: (r: number, c: number) => void };
-export type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps> }>; comp: Promise<ComponentType<Arena3dProps>> | null };
+/* A 3D arena's props: its match (its game's state S) and the hooks a scene may take. */
+export type Arena3dProps<S = GL> = { g: S; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void; draft?: { word: string; path: number[][] | null } | null; onCell?: (r: number, c: number) => void };
+/* A game's 3D arena in the store's table: its host class and its lazily
+   loaded scene, whichever game's (each takes its own state; paint3d hands
+   it the match its kind was picked by). */
+export type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType<Arena3dProps<never>> }>; comp: Promise<ComponentType<Arena3dProps<never>>> | null };
 
 /* The open arena view: the match it shows, its wrapper, and what each
    game keeps across repaints (drafts, 3D hosts, hooks into the scene). */
@@ -80,11 +84,6 @@ export type GameView = {
   } | null;
 };
 
-/* A game's arena view renderer: paints g into ctx.gameView (when it is
-   still the open view), skipping the work when nothing it shows changed
-   unless force. */
-export type GameViewRenderer = (ctx: GameViewCtx, g: GL, force?: boolean) => void;
-
 /* What a renderer may use from the store. */
 export interface GameViewCtx {
   /** The open arena view, or null once it closed. */
@@ -94,11 +93,11 @@ export interface GameViewCtx {
   claimRender(key: string, force?: boolean): boolean;
   arenaHint(key: string, text: string): HTMLElement | null;
   arenaTabs(g: GL): HTMLElement;
-  bsScene(g: GL, wrap: HTMLElement, under?: HTMLElement): void;
-  bsStrips3d(g: GL, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement;
+  bsScene(g: BattleshipState, wrap: HTMLElement, under?: HTMLElement): void;
+  bsStrips3d(g: BattleshipState, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement;
   dropBs3d(): void;
   dropLc3d(): void;
-  paintLc3d(g: GL, h: Host3d): void;
+  paintLc3d(g: LightCyclesState, h: Host3d): void;
   rememberBsFocus(): void;
   drop3d(): void;
   dropDuel3d(): void;
@@ -106,8 +105,8 @@ export interface GameViewCtx {
   host3d(kind: string): Host3d;
   lobbyPanel(g: GL, note: HTMLElement): HTMLElement;
   makeHost3d(cls: string): Host3d;
-  paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Arena3dProps>): void;
-  paintDuel3d(g: GL, h: Host3d): void;
+  paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Omit<Arena3dProps, "g">>): void;
+  paintDuel3d(g: DuelState, h: Host3d): void;
   resultRow(g: GL): HTMLElement | null;
   sendMove(id: number, dir: string, note: HTMLElement | null, label?: string): Promise<void>;
   turnBanner(g: GL): HTMLElement | null;

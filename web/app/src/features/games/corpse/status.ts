@@ -6,7 +6,7 @@ import type { CorpsePlayer, CorpseState, CorpseYou } from "@chat/contract";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const corpseStatus: GameStatus = {
+export const corpseStatus: GameStatus<CorpseState> = {
   finalScore(g: CorpseState): string {
     const w: CorpsePlayer | null = winnerOf(g);
     return w && w.votes ? "★ " + w.votes : "";

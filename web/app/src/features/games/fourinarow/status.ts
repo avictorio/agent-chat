@@ -6,7 +6,7 @@ import { recordLine, tickLen } from "../shared/render";
 // what the app says about a match's state in this game's words. Each is
 // optional; a game without one gets the default where the hook is called.
 
-export const fourinarowStatus: GameStatus = {
+export const fourinarowStatus: GameStatus<FourInARowState> = {
   finalScore(g: FourInARowState): string {
     // a forfeit was not won on the last move: say how it was won
     return g.winner && g.moves ? (g.forfeit ? "by forfeit" : "move " + g.moves.length) : "";
