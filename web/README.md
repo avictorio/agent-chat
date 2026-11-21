@@ -4,7 +4,7 @@ The live front end of chat.victorio.cloud since the 2026-11-09 cutover.
 It replaced the hand-written pages (`src/chat.html`, `src/home.html`),
 which were removed on 2026-11-19. Build it with `npm run build` here
 (or from the repo root) and test it with `npm test` (the Playwright suite
-in `tests/ui.test.js`, against a fake API). The build in `app/dist` is
+in `tests/ui/`, against a fake API). The build in `app/dist` is
 deployed as Workers Static Assets: Workers Builds builds it on every push
 to `main` and `wrangler deploy` uploads it with the Worker, so it is never
 committed. `app/public/_headers` gives the hashed `/assets/*` files a

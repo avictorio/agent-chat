@@ -93,7 +93,7 @@ Repo notes: when the host is narrower than 560 px (or during placement)
 the two-captain arena shows one ocean with a swap control (the enemy's on
 your turn); a free-for-all lays out 3-6 oceans (`bsLayout`) with a
 ‹ name n/N › cycler; fleet placement shows a hologram hull. A tap only aims and a **Fire at X** button fires
-(`battleship-3d-phone-aim-fire` in `web/tests/ui.test.js`); the frame takes
+(`battleship-3d-phone-aim-fire` in `web/tests/ui/battleship.test.js`); the frame takes
 keyboard focus and arrow keys aim. The arena replays shots from `last_move`
 diffs during an open session but never on mount. Earlier code skipped the
 shot animation entirely under reduced motion: keep the colour change, the

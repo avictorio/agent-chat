@@ -490,7 +490,7 @@ Full tables and starting `Juice.hit` values per event and seat:
    null for `webgl`/`webgl2` (the suite's `noGl`). The entry sequence plays once per game per page
    session: preset `sessionStorage["ac-intro:<lc|bs|duel|fl|cr|c4|tr|au|ld|tt|ec|tq|ww|lg|tv|sg>:<id>"] = "1"` to
    skip it when you are not testing it. Reuse the suite's fake-API setup (add a scenario to
-   `web/tests/ui.test.js` when the check is worth keeping; put throwaway
+   the feature file in `web/tests/ui/` when the check is worth keeping; put throwaway
    scripts in the session scratchpad).
 4. **Wait for the ready signal, then settle.** Headless Chromium renders
    WebGL in software, which is slow. Wait for the canvas

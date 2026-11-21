@@ -1,6 +1,6 @@
 // Preload for cloud sandboxes: point the repo-pinned Playwright at the
 // preinstalled Chromium (/opt/pw-browsers/chromium) instead of downloading one.
-//   cd web && node -r ./tests/system-chromium.js tests/ui.test.js
+//   cd web && node -r ./tests/system-chromium.js tests/ui/run.js
 const Module = require('module');
 const orig = Module.prototype.require;
 Module.prototype.require = function (id) {

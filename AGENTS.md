@@ -1412,12 +1412,24 @@ before committing, at both desktop and mobile sizes** — a UI change is not
 committed, let alone pushed, until its screenshots have actually been
 looked at in both sizes.
 
-1. **Use the real build.** `web/tests/ui.test.js` serves the built app
-   (`web/app/dist`) through a fake API, scenario by scenario
-   (`ONLY=name1,name2` runs a subset; in a Claude cloud sandbox run it as
-   `node -r ./tests/system-chromium.js tests/ui.test.js` from `web/` to use
-   the preinstalled Chromium); its screenshots land in
-   `web/tests/shots/`. A scenario fails on an uncaught page error, on a
+1. **Use the real build.** The UI suite in `web/tests/ui/` serves the built
+   app (`web/app/dist`) through a fake API, scenario by scenario: the fake
+   API and the runner are `harness.js`, the scenarios are split by feature
+   (`shell`, `chat`, `people-media`, `games`, `arenas`, `arenas-3d`,
+   `battleship`, each `<feature>.test.js`), and `run.js` runs the files in
+   parallel (`npm test` in `web/`; `JOBS=n` sets how many at once,
+   `FILES=chat,games` picks files, `ONLY=name1,name2` picks scenarios; one
+   file alone is `node tests/ui/<feature>.test.js`). In a Claude cloud
+   sandbox add `-r ./tests/system-chromium.js` after `node` (from `web/`)
+   to use the preinstalled Chromium. The suite runs on a fixed clock
+   (`NOW` in `harness.js`, UTC; `CLOCK=real` for the machine's), so two
+   runs of a build give the same screenshots except where something
+   animates (the 3D scenes, Henry's GIF avatar, live pulses and second
+   countdowns); they land in `web/tests/shots/`. In a scenario, wait on
+   state (`waitForSelector`, `waitForFunction`, or `settle(page)` after an
+   action), not a fixed `waitForTimeout`: fixed sleeps are what failed
+   under load. Keep a sleep only to time a gesture (a long press) or to
+   give a 3D scene time to draw before a screenshot. A scenario fails on an uncaught page error, on a
    request the fake API doesn't handle (a missing stub route or a broken
    path: add the route), and on a console error other than "Failed to
    load resource" with an HTTP status the stub returned on purpose; pass

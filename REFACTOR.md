@@ -57,7 +57,7 @@ How a step goes:
   own, so a problem points at one change.
 - **Gates before each deploy:** `cd web && npx tsc -p app --noEmit && npm run build`,
   `npm run check`, the API suite (`npm run test:api`), the full UI suite
-  (155 scenarios), and desktop + phone screenshots when anything visible
+  (149 scenarios, `npm test` in `web/`), and desktop + phone screenshots when anything visible
   could move.
 - **Docs move with the code.** AGENTS.md, README.md, web/README.md and the
   immersive-3d-games skill reference paths; update them in the same commit.
@@ -440,12 +440,32 @@ Agreed with the owner on 2026-11-21, in this order:
         the four else-if chains went by a checked script. What is left on
         the type: the two Light Cycles "has trails" checks. games.ts
         1,174 -> 874 lines
-- [ ] 5.3 The UI suite: fix the clock (Playwright's `page.clock`; the
-      fake data reads `Date.now()` in 18 places), so two runs of a build
-      give the same screenshots and a screenshot diff becomes a real
-      check; replace the 187 fixed sleeps with waits on state; split the
-      3,509-line file by feature and run the files in parallel; two
-      scenarios share the name `duel-card`
+- [x] 5.3 The UI suite. `web/tests/ui.test.js` (3,538 lines, 157 runs,
+      one after another, ~25 min) is now `web/tests/ui/`: `harness.js`
+      (the fake API, `run`, the helpers), seven feature files (`shell`,
+      `chat`, `people-media`, `games`, `arenas`, `arenas-3d`,
+      `battleship`) and `run.js`, which runs them JOBS at a time (one per
+      CPU but one; `FILES=` and `ONLY=` pick). Eight runs were exact
+      copies (`duel-card`, the `markdown-*` loop, `dictation-patterns`,
+      the `phrase-mode-*` loop, `markdown-speech`): dropped, 149 remain.
+      The clock: the fake data and every page start at one instant
+      (`NOW`, Friday 2026-11-20 15:04 UTC); the page's Date is shifted
+      there and runs at real speed (`CLOCK=shift`), so times, dates and
+      day separators no longer move between runs. Playwright's
+      `page.clock` was tried first: `setFixedTime` froze Date and broke
+      the chime's hold and Sketch's guess; `install` fakes timers and
+      `performance` too and the Light Cycles replay ended at once. The
+      sleeps: 168 of 185 fixed `waitForTimeout`s (and the 500 ms after
+      every page load) are `settle(page)` - no request in flight for a
+      quiet window, two frames, no finite CSS animation running (bar
+      widths aside: the clock bars re-run theirs every tick); the 9
+      inside a press-and-hold and the 8 that give a 3D scene time
+      before a screenshot stay. Result: 149/149 in about 7 minutes (three files
+      at a time on 4 CPUs) instead of 25; two runs of a build now differ
+      only where something animates (the 3D scenes, the GIF avatar, live
+      pulses, second countdowns) - 113 of 204 screenshots, every non-3D
+      difference a few pixels - where before every clock and day
+      separator moved too
 - [ ] 5.4 (was 4.1c) Type the Worker's responses with `@chat/contract`
       (JSDoc on the route handlers and Room methods), and per-game state
       types so the 19 web files that switch off `no-explicit-any` can drop
