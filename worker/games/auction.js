@@ -3,6 +3,38 @@
 import AU_LOTS_TXT from "../data/auction-lots.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("./engine.js").GameEngine} GameEngine */
+/** A bidder's seat. @typedef {{ name: string, color: string, hex: string }} AuSeat */
+/** A bidder's purse: budget left, spent so far, lots won.
+ *  @typedef {{ budget: number, spent: number, won: number }} AuProg */
+/** The auction's stored match state (g.st; the API's AuctionState is built
+ *  from it). pending holds the round's sealed bids (0 is a pass) and
+ *  pending_at when each came in (roundsCommit in room/games.js); rounds are
+ *  the resolved lots, as the API sends them.
+ *  @typedef {{
+ *    type: "auction",
+ *    lots: string[],
+ *    budget: number,
+ *    round_seconds: number,
+ *    round: number,
+ *    deadline: number | null,
+ *    lobby_deadline: number,
+ *    accepted: Record<string, boolean>,
+ *    players: AuSeat[],
+ *    prog: Record<string, AuProg>,
+ *    rounds: import("@chat/contract").AuctionRound[],
+ *    pending: Record<string, number>,
+ *    pending_at: Record<string, number>,
+ *    places: string[] | null,
+ *    log: import("@chat/contract").GameLogLine[],
+ *    winner: string | null,
+ *    draw: boolean,
+ *    announced: boolean,
+ *    declined_by?: string,
+ *    ended?: number,
+ *  }} AuSt */
+/** An auction: its gm row with the state typed.
+ *  @typedef {Omit<GameRow, "st"> & { st: AuSt }} AuGame */
 
 // The auction's lots (content as data, worker/data/auction-lots.txt): one
 // per line, # comments; parsed on first use.
@@ -26,11 +58,15 @@ export const AuctionMethods = {
      budget left breaks a tie; still tied, no winner (a draw for two).
      Rides the simultaneous-rounds machinery, waiting only on bidders with
      budget left. */
+  /** @param {AuSt} st */
   auActive(st) {
     return st.players.filter((p) => st.prog[p.name].budget > 0);
   },
 
-  /** @returns {import("@chat/contract").AuctionState} */
+  /**
+   * @param {AuGame} g
+   * @returns {import("@chat/contract").AuctionState}
+   */
   auSummary(g) {
     const st = g.st;
     const lotNow = g.status === "running" ? st.lots[st.round - 1] || null : null;
@@ -45,7 +81,11 @@ export const AuctionMethods = {
     };
   },
 
-  /** @returns {import("@chat/contract").AuctionState} */
+  /**
+   * @param {AuGame} g
+   * @param {string | null | undefined} who the viewer
+   * @returns {import("@chat/contract").AuctionState}
+   */
   auStateFull(g, who) {
     const out = this.auSummary(g);
     const st = g.st;
@@ -67,12 +107,18 @@ export const AuctionMethods = {
     return out;
   },
 
+  /**
+   * @param {string} creator
+   * @param {unknown[]} playersIn
+   * @param {Record<string, any>} opts the create's options (lots, budget, tick_seconds, lobby_seconds)
+   * @param {string} room
+   */
   async createAuction(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "An auction needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp = (/** @type {unknown} */ v, /** @type {number} */ lo, /** @type {number} */ hi, /** @type {number} */ def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const pool = auLots();
     const nLots = clamp(opts.lots, 3, Math.min(20, pool.length), 10);
     const budget = clamp(opts.budget, 10, 1000, 100);
@@ -81,8 +127,10 @@ export const AuctionMethods = {
     for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    /** @type {Record<string, AuProg>} */
     const prog = {};
     for (const n of names) prog[n] = { budget: budget, spent: 0, won: 0 };
+    /** @type {AuSt} */
     const st = {
       type: "auction", lots: deck.slice(0, nLots), budget: budget, round_seconds: roundSeconds, round: 1,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
@@ -102,6 +150,12 @@ export const AuctionMethods = {
     return { status: 201, game: this.auStateFull(g, creator) };
   },
 
+  /**
+   * @param {AuGame} g
+   * @param {string} who
+   * @param {unknown} raw the bid, as sent
+   * @param {string} room
+   */
   async auMove(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -119,6 +173,7 @@ export const AuctionMethods = {
     return { status: 200, game: this.auStateFull(g, who), resolved: resolved };
   },
 
+  /** @param {AuGame} g */
   auResolveRound(g) {
     const st = g.st;
     const n = st.round;
@@ -143,7 +198,7 @@ export const AuctionMethods = {
         if (fewer.length < tied.length) entry.tie = "spent less";
         tied = fewer;
         if (tied.length > 1) {
-          const at2 = (nm) => (st.pending_at || {})[nm] || Infinity;
+          const at2 = (/** @type {string} */ nm) => (st.pending_at || {})[nm] || Infinity;
           tied.sort((a, b) => at2(a) - at2(b));
           entry.tie = "bid first";
         }
@@ -169,6 +224,7 @@ export const AuctionMethods = {
     }
   },
 
+  /** @param {AuSt} st */
   auStanding(st) {
     st.places = st.players.map((p) => p.name).sort((a, b) => st.prog[b].won - st.prog[a].won || st.prog[b].budget - st.prog[a].budget || (a < b ? -1 : 1));
     const [x, y] = st.places;
@@ -177,36 +233,39 @@ export const AuctionMethods = {
     return tied ? null : x;
   },
 
+  /** @param {AuGame} g */
   auResultText(g) {
     const st = g.st;
     if (!st.places) this.auStanding(st);
-    const lines = st.places.map((nm) => nm + " " + st.prog[nm].won + (st.prog[nm].won === 1 ? " lot" : " lots") + " (" + st.prog[nm].budget + " left)").join(", ");
+    // auStanding has just set places if they were unset
+    const lines = /** @type {string[]} */ (st.places).map((nm) => nm + " " + st.prog[nm].won + (st.prog[nm].won === 1 ? " lot" : " lots") + " (" + st.prog[nm].budget + " left)").join(", ");
     const sold = st.rounds.filter((r) => r.winner);
     const top = sold.slice().sort((a, b) => b.price - a.price)[0];
     return "Auction #" + g.id + " is over - " + (st.winner ? st.winner + " takes the season with " + st.prog[st.winner].won + " lots." : "a tie at the top, no winner.") + " " + lines + "." + (top ? " Top price: \"" + top.lot + "\" went to " + top.winner + " for " + top.price + "." : "");
   },
 };
 
+/** @satisfies {GameEngine} */
 export const auctionEngine = {
   name: "Auction",
   turnWord: "lot",
-  logTick: (st) => st.round,
-  clockSeconds: (st) => st.round_seconds,
+  logTick: (/** @type {AuSt} */ st) => st.round,
+  clockSeconds: (/** @type {AuSt} */ st) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createAuction(creator, players, opts, roomName),
   summary: (room, g) => room.auSummary(g),
   full: (room, g, who) => room.auStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.auMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
   resolveRound: (room, g) => room.auResolveRound(g),
-  standing: (room, st) => room.auStanding(st),
-  active: (room, st) => room.auActive(st),
-  targets: (pub) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
-  card: (g) => ({ id: g.id, type: "auction", status: g.status, round: g.st.round, lots_total: g.st.lots.length, lot: g.status === "running" ? g.st.lots[g.st.round - 1] : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, budget: pr.budget, won: pr.won || 0 }; }) }),
-  stateItem: (r, st) => ({ id: r.id, type: "auction", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: (pr.budget || 0) > 0, moved: (st.pending || {})[p.name] !== undefined || (pr.budget || 0) <= 0, accepted: seatAccepted(st, p) }; }) }),
+  standing: (room, /** @type {AuSt} */ st) => room.auStanding(st),
+  active: (room, /** @type {AuSt} */ st) => room.auActive(st),
+  targets: (/** @type {import("@chat/contract").AuctionState} */ pub) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
+  card: (/** @type {AuGame} */ g) => ({ id: g.id, type: "auction", status: g.status, round: g.st.round, lots_total: g.st.lots.length, lot: g.status === "running" ? g.st.lots[g.st.round - 1] : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, budget: pr.budget, won: pr.won || 0 }; }) }),
+  stateItem: (r, /** @type {AuSt} */ st) => ({ id: r.id, type: "auction", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: (pr.budget || 0) > 0, moved: (st.pending || {})[p.name] !== undefined || (pr.budget || 0) <= 0, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,
   moveHint: () => "<a whole number from 0 to your budget left, or pass>",
   result: (room, g) => room.auResultText(g),
-  rules: (st) =>
+  rules: (/** @type {AuSt} */ st) =>
     "Sealed-bid auction: " + st.lots.length + " lots, one per round, every lot worth the same one point (the names are flavour). Everyone starts with " + st.budget + " to spend, and budgets are public. " +
     "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass; the highest bid wins the lot and pays it, losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
     "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. Send dir as the number (e.g. 15) or pass; you can change it until the round resolves.",

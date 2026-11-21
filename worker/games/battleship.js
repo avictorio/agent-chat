@@ -2,6 +2,53 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("./engine.js").GameEngine} GameEngine */
+/** @typedef {import("@chat/contract").BattleshipShotResult} BattleshipShotResult */
+/** A ship as stored: its cells and the ones hit, as board keys ("x,y",
+ *  bsKey), and in a free-for-all who fired the shell that sank it.
+ *  @typedef {{ size: number, cells: string[], hits: string[], sunk_by?: string }} BsShip */
+/** A shot record against one board, by key: hit or miss.
+ *  @typedef {Record<string, BattleshipShotResult>} BsShotMap */
+/** A captain as stored. fleet is null until placed; shots is the one shot
+ *  map of the two-captain game, shots_by the free-for-all's map per target
+ *  (bsShotMap); eliminated (free-for-all) is missing on matches from before
+ *  it (2026-11-17).
+ *  @typedef {{ name: string, color: string, hex: string, fleet: BsShip[] | null, shots: BsShotMap, shots_by?: Record<string, BsShotMap>, eliminated?: boolean }} BsCaptain */
+/** Battleship's stored match state (g.st; the API's BattleshipState is
+ *  built from it). turn_of is null in setup; misses counts each captain's
+ *  expired turns in a row. Matches from before the variants (2026-11-11)
+ *  have no fleet_sizes or variant (read with their defaults); last_move,
+ *  shots, eliminated, own_turns and salvo_turn appear as play adds them.
+ *  @typedef {{
+ *    type: "battleship",
+ *    w: number,
+ *    h: number,
+ *    fleet_sizes?: number[],
+ *    variant?: "classic" | "salvo" | "skirmish",
+ *    salvo_left: number | null,
+ *    sonar: import("@chat/contract").BattleshipSonar | null,
+ *    tick_seconds: number,
+ *    turn: number,
+ *    phase: "setup" | "play",
+ *    turn_of: string | null,
+ *    deadline: number | null,
+ *    lobby_deadline: number,
+ *    accepted: Record<string, boolean>,
+ *    players: BsCaptain[],
+ *    misses: Record<string, number>,
+ *    eliminated?: string[],
+ *    log: import("@chat/contract").BattleshipLogLine[],
+ *    last_move?: import("@chat/contract").BattleshipMove,
+ *    shots?: import("@chat/contract").BattleshipShot[],
+ *    own_turns?: Record<string, number>,
+ *    salvo_turn?: { turn: number, rivals: number, targets: string[], fired: number },
+ *    winner: string | null,
+ *    announced: boolean,
+ *    declined_by?: string,
+ *    ended?: number,
+ *  }} BsSt */
+/** A Battleship match: its gm row with the state typed.
+ *  @typedef {Omit<GameRow, "st"> & { st: BsSt }} BsGame */
 
 /* ---------- games: Battleship ----------
    The slow game, added 2026-11-10 from the room's latency debate:
@@ -30,27 +77,42 @@ import { clockWords, seatAccepted } from "./shared.js";
    the two-player paths keep their exact behavior. */
 /** @satisfies {ThisType<import("../room/Room.js").Room>} */
 export const BattleshipMethods = {
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
   bsKey(x, y) { return x + "," + y; },
 
+  /** @param {string} key a board key, "x,y" */
   bsLabel(key) {
     const p = String(key).split(",");
     return String.fromCharCode(65 + Number(p[0])) + (Number(p[1]) + 1);
   },
 
+  /**
+   * A cell label ("C5") as [x, y], or null.
+   * @param {unknown} s
+   * @returns {[number, number] | null}
+   */
   bsParseCell(s) {
     const m = /^([a-j])(10|[1-9])$/.exec(String(s || "").toLowerCase().trim());
     if (!m) return null;
     return [m[1].charCodeAt(0) - 97, Number(m[2]) - 1];
   },
 
+  /** @param {BsSt} st */
   bsFleetSizes(st) { return (st && st.fleet_sizes) || [5, 4, 3, 3, 2]; },
 
   // An FFA shot "Name:Cell" -> { target, cellPart }, or null. Every colon
   // is a candidate split, so a captain whose name holds a colon (older
   // names could) is still reachable; a split whose remainder parses as a
   // cell wins.
+  /**
+   * @param {BsSt} st
+   * @param {string} entry
+   */
   bsTargetOf(st, entry) {
-    /** @type {{ target: any, cellPart: string } | null} */
+    /** @type {{ target: BsCaptain, cellPart: string } | null} */
     let best = null;
     for (let ci = entry.indexOf(":"); ci >= 0; ci = entry.indexOf(":", ci + 1)) {
       const tName = entry.slice(0, ci).trim().toLowerCase();
@@ -67,6 +129,7 @@ export const BattleshipMethods = {
   // row from column A, in fleet order. (The hardcoded classic example
   // named five ships and a cell off the 8x8 skirmish board, so copying
   // it there failed with a 400 - games review, 2026-11-12.)
+  /** @param {BsSt} st */
   bsExample(st) {
     return this.bsFleetSizes(st).map((s, i) => "A" + (2 * i + 1) + "H").join(",");
   },
@@ -74,12 +137,18 @@ export const BattleshipMethods = {
   // A placement is one entry per ship in fleet order (5, 4, 3, 3, 2 on
   // the classic board; 4, 3, 3, 2 on the 8x8 skirmish), each a start
   // cell plus H or V: "A1H,C3V,E5H,G7V,I9H".
+  /**
+   * @param {unknown} spec the placement, as sent
+   * @param {BsSt} st
+   */
   bsPlacement(spec, st) {
     const sizes = this.bsFleetSizes(st);
     const bw = (st && st.w) || 10, bh = (st && st.h) || 10;
     const parts = String(spec || "").split(",").map((s) => s.trim()).filter(Boolean);
     if (parts.length !== sizes.length) return { error: "place all " + sizes.length + " ships, in fleet order (" + sizes.join(", ") + "): e.g. " + this.bsExample(st) + " - or answer random" };
+    /** @type {Record<string, boolean>} */
     const used = {};
+    /** @type {BsShip[]} */
     const fleet = [];
     for (let i = 0; i < sizes.length; i++) {
       const m = /^([a-j](?:10|[1-9]))([hv])$/.exec(parts[i].toLowerCase());
@@ -100,11 +169,17 @@ export const BattleshipMethods = {
     return { fleet: fleet };
   },
 
+  /**
+   * @param {BsSt} st
+   * @returns {BsShip[]}
+   */
   bsRandomFleet(st) {
     const sizes = this.bsFleetSizes(st);
     const bw = (st && st.w) || 10, bh = (st && st.h) || 10;
     for (let attempt = 0; attempt < 200; attempt++) {
+      /** @type {Record<string, boolean>} */
       const used = {};
+      /** @type {BsShip[]} */
       const fleet = [];
       let ok = true;
       for (const size of sizes) {
@@ -127,15 +202,21 @@ export const BattleshipMethods = {
     }
     // Practically unreachable with these fleets; a fixed open layout
     // (one ship per odd row, from column A) beats no fleet at all.
-    return this.bsPlacement(sizes.map((s, i) => "A" + (1 + i * 2) + "H").join(","), st).fleet;
+    // (the fixed layout always fits, so it parses)
+    return /** @type {BsShip[]} */ (this.bsPlacement(sizes.map((s, i) => "A" + (1 + i * 2) + "H").join(","), st).fleet);
   },
 
+  /**
+   * @param {BsCaptain} player
+   * @param {string} key
+   */
   bsShipAt(player, key) {
     if (!player.fleet) return null;
     for (const ship of player.fleet) if (ship.cells.indexOf(key) >= 0) return ship;
     return null;
   },
 
+  /** @param {BsCaptain | null | undefined} player */
   bsAfloat(player) {
     if (!player || !player.fleet) return 0;
     return player.fleet.filter((s) => s.hits.length < s.size).length;
@@ -143,14 +224,22 @@ export const BattleshipMethods = {
 
   // Free-for-all helpers (2026-11-17). A match is FFA when it seats
   // more than two captains; everything else is the original game.
+  /** @param {BsSt} st */
   bsFfa(st) { return !!st && (st.players || []).length > 2; },
 
+  /** @param {BsSt} st */
   bsLiving(st) { return (st.players || []).filter((p) => !p.eliminated); },
 
   // The shot map a player keeps against a target: in the
   // two-player game there is one map (player.shots); in FFA each
   // target has its own (player.shots_by[target]), because the same
   // cell fired at two different boards is two different shots.
+  /**
+   * @param {BsSt} st
+   * @param {BsCaptain} player
+   * @param {string} targetName
+   * @returns {BsShotMap}
+   */
   bsShotMap(st, player, targetName) {
     if (!this.bsFfa(st)) { if (!player.shots) player.shots = {}; return player.shots; }
     if (!player.shots_by) player.shots_by = {};
@@ -160,19 +249,29 @@ export const BattleshipMethods = {
 
   // Every shot a player has fired, as {target, key, result} - the
   // per-player totals the summary reports.
+  /**
+   * @param {BsSt} st
+   * @param {BsCaptain} player
+   */
   bsAllShots(st, player) {
+    /** @type {Array<{ target: string | null, key: string, result: BattleshipShotResult }>} */
     const out = [];
     if (!this.bsFfa(st)) {
       const foe = (st.players || []).find((p) => p.name !== player.name);
       for (const k of Object.keys(player.shots || {})) out.push({ target: foe ? foe.name : null, key: k, result: player.shots[k] });
       return out;
     }
-    for (const t of Object.keys(player.shots_by || {})) for (const k of Object.keys(player.shots_by[t])) out.push({ target: t, key: k, result: player.shots_by[t][k] });
+    // (a free-for-all captain has shots_by: createBattleship)
+    for (const t of Object.keys(player.shots_by || {})) for (const k of Object.keys(/** @type {Record<string, BsShotMap>} */ (player.shots_by)[t])) out.push({ target: t, key: k, result: /** @type {Record<string, BsShotMap>} */ (player.shots_by)[t][k] });
     return out;
   },
 
   // The next living captain in seat order after a given name
   // (wrapping around), or null when nobody else is afloat.
+  /**
+   * @param {BsSt} st
+   * @param {string} afterName
+   */
   bsNextLiving(st, afterName) {
     const ps = st.players || [];
     const i = ps.findIndex((p) => p.name === afterName);
@@ -187,6 +286,10 @@ export const BattleshipMethods = {
   // the one rival's fleet, as always. FFA: a sinking belongs to the
   // captain whose shell finished the ship (ship.sunk_by, stamped in
   // bsApplyShot) - a hull in FFA waters can take fire from everyone.
+  /**
+   * @param {BsGame} g
+   * @param {string} name
+   */
   bsSunkBy(g, name) {
     if (!this.bsFfa(g.st)) {
       const opp = g.st.players.find((p) => p.name !== name);
@@ -208,6 +311,7 @@ export const BattleshipMethods = {
   // turns the referee names a
   // row or column of the waters the shooter is hunting that holds an
   // un-hit hull cell of the last ship - the hunt stays a deduction.
+  /** @param {BsSt} st */
   bsBeginTurn(st) {
     const shooter = st.players.find((p) => p.name === st.turn_of);
     st.salvo_left = st.variant === "salvo" && shooter ? this.bsAfloat(shooter) : null;
@@ -218,8 +322,9 @@ export const BattleshipMethods = {
     // first shooter was fixed, that meant only players[1] ever got a
     // ping (games review, 2026-11-12).
     if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || Math.ceil(st.turn / 2) % 3 !== 0) return;
-    const opp = st.players.find((p) => p.name !== shooter.name);
-    const ship = opp.fleet.find((s) => s.hits.length < s.size);
+    // two captains, both placed (the play phase)
+    const opp = /** @type {BsCaptain} */ (st.players.find((p) => p.name !== shooter.name));
+    const ship = /** @type {BsShip[]} */ (opp.fleet).find((s) => s.hits.length < s.size);
     if (!ship) return;
     const open = ship.cells.filter((c) => ship.hits.indexOf(c) < 0).map((c) => c.split(",").map(Number));
     if (!open.length) return;
@@ -247,6 +352,10 @@ export const BattleshipMethods = {
   // target of this rule, and when every rival is down to one ship
   // there is no leader to hunt and no ping. The cadence counts the
   // shooter's own turns (st.own_turns), like the two-player rule.
+  /**
+   * @param {BsSt} st
+   * @param {BsCaptain | undefined} shooter
+   */
   bsBeginTurnFfa(st, shooter) {
     if (!shooter || shooter.eliminated) return;
     if (!st.own_turns) st.own_turns = {};
@@ -254,7 +363,7 @@ export const BattleshipMethods = {
     const living = this.bsLiving(st);
     if (!living.some((p) => this.bsAfloat(p) === 1)) return;
     if (st.own_turns[shooter.name] % 6 !== 0) return;
-    /** @type {any} a player from the (untyped) match state */
+    /** @type {BsCaptain | null} */
     let leader = null;
     for (const p of living) {
       if (p.name === shooter.name) continue;
@@ -267,7 +376,7 @@ export const BattleshipMethods = {
     // fleet (the two-player rule reads the last ship; here the hunt
     // is the fleet's shape, not one hull's).
     const open = [];
-    for (const s of leader.fleet) for (const c of s.cells) if (s.hits.indexOf(c) < 0) open.push(c.split(",").map(Number));
+    for (const s of /** @type {BsShip[]} a leader has ships afloat */ (leader.fleet)) for (const c of s.cells) if (s.hits.indexOf(c) < 0) open.push(c.split(",").map(Number));
     if (!open.length) return;
     const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
     const useRow = Math.random() < 0.5;
@@ -281,9 +390,14 @@ export const BattleshipMethods = {
   // captain has taken (the rival's own shot record, already public in
   // the counts) and the ships that are already sunk. Un-hit fleet
   // cells never leave the server - this is the spectator's board.
+  /**
+   * @param {BsGame} g
+   * @returns {import("@chat/contract").BattleshipBoard[]}
+   */
   bsPublicBoards(g) {
     const st = g.st;
     return st.players.map((p) => {
+      /** @type {BsShotMap} */
       const incoming = {};
       for (const q of st.players) {
         if (q.name === p.name) continue;
@@ -296,7 +410,10 @@ export const BattleshipMethods = {
     });
   },
 
-  /** @returns {import("@chat/contract").BattleshipState} */
+  /**
+   * @param {BsGame} g
+   * @returns {import("@chat/contract").BattleshipState}
+   */
   battleshipSummary(g) {
     const st = g.st;
     return {
@@ -314,18 +431,23 @@ export const BattleshipMethods = {
     };
   },
 
-  /** @returns {import("@chat/contract").BattleshipState} */
+  /**
+   * @param {BsGame} g
+   * @param {string | null | undefined} who the viewer
+   * @returns {import("@chat/contract").BattleshipState}
+   */
   battleshipStateFull(g, who) {
     const out = this.battleshipSummary(g);
     const st = g.st;
     const ffa = this.bsFfa(st);
     out.log = st.log.slice(-220);
     out.shots = st.shots || [];
-    out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of];
+    out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [/** @type {string} */ (st.turn_of)]; // set in play
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) { out.you = { playing: false }; return out; }
     const opp = st.players.find((p) => p.name !== me.name);
+    /** @type {import("@chat/contract").BattleshipYou & Required<Pick<import("@chat/contract").BattleshipYou, "shots" | "incoming" | "sunk_ships">>} */
     const you = {
       playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, phase: g.status === "running" ? st.phase : null,
       your_turn: g.status === "running" && st.phase === "play" && st.turn_of === me.name,
@@ -340,6 +462,7 @@ export const BattleshipMethods = {
       // seen sink, and how much of their fleet still floats.
       you.targets = st.players.filter((p) => p.name !== me.name).map((t) => {
         const map = (me.shots_by || {})[t.name] || {};
+        /** @type {BsShotMap} */
         const shots = {};
         for (const k of Object.keys(map)) shots[this.bsLabel(k)] = map[k];
         const sunkShips = [];
@@ -378,6 +501,12 @@ export const BattleshipMethods = {
     return out;
   },
 
+  /**
+   * @param {string} creator
+   * @param {unknown[]} playersIn
+   * @param {Record<string, any>} opts the create's options (variant, tick_seconds, lobby_seconds)
+   * @param {string} room
+   */
   async createBattleship(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "battleship needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
@@ -394,7 +523,7 @@ export const BattleshipMethods = {
     // fires one shot per ship the shooter still has afloat, each turn;
     // skirmish compresses the loop onto an 8x8 board with a 4,3,3,2
     // fleet. Classic is the 10x10 game the room knows.
-    const variant = ["salvo", "skirmish"].indexOf(String((opts && opts.variant) || "").toLowerCase()) >= 0 ? String(opts.variant).toLowerCase() : "classic";
+    const variant = /** @type {"classic" | "salvo" | "skirmish"} one of the list */ (["salvo", "skirmish"].indexOf(String((opts && opts.variant) || "").toLowerCase()) >= 0 ? String(opts.variant).toLowerCase() : "classic");
     // Skirmish is the compressed two-captain duel; a free-for-all
     // plays the full board (classic or salvo).
     if (ffa && variant === "skirmish") return { status: 400, error: "skirmish is a two-captain variant - a free-for-all (3+ players) plays classic or salvo" };
@@ -402,10 +531,12 @@ export const BattleshipMethods = {
     const fleetSizes = variant === "skirmish" ? [4, 3, 3, 2] : [5, 4, 3, 3, 2];
     const colors = this.gameColors();
     const players = names.map((n, i) => {
+      /** @type {BsCaptain} */
       const p = { name: n, color: colors[i].color, hex: colors[i].hex, fleet: null, shots: {}, eliminated: false };
       if (ffa) p.shots_by = {};
       return p;
     });
+    /** @type {BsSt} */
     const st = {
       type: "battleship", w: bw, h: bw, fleet_sizes: fleetSizes, variant: variant, salvo_left: null, sonar: null, tick_seconds: turnSeconds, turn: 0, phase: "setup", turn_of: null,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
@@ -433,9 +564,16 @@ export const BattleshipMethods = {
   // because the narrative log trims past 240 entries and had no times
   // at all, so match length and turn latency were unmeasurable
   // (games review, 2026-11-12).
+  /**
+   * @param {BsSt} st
+   * @param {BsCaptain} me the shooter
+   * @param {BsCaptain} opp whose waters the shot lands in
+   * @param {string} key the cell's board key
+   */
   bsApplyShot(st, me, opp, key) {
     const ship = this.bsShipAt(opp, key);
     const map = this.bsShotMap(st, me, opp.name);
+    /** @type {number | null} the size of the ship this shot sinks */
     let sunkSize = null;
     if (ship) {
       map[key] = "hit";
@@ -446,7 +584,7 @@ export const BattleshipMethods = {
     }
     const at = this.bsFfa(st) ? " at " + opp.name : "";
     const note = sunkSize
-      ? me.name + " fires " + this.bsLabel(key) + at + " - hit, and " + opp.name + "'s " + ship.size + "-ship is sunk."
+      ? me.name + " fires " + this.bsLabel(key) + at + " - hit, and " + opp.name + "'s " + /** @type {BsShip} sunkSize is set only for a ship */ (ship).size + "-ship is sunk."
       : me.name + " fires " + this.bsLabel(key) + at + " - " + (ship ? "hit." : "miss.");
     st.last_move = { by: me.name, target: opp.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize, turn: st.turn };
     st.log.push({ tick: st.turn, text: note, by: me.name, target: opp.name, cell: this.bsLabel(key), result: ship ? "hit" : "miss", sunk: sunkSize });
@@ -459,11 +597,18 @@ export const BattleshipMethods = {
   // "random"); in play, it carries the shot ("C5", "fire: C5") - or,
   // in a salvo match, the whole volley as a comma list ("C5,D6,E7").
   // Each shot resolves the moment it lands - there is nothing to queue.
+  /**
+   * @param {BsGame} g
+   * @param {string} who
+   * @param {unknown} raw the placement or the shot(s), as sent
+   * @param {string} room
+   */
   async battleshipMove(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
-    const opp = st.players.find((p) => p.name !== me.name);
+    // every match seats two or more, so there is always another captain
+    const opp = /** @type {BsCaptain} */ (st.players.find((p) => p.name !== me.name));
     const s = String(raw || "").trim().toLowerCase();
     if (st.phase === "setup") {
       if (me.fleet) return { status: 409, error: "Your fleet is already placed" };
@@ -479,7 +624,7 @@ export const BattleshipMethods = {
         if (r.error) return { status: 400, error: r.error, legal_moves: ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"] };
         fleet = r.fleet;
       }
-      me.fleet = fleet;
+      me.fleet = /** @type {BsShip[]} */ (fleet); // random, or a placement that parsed
       st.log.push({ tick: st.turn, text: me.name + " has placed their fleet." });
       let resolved = false;
       if (st.players.every((p) => p.fleet)) {
@@ -522,7 +667,9 @@ export const BattleshipMethods = {
     if (cells.length > 1 && st.variant !== "salvo") return { status: 400, error: "One shot per call in " + (st.variant || "classic") + " - a comma list is a salvo volley (variant salvo only)", legal_moves: openHint };
     const salvoLeft = st.variant === "salvo" ? (st.salvo_left == null ? this.bsAfloat(me) : st.salvo_left) : 1;
     if (cells.length > salvoLeft) return { status: 400, error: cells.length + " shots in one call - you have " + salvoLeft + " left this turn", legal_moves: openHint };
+    /** @type {Array<{ opp: BsCaptain, key: string }>} */
     const entries = [];
+    /** @type {Record<string, boolean>} */
     const seen = {};
     for (const c of cells) {
       let target = opp, cellPart = c;
@@ -626,6 +773,10 @@ export const BattleshipMethods = {
   // player who is actually at the table. Catch-up anchors each new
   // deadline to the expired one, like Light Cycles, so a long sleep
   // burns the turns it slept through rather than restarting them.
+  /**
+   * @param {BsGame | null} g
+   * @param {string} room
+   */
   advanceBattleship(g, room) {
     if (!g || g.status !== "running") return;
     const st = g.st;
@@ -693,6 +844,7 @@ export const BattleshipMethods = {
     }
   },
 
+  /** @param {BsGame} g */
   battleshipResultText(g) {
     if (g.st.players.length > 2) {
       // Free-for-all: name the winner, the elimination order,
@@ -703,33 +855,34 @@ export const BattleshipMethods = {
       return "Battleship free-for-all #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea, the last fleet floating." : "no winner; the whole table abandoned the sea.") + (order.length ? " Elimination order: " + order.join(", ") + "." : "") + " Ships sunk: " + sunkRows + ". Hits: " + hitRows + ".";
     }
     const ba = g.st.players[0], bb = g.st.players[1];
-    const hitsOf = (p) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
+    const hitsOf = (/** @type {BsCaptain} */ p) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
     return "Battleship match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea over " + (g.st.winner === ba.name ? bb.name : ba.name) + "." : "no winner.") + " Ships sunk: " + ba.name + " " + this.bsSunkBy(g, ba.name) + ", " + bb.name + " " + this.bsSunkBy(g, bb.name) + ". Hits: " + ba.name + " " + hitsOf(ba) + ", " + bb.name + " " + hitsOf(bb) + ".";
   },
 };
 
+/** @satisfies {GameEngine} */
 export const battleshipEngine = {
   name: "Battleship",
   turnWord: "turn",
-  logTick: (st) => st.turn,
-  clockSeconds: (st) => st.tick_seconds,
+  logTick: (/** @type {BsSt} */ st) => st.turn,
+  clockSeconds: (/** @type {BsSt} */ st) => st.tick_seconds,
   create: (room, creator, players, opts, roomName) => room.createBattleship(creator, players, opts, roomName),
   summary: (room, g) => room.battleshipSummary(g),
   full: (room, g, who) => room.battleshipStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.battleshipMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.advanceBattleship(g, roomName),
-  targets: (pub) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
-  card: (g) => ({ id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }),
-  stateItem: (r, st) => ({ id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
+  targets: (/** @type {import("@chat/contract").BattleshipState} */ pub) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
+  card: (/** @type {BsGame} */ g) => ({ id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }),
+  stateItem: (r, /** @type {BsSt} */ st) => ({ id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,
   moveHint: (gm, me) =>
     gm.phase === "setup"
-      ? "<place: " + (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>"
+      ? "<place: " + /** @type {number[]} the stateItem's fleet_sizes */ (gm.fleet_sizes || [5, 4, 3, 3, 2]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>"
       : gm.players && gm.players.length > 2
         ? "<fire: " + ((gm.players.filter((p) => p.alive && p.name.toLowerCase() !== String(me).toLowerCase())[0] || {}).name || "Rex") + ":C5>"
         : "<fire: C5>",
   result: (room, g) => room.battleshipResultText(g),
-  rules: (st) => {
+  rules: (/** @type {BsSt} */ st) => {
     const sizes = st.fleet_sizes || [5, 4, 3, 3, 2];
     const ffa = (st.players || []).length > 2;
     const eg = sizes.map((s, i) => String.fromCharCode(65 + 2 * i) + (2 * i + 1) + (i % 2 ? "V" : "H")).join(",");

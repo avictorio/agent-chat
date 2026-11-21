@@ -3,6 +3,47 @@
 import CR_WORDS_TXT from "../data/coderace-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 /** @typedef {import("../room/games.js").GameRow} GameRow */
+/** @typedef {import("./engine.js").GameEngine} GameEngine */
+/** @typedef {import("@chat/contract").CodeRaceFeedback} CodeRaceFeedback */
+/** A racer's seat. @typedef {{ name: string, color: string, hex: string }} CrSeat */
+/** A racer's progress: the round they cracked it in and when, out (three
+ *  missed rounds in a row), missed rounds in a row, guesses sent, marks
+ *  across them and their closest guess (crScore).
+ *  @typedef {{ solved: number | null, solved_at: number | null, out: boolean, missed: number, guesses: number, marks: number, best: number }} CrProg */
+/** A resolved round as stored: each guess keeps its word as g (crStateFull
+ *  renames it guess, for whoever may see it).
+ *  @typedef {Omit<import("@chat/contract").CodeRaceRound, "guesses"> & { guesses: Record<string, { g: string, fb: CodeRaceFeedback, at: number }> }} CrRound */
+/** Code Race's stored match state (g.st; the API's CodeRaceState is built
+ *  from it), but for mode and colors (CrSt). secret is the word, or the
+ *  code's key letters ("RGBY"). pending holds each racer's guess for the
+ *  round and pending_at when it came in (roundsCommit in room/games.js).
+ *  @typedef {{
+ *    type: "coderace",
+ *    length: number,
+ *    max_rounds: number,
+ *    round_seconds: number,
+ *    round: number,
+ *    secret: string,
+ *    deadline: number | null,
+ *    lobby_deadline: number,
+ *    accepted: Record<string, boolean>,
+ *    players: CrSeat[],
+ *    prog: Record<string, CrProg>,
+ *    rounds: CrRound[],
+ *    pending: Record<string, string>,
+ *    pending_at: Record<string, number>,
+ *    places: string[] | null,
+ *    log: import("@chat/contract").GameLogLine[],
+ *    winner: string | null,
+ *    announced: boolean,
+ *    declined_by?: string,
+ *    ended?: number,
+ *  }} CrStBase */
+/** Code Race's stored match state: colors (how many colours a code is
+ *  drawn from) is set in colors mode only.
+ *  @typedef {CrStBase & ({ mode: "words", colors: null } | { mode: "colors", colors: number })} CrSt */
+/** A Code Race match: its gm row with the state typed.
+ *  @typedef {Omit<GameRow, "st"> & { st: CrSt }} CrGame */
 
 // Code Race: the colours a code is drawn from (the first `colors` of
 // them), and a sample word per length for hints.
@@ -11,6 +52,7 @@ export const CR_PALETTE = [
   { k: "Y", name: "yellow", hex: "#facc15" }, { k: "O", name: "orange", hex: "#f97316" }, { k: "P", name: "purple", hex: "#a855f7" },
   { k: "C", name: "cyan", hex: "#22d3ee" }, { k: "W", name: "white", hex: "#f1f5f9" },
 ];
+/** @type {Record<number, string>} */
 export const CR_EXAMPLE = { 4: "lamp", 5: "crane", 6: "planet" };
 
 // The word lists (content as data, worker/data/coderace-words.txt), parsed
@@ -40,6 +82,10 @@ export function crWords() {
 export const CodeRaceMethods = {
   // A Code Race's secret, set by the API suite so a race can be solved
   // on purpose (TEST_HOOKS only, like the other setTest* hooks).
+  /**
+   * @param {number} id
+   * @param {unknown} secret
+   */
   setTestCrSecret(id, secret) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
     const g = this.gameRow(id);
@@ -69,10 +115,18 @@ export const CodeRaceMethods = {
      cracked it, then most marks across their guesses (pegs, or greens),
      then the earliest solving guess; then the rest by their closest
      guess, dropped racers last. Nobody cracking it means no winner. */
+  /** @param {CrSt} st */
   crActive(st) {
     return st.players.filter((p) => { const pr = st.prog[p.name]; return !pr.solved && !pr.out; });
   },
 
+  /**
+   * A move's guess (the word, or the code's key letters), or the error to
+   * answer with.
+   * @param {CrSt} st
+   * @param {unknown} raw the guess, as sent
+   * @returns {string | { error: string }}
+   */
   crParse(st, raw) {
     const s = String(raw || "").trim().toLowerCase().replace(/^(guess|try)\s*:?\s*/, "");
     if (st.mode === "words") {
@@ -84,6 +138,7 @@ export const CodeRaceMethods = {
     }
     const pal = CR_PALETTE.slice(0, st.colors);
     if (s === "random") return Array.from({ length: st.length }, () => pal[Math.floor(Math.random() * pal.length)].k).join("");
+    /** @type {Record<string, string>} */
     const byName = {};
     pal.forEach((c) => { byName[c.name] = c.k; byName[c.k.toLowerCase()] = c.k; });
     let toks = s.split(/[^a-z]+/).filter(Boolean);
@@ -97,11 +152,16 @@ export const CodeRaceMethods = {
   },
 
   // Colors: [black, white]. Words: "GY..G".
-  /** @returns {import("@chat/contract").CodeRaceFeedback} */
+  /**
+   * @param {CrSt} st
+   * @param {string} guess
+   * @returns {CodeRaceFeedback}
+   */
   crFeedback(st, guess) {
     const sec = st.secret;
     if (st.mode === "words") {
       const out = Array(sec.length).fill(".");
+      /** @type {Record<string, number>} */
       const left = {};
       for (let i = 0; i < sec.length; i++) {
         if (guess[i] === sec[i]) out[i] = "G";
@@ -113,7 +173,8 @@ export const CodeRaceMethods = {
       return out.join("");
     }
     let black = 0;
-    const cs = {}, cg = {};
+    /** @type {Record<string, number>} */
+    const cs = {}, /** @type {Record<string, number>} */ cg = {};
     for (let i = 0; i < sec.length; i++) {
       if (guess[i] === sec[i]) black++;
       cs[sec[i]] = (cs[sec[i]] || 0) + 1;
@@ -124,20 +185,34 @@ export const CodeRaceMethods = {
     return [black, both - black];
   },
 
+  /**
+   * @param {CrSt} st
+   * @param {CodeRaceFeedback} fb
+   */
   crCracked(st, fb) {
     return st.mode === "words" ? fb === "G".repeat(st.length) : fb[0] === st.length;
   },
   // a guess's closeness (for the unsolved order) and its marks (for the
   // solvers' tie-break): pegs, or greens then yellows
+  // (fb is the marks string in words mode, the [black, white] pair in colors)
+  /**
+   * @param {CrSt} st
+   * @param {CodeRaceFeedback} fb
+   */
   crScore(st, fb) {
-    if (st.mode === "words") { const gr = fb.split("G").length - 1; const ye = fb.split("Y").length - 1; return { close: gr * 10 + ye, marks: gr }; }
-    return { close: fb[0] * 10 + fb[1], marks: fb[0] + fb[1] };
+    if (st.mode === "words") { const gr = /** @type {string} */ (fb).split("G").length - 1; const ye = /** @type {string} */ (fb).split("Y").length - 1; return { close: gr * 10 + ye, marks: gr }; }
+    return { close: /** @type {[number, number]} */ (fb)[0] * 10 + /** @type {[number, number]} */ (fb)[1], marks: /** @type {[number, number]} */ (fb)[0] + /** @type {[number, number]} */ (fb)[1] };
   },
 
+  /**
+   * @param {CrSt} st
+   * @param {string} guess
+   */
   crShow(st, guess) {
     return st.mode === "words" ? String(guess).toUpperCase() : String(guess).split("").join(" ");
   },
 
+  /** @param {CrSt} st */
   crPlaces(st) {
     const rows = st.players.map((p) => ({ name: p.name, pr: st.prog[p.name] }));
     rows.sort((a, b) => {
@@ -153,13 +228,17 @@ export const CodeRaceMethods = {
 
   // The places are settled when the race ends; the winner is the first
   // place only if they cracked it.
+  /** @param {CrSt} st */
   crStanding(st) {
     st.places = this.crPlaces(st);
     const top = st.places[0];
     return top && st.prog[top].solved ? top : null;
   },
 
-  /** @returns {import("@chat/contract").CodeRaceState} */
+  /**
+   * @param {CrGame} g
+   * @returns {import("@chat/contract").CodeRaceState}
+   */
   crSummary(g) {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
@@ -181,13 +260,18 @@ export const CodeRaceMethods = {
 
   // Rounds as this viewer may see them: your own guesses in full, a
   // rival's only as feedback while the race runs; everything once over.
-  /** @returns {import("@chat/contract").CodeRaceState} */
+  /**
+   * @param {CrGame} g
+   * @param {string | null | undefined} who the viewer
+   * @returns {import("@chat/contract").CodeRaceState}
+   */
   crStateFull(g, who) {
     const out = this.crSummary(g);
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     const open = g.status !== "running" && g.status !== "lobby";
     out.rounds = st.rounds.map((r) => {
+      /** @type {Record<string, import("@chat/contract").CodeRaceGuess>} */
       const gs = {};
       for (const name in r.guesses) {
         const x = r.guesses[name];
@@ -210,6 +294,12 @@ export const CodeRaceMethods = {
     return out;
   },
 
+  /**
+   * @param {string} creator
+   * @param {unknown[]} playersIn
+   * @param {Record<string, any>} opts the create's options (mode, length, colors, max_rounds, tick_seconds, lobby_seconds)
+   * @param {string} room
+   */
   async createCodeRace(creator, playersIn, opts, room) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Code Race needs 2 to 6 players" };
     const modeIn = String(opts.mode || "colors").toLowerCase();
@@ -218,7 +308,7 @@ export const CodeRaceMethods = {
     if (resolved.error) return resolved;
     const names = /** @type {string[]} */ (resolved.names); // gamePlayers sets names whenever it sets no error
     const words = modeIn === "words";
-    const clamp = (v, lo, hi, def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
+    const clamp = (/** @type {unknown} */ v, /** @type {number} */ lo, /** @type {number} */ hi, /** @type {number} */ def) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const length = words ? clamp(opts.length, 4, 6, 5) : clamp(opts.length, 3, 6, 4);
     const ncolors = words ? null : clamp(opts.colors, 4, CR_PALETTE.length, 6);
     const maxRounds = words ? clamp(opts.max_rounds, 4, 12, 6) : clamp(opts.max_rounds, 4, 16, 10);
@@ -227,12 +317,15 @@ export const CodeRaceMethods = {
     if (words) {
       const list = crWords()[length].answers;
       secret = list[Math.floor(Math.random() * list.length)];
-    } else secret = Array.from({ length: length }, () => CR_PALETTE[Math.floor(Math.random() * ncolors)].k).join("");
+    } else secret = Array.from({ length: length }, () => CR_PALETTE[Math.floor(Math.random() * /** @type {number} */ (ncolors))].k).join(""); // colors mode: ncolors is set
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
+    /** @type {Record<string, CrProg>} */
     const prog = {};
     for (const n of names) prog[n] = { solved: null, solved_at: null, out: false, missed: 0, guesses: 0, marks: 0, best: 0 };
     const what = words ? "the same secret " + length + "-letter word" : "the same secret code: " + length + " pegs from " + ncolors + " colours";
+    // a CrSt: ncolors is null exactly in words mode
+    /** @type {CrStBase & { mode: CrSt["mode"], colors: number | null }} */
     const st = {
       type: "coderace", mode: words ? "words" : "colors", length: length, colors: ncolors, max_rounds: maxRounds, round_seconds: roundSeconds, round: 1, secret: secret,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players, prog: prog,
@@ -253,6 +346,12 @@ export const CodeRaceMethods = {
     return { status: 201, game: this.crStateFull(g, creator) };
   },
 
+  /**
+   * @param {CrGame} g
+   * @param {string} who
+   * @param {unknown} raw the guess, as sent
+   * @param {string} room
+   */
   async crMove(g, who, raw, room) {
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
@@ -260,19 +359,19 @@ export const CodeRaceMethods = {
     const pr = st.prog[me.name];
     if (pr.solved) return { status: 400, error: "You cracked it in round " + pr.solved + " - the race goes on without you now" };
     if (pr.out) return { status: 400, error: "You are out of this race (three missed rounds in a row)" };
-    const guess = /** @type {any} */ (this.crParse(st, raw)); // the code, or { error }
+    const guess = /** @type {(string & { error?: undefined }) | { error: string }} */ (this.crParse(st, raw)); // the code, or { error } (a string has no error)
     if (guess.error) return { status: 400, error: guess.error, legal_moves: st.mode === "words" ? [CR_EXAMPLE[st.length]] : [CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" "), "random"] };
     const resolved = this.roundsCommit(g, who, guess, room);
     await this.armGameAlarm();
     return { status: 200, game: this.crStateFull(g, who), resolved: resolved };
   },
 
+  /** @param {CrGame} g */
   crResolveRound(g) {
     const st = g.st;
     const n = st.round;
     const at = Date.now();
-    /** The round as stored: each guess keeps its word as g (crStateFull renames it guess, for whoever may see it).
-     *  @type {Omit<import("@chat/contract").CodeRaceRound, "guesses"> & { guesses: Record<string, { g: string, fb: import("@chat/contract").CodeRaceFeedback, at: number }> }} */
+    /** @type {CrRound} */
     const entry = { n: n, at: at, guesses: {}, solved: [], missed: [], dropped: [] };
     for (const p of this.crActive(st)) {
       const pr = st.prog[p.name];
@@ -314,6 +413,7 @@ export const CodeRaceMethods = {
     }
   },
 
+  /** @param {CrGame} g */
   crResultText(g) {
     const st = g.st;
     if (!st.places) st.places = this.crPlaces(st);
@@ -328,11 +428,12 @@ export const CodeRaceMethods = {
   },
 };
 
+/** @satisfies {GameEngine} */
 export const coderaceEngine = {
   name: "Code Race",
   turnWord: "round",
-  logTick: (st) => st.round,
-  clockSeconds: (st) => st.round_seconds,
+  logTick: (/** @type {CrSt} */ st) => st.round,
+  clockSeconds: (/** @type {CrSt} */ st) => st.round_seconds,
   create: (room, creator, players, opts, roomName) => room.createCodeRace(creator, players, opts, roomName),
   summary: (room, g) => room.crSummary(g),
   full: (room, g, who) => room.crStateFull(g, who),
@@ -340,15 +441,15 @@ export const coderaceEngine = {
   advance: (room, g, roomName) => room.roundsAdvance(g, roomName),
   // the simultaneous-rounds hooks: a round waits only on racers still racing
   resolveRound: (room, g) => room.crResolveRound(g),
-  standing: (room, st) => room.crStanding(st),
-  active: (room, st) => room.crActive(st),
-  targets: (pub) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
-  card: (g) => ({ id: g.id, type: "coderace", status: g.status, round: g.st.round, max_rounds: g.st.max_rounds, mode: g.st.mode, length: g.st.length, colors: g.st.colors, winner: g.st.winner || null, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0 }; }) }),
-  stateItem: (r, st) => ({ id: r.id, type: "coderace", status: r.status, round: st.round, mode: st.mode, length: st.length, colors: st.colors, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.solved || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
+  standing: (room, /** @type {CrSt} */ st) => room.crStanding(st),
+  active: (room, /** @type {CrSt} */ st) => room.crActive(st),
+  targets: (/** @type {import("@chat/contract").CodeRaceState} */ pub) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
+  card: (/** @type {CrGame} */ g) => ({ id: g.id, type: "coderace", status: g.status, round: g.st.round, max_rounds: g.st.max_rounds, mode: g.st.mode, length: g.st.length, colors: g.st.colors, winner: g.st.winner || null, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0 }; }) }),
+  stateItem: (r, /** @type {CrSt} */ st) => ({ id: r.id, type: "coderace", status: r.status, round: st.round, mode: st.mode, length: st.length, colors: st.colors, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.solved || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,
   moveHint: (gm) => (gm.mode === "words" ? "<a " + (gm.length || 5) + "-letter word, e.g. " + CR_EXAMPLE[gm.length || 5] + ">" : "<" + (gm.length || 4) + " colours from " + CR_PALETTE.slice(0, gm.colors || 6).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, gm.length || 4).map((c) => c.k).join(" ") + ">"),
   result: (room, g) => room.crResultText(g),
-  rules: (st) =>
+  rules: (/** @type {CrSt} */ st) =>
     (st.mode === "words"
       ? "Code Race (Words): every racer cracks the same secret " + st.length + "-letter word. A guess must be a word from the list; each letter scores G (right letter, right place), Y (in the word, elsewhere) or . (not in it), and a repeated letter counts only as often as the word holds it. "
       : "Code Race (Colors): every racer cracks the same secret code of " + st.length + " pegs from " + st.colors + " colours (" + CR_PALETTE.slice(0, st.colors).map((c) => c.k + " " + c.name).join(", ") + "), repeats allowed. Each guess scores black pegs (right colour, right place) and white pegs (right colour, wrong place): fb is [black, white]. ") +
