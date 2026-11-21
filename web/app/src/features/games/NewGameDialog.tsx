@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useFeed, useMembers, useSession } from "../room/ctx";
-import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./shared/catalog";
+import { CATALOG, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialOpts, type GameDef, type Opts } from "./shared/catalog";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 
@@ -131,7 +131,7 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
           </div>
           <p className="ng-sub">Pick a game. You'll choose the players next.</p>
           <div className="ng-gallery">
-            {GAMES.map((g) => (
+            {CATALOG.map((g) => (
               <button type="button" key={g.id} className="ng-game" data-game={g.id} style={accentStyle(g)} onClick={() => choose(g)}>
                 <span className="ng-game-ic">
                   <GameIcon def={g} />

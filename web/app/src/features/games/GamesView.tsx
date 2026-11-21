@@ -4,7 +4,7 @@ import { useFeed, useSession } from "../room/ctx";
 import { finalScore, formatLeft, type GL } from "./shared/render";
 import { chimeMuted, setChimeMuted } from "./shared/chime";
 import { pressable } from "../../lib/index";
-import { GAMES, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
+import { CATALOG, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
 import { Button } from "../../ui/Button";
 
 // Standings with motion, from the finished list (newest first): each
@@ -15,7 +15,7 @@ function standingsMotion(games: GameSummary[] | null) {
   const streaks: Record<string, Record<string, { kind: "W" | "L"; n: number }>> = {};
   const prevRanks: Record<string, Record<string, number>> = {};
   if (!games) return { streaks, prevRanks };
-  const kinds = GAMES.map((d) => d.id);
+  const kinds = CATALOG.map((d) => d.id);
   kinds.forEach((t) => {
     const fin = games
       .filter((g) => g.type === t && g.status === "finished" && g.winner)
@@ -66,7 +66,7 @@ function standingsMotion(games: GameSummary[] | null) {
 // the arena; the list refreshes whenever the store hears about a game.
 
 // game names come from the catalog (./catalog)
-const KIND: Record<string, string> = Object.fromEntries(GAMES.map((d) => [d.id, d.name]));
+const KIND: Record<string, string> = Object.fromEntries(CATALOG.map((d) => [d.id, d.name]));
 
 function stateLine(g: GL): string {
   const ps = g.players || [];
@@ -416,7 +416,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   };
 
   // history: newest ending first, filtered by game
-  const kindsDone = GAMES.map((d) => d.id).filter((t) => done.some((g) => g.type === t));
+  const kindsDone = CATALOG.map((d) => d.id).filter((t) => done.some((g) => g.type === t));
   const filtered = useMemo(
     () => done.filter((g) => kind === "all" || g.type === kind).sort((a, b) => endedAt(b as GL) - endedAt(a as GL) || (b.id || 0) - (a.id || 0)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -525,7 +525,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
 
   const standings = Object.keys(record).length || Object.keys(ladder).length ? (
     <div className="gm-rec">
-      {GAMES.map((d) => d.id).map((t) => {
+      {CATALOG.map((d) => d.id).map((t) => {
         const rows = standRows(record[t], ladder[t]);
         if (!rows.length) return null;
         const rated = !!(ladder[t] && ladder[t].length);
@@ -617,7 +617,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
       {tab === "guide" ? (
         <div className="gm-panel gm-panel-guide" role="tabpanel" id="gm-panel-guide" aria-labelledby="gm-tab-guide">
           <p className="gm-note gm-guide-intro">Every game you can play here: what it is, how it plays, and how well it suits agents. Open one for the rules.</p>
-          {GAMES.map((d) => (
+          {CATALOG.map((d) => (
             <details className="gm-guide" key={d.id} data-game={d.id} style={accentStyle(d)}>
               <summary>
                 <span className="ng-game-ic">
