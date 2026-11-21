@@ -39,4 +39,12 @@ export const AUCTION: GameDef = {
   players: () => ({ min: 2, max: 6 }),
   body: (o, players) => ({ game: "auction", players, lots: o.lots }),
   summary: (o) => o.lots + " lots, 100 each to spend. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "auction";
+    body.lots = g.lots_total;
+    body.budget = g.budget;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import type { GameSummary } from "@chat/contract";
 import { useFeed, useSession } from "../room/ctx";
-import { finalScore, formatLeft, type GL } from "./shared/render";
+import { clockSeconds, finalScore, formatLeft, type GL } from "./shared/render";
 import { chimeMuted, setChimeMuted } from "./shared/chime";
 import { pressable } from "../../lib/index";
 import { CATALOG, GameFacts, GameIcon, HowToPlay, accentStyle } from "./shared/catalog";
 import { Button } from "../../ui/Button";
+import { GAMES } from "./registry";
 
 // Standings with motion, from the finished list (newest first): each
 // player's current streak, and their rank before the kind's most
@@ -74,26 +75,8 @@ function stateLine(g: GL): string {
     const waiting = ps.filter((p: GL) => p.accepted === false).map((p: GL) => p.name);
     return waiting.length ? "Lobby · waiting on " + waiting.join(", ") + " to accept" : "Lobby · starting";
   }
-  if (g.type === "battleship") {
-    const head = g.phase === "setup" ? "Placing fleets" : "Turn " + g.turn + (g.turn_of ? " · " + g.turn_of + " to fire" : "");
-    return head + " · " + ps.map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
-  }
-  if (g.type === "duel" || g.type === "frontlines") return "Round " + (g.round || 1) + " · " + ps.map((p: GL) => p.name + " " + (p.wins || 0)).join(" · ");
-  if (g.type === "fourinarow") return "Turn " + (g.turn || 1) + (g.turn_of ? " · " + g.turn_of + " to move" : "");
-  if (g.type === "werewolf") return (g.phase === "night" ? "Night " + (g.night || 1) + " · the village sleeps" : "Day " + (g.day || 1) + " · voting") + " · " + ps.filter((p: GL) => p.alive).length + " alive";
-  if (g.type === "twenty") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.answerer ? " · " + g.answerer + (g.phase === "secret" ? " choosing" : " answering · " + (g.asked || 0) + "/20") : "");
-  if (g.type === "corpse") return g.phase === "vote" ? "Revealed · " + (g.segments || 0) + " segments · voting" : "Turn " + (g.turn || 1) + " of " + (g.turns_total || "?") + (g.turn_of ? " · " + g.turn_of + " writing" : "");
-  if (g.type === "twotruths") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.teller ? " · " + g.teller + (g.phase === "write" ? " writing" : " told") : "") + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
-  if (g.type === "liarsdice") return "Round " + (g.round || 1) + (g.turn_of ? " · " + g.turn_of + " to bid" : "") + " · " + ps.filter((p: GL) => !p.out).map((p: GL) => p.name + " " + (p.dice || 0)).join(" · ");
-  if (g.type === "auction") return "Lot " + (g.round || 1) + " of " + (g.lots_total || "?") + " · " + ps.slice().sort((a: GL, b: GL) => (b.won || 0) - (a.won || 0)).map((p: GL) => p.name + " " + (p.won || 0)).join(" · ");
-  if (g.type === "sketch") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.artist ? " · " + g.artist + (g.phase === "draw" ? " drawing" : g.phase === "judging" ? " · judging" : " drew") : "") + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
-  if (g.type === "trivia") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + (g.asker ? " · " + g.asker + (g.phase === "ask" ? " writing" : g.phase === "judge" ? " judging" : " asked") : "") + " · " + ps.slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0)).map((p: GL) => p.name + " " + (p.balance != null ? p.balance : 100)).join(" · ");
-  if (g.type === "lettergrid") return "Round " + (g.round || 1) + " of " + (g.rounds_total || "?") + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
-  if (g.type === "trust") return "Round " + (g.round || 1) + " · " + ps.slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.name + " " + (p.score || 0)).join(" · ");
-  if (g.type === "coderace") {
-    const cracked = ps.filter((p: GL) => p.solved).map((p: GL) => p.name);
-    return "Round " + (g.round || 1) + " of " + (g.max_rounds || "?") + " · " + (cracked.length ? cracked.join(", ") + " cracked it" : "nobody has cracked it");
-  }
+  const own = GAMES[g.type]?.stateLine;
+  if (own) return own(g);
   const alive = ps.filter((p: GL) => p.alive).length;
   return "Tick " + (g.tick || 0) + " · " + alive + " still riding";
 }
@@ -130,46 +113,20 @@ function standRows(rec: RecordTable[string] | undefined, lad: LadderTable[string
 function waitingOn(g: GL): string[] {
   if (Array.isArray(g.targets)) return g.targets;
   // No targets (an older payload): derive them the way the server does
-  // (gameTargets in src/worker.js).
+  // (Room.gameTargets in worker/room/games.js).
   const ps: GL[] = g.players || [];
   if (g.status === "lobby") return ps.filter((p) => !p.accepted).map((p) => p.name);
   if (g.status !== "running") return [];
-  if (g.type === "duel") return ps.filter((p) => !p.thrown).map((p) => p.name);
-  if (g.type === "frontlines") return ps.filter((p) => !p.committed).map((p) => p.name);
-  if (g.type === "coderace") return ps.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name);
-  if (g.type === "fourinarow" || g.type === "liarsdice") return g.turn_of ? [g.turn_of] : [];
-  if (g.type === "werewolf") return g.phase === "day" ? ps.filter((p) => p.alive && !p.voted).map((p) => p.name) : [];
-  if (g.type === "twenty") return g.phase === "ask" ? ps.filter((p) => p.name !== g.answerer).map((p) => p.name) : g.answerer ? [g.answerer] : [];
-  if (g.type === "corpse") return g.phase === "write" ? (g.turn_of ? [g.turn_of] : []) : ps.filter((p) => !p.committed).map((p) => p.name);
-  if (g.type === "twotruths") return g.phase === "write" ? (g.teller ? [g.teller] : []) : ps.filter((p) => p.name !== g.teller && !p.committed).map((p) => p.name);
-  if (g.type === "trust" || g.type === "lettergrid") return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
-  if (g.type === "trivia") return g.phase === "answer" ? ps.filter((p) => p.name !== g.asker && !p.committed).map((p) => p.name) : g.asker ? [g.asker] : [];
-  if (g.type === "sketch") return g.phase === "draw" ? (g.artist ? [g.artist] : []) : g.phase === "guess" ? ps.filter((p) => p.name !== g.artist && !p.committed).map((p) => p.name) : [];
-  if (g.type === "auction") return ps.filter((p) => !p.committed && (p.budget || 0) > 0).map((p) => p.name);
-  if (g.type === "battleship") return g.phase === "setup" ? ps.filter((p) => !p.placed).map((p) => p.name) : g.turn_of ? [g.turn_of] : [];
+  const own = GAMES[g.type]?.waitingOn;
+  if (own) return own(g);
   return ps.filter((p) => p.alive && !p.moved).map((p) => p.name);
 }
 const deadlineOf = (g: GL): number | null => (g.status === "lobby" ? g.lobby_deadline || null : g.deadline || null);
-const durOf = (g: GL): number =>
-  g.status === "lobby"
-    ? 3600e3
-    : 1000 * (g.type === "duel" || g.type === "frontlines" || g.type === "trust" || g.type === "auction" ? g.round_seconds || 180 : g.type === "coderace" || g.type === "twotruths" || g.type === "twenty" || g.type === "lettergrid" || g.type === "trivia" ? g.round_seconds || 3600 : g.type === "sketch" ? (g.phase === "guess" ? g.guess_seconds || 600 : g.draw_seconds || 3600) : g.type === "corpse" ? g.turn_seconds || 86400 : g.type === "werewolf" ? g.phase_seconds || 86400 : g.type === "battleship" || g.type === "fourinarow" || g.type === "liarsdice" ? g.turn_seconds || 3600 : g.tick_seconds || 120);
+const durOf = (g: GL): number => (g.status === "lobby" ? 3600e3 : 1000 * clockSeconds(g));
 function youLabel(g: GL): string {
   if (g.status === "lobby") return "Your invite";
-  if (g.type === "duel") return "Your throw";
-  if (g.type === "frontlines") return "Your split";
-  if (g.type === "coderace") return "Your guess";
-  if (g.type === "fourinarow") return "Your move";
-  if (g.type === "trust") return "Your choices";
-  if (g.type === "lettergrid") return "Your word";
-  if (g.type === "sketch") return g.phase === "draw" ? "Your drawing" : "Your guess";
-  if (g.type === "trivia") return g.phase === "ask" ? "Your question" : g.phase === "judge" ? "Your ruling" : "Your answer";
-  if (g.type === "auction" || g.type === "liarsdice") return "Your bid";
-  if (g.type === "twotruths") return g.phase === "write" ? "Your story" : "Your vote";
-  if (g.type === "corpse") return g.phase === "write" ? "Your segment" : "Your favourite";
-  if (g.type === "werewolf") return g.phase === "night" ? "Your night move" : "Your vote";
-  if (g.type === "twenty") return g.phase === "secret" ? "Your secret" : g.phase === "answer" ? "Your answer" : "Your question";
-  if (g.type === "battleship") return g.phase === "setup" ? "Place your fleet" : "Your shot";
+  const own = GAMES[g.type]?.youLabel;
+  if (own) return own(g);
   return "Your move";
 }
 
@@ -215,17 +172,8 @@ function whenLabel(t: number, group: string): string {
 
 /* How long a finished match ran, in its own unit. */
 function lengthLine(g: GL): string {
-  if (g.type === "battleship") return (g.turn || 0) + " turns";
-  if (g.type === "duel") return (g.round || 0) + " rounds";
-  if (g.type === "frontlines" || g.type === "coderace" || g.type === "trust" || g.type === "lettergrid") return ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
-  if (g.type === "fourinarow") return ((g.last_move && g.last_move.n) || 0) + " moves";
-  if (g.type === "auction") return ((g.rounds && g.rounds.length) || g.lots_total || 0) + " lots";
-  if (g.type === "corpse") return (g.segments || 0) + " segments";
-  if (g.type === "twenty") return ((g.rounds && g.rounds.length) || g.rounds_total || 0) + " rounds";
-  if (g.type === "trivia") return ((g.rounds && g.rounds.length) || g.rounds_total || 0) + " questions";
-  if (g.type === "sketch") return ((g.rounds && g.rounds.length) || g.rounds_total || 0) + " drawings";
-  if (g.type === "werewolf") return (g.day || g.night || 0) + " days";
-  if (g.type === "liarsdice" || g.type === "twotruths") return ((g.rounds && g.rounds.length) || g.round || 0) + " rounds";
+  const own = GAMES[g.type]?.lengthLine;
+  if (own) return own(g);
   return (g.tick || 0) + " ticks";
 }
 

@@ -129,55 +129,23 @@ function isLoaded(g: GL | undefined): boolean {
 // A compact fingerprint of "the match moved": status plus the
 // per-kind progress counters and the latest event. Null until the
 // full game has loaded (the summary alone never pulses).
-/* eslint-disable @typescript-eslint/no-explicit-any */
-function gameSignature(g: any): string | null {
+function gameSignature(g: GL): string | null {
   if (!g || !g.type) return null;
-  if (g.type === "battleship") {
-    const lm = g.last_move;
-    return ["bs", g.status, g.phase || "", g.turn || 0, lm ? lm.by + lm.cell + (lm.sunk || "") : ""].join("|");
-  }
-  if (g.type === "fourinarow") return ["c4", g.status, g.turn || 0, (g.board || []).join("")].join("|");
-  if (g.type === "trust") return ["tr", g.status, g.round || 0, (g.rounds || []).length].join("|");
-  if (g.type === "lettergrid") return ["lg", g.status, g.round || 0, (g.rounds || []).length].join("|");
-  if (g.type === "trivia") return ["tv", g.status, g.round || 0, g.phase || "", (g.rounds || []).length].join("|");
-  if (g.type === "sketch") return ["sg", g.status, g.round || 0, g.phase || "", (g.rounds || []).length].join("|");
-  if (g.type === "auction") return ["au", g.status, g.round || 0, (g.rounds || []).length].join("|");
-  if (g.type === "werewolf") return ["ww", g.status, g.phase || "", g.night || 0, g.day || 0, (g.players || []).filter((p: any) => p.alive).length].join("|");
-  if (g.type === "twenty") return ["tq", g.status, g.round || 0, g.phase || "", g.asked || 0].join("|");
-  if (g.type === "corpse") return ["ec", g.status, g.phase || "", g.turn || 0, g.segments || 0, (g.players || []).filter((p: any) => p.committed).length].join("|");
-  if (g.type === "twotruths") return ["tt", g.status, g.round || 0, g.phase || "", (g.players || []).map((p: any) => p.score || 0).join("-")].join("|");
-  if (g.type === "liarsdice") return ["ld", g.status, g.turn || 0, g.round || 0, g.bid ? g.bid.qty + "x" + g.bid.face : ""].join("|");
-  if (g.type === "coderace") {
-    const solved = (g.players || []).filter((p: any) => p.solved).length;
-    return ["cr", g.status, g.round || 0, (g.rounds || []).length, solved].join("|");
-  }
-  if (g.type === "duel" || g.type === "frontlines") {
-    const rounds = g.rounds || [];
-    const sc = g.score || {};
-    return [g.type, g.status, g.round || 0, rounds.length, Object.values(sc).join("-")].join("|");
-  }
-  const alive = (g.players || []).filter((p: any) => p.alive).length;
+  const own = GAMES[g.type]?.signature;
+  if (own) return own(g);
+  const alive = (g.players || []).filter((p: GL) => p.alive).length;
   return ["lc", g.status, g.tick || 0, alive].join("|");
 }
 
 // The colour of whoever made the latest move, for the pulse ring.
-function gameMoverHex(g: any): string | null {
+function gameMoverHex(g: GL): string | null {
   if (!g || !g.players) return null;
-  let name: string | null = null;
-  if (g.type === "battleship" && g.last_move) name = g.last_move.by;
-  else if ((g.type === "duel" || g.type === "frontlines") && g.rounds && g.rounds.length) name = g.rounds[g.rounds.length - 1].winner;
-  else if (g.type === "coderace" && g.rounds && g.rounds.length) name = (g.rounds[g.rounds.length - 1].solved || [])[0] || null;
-  else if (g.type === "fourinarow" && g.last_move) name = g.last_move.by;
-  else if (g.type === "auction" && g.rounds && g.rounds.length) name = g.rounds[g.rounds.length - 1].winner;
-  else if (g.type === "twotruths" && g.status === "running") name = g.teller;
-  else if (g.type === "corpse" && g.status === "running") name = g.turn_of;
-  else if (g.type === "twenty" && g.status === "running") name = g.answerer;
-  else if (g.type === "trivia" && g.status === "running") name = g.asker;
-  else if (g.type === "sketch" && g.status === "running") name = g.artist;
-  else if (g.type === "liarsdice" && g.status !== "finished") name = g.bid ? g.bid.by : g.last_round ? g.last_round.loser : null;
-  else if (g.status === "finished") name = g.winner;
+  // the game's own mover (registry.ts); without one, a finished match's winner
+  const own = GAMES[g.type]?.mover;
+  const moved = own ? own(g) : undefined;
+  const name: string | null = moved !== undefined ? moved : g.status === "finished" ? g.winner : null;
   if (!name) return null;
-  const p = (g.players || []).find((x: any) => x.name === name);
+  const p = (g.players || []).find((x: GL) => x.name === name);
   return p ? p.hex : null;
 }
 

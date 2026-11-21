@@ -1,4 +1,5 @@
 import { el } from "../../../lib/index";
+import { GAMES } from "../registry";
 
 // Pure game rendering, shared by the feed cards and the arena:
 // the Light Cycles SVG board, the Duel scoreboard, the meta line,
@@ -17,7 +18,9 @@ export function tickLen(ts: number): string {
 // The standard finished-match presentation, shared by the feed
 // card, the arena and the Games tab so a result reads the same
 // everywhere: a gold winner banner (trophy + name + final score)
-// and a record line in one shape per kind.
+// and a record line in one shape per kind. The per-game parts are the
+// games' status hooks (GameStatus in ../registry); the functions here
+// call them and hold the defaults.
 
 // A team's win (Werewolf): "The village wins" / "The wolves win".
 export function sideWin(g: GL): { icon: string; text: string; hex: string } | null {
@@ -30,39 +33,16 @@ export function winnerOf(g: GL): GL | null {
   return (g.players || []).find((p: GL) => p.name === g.winner) || null;
 }
 
-function winnerFirst(g: GL): GL[] {
+export function winnerFirst(g: GL): GL[] {
   return (g.players || []).slice().sort((a: GL, b: GL) => (b.name === g.winner ? 1 : 0) - (a.name === g.winner ? 1 : 0));
 }
 
-// Final score, winner first: duel and Frontlines round wins, battleship ships sunk.
+// Final score, winner first, in each game's own unit (its finalScore hook in
+// <game>/status.ts: Duel round wins, Battleship ships sunk...); none by default.
 export function finalScore(g: GL): string {
   if (!g) return "";
-  if (g.type === "duel" || g.type === "frontlines") {
-    const sc = g.score || {};
-    const wins = (p: GL) => (sc[p.name] != null ? sc[p.name] : p.wins || 0);
-    return winnerFirst(g).map(wins).join("–");
-  }
-  if (g.type === "battleship") return winnerFirst(g).map((p: GL) => p.sunk || 0).join("–");
-  if (g.type === "coderace") {
-    const w = winnerOf(g);
-    return w && w.solved ? "round " + w.solved : "";
-  }
-  if (g.type === "fourinarow") return g.winner && g.moves ? "move " + g.moves.length : "";
-  if (g.type === "auction") return winnerFirst(g).map((p: GL) => p.won || 0).join("–");
-  if (g.type === "werewolf") return "";
-  if (g.type === "twenty") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
-  if (g.type === "corpse") {
-    const w = winnerOf(g);
-    return w && w.votes ? "★ " + w.votes : "";
-  }
-  if (g.type === "twotruths") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
-  if (g.type === "liarsdice") {
-    const w = winnerOf(g);
-    return w ? (w.dice || 0) + (w.dice === 1 ? " die left" : " dice left") : "";
-  }
-  if (g.type === "trust" || g.type === "lettergrid") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
-  if (g.type === "trivia") return (g.players || []).slice().sort((a: GL, b: GL) => (b.balance || 0) - (a.balance || 0)).map((p: GL) => p.balance || 0).join("–");
-  if (g.type === "sketch") return (g.players || []).slice().sort((a: GL, b: GL) => (b.score || 0) - (a.score || 0)).map((p: GL) => p.score || 0).join("–");
+  const own = GAMES[g.type]?.finalScore;
+  if (own) return own(g);
   return "";
 }
 
@@ -70,61 +50,8 @@ export function recordLine(g: GL): string {
   if (!g) return "";
   if (g.status === "cancelled") return "Called off" + (g.declined_by ? " · " + g.declined_by + " declined" : "");
   if (g.status !== "finished") return "";
-  if (g.type === "battleship") {
-    const hits = winnerFirst(g).map((p: GL) => p.hits || 0).join("–");
-    return "Final · " + finalScore(g) + " ships · " + hits + " hits · " + (g.turn || 0) + " turns";
-  }
-  if (g.type === "duel") return "Final · " + finalScore(g) + " · " + (g.round || 0) + " rounds";
-  if (g.type === "frontlines") return "Final · " + finalScore(g) + " · " + ((g.rounds && g.rounds.length) || Math.max(0, (g.round || 1) - 1)) + " rounds";
-  if (g.type === "auction") {
-    const n = (g.rounds && g.rounds.length) || g.lots_total || 0;
-    return "Final · " + finalScore(g) + " lots won · " + n + " lots";
-  }
-  if (g.type === "trust") {
-    const n = (g.rounds && g.rounds.length) || g.last_round || Math.max(0, (g.round || 1) - 1);
-    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
-  }
-  if (g.type === "werewolf") {
-    const t = sideWin(g);
-    return (t ? t.text : "Over") + " · " + ((g.events || []).length || 0) + " dawns and votes";
-  }
-  if (g.type === "twenty") {
-    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
-    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
-  }
-  if (g.type === "sketch") {
-    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
-    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " drawing" : " drawings");
-  }
-  if (g.type === "trivia") {
-    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
-    return "Final · " + finalScore(g) + " points · " + n + (n === 1 ? " question" : " questions");
-  }
-  if (g.type === "lettergrid") {
-    const n = (g.rounds && g.rounds.length) || g.rounds_total || 0;
-    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
-  }
-  if (g.type === "corpse") {
-    const n = g.segments || (g.story || []).length;
-    return ((g.honours || []).length > 1 ? "Shared honours" : (g.honours || []).length ? "The honours" : "No favourite") + " · " + n + (n === 1 ? " segment" : " segments");
-  }
-  if (g.type === "twotruths") {
-    const n = (g.rounds && g.rounds.length) || g.round || 0;
-    return "Final · " + finalScore(g) + " · " + n + (n === 1 ? " round" : " rounds");
-  }
-  if (g.type === "liarsdice") {
-    const n = (g.rounds && g.rounds.length) || g.round || 0;
-    return "Last with dice" + (g.forfeit ? " · " + g.forfeit + " timed out" : "") + " · " + n + (n === 1 ? " round" : " rounds");
-  }
-  if (g.type === "fourinarow") {
-    const n = (g.moves && g.moves.length) || (g.last_move ? g.last_move.n : 0);
-    return (g.draw ? "Draw" : g.forfeit ? "Won by forfeit" : "Four in a row") + " · " + n + (n === 1 ? " move" : " moves");
-  }
-  if (g.type === "coderace") {
-    const n = (g.rounds && g.rounds.length) || 0;
-    const w = winnerOf(g);
-    return (w ? "Cracked in round " + w.solved : "Not cracked") + " · " + n + (n === 1 ? " round" : " rounds") + " · " + crWhat(g);
-  }
+  const own = GAMES[g.type]?.recordLine;
+  if (own) return own(g);
   return "Final · tick " + (g.tick || 0);
 }
 
@@ -170,6 +97,15 @@ export function winnerBanner(g: GL): HTMLElement | null {
   return b;
 }
 
+// The length of a running match's clock - a turn, a round or a phase - in
+// seconds: the turn banner's bar and the Games tab's countdowns. Light
+// Cycles' tick by default.
+export function clockSeconds(g: GL): number {
+  const own = GAMES[g.type]?.clockSeconds;
+  if (own) return own(g);
+  return g.tick_seconds || 120;
+}
+
 // "4 pegs · 6 colours" or "5-letter word": a Code Race's secret, in brief.
 export function crWhat(g: GL): string {
   return g.mode === "words" ? (g.length || 5) + "-letter word" : (g.length || 4) + " pegs · " + (g.colors || 6) + " colours";
@@ -177,135 +113,8 @@ export function crWhat(g: GL): string {
 
 export function gameMetaText(g: GL): string {
   if (!g) return "";
-  if (g.type === "auction") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + g.lots_total + " lots · " + g.budget + " each";
-    }
-    return "Lot " + g.round + " of " + g.lots_total + " · " + tickLen(g.round_seconds || 180) + " per lot";
-  }
-  if (g.type === "trust") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · about " + (g.rounds_about || 10) + " rounds";
-    }
-    return "Round " + g.round + " of about " + (g.rounds_about || 10) + " · " + tickLen(g.round_seconds || 180) + " per round";
-  }
-  if (g.type === "werewolf") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    const rip = g.roles_in_play || {};
-    const cast = (rip.werewolf || 0) + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + ", " + (rip.villager || 0) + " villagers";
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + cast;
-    }
-    return (g.phase === "night" ? "Night " + g.night : "Day " + g.day) + " · " + (g.alive_count || 0) + " alive · " + cast + " · " + tickLen(g.phase_seconds || 86400) + " a phase";
-  }
-  if (g.type === "sketch") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " drawings";
-    }
-    return "Round " + g.round + " of " + g.rounds_total + " · " + (g.artist || "?") + (g.phase === "draw" ? " drawing" : " drew") + " · " + tickLen(g.phase === "guess" ? g.guess_seconds || 600 : g.draw_seconds || 3600) + (g.phase === "guess" ? " to guess" : " to draw");
-  }
-  if (g.type === "trivia") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " questions";
-    }
-    return "Round " + g.round + " of " + g.rounds_total + " · " + (g.asker || "?") + " asks · " + tickLen(g.round_seconds || 3600) + " a phase";
-  }
-  if (g.type === "lettergrid") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    const shape = (g.size || 5) + "x" + (g.size || 5) + " grid";
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + shape + " · " + (g.rounds_total || 8) + " rounds";
-    }
-    return "Round " + g.round + " of " + g.rounds_total + " · " + shape + " · " + tickLen(g.round_seconds || 3600) + " per round";
-  }
-  if (g.type === "twenty") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " rounds";
-    }
-    return "Round " + g.round + " of " + g.rounds_total + " · " + tickLen(g.round_seconds || 3600) + " a move · " + (g.mode === "table" ? "the table asks together" : "head to head");
-  }
-  if (g.type === "corpse") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.turns_total || 0) + " turns" + (g.genre ? " · " + g.genre : "");
-    }
-    if (g.phase === "vote") return "The story is revealed · " + (g.segments || 0) + " segments · vote for a favourite";
-    return "Turn " + g.turn + " of " + g.turns_total + " · " + tickLen(g.turn_seconds || 86400) + " per turn" + (g.genre ? " · " + g.genre : "");
-  }
-  if (g.type === "twotruths") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.rounds_total || 0) + " rounds";
-    }
-    return "Round " + g.round + " of " + g.rounds_total + " · " + tickLen(g.round_seconds || 3600) + " to write, the same to vote";
-  }
-  if (g.type === "liarsdice") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.dice_each || 5) + " dice each · ones " + (g.ones_wild ? "wild" : "not wild");
-    }
-    return "Round " + g.round + " · " + (g.dice_total || 0) + " dice on the table · " + tickLen(g.turn_seconds || 3600) + " per turn";
-  }
-  if (g.type === "fourinarow") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + (g.first ? g.first + " moves first · " : "") + tickLen(g.turn_seconds || 3600) + " per turn";
-    }
-    return "Turn " + g.turn + (g.turn_of ? " · " + g.turn_of + " to move" : "") + " · " + tickLen(g.turn_seconds || 3600) + " per turn";
-  }
-  if (g.type === "coderace") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + crWhat(g);
-    }
-    const cracked = (g.players || []).filter((p: GL) => p.solved).length;
-    return "Round " + g.round + " of " + (g.max_rounds || "?") + " · " + crWhat(g) + (cracked ? " · " + cracked + " cracked it" : "") + " · " + tickLen(g.round_seconds || 3600) + " per round";
-  }
-  if (g.type === "battleship") {
-    const line = (g.players || []).map((p: GL) => p.name + " " + (p.afloat != null ? p.afloat : 5) + " afloat").join(" · ");
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · " + tickLen(g.turn_seconds || 3600) + " per turn" + (g.variant && g.variant !== "classic" ? " · " + g.variant : "");
-    }
-    if (g.phase === "setup") return "Placing fleets · " + tickLen(g.turn_seconds || 3600) + " per turn";
-    return "Turn " + g.turn + " · " + (g.turn_of ? g.turn_of + " to fire" : "") + " · " + line;
-  }
-  if (g.type === "frontlines") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    const valued = g.variant === "valued" ? " · valued hills" : "";
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target + valued;
-    }
-    return "Round " + g.round + " · first to " + g.target + valued + " · " + tickLen(g.round_seconds || 180) + " per round";
-  }
-  if (g.type === "duel") {
-    if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
-    if (g.status === "lobby") {
-      const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);
-      return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
-    }
-    // 180 s is the server's default round deadline (since 2026-11-12)
-    return "Round " + g.round + " · first to " + g.target + " · ties replay · " + tickLen(g.round_seconds || 180) + " per round";
-  }
+  const own = GAMES[g.type]?.metaText;
+  if (own) return own(g);
   if (g.status === "finished" || g.status === "cancelled") return recordLine(g);
   if (g.status === "lobby") {
     const waiting = (g.players || []).filter((p: GL) => !p.accepted).map((p: GL) => p.name);

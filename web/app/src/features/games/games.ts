@@ -2,9 +2,8 @@ import type { Placing as BsPlacing } from "./battleship/BsArena3D";
 import { createElement, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { el, toast } from "../../lib/index";
-import { matchTitle } from "./shared/catalog";
-import { wwVerb } from "./werewolf/werewolf";
-import { fleetStrip, formatLeft, setClockBar, setTurnClock, type GL } from "./shared/render";
+import { gameDef, matchTitle } from "./shared/catalog";
+import { clockSeconds, fleetStrip, formatLeft, setClockBar, setTurnClock, type GL } from "./shared/render";
 import type { Arena3dProps, GameStoreOptions, GameView, GameViewCtx, Host3d, Kind3d } from "./shared/viewctx";
 import { GAMES } from "./registry";
 
@@ -121,228 +120,19 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     const me = opts.meName();
     const you = g.you || {};
     const players: GL[] = g.players || [];
-    const opp = players.filter((p: GL) => p.name !== me)[0];
     let text = "";
     let sub = "";
     let mine = false;
-    let dur = 0;
+    const dur = clockSeconds(g) * 1000;
     let prefix = "";
-    if (g.type === "duel") {
-      dur = (g.round_seconds || 180) * 1000;
-      if (you.playing && opp) {
-        if (you.queued) text = "You're in · waiting on " + opp.name;
-        else {
-          mine = true;
-          text = opp.thrown ? opp.name + " is in · your throw decides the round" : "Your throw · round " + g.round;
-          sub = "If the clock runs out, a lone throw takes the round.";
-        }
-      } else text = players.map((p: GL) => p.name + (p.thrown ? " locked ✓" : " thinking…")).join(" · ");
-    } else if (g.type === "frontlines") {
-      dur = (g.round_seconds || 180) * 1000;
-      if (you.playing && opp) {
-        if (you.queued) text = "Your split is in · waiting on " + opp.name;
-        else {
-          mine = true;
-          text = opp.committed ? opp.name + " has committed · your split decides round " + g.round : "Your split · round " + g.round;
-          sub = "If the clock runs out, a lone split takes the round.";
-        }
-      } else text = players.map((p: GL) => p.name + (p.committed ? " committed ✓" : " planning…")).join(" · ");
-    } else if (g.type === "auction") {
-      dur = (g.round_seconds || 180) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && (p.budget || 0) > 0 && p.name !== me).map((p: GL) => p.name);
-      if (you.playing && (you.budget || 0) <= 0) text = "You've spent out · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-      else if (you.playing && you.queued != null) text = "Your bid is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-      else if (you.playing) {
-        mine = true;
-        text = "Your bid · lot " + g.round + " of " + g.lots_total;
-        sub = "If the clock runs out, you pass on this lot.";
-      } else text = "Lot " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-    } else if (g.type === "trust") {
-      dur = (g.round_seconds || 180) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
-      if (you.playing && you.out) text = "You're out of this match" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
-      else if (you.playing && you.queued) text = "Your choices are in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-      else if (you.playing) {
-        mine = true;
-        text = "Your choices · round " + g.round;
-        sub = "If the clock runs out, you defect on everyone this round.";
-      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-    } else if (g.type === "sketch") {
-      dur = (g.phase === "guess" ? g.guess_seconds || 600 : g.draw_seconds || 3600) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && p.name !== g.artist && p.name !== me).map((p: GL) => p.name);
-      if (g.phase === "judging") text = "The Referee is judging the guesses…";
-      else if (you.playing && you.artist) {
-        if (g.phase === "draw") {
-          mine = true;
-          text = "You're the artist · draw your prompt";
-          sub = "If the clock runs out, you forfeit the round.";
-        } else text = "Your drawing is up · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-      } else if (g.phase === "draw") text = (g.artist || "The artist") + " is drawing · round " + g.round + " of " + g.rounds_total;
-      else if (you.playing && you.queued) text = "Your guess is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-      else if (you.playing) {
-        mine = true;
-        text = "Guess " + (g.artist || "the artist") + "'s drawing · round " + g.round + " of " + g.rounds_total;
-        sub = "If the clock runs out, you score nothing this round.";
-      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-    } else if (g.type === "trivia") {
-      dur = (g.round_seconds || 3600) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && p.name !== g.asker && p.name !== me).map((p: GL) => p.name);
-      if (you.playing && you.asker) {
-        if (g.phase === "ask") {
-          mine = true;
-          text = "You're the quizmaster · ask a question";
-          sub = "If the clock runs out, you forfeit the round.";
-        } else if (g.phase === "judge") {
-          mine = true;
-          text = "Judge the answers the match missed";
-          sub = "If the clock runs out, the reveal counts them wrong.";
-        } else text = "Your question is up · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-      } else if (g.phase === "ask") text = (g.asker || "The quizmaster") + " is writing a question · round " + g.round + " of " + g.rounds_total;
-      else if (g.phase === "judge") text = (g.asker || "The quizmaster") + " is judging the answers";
-      else if (you.playing && you.queued) text = "Your answer is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-      else if (you.playing) {
-        mine = true;
-        text = "Your answer · round " + g.round + " of " + g.rounds_total;
-        sub = "If the clock runs out, you score nothing (and lose nothing).";
-      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-    } else if (g.type === "lettergrid") {
-      dur = (g.round_seconds || 3600) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && !p.out && p.name !== me).map((p: GL) => p.name);
-      if (you.playing && you.out) text = "You're out of this match" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
-      else if (you.playing && you.queued) text = "Your word is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-      else if (you.playing) {
-        mine = true;
-        text = "Your word · round " + g.round + " of " + g.rounds_total;
-        sub = "If the clock runs out, you score nothing this round.";
-      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-    } else if (g.type === "werewolf") {
-      dur = (g.phase_seconds || 86400) * 1000;
-      const verb = wwVerb(you.role);
-      if (you.playing && you.alive === false) text = "You're out · " + (g.phase === "night" ? "night " + g.night : "day " + g.day) + " · watching";
-      else if (g.phase === "night") {
-        if (you.playing && verb && !you.act) {
-          mine = true;
-          text = "Night " + g.night + " · your move: " + verb;
-          sub = "The night ends when every role has acted, or at the clock.";
-        } else text = "Night " + g.night + " · the village sleeps";
-      } else {
-        const waiting = players.filter((p: GL) => p.alive && !p.voted && p.name !== me).map((p: GL) => p.name);
-        if (you.playing && you.vote == null) {
-          mine = true;
-          text = "Day " + g.day + " · talk it out, then vote";
-          sub = "Votes are public and can change until the day closes.";
-        } else text = (you.playing ? "Your vote is in · " : "Day " + g.day + " · ") + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
-      }
-    } else if (g.type === "twenty") {
-      dur = (g.round_seconds || 3600) * 1000;
-      const left = (g.remaining != null ? g.remaining : 20) + " of 20 left";
-      if (you.playing && you.answerer) {
-        if (g.phase === "secret") {
-          mine = true;
-          text = "Your turn to answer · choose a secret";
-          sub = "If the clock runs out, one is drawn for you.";
-        } else if (g.phase === "answer") {
-          mine = true;
-          text = (g.pending ? g.pending.by : "Someone") + (g.pending && g.pending.kind === "guess" ? " guesses" : " asks") + " · answer";
-          sub = "If the clock runs out on a question, you forfeit the round.";
-        } else text = "You hold the secret · waiting for a question · " + left;
-      } else if (g.phase === "secret") text = (g.answerer || "The answerer") + " is choosing a secret · round " + g.round + " of " + g.rounds_total;
-      else if (g.phase === "answer") text = "Waiting on " + g.answerer + "'s answer · " + left;
-      else if (you.playing) {
-        mine = true;
-        text = "Ask " + g.answerer + " a question · " + left;
-        sub = g.mode === "table" ? "Anyone at the table may ask - one question at a time." : "A yes/no question, or a guess.";
-      } else text = "Questions for " + g.answerer + " · " + left;
-    } else if (g.type === "corpse") {
-      dur = (g.turn_seconds || 86400) * 1000;
-      if (g.phase === "write") {
-        if (you.playing && you.writer) {
-          mine = true;
-          text = "Your turn to write · turn " + g.turn + " of " + g.turns_total;
-          sub = "You see only the segment before yours. If the clock runs out, your turn is a silent beat.";
-        } else text = (g.turn_of || "Someone") + " is writing · turn " + g.turn + " of " + g.turns_total;
-      } else {
-        const waiting = players.filter((p: GL) => !p.committed && p.name !== me).map((p: GL) => p.name);
-        if (you.playing && you.vote != null) text = "Your favourite is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "counting…");
-        else if (you.playing) {
-          mine = true;
-          text = "The story is revealed · pick a favourite";
-          sub = "Any segment but your own.";
-        } else text = "The story is revealed · voting";
-      }
-    } else if (g.type === "twotruths") {
-      dur = (g.round_seconds || 3600) * 1000;
-      if (g.phase === "write") {
-        if (you.playing && you.teller) {
-          mine = true;
-          text = "Your turn to tell · round " + g.round + " of " + g.rounds_total;
-          sub = "Two truths and a lie about you. If the clock runs out, you forfeit the round.";
-        } else text = (g.teller || "The storyteller") + " is writing · round " + g.round + " of " + g.rounds_total;
-      } else {
-        const waiting = players.filter((p: GL) => p.name !== g.teller && !p.committed && p.name !== me).map((p: GL) => p.name);
-        const rest = waiting.length ? "waiting on " + waiting.join(", ") : "revealing…";
-        if (you.playing && you.teller) text = "Your statements are up · " + rest;
-        else if (you.playing && you.vote != null) text = "Your vote is in · " + rest;
-        else if (you.playing) {
-          mine = true;
-          text = "Spot the lie · " + g.teller + "'s statements";
-          sub = "If the clock runs out, you score nothing this round.";
-        } else text = "Voting on " + g.teller + "'s statements · " + rest;
-      }
-    } else if (g.type === "liarsdice") {
-      dur = (g.turn_seconds || 3600) * 1000;
-      if (you.playing && you.out) text = "You're out of this match" + (g.turn_of ? " · " + g.turn_of + " to bid" : "");
-      else if (you.playing && you.your_turn) {
-        mine = true;
-        text = (g.bid ? "Raise or call liar" : "Open the bidding") + " · round " + g.round;
-        const to = you.timeouts || 0;
-        sub = to >= 2 ? "You've timed out twice in a row - one more and you're out." : "If the clock runs out, you lose a die.";
-      } else if (you.playing) text = "Waiting on " + (g.turn_of || "the table") + " · round " + g.round;
-      else text = (g.turn_of ? g.turn_of + " to bid · " : "") + "round " + g.round;
-    } else if (g.type === "fourinarow") {
-      dur = (g.turn_seconds || 3600) * 1000;
-      if (you.playing && you.your_turn) {
-        mine = true;
-        text = "Your move · turn " + g.turn;
-        const to = you.timeouts || 0;
-        sub = to >= 2 ? "You've timed out twice - one more forfeits the match." : to === 1 ? "You timed out once - three timeouts forfeit the match." : "Tap a column to drop your disc.";
-      } else if (you.playing) text = "Waiting on " + (g.turn_of || "your rival") + " · turn " + g.turn;
-      else text = (g.turn_of ? g.turn_of + " to move · " : "") + "turn " + g.turn;
-    } else if (g.type === "coderace") {
-      dur = (g.round_seconds || 3600) * 1000;
-      const waiting = players.filter((p: GL) => !p.committed && !p.solved && !p.out && p.name !== me).map((p: GL) => p.name);
-      if (you.playing && you.solved) text = "You cracked it in round " + you.solved + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
-      else if (you.playing && you.out) text = "You're out of this race" + (waiting.length ? " · waiting on " + waiting.join(", ") : "");
-      else if (you.playing && you.queued) text = "Your guess is in · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-      else if (you.playing) {
-        mine = true;
-        text = "Your guess · round " + g.round + " of " + (g.max_rounds || "?");
-        sub = waiting.length ? "The round resolves when every racer still racing has guessed." : "Everyone else is in · your guess resolves the round.";
-        const missed = (g.rounds || []).slice(-2).filter((r: GL) => (r.missed || []).indexOf(me) >= 0).length;
-        if (missed >= 2) sub = "You've missed two rounds in a row - miss this one and you're out.";
-      } else text = "Round " + g.round + " · " + (waiting.length ? "waiting on " + waiting.join(", ") : "resolving…");
-    } else if (g.type === "battleship") {
-      dur = (g.turn_seconds || 3600) * 1000;
-      if (g.phase === "setup") {
-        if (you.playing && !you.fleet) {
-          mine = true;
-          text = "Place your fleet";
-        } else if (you.playing) text = "Fleet placed · waiting on " + (opp ? opp.name : "your rival");
-        else text = players.map((p: GL) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
-      } else if (you.playing && you.your_turn) {
-        mine = true;
-        text =
-          g.variant === "salvo" && g.salvo_left != null
-            ? "Your salvo · " + g.salvo_left + " shot" + (g.salvo_left === 1 ? "" : "s") + " left"
-            : "Your shot · turn " + g.turn;
-        // the stakes only once they are real: your own missed turns
-        const missed = (g.misses || {})[me] || 0;
-        if (missed >= 2) sub = "You've missed " + missed + " turns in a row - one more forfeits the match.";
-        else if (missed === 1) sub = "You missed a turn - three in a row forfeits the match.";
-      } else if (you.playing) text = "Waiting on " + (opp ? opp.name + "'s shot" : "the next shot") + " · turn " + g.turn;
-      else text = (g.turn_of ? g.turn_of + " to fire · " : "") + "turn " + g.turn;
+    const own = GAMES[g.type]?.turnLine;
+    if (own) {
+      const line = own(g, me);
+      text = line.text;
+      sub = line.sub || "";
+      mine = !!line.mine;
     } else {
-      dur = (g.tick_seconds || 120) * 1000;
+      // Light Cycles, and a match without a type
       const waiting = players.filter((p: GL) => p.alive && !p.moved && p.name !== me).map((p: GL) => p.name);
       if (g.mode === "async") prefix = "cap in ";
       if (you.playing && you.alive && !you.queued) {
@@ -408,76 +198,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     if (rematchInFlight.has(g.id)) return;
     rematchInFlight.add(g.id);
     const body: Record<string, unknown> = { players: (g.players || []).map((p: GL) => p.name) };
-    if (g.type === "duel") {
-      body.game = "duel";
-      body.best_of = g.best_of;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "frontlines") {
-      body.game = "frontlines";
-      body.best_of = g.best_of;
-      body.tick_seconds = g.round_seconds;
-      if (g.variant && g.variant !== "classic") body.variant = g.variant;
-    } else if (g.type === "auction") {
-      body.game = "auction";
-      body.lots = g.lots_total;
-      body.budget = g.budget;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "trust") {
-      body.game = "trust";
-      body.rounds = g.rounds_about;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "fourinarow") {
-      body.game = "fourinarow";
-      body.tick_seconds = g.turn_seconds;
-    } else if (g.type === "sketch") {
-      body.game = "sketch";
-      body.rotations = g.rotations || 1;
-      body.draw_seconds = g.draw_seconds;
-      body.guess_seconds = g.guess_seconds;
-    } else if (g.type === "trivia") {
-      body.game = "trivia";
-      body.rotations = g.rotations || 1;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "lettergrid") {
-      body.game = "lettergrid";
-      body.rounds = g.rounds_total;
-      body.size = g.size;
-      body.min_length = g.min_len;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "werewolf") {
-      body.game = "werewolf";
-      body.tick_seconds = g.phase_seconds;
-    } else if (g.type === "twenty") {
-      body.game = "twenty";
-      body.rotations = g.rotations || 1;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "corpse") {
-      body.game = "corpse";
-      body.rotations = g.rotations || 3;
-      body.variant = g.variant || "straight";
-      if (g.genre) body.genre = g.genre;
-      body.tick_seconds = g.turn_seconds;
-    } else if (g.type === "twotruths") {
-      body.game = "twotruths";
-      body.rotations = g.rotations || 1;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "liarsdice") {
-      body.game = "liarsdice";
-      body.dice = g.dice_each;
-      body.ones_wild = !!g.ones_wild;
-      body.tick_seconds = g.turn_seconds;
-    } else if (g.type === "coderace") {
-      body.game = "coderace";
-      body.mode = g.mode;
-      body.length = g.length;
-      if (g.colors) body.colors = g.colors;
-      body.max_rounds = g.max_rounds;
-      body.tick_seconds = g.round_seconds;
-    } else if (g.type === "battleship") {
-      body.game = "battleship";
-      body.tick_seconds = g.turn_seconds;
-      if (g.variant && g.variant !== "classic") body.variant = g.variant;
-    } else {
+    const own = gameDef(g.type)?.rematch;
+    if (own) Object.assign(body, own(g));
+    else {
+      // Light Cycles, and a match without a type
       body.tick_seconds = g.tick_seconds;
       if (g.mode) body.mode = g.mode;
       body.w = g.w;
@@ -1128,33 +852,9 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
           return;
         }
         if (g.status !== "running") return;
-        if (g.type === "duel") {
-          if (!mine.thrown) n++;
-        } else if (g.type === "frontlines") {
-          if (!mine.committed) n++;
-        } else if (g.type === "coderace") {
-          if (!mine.committed && !mine.solved && !mine.out) n++;
-        } else if (g.type === "fourinarow" || g.type === "liarsdice") {
-          if (g.turn_of === me) n++;
-        } else if (g.type === "twotruths") {
-          if (g.phase === "write" ? g.teller === me : g.teller !== me && !mine.committed) n++;
-        } else if (g.type === "corpse") {
-          if (g.phase === "write" ? g.turn_of === me : !mine.committed) n++;
-        } else if (g.type === "twenty") {
-          if (g.phase === "ask" ? g.answerer !== me : g.answerer === me) n++;
-        } else if (g.type === "trivia") {
-          if (g.phase === "answer" ? g.asker !== me && !mine.committed : g.asker === me) n++;
-        } else if (g.type === "sketch") {
-          if (g.phase === "draw" ? g.artist === me : g.phase === "guess" ? g.artist !== me && !mine.committed : false) n++;
-        } else if (g.type === "werewolf") {
-          const y = g.you || {};
-          if (mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act)) n++;
-        } else if (g.type === "trust" || g.type === "lettergrid") {
-          if (!mine.committed && !mine.out) n++;
-        } else if (g.type === "auction") {
-          if (!mine.committed && (mine.budget || 0) > 0) n++;
-        } else if (g.type === "battleship") {
-          if (g.phase === "setup" ? !mine.placed : g.turn_of === me) n++;
+        const own = GAMES[g.type]?.awaiting;
+        if (own) {
+          if (own(g, mine, me)) n++;
         } else if (mine.alive && !mine.moved) n++;
       });
       return n;

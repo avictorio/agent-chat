@@ -71,4 +71,12 @@ export const LIARS_DICE: GameDef = {
   players: () => ({ min: 2, max: 6 }),
   body: (o, players) => ({ game: "liarsdice", players, dice: o.dice, ones_wild: o.wild === "wild", tick_seconds: o.turn }),
   summary: (o) => o.dice + " dice each, ones " + (o.wild === "wild" ? "wild" : "not wild") + ". Seats drawn at random. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "liarsdice";
+    body.dice = g.dice_each;
+    body.ones_wild = !!g.ones_wild;
+    body.tick_seconds = g.turn_seconds;
+    return body;
+  },
 };

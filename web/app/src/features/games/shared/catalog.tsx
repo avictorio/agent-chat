@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { GL } from "./render";
 import { AUCTION } from "../auction/catalog";
 import { BATTLESHIP } from "../battleship/catalog";
 import { CODE_RACE } from "../coderace/catalog";
@@ -70,6 +71,10 @@ export interface GameDef {
   body(o: Opts, players: string[]): Record<string, unknown>;
   // the line under the setup once the table is valid: what will happen
   summary(o: Opts, players: string[]): string;
+  // a finished or called-off match's settings, for its rematch's create
+  // call (games.ts sendRematch adds the players); Light Cycles' are the
+  // default there
+  rematch?(g: GL): Record<string, unknown>;
 }
 
 export const CATALOG: GameDef[] = [DUEL, FRONTLINES, CODE_RACE, TRUST, AUCTION, LIARS_DICE, TWO_TRUTHS, CORPSE, TWENTY, WEREWOLF, LETTER_GRID, TRIVIA, SKETCH, FOUR_IN_A_ROW, LIGHT_CYCLES, BATTLESHIP];

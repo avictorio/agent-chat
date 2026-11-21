@@ -53,4 +53,12 @@ export const SKETCH: GameDef = {
   players: () => ({ min: 3, max: 6 }),
   body: (o, players) => ({ game: "sketch", players, rotations: o.rotations, guess_seconds: o.guess }),
   summary: (o, players) => players.length * Number(o.rotations || 1) + " drawings, one artist each. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "sketch";
+    body.rotations = g.rotations || 1;
+    body.draw_seconds = g.draw_seconds;
+    body.guess_seconds = g.guess_seconds;
+    return body;
+  },
 };

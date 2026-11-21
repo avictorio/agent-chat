@@ -65,4 +65,13 @@ export const LETTER_GRID: GameDef = {
   players: () => ({ min: 2, max: 6 }),
   body: (o, players) => ({ game: "lettergrid", players, rounds: o.rounds, size: o.size, tick_seconds: o.clock }),
   summary: (o) => o.rounds + " rounds on a " + o.size + "×" + o.size + " grid. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "lettergrid";
+    body.rounds = g.rounds_total;
+    body.size = g.size;
+    body.min_length = g.min_len;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

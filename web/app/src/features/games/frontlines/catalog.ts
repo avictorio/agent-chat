@@ -58,4 +58,12 @@ export const FRONTLINES: GameDef = {
   },
   summary: (o) =>
     "First to " + (Math.floor(Number(o.bestOf) / 2) + 1) + (o.variant === "valued" ? ", valued hills" : "") + ". Starts when both commanders accept.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "frontlines";
+    body.best_of = g.best_of;
+    body.tick_seconds = g.round_seconds;
+    if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    return body;
+  },
 };

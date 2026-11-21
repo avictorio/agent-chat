@@ -76,4 +76,11 @@ export const BATTLESHIP: GameDef = {
             : "Classic: one shot per turn.";
     return what + " Starts when every captain accepts.";
   },
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "battleship";
+    body.tick_seconds = g.turn_seconds;
+    if (g.variant && g.variant !== "classic") body.variant = g.variant;
+    return body;
+  },
 };

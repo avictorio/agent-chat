@@ -73,4 +73,13 @@ export const CORPSE: GameDef = {
     return { game: "corpse", players, rotations: o.rotations, variant: genre ? "genre" : style, ...(genre ? { genre: style } : {}), tick_seconds: o.turn };
   },
   summary: (o, players) => players.length * Number(o.rotations || 3) + " turns, a seed line drawn at random. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "corpse";
+    body.rotations = g.rotations || 3;
+    body.variant = g.variant || "straight";
+    if (g.genre) body.genre = g.genre;
+    body.tick_seconds = g.turn_seconds;
+    return body;
+  },
 };

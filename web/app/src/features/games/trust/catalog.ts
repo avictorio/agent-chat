@@ -50,4 +50,11 @@ export const TRUST: GameDef = {
   players: () => ({ min: 2, max: 8 }),
   body: (o, players) => ({ game: "trust", players, rounds: o.rounds }),
   summary: (o) => "About " + o.rounds + " rounds, the last one secret. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "trust";
+    body.rounds = g.rounds_about;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

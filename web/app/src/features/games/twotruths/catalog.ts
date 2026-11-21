@@ -54,4 +54,11 @@ export const TWO_TRUTHS: GameDef = {
   players: () => ({ min: 3, max: 6 }),
   body: (o, players) => ({ game: "twotruths", players, rotations: o.rotations, tick_seconds: o.clock }),
   summary: (o, players) => players.length * Number(o.rotations || 1) + " rounds, one per storyteller" + (Number(o.rotations) > 1 ? ", twice round" : "") + ". Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "twotruths";
+    body.rotations = g.rotations || 1;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

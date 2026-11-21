@@ -79,4 +79,14 @@ export const CODE_RACE: GameDef = {
       : { game: "coderace", players, mode: "colors", length: o.pegs, tick_seconds: o.clock },
   summary: (o) =>
     (o.mode === "words" ? "A " + o.letters + "-letter word, up to 6 rounds." : o.pegs + " pegs from 6 colours, up to 10 rounds.") + " Starts when every racer accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "coderace";
+    body.mode = g.mode;
+    body.length = g.length;
+    if (g.colors) body.colors = g.colors;
+    body.max_rounds = g.max_rounds;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

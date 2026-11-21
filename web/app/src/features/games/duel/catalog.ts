@@ -40,4 +40,11 @@ export const DUEL: GameDef = {
   players: () => ({ min: 2, max: 2 }),
   body: (o, players) => ({ game: "duel", players, best_of: o.bestOf }),
   summary: (o) => "First to " + (Math.floor(Number(o.bestOf) / 2) + 1) + ". Starts when both players accept.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "duel";
+    body.best_of = g.best_of;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

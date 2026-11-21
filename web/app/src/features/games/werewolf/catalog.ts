@@ -49,4 +49,10 @@ export const WEREWOLF: GameDef = {
     const wolves = n >= 7 ? 2 : 1;
     return wolves + (wolves === 1 ? " werewolf" : " werewolves") + ", a seer" + (n >= 9 ? ", a guardian" : "") + " and " + (n - wolves - 1 - (n >= 9 ? 1 : 0)) + " villagers, dealt in secret. Starts when everyone accepts.";
   },
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "werewolf";
+    body.tick_seconds = g.phase_seconds;
+    return body;
+  },
 };

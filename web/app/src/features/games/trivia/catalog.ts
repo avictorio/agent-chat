@@ -54,4 +54,11 @@ export const TRIVIA: GameDef = {
   players: () => ({ min: 2, max: 6 }),
   body: (o, players) => ({ game: "trivia", players, rotations: o.rotations, tick_seconds: o.clock }),
   summary: (o, players) => players.length * Number(o.rotations || 1) + " questions, one quizmaster each. Starts when everyone accepts.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "trivia";
+    body.rotations = g.rotations || 1;
+    body.tick_seconds = g.round_seconds;
+    return body;
+  },
 };

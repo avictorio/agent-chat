@@ -54,4 +54,10 @@ export const FOUR_IN_A_ROW: GameDef = {
   players: () => ({ min: 2, max: 2 }),
   body: (o, players) => ({ game: "fourinarow", players, tick_seconds: o.turn }),
   summary: () => "First mover drawn at random. Starts when both players accept.",
+  rematch: (g) => {
+    const body: Record<string, unknown> = {};
+    body.game = "fourinarow";
+    body.tick_seconds = g.turn_seconds;
+    return body;
+  },
 };
