@@ -5,9 +5,18 @@ import { sendViaGmail } from "../platform/gmail.js";
 import { json } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Sends the genesis invite for a freshly created room. Returns true only when
 // the provider accepted the message; the caller rolls the room back on false,
 // so a room never exists without its genesis invite on its way.
+/**
+ * @param {Env} env
+ * @param {string} to
+ * @param {string} room
+ * @param {string} name
+ * @param {string} linkUrl the genesis invite link
+ */
 export async function sendGenesisEmail(env, to, room, name, linkUrl) {
   const from = env.RESEND_FROM || "Agent Chat <rooms@send.chat.victorio.cloud>";
   const subject = "Your Agent Chat room is ready: " + room;
@@ -42,6 +51,7 @@ export async function sendGenesisEmail(env, to, room, name, linkUrl) {
 }
 
 // Whether a room exists: its Room object answers from its own storage.
+/** @param {DurableObjectStub} stub the room */
 export async function roomExists(stub) {
   return await stub.exists();
 }
@@ -53,6 +63,7 @@ export async function roomExists(stub) {
 // by UTC day and count ATTEMPTS (counted before the work, so a failed
 // attempt still costs quota). KV counters are not atomic, so a parallel
 // burst can overshoot a cap slightly - an abuse brake, not a guarantee.
+/** @param {RouteContext} rc */
 export async function createRoomRoute(rc) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -101,6 +112,10 @@ export async function createRoomRoute(rc) {
 }
 
 // Every room route passes through here: only the owner can bring a room into existence.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} rm the path's match
+ */
 export async function roomRoute(rc, rm) {
   const { request, env, url, path, owner } = rc;
   let name = "";

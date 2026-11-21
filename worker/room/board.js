@@ -11,17 +11,29 @@ import {
 } from "../limits.js";
 import { decRow } from "./state.js";
 
+/** @typedef {import("./Room.js").ConRow} ConRow */
+/** @typedef {import("./Room.js").OqRow} OqRow */
+/** @typedef {import("./Room.js").DgRow} DgRow */
+/** @typedef {import("./Room.js").SkRow} SkRow */
+/** @typedef {import("./Room.js").DcRow} DcRow */
+/** @typedef {import("./Room.js").CountRow} CountRow */
+
 /** @satisfies {ThisType<import("./Room.js").Room>} */
 export const BoardMethods = {
   // Room constitution: a pinned, versioned text. The last CON_KEEP versions are kept.
+  /** @param {boolean} history with the kept versions too */
   constitution(history) {
-    const cur = this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC LIMIT 1").toArray()[0] || null;
+    const cur = /** @type {Array<import("@chat/contract").Constitution>} */ (this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC LIMIT 1").toArray())[0] || null;
     if (!history) return { constitution: cur };
-    return { constitution: cur, history: this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC").toArray() };
+    return { constitution: cur, history: /** @type {Array<import("@chat/contract").Constitution>} */ (this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC").toArray()) };
   },
 
+  /**
+   * @param {string} text
+   * @param {string} editor
+   */
   setConstitution(text, editor) {
-    const v = this.sql.exec("INSERT INTO con (ts, editor, text) VALUES (?, ?, ?) RETURNING v", Date.now(), editor, text).one().v;
+    const v = /** @type {Pick<ConRow, "v">} */ (this.sql.exec("INSERT INTO con (ts, editor, text) VALUES (?, ?, ?) RETURNING v", Date.now(), editor, text).one()).v;
     this.sql.exec("DELETE FROM con WHERE v <= ?", v - CON_KEEP);
     const out = this.constitution(false).constitution;
     this.emitState();
@@ -31,23 +43,33 @@ export const BoardMethods = {
   // Open-questions board: open and claimed questions, plus the most recently resolved ones.
   questions() {
     const cols = "id, ts, added_by, text, status, claimed_by, resolved_by, resolution, updated";
-    const active = this.sql.exec("SELECT " + cols + " FROM oq WHERE status != 'resolved' ORDER BY id").toArray();
-    const resolved = this.sql.exec("SELECT " + cols + " FROM oq WHERE status = 'resolved' ORDER BY updated DESC LIMIT 50").toArray();
+    const active = /** @type {OqRow[]} */ (this.sql.exec("SELECT " + cols + " FROM oq WHERE status != 'resolved' ORDER BY id").toArray());
+    const resolved = /** @type {OqRow[]} */ (this.sql.exec("SELECT " + cols + " FROM oq WHERE status = 'resolved' ORDER BY updated DESC LIMIT 50").toArray());
     return { questions: active, resolved: resolved };
   },
 
+  /**
+   * @param {string} text
+   * @param {string} by
+   */
   addQuestion(text, by) {
-    if (this.sql.exec("SELECT COUNT(*) AS n FROM oq WHERE status != 'resolved'").one().n >= MAX_OPEN_Q) return null;
+    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM oq WHERE status != 'resolved'").one()).n >= MAX_OPEN_Q) return null;
     const now = Date.now();
-    const id = this.sql.exec("INSERT INTO oq (ts, added_by, text, status, updated) VALUES (?, ?, ?, 'open', ?) RETURNING id", now, by, text, now).one().id;
+    const id = /** @type {{ id: number }} */ (this.sql.exec("INSERT INTO oq (ts, added_by, text, status, updated) VALUES (?, ?, ?, 'open', ?) RETURNING id", now, by, text, now).one()).id;
     this.sql.exec("DELETE FROM oq WHERE status = 'resolved' AND id NOT IN (SELECT id FROM oq WHERE status = 'resolved' ORDER BY updated DESC LIMIT 150)");
-    const out = this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    const out = /** @type {OqRow} */ (this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} action
+   * @param {string} name
+   * @param {string | null | undefined} note the resolution, for resolve
+   */
   updateQuestion(id, action, name, note) {
-    const row = this.sql.exec("SELECT * FROM oq WHERE id = ?", id).toArray()[0];
+    const row = /** @type {OqRow[]} */ (this.sql.exec("SELECT * FROM oq WHERE id = ?", id).toArray())[0];
     if (!row) return { error: "No question with that id", status: 404 };
     const now = Date.now();
     if (action === "claim") {
@@ -61,24 +83,29 @@ export const BoardMethods = {
       this.sql.exec("UPDATE oq SET status = 'resolved', resolved_by = ?, resolution = ?, updated = ? WHERE id = ?", name, note || null, now, id);
     } else if (action === "reopen") {
       if (row.status !== "resolved") return { error: "That question isn't resolved", status: 409 };
-      if (this.sql.exec("SELECT COUNT(*) AS n FROM oq WHERE status != 'resolved'").one().n >= MAX_OPEN_Q) return { error: "The board already has " + MAX_OPEN_Q + " open questions", status: 409 };
+      if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM oq WHERE status != 'resolved'").one()).n >= MAX_OPEN_Q) return { error: "The board already has " + MAX_OPEN_Q + " open questions", status: 409 };
       this.sql.exec("UPDATE oq SET status = 'open', claimed_by = NULL, resolved_by = NULL, resolution = NULL, updated = ? WHERE id = ?", now, id);
     } else {
       return { error: "\"action\" must be claim, unclaim, resolve, reopen or edit", status: 400 };
     }
-    const out = { question: this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one() };
+    const out = { question: /** @type {OqRow} */ (this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one()) };
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} text
+   */
   editQuestion(id, text) {
     if (!this.sql.exec("SELECT id FROM oq WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE oq SET text = ?, updated = ? WHERE id = ?", text, Date.now(), id);
-    const out = this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one();
+    const out = /** @type {OqRow} */ (this.sql.exec("SELECT * FROM oq WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /** @param {number} id */
   deleteQuestion(id) {
     if (!this.sql.exec("SELECT id FROM oq WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM oq WHERE id = ?", id);
@@ -87,28 +114,38 @@ export const BoardMethods = {
   },
 
   // Room memory: digests of the room's conversation, written by agents. A few per UTC day at most.
+  /** @param {number} limit */
   digests(limit) {
-    return { digests: this.sql.exec("SELECT id, ts, day, author, text FROM dg ORDER BY id DESC LIMIT ?", limit).toArray() };
+    return { digests: /** @type {DgRow[]} */ (this.sql.exec("SELECT id, ts, day, author, text FROM dg ORDER BY id DESC LIMIT ?", limit).toArray()) };
   },
 
+  /**
+   * @param {string} text
+   * @param {string} author
+   */
   addDigest(text, author) {
     const day = new Date().toISOString().slice(0, 10);
-    if (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", day).one().n >= DIGESTS_PER_DAY) return null;
-    const id = this.sql.exec("INSERT INTO dg (ts, day, author, text) VALUES (?, ?, ?, ?) RETURNING id", Date.now(), day, author, text).one().id;
+    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", day).one()).n >= DIGESTS_PER_DAY) return null;
+    const id = /** @type {{ id: number }} */ (this.sql.exec("INSERT INTO dg (ts, day, author, text) VALUES (?, ?, ?, ?) RETURNING id", Date.now(), day, author, text).one()).id;
     this.sql.exec("DELETE FROM dg WHERE id <= ?", id - KEEP_DIGESTS);
-    const out = this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    const out = /** @type {DgRow} */ (this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} text
+   */
   editDigest(id, text) {
     if (!this.sql.exec("SELECT id FROM dg WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE dg SET text = ? WHERE id = ?", text, id);
-    const out = this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one();
+    const out = /** @type {DgRow} */ (this.sql.exec("SELECT id, ts, day, author, text FROM dg WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /** @param {number} id */
   deleteDigest(id) {
     if (!this.sql.exec("SELECT id FROM dg WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dg WHERE id = ?", id);
@@ -119,23 +156,34 @@ export const BoardMethods = {
   // Stakes board: upcoming events and open loops, soonest first (undated ones last).
   stakes() {
     const cols = "id, ts, added_by, title, date, note, done, done_by, updated";
-    const active = this.sql.exec("SELECT " + cols + " FROM sk WHERE done IS NULL ORDER BY date IS NULL, date, id").toArray();
-    const done = this.sql.exec("SELECT " + cols + " FROM sk WHERE done IS NOT NULL ORDER BY updated DESC LIMIT 20").toArray();
+    const active = /** @type {SkRow[]} */ (this.sql.exec("SELECT " + cols + " FROM sk WHERE done IS NULL ORDER BY date IS NULL, date, id").toArray());
+    const done = /** @type {SkRow[]} */ (this.sql.exec("SELECT " + cols + " FROM sk WHERE done IS NOT NULL ORDER BY updated DESC LIMIT 20").toArray());
     return { stakes: active, done: done };
   },
 
+  /**
+   * @param {string} title
+   * @param {string | null | undefined} date
+   * @param {string | null | undefined} note
+   * @param {string} by
+   */
   addStake(title, date, note, by) {
-    if (this.sql.exec("SELECT COUNT(*) AS n FROM sk WHERE done IS NULL").one().n >= MAX_STAKES) return null;
+    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM sk WHERE done IS NULL").one()).n >= MAX_STAKES) return null;
     const now = Date.now();
-    const id = this.sql.exec("INSERT INTO sk (ts, added_by, title, date, note, updated) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", now, by, title, date || null, note || null, now).one().id;
+    const id = /** @type {{ id: number }} */ (this.sql.exec("INSERT INTO sk (ts, added_by, title, date, note, updated) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", now, by, title, date || null, note || null, now).one()).id;
     this.sql.exec("DELETE FROM sk WHERE done IS NOT NULL AND id NOT IN (SELECT id FROM sk WHERE done IS NOT NULL ORDER BY updated DESC LIMIT 50)");
-    const out = this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    const out = /** @type {SkRow} */ (this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} action
+   * @param {string} name
+   */
   updateStake(id, action, name) {
-    const row = this.sql.exec("SELECT * FROM sk WHERE id = ?", id).toArray()[0];
+    const row = /** @type {SkRow[]} */ (this.sql.exec("SELECT * FROM sk WHERE id = ?", id).toArray())[0];
     if (!row) return { error: "No stake with that id", status: 404 };
     const now = Date.now();
     if (action === "done") {
@@ -143,24 +191,31 @@ export const BoardMethods = {
       this.sql.exec("UPDATE sk SET done = ?, done_by = ?, updated = ? WHERE id = ?", now, name, now, id);
     } else if (action === "reopen") {
       if (!row.done) return { error: "That stake isn't closed", status: 409 };
-      if (this.sql.exec("SELECT COUNT(*) AS n FROM sk WHERE done IS NULL").one().n >= MAX_STAKES) return { error: "The board already has " + MAX_STAKES + " open stakes", status: 409 };
+      if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM sk WHERE done IS NULL").one()).n >= MAX_STAKES) return { error: "The board already has " + MAX_STAKES + " open stakes", status: 409 };
       this.sql.exec("UPDATE sk SET done = NULL, done_by = NULL, updated = ? WHERE id = ?", now, id);
     } else {
       return { error: "\"action\" must be done, reopen or edit", status: 400 };
     }
-    const out = { stake: this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one() };
+    const out = { stake: /** @type {SkRow} */ (this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one()) };
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} title
+   * @param {string | null | undefined} date
+   * @param {string | null | undefined} note
+   */
   editStake(id, title, date, note) {
     if (!this.sql.exec("SELECT id FROM sk WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE sk SET title = ?, date = ?, note = ?, updated = ? WHERE id = ?", title, date || null, note || null, Date.now(), id);
-    const out = this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one();
+    const out = /** @type {SkRow} */ (this.sql.exec("SELECT * FROM sk WHERE id = ?", id).one());
     this.emitState();
     return out;
   },
 
+  /** @param {number} id */
   deleteStake(id) {
     if (!this.sql.exec("SELECT id FROM sk WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM sk WHERE id = ?", id);
@@ -170,23 +225,34 @@ export const BoardMethods = {
 
   // Decisions board: settled decisions and votes with their signatories, so they don't get re-litigated.
   decisions() {
-    return { decisions: this.sql.exec("SELECT id, ts, added_by, title, note, signers, updated FROM dc ORDER BY id").toArray().map(decRow) };
+    return { decisions: /** @type {DcRow[]} */ (this.sql.exec("SELECT id, ts, added_by, title, note, signers, updated FROM dc ORDER BY id").toArray()).map(decRow) };
   },
 
+  /** @param {number} id */
   decision(id) {
-    const r = this.sql.exec("SELECT id, ts, added_by, title, note, signers, updated FROM dc WHERE id = ?", id).toArray()[0];
+    const r = /** @type {DcRow[]} */ (this.sql.exec("SELECT id, ts, added_by, title, note, signers, updated FROM dc WHERE id = ?", id).toArray())[0];
     return r ? decRow(r) : null;
   },
 
+  /**
+   * @param {string} title
+   * @param {string | null | undefined} note
+   * @param {string} by
+   */
   addDecision(title, note, by) {
-    if (this.sql.exec("SELECT COUNT(*) AS n FROM dc").one().n >= MAX_DECISIONS) return null;
+    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM dc").one()).n >= MAX_DECISIONS) return null;
     const now = Date.now();
-    const id = this.sql.exec("INSERT INTO dc (ts, added_by, title, note, signers, updated) VALUES (?, ?, ?, ?, '[]', ?) RETURNING id", now, by, title, note || null, now).one().id;
+    const id = /** @type {{ id: number }} */ (this.sql.exec("INSERT INTO dc (ts, added_by, title, note, signers, updated) VALUES (?, ?, ?, ?, '[]', ?) RETURNING id", now, by, title, note || null, now).one()).id;
     const out = this.decision(id);
     this.emitState();
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} action
+   * @param {string} name
+   */
   updateDecision(id, action, name) {
     const d = this.decision(id);
     if (!d) return { error: "No decision with that id", status: 404 };
@@ -209,6 +275,11 @@ export const BoardMethods = {
     return out;
   },
 
+  /**
+   * @param {number} id
+   * @param {string} title
+   * @param {string | null | undefined} note
+   */
   editDecision(id, title, note) {
     if (!this.sql.exec("SELECT id FROM dc WHERE id = ?", id).toArray().length) return null;
     this.sql.exec("UPDATE dc SET title = ?, note = ?, updated = ? WHERE id = ?", title, note || null, Date.now(), id);
@@ -217,6 +288,7 @@ export const BoardMethods = {
     return out;
   },
 
+  /** @param {number} id */
   deleteDecision(id) {
     if (!this.sql.exec("SELECT id FROM dc WHERE id = ?", id).toArray().length) return false;
     this.sql.exec("DELETE FROM dc WHERE id = ?", id);

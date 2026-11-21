@@ -62,12 +62,24 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
 export const MCP_CATALOG_VERSION = "1.21.0";
+/** @param {McpTool[]} list the catalog */
 export function mcpCatalogDigest(list) {
   const s = JSON.stringify(list);
   let h = 0xcbf29ce484222325n;
   for (let i = 0; i < s.length; i++) { h ^= BigInt(s.charCodeAt(i)); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; }
   return ("0000000000000000" + h.toString(16)).slice(-16);
 }
+/** A tool in the catalog: its JSON Schema input, and the hints a harness
+ *  reads to tell reads from writes (mcpCatalog sets them on every tool).
+ *  @typedef {{ name: string, description: string, inputSchema: { type: string, properties: Record<string, object>, required: string[], additionalProperties: boolean },
+ *    annotations?: { readOnlyHint: boolean, destructiveHint?: boolean, idempotentHint: boolean, openWorldHint: boolean } }} McpTool */
+/**
+ * @param {string} name
+ * @param {string} description
+ * @param {Record<string, object>} [properties] the arguments' JSON Schemas
+ * @param {string[]} [required]
+ * @returns {McpTool}
+ */
 export function mcpTool(name, description, properties, required) {
   const props = Object.assign({ as: { type: "string", description: "Owner key only: act under this name. Invite callers ignore this - your name is fixed by your invite." } }, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
@@ -129,13 +141,19 @@ export function mcpCatalog() {
   }
   return list;
 }
+/** @param {unknown} obj a tool's result */
 export function mcpOk(obj) {
   const o = obj && typeof obj === "object" ? obj : { value: obj };
   return { content: [{ type: "text", text: JSON.stringify(o) }], structuredContent: o };
 }
+/** @param {unknown} message */
 export function mcpErr(message) {
   return { content: [{ type: "text", text: String(message) }], isError: true };
 }
+/**
+ * @param {unknown} s base64, or a data: URL
+ * @param {string} what the argument's name, for the error
+ */
 export function mcpDecodeB64(s, what) {
   const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
   try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch (e) { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
@@ -143,6 +161,17 @@ export function mcpDecodeB64(s, what) {
 // Executes one tools/call against the Room stub. Identity (from) is already
 // resolved by the route from the credential - never from tool arguments,
 // except the owner-only "as" handled by the caller of this function.
+/**
+ * @param {Env} env
+ * @param {DurableObjectStub} stub the room
+ * @param {string} room
+ * @param {string} origin
+ * @param {boolean} owner
+ * @param {{ kind?: string | null }} acc the credential's access check (its member kind)
+ * @param {string | null | undefined} from who the call acts as
+ * @param {string} name the tool
+ * @param {Record<string, any> | null | undefined} args the tool's arguments, as the client sent them
+ */
 export async function mcpCallTool(env, stub, room, origin, owner, acc, from, name, args) {
   const A = args || {};
   const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); };
@@ -189,9 +218,10 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
     case "get_reactions": { const r = await stub.reactionsOf(parseInt(A.id, 10), from, owner); if (!r) throw new Error("No message with that id"); return { room: room, id: parseInt(A.id, 10), reactions: r }; }
     case "get_members": {
       const mb = await stub.members();
+      /** @type {Record<string, string>} signed avatar params, by member name */
       const avq = {};
       for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-      mb.members = mb.members.map((x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
+      mb.members = mb.members.map((/** @type {Record<string, any>} a RoomMember, rewritten for the reply */ x) => { const v = x.avatar_version; delete x.avatar_version; x.avatar = v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null; const tok = x.invite_token; delete x.invite_token; if (mb.invite_only && x.status !== "revoked" && tok) { x.invite_link = origin + "/r/" + room + "#invite=" + tok; if (x.kind !== "human") x.agent_onboarding = agentOnboarding(origin, room, x.name, tok); } return x; });
       return Object.assign({ room: room }, mb);
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
@@ -233,6 +263,7 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
       if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw new Error("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours");
       const fr = await webFetch(target);
+      /** @type {Record<string, unknown>} */
       const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
       if (A.post && !fr.error) { const full = fr.text || ""; const excerpt = full.slice(0, 1500); const msgText = "Fetched " + fr.url + " (HTTP " + fr.status + ")" + (fr.title ? "\n" + fr.title : "") + "\n\n" + excerpt + (full.length > 1500 || fr.truncated ? "\n\n[excerpt; the full text is available through the fetch tool]" : ""); out.posted = await stub.post(from, msgText.slice(0, MAX_TEXT), room, owner); }
       if (fr.error) throw new Error(fr.error);
@@ -264,6 +295,7 @@ export async function mcpCallTool(env, stub, room, origin, owner, acc, from, nam
       }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
       if (t.status !== 200) throw new Error(t.error);
+      /** @type {{ room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } }} */
       const out = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
       out.upload.bigger = "For a bigger file (any size up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (the exact byte length) - and name for a file - for a resumable upload link.";

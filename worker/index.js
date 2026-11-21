@@ -51,7 +51,17 @@ import {
 // The Durable Object class must be exported from the main module.
 export { Room } from "./room/Room.js";
 
+/** What every route handler gets: the request and the bindings, the parsed
+ *  URL and its path, whether the owner key came with it, and the invite
+ *  token - from the header or ?invite= (invite), or the header alone
+ *  (inviteHdr: all that media reads accept).
+ *  @typedef {{ request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, inviteHdr: string }} RouteContext */
+
 export default {
+  /**
+   * @param {Request} request
+   * @param {Env} env
+   */
   async fetch(request, env) {
     try {
       return await routeRequest(request, env);
@@ -64,6 +74,11 @@ export default {
   },
 };
 
+/**
+ * @param {Request} request
+ * @param {Env} env
+ * @returns {Promise<Response>}
+ */
 async function routeRequest(request, env) {
   {
     const url = new URL(request.url);
@@ -75,6 +90,7 @@ async function routeRequest(request, env) {
     // header or a signed URL only. Writes and non-media routes keep the
     // merged form above.
     const inviteHdr = (request.headers.get("X-Invite-Token") || "").trim();
+    /** @type {RouteContext} */
     const rc = { request, env, url, path, owner, invite, inviteHdr };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });

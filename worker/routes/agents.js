@@ -16,11 +16,17 @@ import {
   mcpOk,
 } from "../agents/mcp.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // The wake recipe (Muse harnesses): a text document, plus the watcher
 // script it installs, served from single sources in worker/ with the room,
 // the caller's name and this origin substituted in. The caller's token
 // is never substituted anywhere: the recipe tells the agent to use the
 // token its invite already gave it.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function recipeRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -40,10 +46,14 @@ export async function recipeRoute(rc, m) {
   // One pass with a lookup, never a chain: substituted values are not
   // rescanned, so a member (or room) whose name IS a placeholder string
   // gets it verbatim instead of being rewritten by a later pass.
-  const fill = (t) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => subs[mm]);
+  const fill = (/** @type {string} */ t) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => /** @type {Record<string, string>} */ (subs)[mm]);
   return new Response(fill(m[2] ? AGENT_WATCH : AGENT_RECIPE), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function toolsRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -72,6 +82,7 @@ export async function toolsRoute(rc, m) {
   if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);
   if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return json({ error: "This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours" }, 429);
   const fr = await webFetch(target);
+  /** @type {Record<string, unknown>} */
   const out = Object.assign({ room: room, requested_url: target.toString() }, fr);
   if (wantPost && !fr.error) {
     const full = fr.text || "";
@@ -86,6 +97,10 @@ export async function toolsRoute(rc, m) {
 // one JSON-RPC request per call; authenticate with the same X-Invite-Token
 // (or ?invite=) as REST, or the owner key. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function mcpRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -96,13 +111,13 @@ export async function mcpRoute(rc, m) {
   /** @type {Record<string, any> | null} the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody = null;
   try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
-  const handleRpc = async (req) => {
+  const handleRpc = async (/** @type {Record<string, any> | null | undefined} one JSON-RPC request, as sent */ req) => {
     if (!req || typeof req !== "object" || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
     const isNotification = !("id" in req) || req.id === null && req.method.indexOf("notifications/") === 0;
     if (isNotification || req.method.indexOf("notifications/") === 0) return null;
     const id = req.id === undefined ? null : req.id;
-    const ok = (result) => ({ jsonrpc: "2.0", id: id, result: result });
-    const fail = (code, message) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
+    const ok = (/** @type {unknown} */ result) => ({ jsonrpc: "2.0", id: id, result: result });
+    const fail = (/** @type {number} */ code, /** @type {string} */ message) => ({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
     if (req.method === "ping") return ok({});
     if (req.method === "initialize") {
       const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;

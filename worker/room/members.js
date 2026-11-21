@@ -2,18 +2,26 @@
 
 import { nameFold } from "../lib/text.js";
 
+/** @typedef {import("./Room.js").InvRow} InvRow */
+/** @typedef {import("./Room.js").MvRow} MvRow */
+/** @typedef {import("./Room.js").CountRow} CountRow */
+
 /** @satisfies {ThisType<import("./Room.js").Room>} */
 export const MemberMethods = {
   // Daily cap on room tool calls (web fetches).
+  /**
+   * @param {number} limit
+   * @param {string | null} [url]
+   */
   toolTake(limit, url) {
     this.sql.exec("DELETE FROM tf WHERE ts <= ?", Date.now() - 86400e3);
-    if (this.sql.exec("SELECT COUNT(*) AS n FROM tf").one().n >= limit) return false;
+    if (/** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM tf").one()).n >= limit) return false;
     this.sql.exec("INSERT INTO tf (ts, url) VALUES (?, ?)", Date.now(), url || null);
     return true;
   },
 
   invites() {
-    return this.sql.exec("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray();
+    return /** @type {Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">[]} */ (this.sql.exec("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray());
   },
 
   // Invite status for anyone in the room: active, unused or revoked. The token rides
@@ -24,9 +32,11 @@ export const MemberMethods = {
    *  @typedef {Omit<import("@chat/contract").Member, "avatar" | "invite_link" | "agent_onboarding"> & { avatar_version: number | null, invite_token: string }} RoomMember */
   /** @returns {{ invite_only: true, members: RoomMember[] }} */
   members() {
-    const rows = this.sql.exec("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
+    const rows = /** @type {Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver">[]} */ (this.sql.exec("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray());
+    /** @typedef {Pick<MvRow, "name" | "provider" | "voice_id" | "sample_key">} VoiceCols */
+    /** @type {Record<string, VoiceCols>} voices by (lowercased) name */
     const vmap = {};
-    for (const v of this.sql.exec("SELECT name, provider, voice_id, sample_key FROM mv").toArray()) vmap[v.name] = v;
+    for (const v of /** @type {VoiceCols[]} */ (this.sql.exec("SELECT name, provider, voice_id, sample_key FROM mv").toArray())) vmap[v.name] = v;
     return {
       invite_only: true,
       members: rows.map((r) => { const v = vmap[String(r.name).toLowerCase()] || null; return /** @satisfies {RoomMember} */ ({ name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, invite_token: r.token }); }),
@@ -38,14 +48,25 @@ export const MemberMethods = {
   // only the pointer (avatar_key, avatar_type, avatar_ver). There is no
   // in-DB copy any more (the blob era ended 2026-11-19). Streams get a
   // "members" event on change.
+  /**
+   * @param {string} room
+   * @param {string} name
+   * @param {number} ver
+   */
   avatarKey(room, name, ver) {
     return "avatars/" + room + "/" + String(name).toLowerCase() + "/" + ver;
   },
 
+  /**
+   * @param {string} name
+   * @param {ArrayBuffer} data
+   * @param {string} type
+   * @param {string} room
+   */
   async setAvatar(name, data, type, room) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
-    const prev = this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
+    const prev = /** @type {{ avatar_key: string }[]} */ (this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray())[0];
     const ver = Date.now();
     const key = this.avatarKey(room, name, ver);
     try {
@@ -57,8 +78,9 @@ export const MemberMethods = {
     return ver;
   },
 
+  /** @param {string} name */
   async clearAvatar(name) {
-    const rows = this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL", name).toArray();
+    const rows = /** @type {Pick<InvRow, "avatar_key">[]} */ (this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL", name).toArray());
     if (!rows.length) return false;
     this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE lower(name) = lower(?)", name);
     if (this.env && this.env.MEDIA) {
@@ -70,26 +92,33 @@ export const MemberMethods = {
 
   // The member's avatar pointer, or null; the route streams the bytes
   // from R2.
+  /** @param {string} name */
   getAvatar(name) {
-    const r = this.sql.exec("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
+    const r = /** @type {{ avatar_type: string | null, avatar_ver: number, avatar_key: string }[]} */ (this.sql.exec("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray())[0];
     return r ? { key: r.avatar_key, type: r.avatar_type, ver: r.avatar_ver } : null;
   },
 
   // The holder of an active invite (members can invite others). Null when the token isn't active.
+  /** @param {string | null | undefined} token */
   inviter(token) {
     if (!token) return null;
-    const row = this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray()[0];
+    const row = /** @type {Pick<InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray())[0];
     return row ? row.name : null;
   },
 
   // Invites this member made in the last 24 hours, and active invites overall.
+  /** @param {string | null | undefined} name */
   inviteLoad(name) {
     return {
-      recent: this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one().n,
-      active: this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n,
+      recent: /** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one()).n,
+      active: /** @type {CountRow} */ (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one()).n,
     };
   },
 
+  /**
+   * @param {string} name
+   * @param {import("@chat/contract").MemberKind} kind
+   */
   setKind(name, kind) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return false;
     this.sql.exec("UPDATE inv SET kind = ? WHERE lower(name) = lower(?)", kind, name);
@@ -100,6 +129,7 @@ export const MemberMethods = {
   // posts match results under. It is reserved (2026-11-12, games
   // review): if a member could hold it, their posts and game frames
   // would be indistinguishable from the official's.
+  /** @param {unknown} name */
   isReservedName(name) {
     return nameFold(String(name || "").trim()) === "referee";
   },
@@ -107,11 +137,17 @@ export const MemberMethods = {
   // limits (a member creating an invite): the day and active caps are
   // checked here, inside the one serialized call, so parallel requests
   // cannot all pass a check made in a separate call.
+  /**
+   * @param {string} name
+   * @param {string | null | undefined} kind "human" or "agent" (the default)
+   * @param {string | null | undefined} by the member inviting, or null for the owner
+   * @param {{ perDay: number, maxActive: number } | null} [limits]
+   */
   invite(name, kind, by, limits) {
     name = String(name || "").normalize("NFC");
     if (this.isReservedName(name)) return null;
     const fold = nameFold(name);
-    if (this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) return null;
+    if (/** @type {Pick<InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray()).some((r) => nameFold(r.name) === fold)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
       if (load.recent >= limits.perDay) return { limit: "day" };
@@ -125,15 +161,16 @@ export const MemberMethods = {
     return { token, name, created, revoked: null, kind: kind || "agent", invited_by: by || null };
   },
 
+  /** @param {string} token */
   revoke(token) {
-    const row = this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray()[0];
+    const row = /** @type {Pick<InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray())[0];
     if (!row) return false;
     this.sql.exec("UPDATE inv SET revoked = ? WHERE token = ?", Date.now(), token);
     for (const c of this.clients) if (c.token === token) c.close();
     // A member who is out stops getting pushes (message text included):
     // their browser push subscriptions go with their last invite.
     const fold = nameFold(row.name);
-    if (!this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
+    if (!/** @type {Pick<InvRow, "name">[]} */ (this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray()).some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
     this.emitState();
     return true;
   },
@@ -143,7 +180,7 @@ export const MemberMethods = {
   // the inv rows are their only pointers, so a later destroy() could not
   // find them.
   async unlock() {
-    const avatarKeys = this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
+    const avatarKeys = /** @type {{ avatar_key: string }[]} */ (this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray()).map((r) => r.avatar_key);
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
@@ -154,10 +191,14 @@ export const MemberMethods = {
   // The kind of an actor by name: "human" | "agent" from their invite,
   // "non_interactive" for a system actor with no invite (the Referee),
   // null for no actor at all.
+  /**
+   * @param {string | null | undefined} name
+   * @returns {import("@chat/contract").MemberKind | "non_interactive" | null}
+   */
   memberKind(name) {
     if (!name) return null;
     const n = String(name).toLowerCase();
-    const r = this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray()[0];
+    const r = /** @type {Pick<InvRow, "kind">[]} */ (this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray())[0];
     return r ? (r.kind === "human" ? "human" : "agent") : "non_interactive";
   },
 };

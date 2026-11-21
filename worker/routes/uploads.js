@@ -17,6 +17,8 @@ import {
 import { mediaSigParams } from "../lib/media.js";
 import { sniffVideo } from "../lib/sniff.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
 // from Content-Length). With sniff set (part 1 of an image, audio or
@@ -24,6 +26,13 @@ import { sniffVideo } from "../lib/sniff.js";
 // stored, then rejoined to the rest through a FixedLengthStream, so a
 // wrong kind of file is refused at its first part, not after the whole
 // upload. Answers { part } - or { part: null } when the sniff fails.
+/**
+ * @param {R2MultipartUpload} up
+ * @param {number} n the part number
+ * @param {ReadableStream<Uint8Array>} body
+ * @param {number} len the part's length
+ * @param {((buf: ArrayBuffer) => string | null) | null} sniff the kind's sniffer, for a first part
+ */
 export async function streamUploadPart(up, n, body, len, sniff) {
   if (!sniff) return { part: await up.uploadPart(n, body) };
   const reader = body.getReader();
@@ -70,12 +79,24 @@ export async function streamUploadPart(up, n, body, len, sniff) {
 // routes (/messages/ID/KIND/STEP) and resumable upload links
 // (/api/uploads/ROOM/LINK/STEP, which cannot start: their session
 // started when the link was opened).
+/**
+ * @param {Request} request
+ * @param {Env} env
+ * @param {URL} url
+ * @param {DurableObjectStub} stub the room
+ * @param {string} room
+ * @param {number} id
+ * @param {string} kind
+ * @param {string} step start, part, sign, status, finish or abort
+ * @param {string | null | undefined} who
+ * @param {boolean} owner
+ */
 export async function uploadStep(request, env, url, stub, room, id, kind, step, who, owner) {
   if (step === "part") {
     // A refused part is read away before the answer goes back: a client
     // still sending its body would otherwise see the connection drop
     // instead of the reason.
-    const refuse = async (body, status) => {
+    const refuse = async (/** @type {Record<string, unknown>} */ body, /** @type {number} */ status) => {
       if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch (e) {} }
       return json(body, status);
     };
@@ -106,7 +127,9 @@ export async function uploadStep(request, env, url, stub, room, id, kind, step, 
     const t = await stub.uploadSignTarget(id, kind, who, owner, nums);
     if (t.status !== 200) return json({ error: t.error }, t.status);
     if (!r2DirectConfigured(env)) return json({ error: "Direct uploads are not configured right now; send the parts through the site (PUT /part?n=N) if they fit, or try again later" }, 503);
+    /** @type {Record<number, string>} each part's address */
     const urls = {};
+    /** @type {Record<number, number>} each part's length */
     const bytes = {};
     for (const p of t.parts) { urls[p.n] = await r2PresignPart(env, t.key, t.upload_id, p.n, UP_SIGN_TTL); bytes[p.n] = p.bytes; }
     return json({ room: room, id: id, kind: kind, method: "PUT", urls: urls, bytes: bytes, expires_at: new Date(Date.now() + UP_SIGN_TTL * 1000).toISOString(), note: "PUT each part's raw bytes to its url - no other headers, no credential. Then status / finish as usual." });
@@ -128,6 +151,7 @@ export async function uploadStep(request, env, url, stub, room, id, kind, step, 
   if (step === "finish") {
     const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
     if (r.status !== 200) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
+    /** @type {Record<string, any>} the answer, with the media under its kind */
     const out = { room: room, id: id, kind: kind, published: !!r.published };
     out[kind] = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
     if (kind === "file") out[kind].name = r.name;
@@ -140,6 +164,16 @@ export async function uploadStep(request, env, url, stub, room, id, kind, step, 
 
 // A resumable upload link's addresses (begin_upload or upload-ticket with
 // a size): the engine's steps, with the link itself as the credential.
+/** An upload ticket as mintUploadTicket answers it (status 200): the raw
+ *  ticket, when it expires and how big its upload may be, plus a
+ *  resumable session's plan.
+ *  @typedef {{ ticket: string, expires: number, max_bytes: number, size?: number, part_size?: number, parts?: number, direct?: boolean }} UploadTicket */
+/**
+ * @param {string} origin
+ * @param {string} room
+ * @param {string} kind
+ * @param {UploadTicket} t
+ */
 export function sessionUpload(origin, room, kind, t) {
   const base = origin + "/api/uploads/" + room + "/" + t.ticket;
   return {
@@ -163,6 +197,10 @@ export function sessionUpload(origin, room, kind, t) {
 // Does an upload-link request want a resumable session? Yes for a file
 // (always) and for any kind given a size past its single-shot cap.
 // Answers null (single-shot), { size, type, name } or { error }.
+/**
+ * @param {string} kind
+ * @param {Record<string, any>} a the request's fields (a JSON body or MCP arguments)
+ */
 export function uploadSessionWanted(kind, a) {
   const has = a.size !== undefined && a.size !== null && a.size !== "";
   if (!has) return kind === "file" ? { error: "\"size\" (the file's exact length in bytes) is required for kind file" } : null;
@@ -176,6 +214,11 @@ export function uploadSessionWanted(kind, a) {
 // The upload object begin_upload and the REST upload-ticket route hand out
 // (media plan phase C). The URL is the credential: single-use, short-lived,
 // and the only place the raw ticket exists outside the client's hands.
+/**
+ * @param {string} origin
+ * @param {string} room
+ * @param {UploadTicket} t
+ */
 export function ticketUpload(origin, room, t) {
   return {
     method: "PUT",
@@ -191,6 +234,10 @@ export function ticketUpload(origin, room, t) {
 
 // Resumable upload links: the upload engine's part / sign / status /
 // finish / abort steps with the link as the credential, for one session.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} usm the path's match
+ */
 export async function uploadLinkStepRoute(rc, usm) {
   const { request, env, url } = rc;
   const uroom = decodeURIComponent(usm[1]).toLowerCase();
@@ -208,6 +255,10 @@ export async function uploadLinkStepRoute(rc, usm) {
 // begin_upload ticket. Deliberately NO access check: the ticket is the
 // credential (single-use, 15 minutes, hash-only at rest). The ticket is
 // never echoed back in any response.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} um the path's match
+ */
 export async function uploadLinkRoute(rc, um) {
   const { request, env } = rc;
   const uroom = decodeURIComponent(um[1]).toLowerCase();
@@ -226,6 +277,10 @@ export async function uploadLinkRoute(rc, um) {
 // files use the upload engine), for a client that can send a file in one
 // request. The Worker assembles
 // R2 multipart parts as the bytes arrive; nothing holds the whole file.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function videoStreamRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -242,7 +297,7 @@ export async function videoStreamRoute(rc, m) {
   if (begun.status !== 200) return json({ error: begun.error }, begun.status);
   const key = begun.key, uploadId = begun.uploadId;
   const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
-  const fail = async (status, error) => {
+  const fail = async (/** @type {number} */ status, /** @type {string} */ error) => {
     try { await up.abort(); } catch (e) {}
     // streamAbort deletes the object too, but only while this upload
     // still owns the message's row: the key is shared with any newer one
@@ -250,8 +305,8 @@ export async function videoStreamRoute(rc, m) {
     return json({ error: error }, status);
   };
   const parts = [];
-  let counted = 0, n = 0, bufs = [], buflen = 0;
-  const take = (amount) => {
+  let counted = 0, n = 0, bufs = /** @type {Uint8Array[]} */ ([]), buflen = 0;
+  const take = (/** @type {number} */ amount) => {
     const out = new Uint8Array(amount);
     let off = 0;
     while (off < amount) {
@@ -295,6 +350,10 @@ export async function videoStreamRoute(rc, m) {
 // The upload engine (UP_KINDS): start / part / sign / status / finish / abort
 // for any kind, with the sender's invite or the owner key. /video/...
 // was the first chunked flow (video only); it is this same route.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function uploadRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -309,6 +368,10 @@ export async function uploadRoute(rc, m) {
 // Mint an upload ticket for one of your drafts (phase C): the REST twin
 // of MCP begin_upload for a draft that already exists. The response is
 // the only place the raw ticket ever appears.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function uploadTicketRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -333,6 +396,10 @@ export async function uploadTicketRoute(rc, m) {
 // as an interrupted attempt, of any kind (or "kind" in the body). Returns the
 // draft message id, its kind and the parts received. /video/resume is the
 // first, video-only form.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function uploadResumeRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

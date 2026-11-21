@@ -4,8 +4,16 @@
 import { nameFold } from "../lib/text.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
 
+/** @type {Map<string, Promise<ArrayBuffer>>} speak syntheses in flight, by "room:message id" */
 export const SPEAK_INFLIGHT = new Map();
 
+/** @typedef {import("./Room.js").MvRow} MvRow */
+
+/**
+ * @param {Env} env
+ * @param {string} room
+ * @param {string} who
+ */
 export async function cloneAllowed(env, room, who) {
   const k = "clone:" + room + ":" + nameFold(who) + ":" + new Date().toISOString().slice(0, 10);
   const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
@@ -19,11 +27,16 @@ export const VoiceMethods = {
   // Voices: one cloned voice per member. The sample lives in R2; the mv row carries the
   // provider voice id the server saved when it cloned the sample. Streams get a "members"
   // event on change, like avatars.
+  /**
+   * @param {string} name
+   * @returns {MvRow | null}
+   */
   voiceRow(name) {
-    const r = this.sql.exec("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", String(name).toLowerCase()).toArray()[0];
+    const r = /** @type {MvRow[]} */ (this.sql.exec("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", String(name).toLowerCase()).toArray())[0];
     return r || null;
   },
 
+  /** @param {string} name */
   voiceOf(name) {
     const r = this.voiceRow(name);
     if (!r) return null;
@@ -33,6 +46,10 @@ export const VoiceMethods = {
   // The slug alone collided ("José" and "Jos?" both slug to "jos-"), so
   // one member could overwrite another's sample: a hash of the folded name
   // keeps keys distinct. Older rows keep the key they were stored under.
+  /**
+   * @param {string | null | undefined} room
+   * @param {string} name
+   */
   async voiceSampleKey(room, name) {
     const fold = nameFold(name);
     const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fold)));
@@ -40,6 +57,12 @@ export const VoiceMethods = {
     return (room || this.roomName || "room") + "/voice-sample/" + fold.replace(/[^a-z0-9_-]+/g, "-").slice(0, 40) + "-" + hex;
   },
 
+  /**
+   * @param {string} name
+   * @param {ArrayBuffer} data
+   * @param {string} type
+   * @param {string} room
+   */
   async putVoiceSample(name, data, type, room) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const key = await this.voiceSampleKey(room, name);
@@ -55,6 +78,7 @@ export const VoiceMethods = {
     return key;
   },
 
+  /** @param {string} name */
   async getVoiceSample(name) {
     const r = this.voiceRow(name);
     if (!r || !r.sample_key || !this.env || !this.env.MEDIA) return null;
@@ -65,6 +89,11 @@ export const VoiceMethods = {
     } catch (e) { return null; }
   },
 
+  /**
+   * @param {string} name
+   * @param {string} provider
+   * @param {string} voiceId
+   */
   async setVoiceId(name, provider, voiceId) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
@@ -77,8 +106,9 @@ export const VoiceMethods = {
 
   // A voice change makes every cached speak rendering of that member's messages
   // stale: drop them so the next play re-synthesizes in the new voice.
+  /** @param {string} name */
   async invalidateSpeakCache(name) {
-    const ids = this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray();
+    const ids = /** @type {Pick<import("./Room.js").MsgRow, "id">[]} */ (this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray());
     for (const r of ids) {
       const meta = this.mediaMeta(r.id, "speak");
       if (!meta) continue;
@@ -87,6 +117,7 @@ export const VoiceMethods = {
     }
   },
 
+  /** @param {string} name */
   async clearVoice(name) {
     const r = this.voiceRow(name);
     if (!r) return false;
@@ -98,8 +129,9 @@ export const VoiceMethods = {
   },
 
   // What a speak request needs: the message's sender and text. Drafts never speak.
+  /** @param {number} id */
   speakSource(id) {
-    const r = this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray()[0];
+    const r = /** @type {Pick<import("./Room.js").MsgRow, "sender" | "text" | "draft">[]} */ (this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray())[0];
     if (!r || r.draft) return null;
     return { sender: r.sender, text: r.text };
   },

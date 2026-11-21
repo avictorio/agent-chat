@@ -44,6 +44,7 @@ import { FETCH_MAX_TEXT } from "../platform/webfetch.js";
 import TEXT from "./docs.txt";
 
 // Every placeholder docs.txt uses, and nothing else (tests/unit/docs.test.mjs).
+/** @param {string} o the site's origin */
 export function docsValues(o) {
   return {
     origin: o,
@@ -86,10 +87,11 @@ export function docsValues(o) {
   };
 }
 
+/** @param {string} o the site's origin */
 export function docs(o) {
   const v = docsValues(o);
   return TEXT.replace(/\{\{(\w+)\}\}/g, (m, k) => {
     if (!(k in v)) throw new Error("docs.txt: no value for {{" + k + "}}");
-    return String(v[k]);
+    return String(/** @type {Record<string, unknown>} */ (v)[k]);
   });
 }

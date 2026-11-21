@@ -8,6 +8,10 @@ import { b64urlEncode, pemToDer } from "../lib/crypto.js";
 // string. Parse strictly first; on failure, retry with raw line
 // breaks inside string values escaped. Anything else malformed
 // still fails, just without throwing.
+/**
+ * @param {string | null | undefined} raw the GMAIL_SA secret
+ * @returns {{ client_email?: string, private_key?: string } | null}
+ */
 export function parseServiceAccount(raw) {
   try { return JSON.parse(raw || "null"); } catch (e) { }
   try {
@@ -36,10 +40,12 @@ export function parseServiceAccount(raw) {
 /** @type {{ email: string | null, sender: string | null, key: CryptoKey | null, token: string | null, exp: number }} */
 export const gmailCache = { email: null, sender: null, key: null, token: null, exp: 0 };
 
+/** @param {Env} env */
 export async function gmailAccessToken(env) {
   try { return await gmailAccessTokenInner(env); } catch (e) { return null; }
 }
 
+/** @param {Env} env */
 export async function gmailAccessTokenInner(env) {
   const sa = parseServiceAccount(env.GMAIL_SA);
   const sender = String(env.GMAIL_SENDER || "").trim();
@@ -58,11 +64,13 @@ export async function gmailAccessTokenInner(env) {
   const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
   const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
   if (!res.ok) return null;
+  /** @type {{ access_token: string, expires_in?: number }} the token endpoint's answer */
   const j = await res.json();
   gmailCache.token = j.access_token; gmailCache.exp = now + (j.expires_in || 3600);
   return gmailCache.token;
 }
 
+/** @param {string} text */
 export function mimePart(text) {
   const bytes = new TextEncoder().encode(text);
   let bin = "";
@@ -71,6 +79,13 @@ export function mimePart(text) {
   return btoa(bin).replace(/.{76}(?=.)/g, "$&\r\n");
 }
 
+/**
+ * @param {Env} env
+ * @param {string} to
+ * @param {string} subject
+ * @param {string} text
+ * @param {string} html
+ */
 export async function sendViaGmail(env, to, subject, text, html) {
   /** @type {string | null} */
   let token = null;

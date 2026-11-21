@@ -24,8 +24,14 @@ import {
 } from "../lib/sniff.js";
 import { isStoreError } from "../lib/errors.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function publishRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -43,6 +49,10 @@ export async function publishRoute(rc, m) {
 
 // Delete one of your own messages (the owner can delete any). Its media
 // (R2 objects, upload parts) and reactions go with it.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function messageRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -57,6 +67,10 @@ export async function messageRoute(rc, m) {
   return json({ room: room, deleted: r.deleted });
 }
 
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function reactionsRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -71,6 +85,7 @@ export async function reactionsRoute(rc, m) {
     return json({ room, id, reactions: r });
   }
   if (request.method !== "POST" && request.method !== "PUT" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
+  /** @type {Record<string, any>} the request's JSON body */
   let body = {};
   if (request.method !== "DELETE") {
     try { body = (await request.json()) || {}; } catch (e) { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
@@ -85,6 +100,10 @@ export async function reactionsRoute(rc, m) {
   return json({ room, id, from, reaction, message_from: r.message_from, reactions: r.reactions });
 }
 
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function attachmentsRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -105,6 +124,10 @@ export async function attachmentsRoute(rc, m) {
   return json(Object.assign({ room }, extra, r));
 }
 
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function messagesRoute(rc, m) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -116,9 +139,11 @@ export async function messagesRoute(rc, m) {
   if (request.method === "GET") {
     const a = url.searchParams.get("after");
     const after = a === null || a === "" ? null : Math.max(0, parseInt(a, 10) || 0);
-    const limit = clamp(parseInt(url.searchParams.get("limit"), 10) || 100, 1, 500);
-    const wait = clamp(parseInt(url.searchParams.get("wait"), 10) || 0, 0, 25);
+    // a missing limit or wait parses as NaN, so the default applies
+    const limit = clamp(parseInt(/** @type {string} */ (url.searchParams.get("limit")), 10) || 100, 1, 500);
+    const wait = clamp(parseInt(/** @type {string} */ (url.searchParams.get("wait")), 10) || 0, 0, 25);
     const r = await stub.list(after, limit, wait, acc.name || "", room);
+    /** @type {{ invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string }} */
     const extra = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }

@@ -7,6 +7,7 @@ export const FETCH_MAX_BYTES = 1000000;
 export const FETCH_MAX_TEXT = 20000;
 
 // Room tools: only public http(s) URLs by domain name. No IP addresses, local names, other ports or this site.
+/** @param {unknown} s */
 export function fetchTarget(s) {
   let u;
   try { u = new URL(String(s || "")); } catch (e) { return null; }
@@ -21,6 +22,7 @@ export function fetchTarget(s) {
   return u;
 }
 
+/** @param {URL} target a URL fetchTarget accepted */
 export async function webFetch(target) {
   let u = target;
   const ctl = new AbortController();

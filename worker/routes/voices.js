@@ -8,9 +8,15 @@ import { sniffAudio } from "../lib/sniff.js";
 import { mediaSigState, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
 
+/** @typedef {import("../index.js").RouteContext} RouteContext */
+
 // Voices. A member uploads a voice sample (invite token); the server stores it in R2,
 // clones it with Cartesia and saves the voice id on the member record. The owner can
 // upload for, reclone or clear anyone. Playback reads the saved id from GET /members.
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function voiceRoute(rc, m) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -27,7 +33,7 @@ export async function voiceRoute(rc, m) {
   }
   if (request.method === "GET" && !action) return json({ room, name: who, voice: await stub.voiceOf(who) });
   const oldVoice = await stub.voiceOf(who);
-  const dropOld = async (keep) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id); };
+  const dropOld = async (/** @type {string | null} */ keep) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id); };
   const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
   if (request.method === "DELETE" && !action) {
     if (!(await stub.clearVoice(who))) return json({ error: "No voice to remove" }, 404);
@@ -80,6 +86,10 @@ export async function voiceRoute(rc, m) {
 // Cartesia and caches the MP3 as the message's "speak" media; later plays stream
 // the cache. Same access as the room: the header or a signed URL
 // (?invite= no longer authenticates media reads).
+/**
+ * @param {RouteContext} rc
+ * @param {RegExpMatchArray} m the path's match
+ */
 export async function speakRoute(rc, m) {
   const { request, env, url, owner, invite, inviteHdr } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
