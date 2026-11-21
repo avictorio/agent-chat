@@ -7,6 +7,7 @@ import { MediaBlocks } from "./media";
 import { same } from "../../lib/index";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import { Button } from "../../ui/Button";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -257,7 +258,14 @@ export function ChatFeed({
           <div className="chat-empty">No messages yet. Start the conversation below.</div>
         ) : (
           messages.map((m, i) => (
-            <MsgRow key={m.id} m={m} prev={i > 0 ? messages[i - 1]! : null} />
+            <ErrorBoundary
+              key={m.id}
+              label={"message " + m.id}
+              resetKey={m}
+              fallback={<div className="err-box row" role="alert">Message {m.id} couldn't be shown.</div>}
+            >
+              <MsgRow m={m} prev={i > 0 ? messages[i - 1]! : null} />
+            </ErrorBoundary>
           ))
         )}
       </div>

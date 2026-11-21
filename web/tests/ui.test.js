@@ -35,6 +35,7 @@ function fresh(opts) {
       { id: 4, ts: now - 40 * 60e3, from: 'claude', text: 'Nice. Mention me if you want anything changed on the site.' },
       { id: 5, ts: now - 5 * 60e3, from: 'Anthony', text: 'Looks good to me.\nLet\'s lock it in.' },
       ...(opts.payloadKind ? [{ id: 6, ts: now - 2 * 60e3, from: 'Visitor', kind: 'human', text: 'Hi, just dropping by.' }] : []),
+      ...(opts.broken ? [{ id: 71, ts: now - 30e3, from: 'Ada', kind: 'agent', text: 'This one arrives with malformed reactions.', reactions: { '\u{1F44D}': 'Ada' } }] : []),
       ...(opts.files ? [{ id: 60, ts: now - 50e3, from: 'Ada', kind: 'agent', text: 'The full dataset, as promised.', file: { type: 'application/zip', bytes: 734003200, name: 'lima-survey-2026.zip', url: '/api/rooms/demo/messages/60/file?exp=1&sig=x' } }, { id: 61, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Raw drone shot.', image: { type: 'image/png', bytes: 48000000, url: '/api/rooms/demo/messages/61/image?exp=1&sig=x' } }] : []),
       ...(opts.artifacts ? [{ id: 8, ts: now - 60e3, from: 'Ada', kind: 'agent', text: 'Sharing the packet and the notes.', html: { type: 'text/html; charset=utf-8', bytes: 2048, name: 'Packet', url: '/api/rooms/demo/messages/8/html' }, doc: { type: 'text/markdown; charset=utf-8', bytes: 1024, name: 'notes.md', url: '/api/rooms/demo/messages/8/doc' }, image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image' } }] : []),
       ...(opts.game ? [{ id: 9, ts: now - 45e3, from: 'Henry', kind: 'agent', text: 'Light Cycles match #1 - Ada (cyan) vs Henry (orange) vs Anthony (pink). Tick: 15 min. Tap the card for the arena.', game: { id: 1, type: 'lightcycles', status: 'running', tick: 3, tick_seconds: 900, winner: null, players: [{ name: 'Ada', color: 'cyan', hex: '#22d3ee', alive: true }, { name: 'Henry', color: 'orange', hex: '#fb923c', alive: true }, { name: 'Anthony', color: 'pink', hex: '#f472b6', alive: true }] } }] : []),
@@ -560,6 +561,34 @@ let FAILURES = 0;
   // M1 smoke scenario (not a parity item): proves the harness discriminates
   // and the skeleton's wiring works — invite fragment stored and scrubbed,
   // fixture messages fetched through the typed client and rendered.
+  // Error boundaries (2026-11-21): a message the feed can't render (here
+  // malformed reactions from the API: one name where a list belongs) shows a one-line notice in its place; the
+  // rest of the chat, the message box and the other views keep working.
+  // Without the boundaries the render error unmounted the whole page.
+  await run('error-boundary-row', { state: { broken: true }, allowConsole: /message 71|is not a function|Cannot read|Objects are not valid|The above error/ }, async (page) => {
+    await page.waitForSelector('#msgs .msg', { timeout: 5000 });
+    const out = await page.evaluate(() => ({
+      notice: ((document.querySelector('#msgs .err-box') || {}).textContent || '').trim(),
+      rows: document.querySelectorAll('#msgs .msg').length,
+      composer: !!document.getElementById('text'),
+    }));
+    if (!/Message 71 couldn't be shown/.test(out.notice)) throw new Error('no notice in place of the broken message: ' + JSON.stringify(out));
+    if (out.rows < 3 || !out.composer) throw new Error('the rest of the room did not render: ' + JSON.stringify(out));
+    await shot(page, 'error-boundary-row.png');
+    await page.click('#tabs .tab[data-tab="decisions"]');
+    await page.waitForTimeout(300);
+    out.decisions = await page.$$eval('#view-decisions .card', (c) => c.length);
+    if (!out.decisions) throw new Error('another view did not render after the broken message: ' + JSON.stringify(out));
+    return out;
+  });
+  await run('error-boundary-row-mobile-dark', { state: { broken: true }, w: 390, h: 844, touch: true, scheme: 'dark', allowConsole: /message 71|is not a function|Cannot read|Objects are not valid|The above error/ }, async (page) => {
+    await page.waitForSelector('#msgs .err-box', { timeout: 5000 });
+    const box = await page.$eval('#msgs .err-box', (e) => { const r = e.getBoundingClientRect(); return { w: Math.round(r.width), right: Math.round(r.right), text: e.textContent.trim() }; });
+    if (box.right > 390) throw new Error('the notice overflows a phone: ' + JSON.stringify(box));
+    await page.$eval('#msgs .err-box', (e) => e.scrollIntoView({ block: 'center' }));
+    await shot(page, 'error-boundary-row-mobile-dark.png');
+    return box;
+  });
   await run('skeleton', { hash: '#invite=tok_Anthony' }, async (page) => {
     const out = {};
     await page.waitForSelector('.msg', { timeout: 4000 });

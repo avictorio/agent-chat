@@ -5,6 +5,7 @@
 @import "./ui/tokens.css";
 @import "./ui/base.css";
 @import "./ui/button.css";
+@import "./ui/error.css";
 @import "./features/room/layout.css";
 @import "./features/room/sidebar.css";
 @import "./features/feed/chat.css";

@@ -13,16 +13,11 @@ delete this file.
 
 ## Resume here (next session)
 
-State on 2026-11-21: phases 1-3 are done and live; phase 4 is done
-except 4.1c (typing the Worker's responses with the contract). Phase 5 is
-the long-term list. What is left, in order:
+State on 2026-11-21: phases 1-4 are done and live (4.1c moved to 5.4);
+5.1 (error boundaries) is done. What is left, in order:
 
-- 4.1c: JSDoc response types from `@chat/contract` on the route handlers
-  and Room methods, checked by `npm run check`.
-- Phase 5: the hand-built 2D game panels (`el()` in `games.ts` and
-  `render.ts`) as React components, one game at a time; then, once the
-  JSDoc check is strict-clean, decide whether the Worker should move to
-  TypeScript.
+- Phase 5, in its order: 5.2 the game registry, 5.3 the UI suite,
+  5.4 response types, 5.5 the docs text, 5.6 AGENTS.md as an index.
 - When those are done, fold the final layout into AGENTS.md and README.md
   and delete this file.
 
@@ -337,7 +332,7 @@ limits and the games move before `agents/`.
         into the Room class. The first run found 21 gaps, all typing
         (methods installed by Object.assign, `concatBytes` reading
         `arguments`, union returns), fixed with JSDoc and a rest parameter
-  - [ ] 4.1c Type the Worker's responses with the contract: JSDoc
+  - [ ] 4.1c (now 5.4) Type the Worker's responses with the contract: JSDoc
         `@returns` on route handlers and Room methods naming
         `@chat/contract` types, so a response that drifts from what the
         web app expects fails the check
@@ -382,11 +377,42 @@ limits and the games move before `agents/`.
       console errors, with a per-scenario allow-list for the deliberate
       ones (the 3D load-failure scenario's 404, missing avatars)
 
-## Phase 5: longer term
+## Phase 5: what the refactor turned up
 
-- [ ] Rewrite the hand-built game panels in `games.ts` / `render.ts`
-      (`el("div", ...)`) as React components, one game at a time
-- [ ] Optional: TypeScript for the Worker, once `checkJs` is clean
+Agreed with the owner on 2026-11-21, in this order:
+
+- [x] 5.1 Error boundaries (`ui/ErrorBoundary.tsx`). There were none: any
+      render error unmounted the whole page. Now each feed row (keyed to
+      its message, so a richer copy retries), each room view, each board
+      page and each dialog has one, with a full-page "Reload" as the last
+      resort; the 3D arenas already caught their own (`onUncaughtError`
+      on each arena root). UI scenarios `error-boundary-row` (+ phone,
+      dark): a message with malformed reactions blanked the whole page on
+      the old build; now only that row shows a notice
+- [ ] 5.2 A client-side game registry. `createGameStore` in
+      `features/games/games.ts` is one 2,987-line function with 78
+      `g.type === "..."` branches; each game's folder should register its
+      panels, card, history rows and catalog entry (the 1,020-line
+      `shared/catalog.tsx`) and the host dispatch through the registry -
+      the server's `GAME_ENGINES` pattern. Moves first, game by game
+- [ ] 5.3 The UI suite: fix the clock (Playwright's `page.clock`; the
+      fake data reads `Date.now()` in 18 places), so two runs of a build
+      give the same screenshots and a screenshot diff becomes a real
+      check; replace the 187 fixed sleeps with waits on state; split the
+      3,509-line file by feature and run the files in parallel; two
+      scenarios share the name `duel-card`
+- [ ] 5.4 (was 4.1c) Type the Worker's responses with `@chat/contract`
+      (JSDoc on the route handlers and Room methods), and per-game state
+      types so the 19 web files that switch off `no-explicit-any` can drop
+      it. The Worker has 3,502 errors under `strict`; that is not the goal
+- [ ] 5.5 The `/api` docs text (`worker/agents/docs.js`, 984 lines of JS
+      strings) as a text module, like the agent recipe
+- [ ] 5.6 AGENTS.md (1,564 lines, read by every agent session) as an
+      index over topic files
+- [ ] Later: the 2D game panels (`el()` builders) as React components,
+      one game at a time once 5.2 gives each a home; `games.css` splits
+      with them; TypeScript for the Worker once the JSDoc check is
+      strict-clean
 
 ## Progress log
 

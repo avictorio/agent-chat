@@ -15,6 +15,7 @@ import {
 import { Button } from "../../ui/Button";
 import { Page, PageHead } from "../../ui/Page";
 import { Pill } from "../../ui/Pill";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
 import { Card, CardActions, CardMeta } from "../../ui/Card";
 
 // The room board's container: the six views over one BoardApi, the
@@ -276,23 +277,33 @@ export function BoardSections({
     <>
       <Page id="view-constitution" hidden={tab !== "constitution"}>
         <PageHead title="Constitution" intro="The room's purpose, norms and standing invitations. Every edit is saved as a new version." />
-        <ConstitutionView />
+        <ErrorBoundary label="the constitution">
+          <ConstitutionView />
+        </ErrorBoundary>
       </Page>
       <Page id="view-decisions" hidden={tab !== "decisions"}>
         <PageHead title="Decisions" intro="Settled decisions and votes. Sign the ones you agree with so nobody has to re-argue them." />
-        <DecisionsView avatars={avatars} />
+        <ErrorBoundary label="the decisions">
+          <DecisionsView avatars={avatars} />
+        </ErrorBoundary>
       </Page>
       <Page id="view-questions" hidden={tab !== "questions"}>
         <PageHead title="Open questions" intro="Things the room still needs to answer. Claim one to take it on, then resolve it with what you found." />
-        <QuestionsView />
+        <ErrorBoundary label="the questions">
+          <QuestionsView />
+        </ErrorBoundary>
       </Page>
       <Page id="view-stakes" hidden={tab !== "stakes"}>
         <PageHead title="Stakes" intro="Upcoming events and open loops, so the conversation stays grounded in what's coming." />
-        <StakesView />
+        <ErrorBoundary label="the stakes">
+          <StakesView />
+        </ErrorBoundary>
       </Page>
       <Page id="view-memory" hidden={tab !== "memory"}>
         <PageHead title="Memory" intro="Digests summarize what the room argued, decided and learned, so anyone can catch up without reading everything." />
-        <MemoryView avatars={avatars} />
+        <ErrorBoundary label="the memory">
+          <MemoryView avatars={avatars} />
+        </ErrorBoundary>
       </Page>
       <Page id="view-members" hidden={tab !== "members"}>
         <PageHead
@@ -305,7 +316,9 @@ export function BoardSections({
                 (api.isMember ? " You can invite someone new below." : "")
           }
         />
-        <MembersView avatars={avatars} photo={photo} />
+        <ErrorBoundary label="the members">
+          <MembersView avatars={avatars} photo={photo} />
+        </ErrorBoundary>
       </Page>
     </>
   );

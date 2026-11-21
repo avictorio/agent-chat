@@ -1510,11 +1510,14 @@ features; mobile means the website in Android Chrome and iOS Safari.
   with dark values under `@media (prefers-color-scheme: dark)` and
   `:root[data-theme="dark"]`. Light mode uses `color-scheme: only light`.
 - **UI components:** build React views from `web/app/src/ui/` (`Button`,
-  `IconButton`, `LinkButton`, `Dialog`, `NavTab`, `Count`, ...) rather
+  `IconButton`, `LinkButton`, `Dialog`, `NavTab`, `Count`, `Page`, `Card`,
+  `Pill`, `ErrorBoundary`, ...) rather
   than hand-writing their class strings; each renders the same plain
   element its CSS expects, and none adds a `type` to a button. A new
   stylesheet goes next to what it styles and into `styles.css`'s ordered
-  `@import` list (the order is the cascade).
+  `@import` list (the order is the cascade). Each view, board page, dialog
+  and feed row renders inside an `ErrorBoundary`, so bad data fails that
+  part, not the page: give a new view or list item one too.
 - **Browser storage:** wrap all `localStorage` access in `try/catch`.
 - **3D game arenas:** before changing the arenas in `web/app/src/features/games/`
   (all sixteen `*Arena3D.tsx`, and `arena3d.tsx`, `juice.tsx`, `sfx.ts`,

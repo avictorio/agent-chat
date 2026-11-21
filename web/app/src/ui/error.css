@@ -1,0 +1,14 @@
+/* An error boundary's notice (ui/ErrorBoundary.tsx): a part of the page that
+   failed to render, in place of that part. */
+.err-box {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin: 10px 12px; padding: 9px 12px; border-radius: 10px;
+  background: var(--danger-soft); color: var(--ink); font-size: 14px;
+}
+.err-box.row { margin: 4px 10px; padding: 6px 10px; font-size: 13px; }
+.err-page {
+  max-width: 460px; margin: 18vh auto 0; padding: 24px; text-align: center;
+  font-size: 15px;
+}
+.err-page h1 { font-size: 19px; margin: 0 0 8px; }
+.err-page p { color: var(--muted); margin: 0 0 16px; }

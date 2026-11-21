@@ -38,6 +38,7 @@ import { useReactions } from "../feed/reactions";
 import { daysAway } from "../../lib/dates";
 import { Button, IconButton } from "../../ui/Button";
 import { Count } from "../../ui/Nav";
+import { ErrorBoundary } from "../../ui/ErrorBoundary";
 
 // The room shell, ported from the current app (PARITY.md sections A
 // and B/C/D): fixed layout, sidebar/drawer, top bar, identity, themes,
@@ -492,35 +493,52 @@ export function RoomShell({ room }: { room: string }) {
           }}
         />
         <section className="view" id="view-chat" hidden={denied || gate !== null || tab !== "chat"}>
-          <ChatFeed
-            messages={messages}
-            jumpVisible={jumpVisible}
-            setJumpVisible={setJumpVisible}
-            onSettleKill={feed.endSettle}
-            listRef={listRef}
-            holdProps={rx.holdProps}
-          />
-          <Composer onCommitName={onCommitName} onPosted={feed.onPosted} denied={denied} />
+          <ErrorBoundary label="the chat">
+            <ChatFeed
+              messages={messages}
+              jumpVisible={jumpVisible}
+              setJumpVisible={setJumpVisible}
+              onSettleKill={feed.endSettle}
+              listRef={listRef}
+              holdProps={rx.holdProps}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary label="the message box">
+            <Composer onCommitName={onCommitName} onPosted={feed.onPosted} denied={denied} />
+          </ErrorBoundary>
         </section>
         <section className="view" id="view-games" hidden={denied || gate !== null || tab !== "games"}>
-          <GamesView
-            active={!denied && !gate && tab === "games"}
-            onNewGame={(game?: string) => {
-              setNavOpen(false);
-              newGameRef.current?.open(game);
-            }}
-          />
+          <ErrorBoundary label="the games">
+            <GamesView
+              active={!denied && !gate && tab === "games"}
+              onNewGame={(game?: string) => {
+                setNavOpen(false);
+                newGameRef.current?.open(game);
+              }}
+            />
+          </ErrorBoundary>
         </section>
         <section className="view" id="view-media" hidden={denied || gate !== null || tab !== "media"}>
-          <MediaView active={!denied && !gate && tab === "media"} onJump={jumpToMessage} />
+          <ErrorBoundary label="the media shelf">
+            <MediaView active={!denied && !gate && tab === "media"} onJump={jumpToMessage} />
+          </ErrorBoundary>
         </section>
         <BoardSections tab={denied || gate ? "" : tab} photo={photo} />
       </div>
       {viewerHost.node}
-      <AvatarDialog name={avatarName} mb={board.boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
-      <VoiceDialog ref={voiceRef} />
-      <NewGameDialog ref={newGameRef} />
-      <GameHelpDialog ref={gameHelpRef} />
+      {/* A dialog that fails to render is left out rather than taking the room with it. */}
+      <ErrorBoundary label="the picture dialog" fallback={null}>
+        <AvatarDialog name={avatarName} mb={board.boardData?.mb ?? null} invite={token} onClose={() => setAvatarName(null)} />
+      </ErrorBoundary>
+      <ErrorBoundary label="the voice dialog" fallback={null}>
+        <VoiceDialog ref={voiceRef} />
+      </ErrorBoundary>
+      <ErrorBoundary label="the new-game dialog" fallback={null}>
+        <NewGameDialog ref={newGameRef} />
+      </ErrorBoundary>
+      <ErrorBoundary label="the rules sheet" fallback={null}>
+        <GameHelpDialog ref={gameHelpRef} />
+      </ErrorBoundary>
       {rx.popovers}
       {photo.el}
       {push.menuNode}
