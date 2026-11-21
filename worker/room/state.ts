@@ -11,10 +11,9 @@ import { gameEngine } from "../games/engine.js";
 import { capped, clipText, daysBetween } from "../lib/text.js";
 import { fetchTarget } from "../platform/webfetch.js";
 import { withReactions } from "../lib/reactions.js";
+import type { CountRow, DcRow, DgRow, GmRow, InvRow, MsgRow, OqRow, Room, StreamClient } from "./Room.js";
+import type { AwaitingItem, RoomState, StateCall } from "@chat/contract";
 
-export type RoomState = import("@chat/contract").RoomState;
-export type InvRow = import("./Room.js").InvRow;
-export type CountRow = import("./Room.js").CountRow;
 /** A reaction left in the last day, with the message it is on (its
  *  sender and the start of its text): room_state's reactions_to_you. */
 export type ReactionToRow = { msg: number, emoji: string, who: string, ts: number, to: string, excerpt: string };
@@ -28,15 +27,15 @@ export type StateData = {
   members: string[],
   humans: string[],
   constitution: number | null,
-  questions: Array<Pick<import("./Room.js").OqRow, "id" | "text" | "added_by" | "claimed_by">>,
+  questions: Array<Pick<OqRow, "id" | "text" | "added_by" | "claimed_by">>,
   decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[] }>,
   stakes: Array<{ id: number, title: string, date: string, days_away: number }>,
-  digest: Pick<import("./Room.js").DgRow, "day" | "author"> | null,
+  digest: Pick<DgRow, "day" | "author"> | null,
   digests_today: number,
   awaiting_digest: string | null | undefined,
   digest_due_at: string,
   fetches_used: number,
-  recent: Array<Pick<import("./Room.js").MsgRow, "id" | "sender" | "text">>,
+  recent: Array<Pick<MsgRow, "id" | "sender" | "text">>,
   fetched: string[],
   rx: ReactionToRow[],
   games: GameStateItem[],
@@ -53,7 +52,7 @@ export type StateData = {
 // deleted it on arrival). It is its own event type, sent only to clients
 // that name state in events= explicitly - "all" does not include it - and
 // only when the rendered block actually changes for that client.
-export function streamWants(client: Pick<import("./Room.js").StreamClient, "kinds" | "games">, kind: string, gameId?: number) {
+export function streamWants(client: Pick<StreamClient, "kinds" | "games">, kind: string, gameId?: number) {
   if (client.kinds && !client.kinds.has(kind)) return false;
   if (kind === "game" && client.games && !client.games.has(gameId as number)) return false; // a game frame names its match
   return true;
@@ -81,20 +80,20 @@ export function expectedDigestAuthor(inv: Array<Pick<InvRow, "name" | "revoked" 
 }
 
 // The complete request that clears an awaiting_you item. Only text the caller must write is left as <...>.
-export function stateCall(room: string, kind: string, body: Record<string, unknown>): import("@chat/contract").StateCall {
+export function stateCall(room: string, kind: string, body: Record<string, unknown>): StateCall {
   return { method: "POST", path: "/api/rooms/" + room + "/" + kind, body: body };
 }
 
 /** One rendering of room_state, its lists cut to the caps given. */
 export function stateAttempt(d: StateData, who: string | null | undefined, room: string, textCap: number, nameCap: number, itemCap: number, youCap: number) {
-  const s: import("@chat/contract").RoomState = { v: 1 };
+  const s: RoomState = { v: 1 };
   const me = String(who || "").toLowerCase();
   if (me) {
     const lc = (list: string[]) => list.map((n) => n.toLowerCase());
     const unsigned = d.decisions.filter((x) => (d.members.length ? lc(x.missing).indexOf(me) >= 0 : lc(x.signed_by).indexOf(me) < 0));
     // The invite's own spelling when the caller is a member.
     const name = d.members.find((n) => n.toLowerCase() === me) || String(who);
-    const mine: import("@chat/contract").AwaitingItem[] = [];
+    const mine: AwaitingItem[] = [];
     // The digest comes first: it's the one item with a deadline.
     if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
     for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
@@ -171,21 +170,21 @@ export function gamesLobby(d: StateData | null, me: string) {
 }
 
 // The room_state block: outstanding items only, and just {v: 1} when nothing is owed.
-export function renderRoomState(d: StateData | null, who: string | null | undefined, room: string): import("@chat/contract").RoomState {
+export function renderRoomState(d: StateData | null, who: string | null | undefined, room: string): RoomState {
   if (!d || (!d.questions.length && !d.decisions.length && !d.stakes.length && !d.awaiting_digest && !findToolNudge(d, String(who || "").toLowerCase()) && !gamesAwaiting(d, String(who || "").toLowerCase()).length && !gamesLobby(d, String(who || "").toLowerCase()).length)) return withReactions({ v: 1 }, d, who);
   const enc = new TextEncoder();
-  let s: import("@chat/contract").RoomState | null = null;
+  let s: RoomState | null = null;
   for (const step of STATE_STEPS) {
     s = stateAttempt(d, who, room, step[0], step[1], step[2], step[3]);
     // Measured as compact JSON, as streams send it. Pretty-printed HTTP responses add whitespace.
     if (enc.encode(JSON.stringify(s)).length <= STATE_MAX_BYTES) break;
   }
   // STATE_STEPS is not empty, so the loop has set s
-  return withReactions(s as import("@chat/contract").RoomState, d, who);
+  return withReactions(s as RoomState, d, who);
 }
 
 /** A decision row with its signers parsed. */
-export function decRow(r: import("./Room.js").DcRow): Omit<import("./Room.js").DcRow, "signers"> & { signers: string[] } {
+export function decRow(r: DcRow): Omit<DcRow, "signers"> & { signers: string[] } {
   let signers: string[] = [];
   try { signers = JSON.parse(r.signers || "[]"); } catch (e) {}
   return Object.assign({}, r, { signers: signers });
@@ -234,7 +233,7 @@ export const StateMethods = {
         fetched: fetched,
         rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray() as ReactionToRow[],
         // filter(Boolean) drops the matches whose state did not parse
-        games: (this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Array<Pick<import("./Room.js").GmRow, "id" | "status" | "state">>).map((r) => {
+        games: (this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Array<Pick<GmRow, "id" | "status" | "state">>).map((r) => {
           // each live match as room_state sees it (engine.stateItem):
           // per player alive / moved / accepted, plus the engine's turn
           try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch (e) { return null; }
@@ -246,7 +245,7 @@ export const StateMethods = {
     }
   },
 
-  roomState(who: string | null | undefined, room: string): import("@chat/contract").RoomState {
+  roomState(who: string | null | undefined, room: string): RoomState {
     return renderRoomState(this.stateData(), who, room);
   },
 
@@ -277,4 +276,4 @@ export const StateMethods = {
       console.log("emitState failed: " + String((e && (e as Error).stack) || e));
     }
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

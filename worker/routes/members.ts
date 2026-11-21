@@ -4,8 +4,7 @@ import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.j
 import { json } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 /** @param m the path's match */
 export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {

@@ -1,13 +1,11 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type WerewolfRole = import("@chat/contract").WerewolfRole;
-export type WerewolfEvent = import("@chat/contract").WerewolfEvent;
-export type WerewolfTalk = import("@chat/contract").WerewolfTalk;
-export type WerewolfCheck = import("@chat/contract").WerewolfCheck;
+import type { GameLogLine, GameStatus, WerewolfCheck, WerewolfEvent, WerewolfRole, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createWerewolf stores it (st.players). */
 export type WwSeat = { name: string, color: string, hex: string };
 /** Werewolf's stored match state (g.st): what createWerewolf builds and
@@ -91,7 +89,7 @@ export const WerewolfMethods = {
     return out;
   },
 
-  wwSummary(g: WwGame): import("@chat/contract").WerewolfState {
+  wwSummary(g: WwGame): WerewolfState {
     const st = g.st;
     const live = g.status === "running";
     const over = g.status === "finished" || g.status === "cancelled";
@@ -106,7 +104,7 @@ export const WerewolfMethods = {
     };
   },
 
-  wwStateFull(g: WwGame, who: string | null | undefined): import("@chat/contract").WerewolfState {
+  wwStateFull(g: WwGame, who: string | null | undefined): WerewolfState {
     const out = this.wwSummary(g);
     const st = g.st;
     out.log = st.log.slice(-30);
@@ -122,7 +120,7 @@ export const WerewolfMethods = {
     }
     const role = st.roles[me.name];
     const alive = !!st.alive[me.name];
-    const you: import("@chat/contract").WerewolfYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
+    const you: WerewolfYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
     if (role === "werewolf") {
       you.pack = st.order.filter((n) => st.roles[n] === "werewolf" && n !== me.name);
       if (!over) out.den = st.talk.filter((t) => t.ch === "den").slice(-120);
@@ -182,7 +180,7 @@ export const WerewolfMethods = {
       log: [{ tick: 0, text: "Werewolf created by " + creator + " - " + names.length + " players; roles are dealt in secret. The first night falls when everyone accepts." }],
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const rip = this.wwRolesInPlay(st);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
@@ -354,7 +352,7 @@ export const WerewolfMethods = {
     else this.wwResolveDay(g);
     this.saveGame(g);
     // the resolution may have called it off (the check above narrowed status to running)
-    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Werewolf #" + g.id + " is off - two full days and nights went by in silence.", room);
+    if ((g.status as GameStatus) === "cancelled") this.postSystem("Werewolf #" + g.id + " is off - two full days and nights went by in silence.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
@@ -366,7 +364,7 @@ export const WerewolfMethods = {
     const at = when ? (when.night ? "dawn of day " + when.night : "day " + when.day) : "the end";
     return "Werewolf #" + g.id + " is over - " + (st.side === "village" ? "the village wins at " + at + ": the " + (wolves.length === 1 ? "werewolf was " : "werewolves were ") + wolves.join(" and ") + "." : "the wolves win at " + at + ": " + wolves.join(" and ") + " outnumber the village.") + (others.length ? " " + others.join(", ") + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const werewolfEngine = {
   name: "Werewolf",
@@ -381,7 +379,7 @@ export const werewolfEngine = {
   // public frames never say who is awaited at night (that would point at
   // the role holders); they are nudged privately through room_state
   // pub is wwSummary's state
-  targets: (pub: import("@chat/contract").WerewolfState) => (pub.status === "running" && pub.phase === "day" ? (pub.players || []).filter((p) => p.alive && !p.voted).map((p) => p.name) : []),
+  targets: (pub: WerewolfState) => (pub.status === "running" && pub.phase === "day" ? (pub.players || []).filter((p) => p.alive && !p.voted).map((p) => p.name) : []),
   card: (g: WwGame) => {
     const st = g.st;
     const over = g.status === "finished" || g.status === "cancelled";

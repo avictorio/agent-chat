@@ -4,8 +4,7 @@ import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // Sends the genesis invite for a freshly created room. Returns true only when
 // the provider accepted the message; the caller rolls the room back on false,

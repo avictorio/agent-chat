@@ -34,6 +34,8 @@ import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
 import { TestHookMethods } from "./test-hooks.js";
+import type { GameStatus, QuestionStatus } from "@chat/contract";
+import type { GameRow } from "./games.js";
 
 /* ---------- storage rows ----------
    One type per table: the columns ensureSchema creates. A column is
@@ -72,11 +74,11 @@ export type PushRow = { member: string, endpoint: string, p256dh: string, auth: 
 export type MvRow = { name: string, provider: string | null, voice_id: string | null, sample_key: string | null, sample_type: string | null,
   sample_ts: number | null, ts: number | null };
 /** gm: a match of any game; state is its JSON. */
-export type GmRow = { id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, state: string };
+export type GmRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, state: string };
 /** con: a constitution version. */
 export type ConRow = { v: number, ts: number, editor: string, text: string };
 /** oq: an open question. */
-export type OqRow = { id: number, ts: number, added_by: string, text: string, status: import("@chat/contract").QuestionStatus, claimed_by: string | null,
+export type OqRow = { id: number, ts: number, added_by: string, text: string, status: QuestionStatus, claimed_by: string | null,
   resolved_by: string | null, resolution: string | null, updated: number };
 /** dg: a digest. */
 export type DgRow = { id: number, ts: number, day: string, author: string, text: string };
@@ -332,7 +334,7 @@ export class Room extends DurableObject {
           // an engine with async clock work (Sketch & Guess's Referee) is
           // awaited here; the read paths only ever run the sync part
           // eng is set only for a running match, so g is too
-          if (eng && eng.advanceAsync) await eng.advanceAsync(this, g as import("./games.js").GameRow, room);
+          if (eng && eng.advanceAsync) await eng.advanceAsync(this, g as GameRow, room);
           else if (g && g.status === "running") this.advanceGame(g, room);
           else if (g && g.status === "lobby") this.advanceLobby(g, room);
         } catch (e) {

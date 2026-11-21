@@ -4,15 +4,16 @@
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type CorpseBeat = import("@chat/contract").CorpseBeat;
+import type { CorpseBeat, CorpseSegment, CorpseState, CorpseYou, GameLogLine, GameStatus } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createCorpse stores it (st.players). */
 export type EcSeat = { name: string, color: string, hex: string };
 /** A stored segment: the revealed story's segment (CorpseSegment), plus
  *  the turn it was written on and when. */
-export type EcSegment = import("@chat/contract").CorpseSegment & { turn: number, at: number };
+export type EcSegment = CorpseSegment & { turn: number, at: number };
 /** Exquisite Corpse's stored match state (g.st): what createCorpse builds
  *  and the moves and the clock change. ecSummary and ecStateFull turn it
  *  into the contract's CorpseState (which hides the story until the
@@ -79,7 +80,7 @@ export const CorpseMethods = {
     return { bySeg, byName };
   },
 
-  ecSummary(g: EcGame): import("@chat/contract").CorpseState {
+  ecSummary(g: EcGame): CorpseState {
     const st = g.st;
     const live = g.status === "running";
     const open = st.phase === "vote" || g.status === "finished";
@@ -100,7 +101,7 @@ export const CorpseMethods = {
     };
   },
 
-  ecStateFull(g: EcGame, who: string | null | undefined): import("@chat/contract").CorpseState {
+  ecStateFull(g: EcGame, who: string | null | undefined): CorpseState {
     const out = this.ecSummary(g);
     const st = g.st;
     out.beats = st.beats;
@@ -113,7 +114,7 @@ export const CorpseMethods = {
       out.you = { playing: false };
       return out;
     }
-    const you: import("@chat/contract").CorpseYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, out: st.active.indexOf(me.name) < 0, writer: live && st.phase === "write" && st.writer === me.name, segments: st.segments.filter((s) => s.by === me.name).map((s) => s.n), legal_moves: [] };
+    const you: CorpseYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, out: st.active.indexOf(me.name) < 0, writer: live && st.phase === "write" && st.writer === me.name, segments: st.segments.filter((s) => s.by === me.name).map((s) => s.n), legal_moves: [] };
     if (st.variant === "constraints") you.constraint = (st.constraints || {})[me.name] || null;
     if (you.writer) {
       // the fold: only the segment before yours
@@ -173,7 +174,7 @@ export const CorpseMethods = {
       log: [{ tick: 0, text: "Exquisite Corpse created by " + creator + " - writers in this order: " + names.join(", ") + ", " + rotations + (rotations === 1 ? " time" : " times") + " round" + (genre ? "; genre: " + genre : "") + (variant === "constraints" ? "; everyone holds a secret constraint card" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Exquisite Corpse #" + g.id + " - " + label + ". One story, " + st.turns_total + " turns of 1 to 3 sentences; each writer sees only the segment before theirs, and the whole thing is revealed at the end" + (genre ? " (genre: " + genre + ")" : variant === "constraints" ? " (everyone holds a secret constraint card)" : "") + ". " + names[0] + " writes first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the story starts when everyone accepts; tap the card to take your seat.";
@@ -286,7 +287,7 @@ export const CorpseMethods = {
     } else this.ecFinish(g);
     this.saveGame(g);
     // ecNextTurn may have called it off (the check above narrowed status to running)
-    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Exquisite Corpse #" + g.id + " is off - nobody wrote a word.", room);
+    if ((g.status as GameStatus) === "cancelled") this.postSystem("Exquisite Corpse #" + g.id + " is off - nobody wrote a word.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
@@ -301,7 +302,7 @@ export const CorpseMethods = {
     if (st.honours.length > 1) return head + " The honours are shared: segments " + st.honours.join(" and ") + ", " + bySeg[st.honours[0]] + " votes each.";
     return head + " The honours go to " + first.by + " for segment " + first.n + " (" + bySeg[first.n] + (bySeg[first.n] === 1 ? " vote" : " votes") + "): \"" + snip(first.text) + "\"";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const corpseEngine = {
   name: "Exquisite Corpse",
@@ -314,7 +315,7 @@ export const corpseEngine = {
   move: (room, g, who, dir, roomName) => room.ecMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.ecAdvance(g, roomName),
   // pub is ecSummary's state
-  targets: (pub: import("@chat/contract").CorpseState) => (pub.status !== "running" ? [] : pub.phase === "write" ? (pub.turn_of ? [pub.turn_of] : []) : (pub.players || []).filter((p) => !p.committed && (pub.story || []).some((x) => x.by !== p.name)).map((p) => p.name)),
+  targets: (pub: CorpseState) => (pub.status !== "running" ? [] : pub.phase === "write" ? (pub.turn_of ? [pub.turn_of] : []) : (pub.players || []).filter((p) => !p.committed && (pub.story || []).some((x) => x.by !== p.name)).map((p) => p.name)),
   card: (g: EcGame) => ({ id: g.id, type: "corpse", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turns_total: g.st.turns_total, turn_of: g.status === "running" && g.st.phase === "write" ? g.st.writer : null, segments: g.st.segments.length, genre: g.st.genre || null, variant: g.st.variant, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, segments: g.st.segments.filter((x) => x.by === p.name).length, out: g.st.active.indexOf(p.name) < 0 })) }),
   stateItem: (r, st: EcStored) => ({ id: r.id, type: "corpse", status: r.status, phase: st.phase, turn: (st.turn || 0) * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.writer : (st.votes || {})[p.name] !== undefined || !(st.segments || []).some((x) => x.by !== p.name)), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,

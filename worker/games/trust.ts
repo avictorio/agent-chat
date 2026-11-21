@@ -1,9 +1,11 @@
 // Trust: the iterated prisoner's dilemma, simultaneous rounds.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type TrustChoice = import("@chat/contract").TrustChoice;
+import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A player's seat. */
 export type TrSeat = { name: string, color: string, hex: string };
 /** A player's running tally: score, missed rounds in a row, out (three
@@ -25,11 +27,11 @@ export type TrSt = {
   accepted: Record<string, boolean>,
   players: TrSeat[],
   prog: Record<string, TrProg>,
-  rounds: import("@chat/contract").TrustRound[],
+  rounds: TrustRound[],
   pending: Record<string, Record<string, TrustChoice>>,
   pending_at: Record<string, number>,
   places: string[] | null,
-  log: import("@chat/contract").GameLogLine[],
+  log: GameLogLine[],
   winner: string | null,
   draw: boolean,
   announced: boolean,
@@ -94,7 +96,7 @@ export const TrustMethods = {
     return { choices: out };
   },
 
-  trSummary(g: TrGame): import("@chat/contract").TrustState {
+  trSummary(g: TrGame): TrustState {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
     return {
@@ -109,7 +111,7 @@ export const TrustMethods = {
   },
 
   /** @param who the viewer */
-  trStateFull(g: TrGame, who: string | null | undefined): import("@chat/contract").TrustState {
+  trStateFull(g: TrGame, who: string | null | undefined): TrustState {
     const out = this.trSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -182,7 +184,7 @@ export const TrustMethods = {
     const n = st.round;
     const at = Date.now();
     const active = this.trActive(st);
-    const entry: import("@chat/contract").TrustRound = { n: n, at: at, moves: {}, missed: [], dropped: [], points: {}, totals: {} };
+    const entry: TrustRound = { n: n, at: at, moves: {}, missed: [], dropped: [], points: {}, totals: {} };
     for (const p of active) {
       const mv = st.pending[p.name];
       const pr = st.prog[p.name];
@@ -251,7 +253,7 @@ export const TrustMethods = {
     const kind = st.players.map((p) => p.name).sort((a, b) => rate(b) - rate(a))[0];
     return "Trust match #" + g.id + " is over after " + st.rounds.length + " rounds - " + (st.winner ? st.winner + " wins with " + st.prog[st.winner].score + " points." : "a tie at the top, no winner.") + " Scores: " + scores + ". Most trusting: " + kind + " (cooperated " + Math.round(100 * rate(kind)) + "% of the time).";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const trustEngine = {
   name: "Trust",
@@ -266,7 +268,7 @@ export const trustEngine = {
   resolveRound: (room, g) => room.trResolveRound(g),
   standing: (room, st: TrSt) => room.trStanding(st),
   active: (room, st: TrSt) => room.trActive(st),
-  targets: (pub: import("@chat/contract").TrustState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
+  targets: (pub: TrustState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
   card: (g: TrGame) => ({ id: g.id, type: "trust", status: g.status, round: g.st.round, rounds_about: g.st.rounds_about, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, score: pr.score || 0, out: !!pr.out }; }) }),
   stateItem: (r, st: TrSt) => ({ id: r.id, type: "trust", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,

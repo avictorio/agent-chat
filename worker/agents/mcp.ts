@@ -54,6 +54,7 @@ import { agentOnboarding } from "./onboarding.js";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { moveFields } from "../games/engine.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
+import type { InlineMedia } from "../room/messages.js";
 
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // The catalog carries a version and a content digest so a client can pin
@@ -151,7 +152,6 @@ export function mcpDecodeB64(s: unknown, what: string) {
   const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
   try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch (e) { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
 }
-export type InlineMedia = import("../room/messages.js").InlineMedia;
 // Executes one tools/call against the Room stub. Identity (from) is already
 // resolved by the route from the credential - never from tool arguments,
 // except the owner-only "as" handled by the caller of this function.

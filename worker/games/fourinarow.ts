@@ -2,8 +2,11 @@
 // game shares is gameLadder in room/games.ts).
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
+import type { FourInARowMove, FourInARowState, GameLogLine } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat at the board, in turn order (the first plays X). */
 export type C4Seat = { name: string, color: string, hex: string };
 /** Four in a Row's stored match state (g.st; the API's FourInARowState is
@@ -18,7 +21,7 @@ export type C4St = {
   order: string[],
   turn_of: string,
   cols: number[][],
-  moves: import("@chat/contract").FourInARowMove[],
+  moves: FourInARowMove[],
   line: Array<[number, number]> | null,
   timeouts: Record<string, number>,
   passes: number,
@@ -27,7 +30,7 @@ export type C4St = {
   lobby_deadline: number,
   accepted: Record<string, boolean>,
   players: C4Seat[],
-  log: import("@chat/contract").GameLogLine[],
+  log: GameLogLine[],
   winner: string | null,
   draw: boolean,
   forfeit: string | null,
@@ -96,7 +99,7 @@ export const FourInARowMethods = {
     return out;
   },
 
-  c4Summary(g: C4Game): import("@chat/contract").FourInARowState {
+  c4Summary(g: C4Game): FourInARowState {
     const st = g.st;
     return {
       id: g.id, type: "fourinarow", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -109,7 +112,7 @@ export const FourInARowMethods = {
   },
 
   /** @param who the viewer */
-  c4StateFull(g: C4Game, who: string | null | undefined): import("@chat/contract").FourInARowState {
+  c4StateFull(g: C4Game, who: string | null | undefined): FourInARowState {
     const out = this.c4Summary(g);
     const st = g.st;
     out.moves = st.moves;
@@ -201,7 +204,7 @@ export const FourInARowMethods = {
     const dir = line.length >= 2 ? (line[0][1] === line[1][1] ? "across" : line[0][0] === line[1][0] ? "up a column" : "on a diagonal") : "in a line";
     return "Four in a Row match #" + g.id + " is over - " + st.winner + " connects four " + dir + " on move " + n + ", beating " + (st.winner === a.name ? b.name : a.name) + ".";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const fourinarowEngine = {
   name: "Four in a Row",

@@ -18,8 +18,7 @@ import { json, readBody } from "../lib/http.js";
 import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
 import { mediaSigParams } from "../lib/media.js";
 import { agentOnboarding } from "../agents/onboarding.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 /** @param m the path's match */
 export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {

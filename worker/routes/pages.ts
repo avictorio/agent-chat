@@ -5,8 +5,7 @@ import { emojiList } from "../lib/reactions.js";
 import { docs } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
 import { ROOM_RE } from "../limits.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // App icons (base64 PNG) for the manifest and apple-touch-icon: a glossy mint
 // speech bubble with two mint dots and an amber third dot on dark charcoal.

@@ -2,8 +2,11 @@
 
 import AU_LOTS_TXT from "../data/auction-lots.txt";
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
+import type { AuctionRound, AuctionState, GameLogLine } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A bidder's seat. */
 export type AuSeat = { name: string, color: string, hex: string };
 /** A bidder's purse: budget left, spent so far, lots won. */
@@ -23,11 +26,11 @@ export type AuSt = {
   accepted: Record<string, boolean>,
   players: AuSeat[],
   prog: Record<string, AuProg>,
-  rounds: import("@chat/contract").AuctionRound[],
+  rounds: AuctionRound[],
   pending: Record<string, number>,
   pending_at: Record<string, number>,
   places: string[] | null,
-  log: import("@chat/contract").GameLogLine[],
+  log: GameLogLine[],
   winner: string | null,
   draw: boolean,
   announced: boolean,
@@ -61,7 +64,7 @@ export const AuctionMethods = {
     return st.players.filter((p) => st.prog[p.name].budget > 0);
   },
 
-  auSummary(g: AuGame): import("@chat/contract").AuctionState {
+  auSummary(g: AuGame): AuctionState {
     const st = g.st;
     const lotNow = g.status === "running" ? st.lots[st.round - 1] || null : null;
     return {
@@ -76,7 +79,7 @@ export const AuctionMethods = {
   },
 
   /** @param who the viewer */
-  auStateFull(g: AuGame, who: string | null | undefined): import("@chat/contract").AuctionState {
+  auStateFull(g: AuGame, who: string | null | undefined): AuctionState {
     const out = this.auSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -156,7 +159,7 @@ export const AuctionMethods = {
     const n = st.round;
     const at = Date.now();
     const lot = st.lots[n - 1];
-    const entry: import("@chat/contract").AuctionRound = { n: n, at: at, lot: lot, bids: {}, winner: null, price: 0, tie: null, missed: [] };
+    const entry: AuctionRound = { n: n, at: at, lot: lot, bids: {}, winner: null, price: 0, tie: null, missed: [] };
     for (const p of st.players) {
       const pr = st.prog[p.name];
       if (pr.budget <= 0) continue;
@@ -217,7 +220,7 @@ export const AuctionMethods = {
     const top = sold.slice().sort((a, b) => b.price - a.price)[0];
     return "Auction #" + g.id + " is over - " + (st.winner ? st.winner + " takes the season with " + st.prog[st.winner].won + " lots." : "a tie at the top, no winner.") + " " + lines + "." + (top ? " Top price: \"" + top.lot + "\" went to " + top.winner + " for " + top.price + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const auctionEngine = {
   name: "Auction",
@@ -232,7 +235,7 @@ export const auctionEngine = {
   resolveRound: (room, g) => room.auResolveRound(g),
   standing: (room, st: AuSt) => room.auStanding(st),
   active: (room, st: AuSt) => room.auActive(st),
-  targets: (pub: import("@chat/contract").AuctionState) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
+  targets: (pub: AuctionState) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
   card: (g: AuGame) => ({ id: g.id, type: "auction", status: g.status, round: g.st.round, lots_total: g.st.lots.length, lot: g.status === "running" ? g.st.lots[g.st.round - 1] : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, budget: pr.budget, won: pr.won || 0 }; }) }),
   stateItem: (r, st: AuSt) => ({ id: r.id, type: "auction", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: (pr.budget || 0) > 0, moved: (st.pending || {})[p.name] !== undefined || (pr.budget || 0) <= 0, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,

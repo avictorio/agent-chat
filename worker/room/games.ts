@@ -5,9 +5,10 @@
 import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
+import type { GameStatus } from "@chat/contract";
+import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
+import type { GameEngine, GamePub } from "../games/engine.js";
 
-export type GameEngine = import("../games/engine.js").GameEngine;
-export type GamePub = import("../games/engine.js").GamePub;
 /** The engine of a game on the simultaneous-rounds machinery, which
  *  supplies resolveRound and standing. */
 export type RoundsEngine = GameEngine & Required<Pick<GameEngine, "resolveRound" | "standing">>;
@@ -17,7 +18,7 @@ export type RecordRow = { name: string, hex: string | null, w: number, l: number
 /** A player's row on the ladder (gameLadder), before rounding. */
 export type LadderRow = { name: string, hex: string | null, rating: number, w: number, l: number, d: number, last: number };
 /** A match as gameRow reads it: its gm row, with the state parsed. */
-export type GameRow = { id: number, status: import("@chat/contract").GameStatus, created: number, created_by: string, card_msg: number | null, st: any };
+export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: any };
 
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
@@ -39,7 +40,7 @@ export const GameMachineryMethods = {
   },
 
   gameRow(id: number): GameRow | null {
-    const r = (this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray() as import("./Room.js").GmRow[])[0];
+    const r = (this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray() as GmRow[])[0];
     if (!r) return null;
     // the match state (untyped JSON); null only if a stored row did not parse,
     // and every write is JSON.stringify of the state
@@ -64,7 +65,7 @@ export const GameMachineryMethods = {
   // membership rules - and their wording - can never drift apart.
   /** @param playersIn the names a create asked for */
   gamePlayers(playersIn: unknown[]) {
-    const members = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<import("./Room.js").InvRow, "name">[]).map((r) => r.name);
+    const members = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
     const byLower = new Map(members.map((n) => [n.toLowerCase(), n]));
     const names = [];
     for (const p of playersIn) {
@@ -226,7 +227,7 @@ export const GameMachineryMethods = {
   // armed time already matches, so hot read paths stay cheap.
   async armGameAlarm() {
     try {
-      const rows = this.sql.exec("SELECT status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<import("./Room.js").GmRow, "status" | "state">[];
+      const rows = this.sql.exec("SELECT status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "status" | "state">[];
       /** the nearest deadline */
       let next: number | null = null;
       for (const r of rows) {
@@ -270,7 +271,7 @@ export const GameMachineryMethods = {
   // renders in the stream and opens the arena full-screen.
   async postGameCard(sender: string, text: string, gameId: number, room: string) {
     const ts = Date.now();
-    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one() as Pick<import("./Room.js").MsgRow, "id">).id;
+    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one() as Pick<MsgRow, "id">).id;
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room);
@@ -438,7 +439,7 @@ export const GameMachineryMethods = {
   // takes a W, the other finishers an L; undecided finishes and
   // called-off matches count for nothing).
   listGames() {
-    const scanned = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray() as Pick<import("./Room.js").GmRow, "id">[];
+    const scanned = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray() as Pick<GmRow, "id">[];
     // filter(Boolean) drops the rows that did not parse
     const all = scanned.map((r) => {
       const g = this.gameRow(r.id);
@@ -579,4 +580,4 @@ export const GameMachineryMethods = {
     if (g.status !== "running") return [];
     return gameEngine(g.st).targets(pub);
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

@@ -3,6 +3,7 @@
 // vapidRecord, vapidAuth, on the __vapid object.)
 
 import { b64urlDecode, concatBytes, hkdf } from "../lib/crypto.js";
+import type { PushRow } from "../room/Room.js";
 
 // VAPID (RFC 8292): one keypair for the whole site, generated on first use and kept by a
 // dedicated Durable Object instance named __vapid; the private half never
@@ -44,7 +45,7 @@ export async function encryptPushPayload(p256dh: string, auth: string, payloadTe
 }
 
 /** @returns the push service's status */
-export async function sendWebPush(env: Env, sub: Pick<import("../room/Room.js").PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string): Promise<number> {
+export async function sendWebPush(env: Env, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string): Promise<number> {
   const aud = new URL(sub.endpoint).origin;
   const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
   const authorization = await keys.vapidAuth(aud);

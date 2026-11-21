@@ -3,9 +3,11 @@
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
 import { clockWords, seatAccepted, tvNear, tvNorm } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
+import type { GameLogLine, GameStatus, SketchRound, SketchState, SketchYou } from "@chat/contract";
+import type { CfgRow, GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createSketch stores it (st.players). */
 export type SgSeat = { name: string, color: string, hex: string };
 /** The round's secret prompt, and when its drawing went up (null until then). */
@@ -16,7 +18,7 @@ export type SgSealed = { guess: string, at: number };
  *  route serves it; sgRoundOut and sgSummary give its signed URL). */
 export type SgImageMeta = { key: string, type: string, bytes: number };
 /** A round as stored; sgRoundOut adds its image. */
-export type SgRound = Omit<import("@chat/contract").SketchRound, "image">;
+export type SgRound = Omit<SketchRound, "image">;
 /** The Referee's answer (sgClaudeJudge, or the test hook's stand-in): the
  *  guesses it judged right and a roast, or why it did not judge. */
 export type SgVerdict = Awaited<ReturnType<typeof sgClaudeJudge>>;
@@ -122,7 +124,7 @@ export const SketchMethods = {
     return this.roomName ? "/api/rooms/" + this.roomName + "/games/" + g.id + "/sketch/" + n + this.mediaQuery(g.id + "." + n, "sketch") : null;
   },
 
-  sgRoundOut(g: SgGame, r: SgRound): import("@chat/contract").SketchRound {
+  sgRoundOut(g: SgGame, r: SgRound): SketchRound {
     return Object.assign({}, r, { image: (g.st.images || {})[r.n] ? { url: this.sgImageUrl(g, r.n), type: g.st.images[r.n].type } : null });
   },
 
@@ -134,7 +136,7 @@ export const SketchMethods = {
     return (g.st.images || {})[n] || null;
   },
 
-  sgSummary(g: SgGame): import("@chat/contract").SketchState {
+  sgSummary(g: SgGame): SketchState {
     const st = g.st;
     const t = this.sgTally(st);
     const live = g.status === "running";
@@ -149,7 +151,7 @@ export const SketchMethods = {
     };
   },
 
-  sgStateFull(g: SgGame, who: string | null | undefined): import("@chat/contract").SketchState {
+  sgStateFull(g: SgGame, who: string | null | undefined): SketchState {
     const out = this.sgSummary(g);
     const st = g.st;
     out.rounds = st.rounds.map((r) => this.sgRoundOut(g, r));
@@ -163,7 +165,7 @@ export const SketchMethods = {
       return out;
     }
     const artist = live && st.artist === me.name;
-    const you: import("@chat/contract").SketchYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, artist: artist, legal_moves: [] };
+    const you: SketchYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, artist: artist, legal_moves: [] };
     if (artist) {
       you.prompt = st.cur ? st.cur.prompt : null;
       if (st.phase === "draw") you.legal_moves = ['{"image": "data:image/png;base64,<your drawing>"}'];
@@ -204,7 +206,7 @@ export const SketchMethods = {
       log: [{ tick: 0, text: "Sketch & Guess created by " + creator + " - artists in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Sketch & Guess #" + g.id + " - " + label + ". Each round an artist draws a secret prompt; everyone else guesses what it shows. " + names[0] + " draws first. Clock: " + clockWords(drawSeconds) + " to draw, " + clockWords(guessSeconds) + " to guess. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
@@ -332,7 +334,7 @@ export const SketchMethods = {
   // The room's daily allowance of Referee calls (counted when spent).
   sgJudgeBudget() {
     const day = new Date().toISOString().slice(0, 10);
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray() as Pick<import("../room/Room.js").CfgRow, "v">[])[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray() as Pick<CfgRow, "v">[])[0];
     const [d, c] = String((r && r.v) || "").split(":");
     const used = d === day ? parseInt(c, 10) || 0 : 0;
     if (used >= SG_JUDGE_DAILY) return false;
@@ -343,7 +345,7 @@ export const SketchMethods = {
   // Tests: a verdict laid by the test hook stands in for Claude, once.
   sgTestJudge(): SgVerdict | null {
     if (!this.env || !this.env.TEST_HOOKS) return null;
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray() as Pick<import("../room/Room.js").CfgRow, "v">[])[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray() as Pick<CfgRow, "v">[])[0];
     if (!r) return null;
     this.sql.exec("DELETE FROM cfg WHERE k = 'test_sg_judge'");
     try {
@@ -373,7 +375,7 @@ export const SketchMethods = {
     const st = g.st as SgStored & { artist: string, cur: SgCur };
     const ok = verdict && !verdict.error;
     /** The round as stored; sgRoundOut adds its image. */
-    const rec: Omit<import("@chat/contract").SketchRound, "image"> = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
+    const rec: Omit<SketchRound, "image"> = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
     for (const p of this.sgGuessers(st)) {
       const x = st.guesses[p.name];
       if (!x) {
@@ -451,7 +453,7 @@ export const SketchMethods = {
     else this.sgResolve(g, {}, null);
     this.saveGame(g);
     // sgNext may have called it off (the check above narrowed status to running)
-    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Sketch & Guess #" + g.id + " is off - nothing was drawn and guessed.", room);
+    if ((g.status as GameStatus) === "cancelled") this.postSystem("Sketch & Guess #" + g.id + " is off - nothing was drawn and guessed.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
@@ -479,7 +481,7 @@ export const SketchMethods = {
     const best = st.rounds.filter((r) => !r.forfeit).sort((a, b) => b.right.length - a.right.length)[0];
     return "Sketch & Guess #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner].score + " points." : "a tie at the top, no winner.") + " " + lines + "." + (best && best.right.length ? " Most guessed: " + best.artist + "'s " + best.prompt + " (" + best.right.length + (best.right.length === 1 ? " got it)." : " got it).") : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const sketchEngine = {
   name: "Sketch & Guess",
@@ -494,7 +496,7 @@ export const sketchEngine = {
   // the alarm awaits this one: the Referee's judge is an API call
   advanceAsync: (room, g, roomName) => room.sgAdvanceAsync(g, roomName),
   // pub is sgSummary's state
-  targets: (pub: import("@chat/contract").SketchState) => (pub.status !== "running" ? [] : pub.phase === "draw" ? (pub.artist ? [pub.artist] : []) : pub.phase === "guess" ? (pub.players || []).filter((p) => p.name !== pub.artist && !p.committed).map((p) => p.name) : []),
+  targets: (pub: SketchState) => (pub.status !== "running" ? [] : pub.phase === "draw" ? (pub.artist ? [pub.artist] : []) : pub.phase === "guess" ? (pub.players || []).filter((p) => p.name !== pub.artist && !p.committed).map((p) => p.name) : []),
   card: (g: SgGame) => {
     const t: Record<string, number> = {};
     for (const p of g.st.players) t[p.name] = 0;

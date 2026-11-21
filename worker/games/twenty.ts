@@ -2,11 +2,11 @@
 
 import { clockWords, dataLines, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type TwentyQuestion = import("@chat/contract").TwentyQuestion;
-export type TwentyRound = import("@chat/contract").TwentyRound;
+import type { GameLogLine, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createTwenty stores it (st.players). */
 export type TqSeat = { name: string, color: string, hex: string };
 /** Twenty Questions' stored match state (g.st): what createTwenty builds
@@ -69,7 +69,7 @@ export const TwentyMethods = {
     return t;
   },
 
-  tqSummary(g: TqGame): import("@chat/contract").TwentyState {
+  tqSummary(g: TqGame): TwentyState {
     const st = g.st;
     const live = g.status === "running";
     const t = this.tqTotals(st);
@@ -85,7 +85,7 @@ export const TwentyMethods = {
     };
   },
 
-  tqStateFull(g: TqGame, who: string | null | undefined): import("@chat/contract").TwentyState {
+  tqStateFull(g: TqGame, who: string | null | undefined): TwentyState {
     const out = this.tqSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -98,7 +98,7 @@ export const TwentyMethods = {
       out.you = { playing: false };
       return out;
     }
-    const you: import("@chat/contract").TwentyYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, answerer: live && st.answerer === me.name, legal_moves: [] };
+    const you: TwentyYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, answerer: live && st.answerer === me.name, legal_moves: [] };
     if (you.answerer) {
       you.secret = st.secret || null;
       const pend = this.tqPending(st);
@@ -130,7 +130,7 @@ export const TwentyMethods = {
       log: [{ tick: 0, text: "Twenty Questions created by " + creator + " - answerers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Twenty Questions #" + g.id + " - " + label + ". Each round one player holds a secret and " + (names.length === 2 ? "the other" : "the rest of the table") + " gets twenty yes-or-no questions to name it. " + names[0] + " answers first. Clock: " + clockWords(roundSeconds) + " a move. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
@@ -272,7 +272,7 @@ export const TwentyMethods = {
     const body = gm ? gm[1].trim() : text.replace(/^(ask|question)\s*[:-]\s*/i, "");
     if (!body) return { status: 400, error: "Ask a yes/no question, or guess: <your answer>", legal_moves: ["<a yes/no question>", "guess: <your answer>"] };
     if (body.length > TQ_Q_MAX) return { status: 400, error: "A question can be up to " + TQ_Q_MAX + " characters" };
-    const entry: import("@chat/contract").TwentyQuestion = { n: st.qa.length + 1, by: me.name, kind: isGuess ? "guess" : "q", q: body, a: null, note: null, flagged: false, at: Date.now() };
+    const entry: TwentyQuestion = { n: st.qa.length + 1, by: me.name, kind: isGuess ? "guess" : "q", q: body, a: null, note: null, flagged: false, at: Date.now() };
     st.qa.push(entry);
     // an exact guess is right on its own
     if (isGuess && tqNorm(body) && tqNorm(body) === tqNorm(st.secret)) {
@@ -319,7 +319,7 @@ export const TwentyMethods = {
     const quick = st.rounds.filter((r) => r.how === "guessed").sort((a, b) => a.asked - b.asked)[0];
     return "Twenty Questions #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner] + " points." : "a tie at the top, no winner.") + " " + lines + "." + (quick ? " Quickest: \"" + quick.secret + "\" named by " + quick.guessed_by + " in " + quick.asked + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const twentyEngine = {
   name: "Twenty Questions",

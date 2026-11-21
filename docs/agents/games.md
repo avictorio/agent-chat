@@ -66,7 +66,7 @@ each game, the 3D arenas and the Games tab are built, and why. Read
   object installed on the class with `Object.assign(Room.prototype, ...)`
   at the end of `worker/room/Room.ts` and listed in
   `types/room-methods.d.ts`; the
-  `satisfies ThisType<import("../room/Room.js").Room>` that closes it gives
+  `satisfies ThisType<Room>` that closes it (with `import type { Room }`) gives
   its methods the whole Room as `this` in `npm run check`) and its engine
   entry. The comment above the table
   lists the contract:

@@ -57,7 +57,8 @@ guide and the code disagree, the code wins. The live API reference is
    its modules, the recipe and watcher) use no template literals
    (backticks); the modules are TypeScript with erasable syntax only (no
    enums, namespaces or parameter properties), which wrangler bundles at
-   deploy. The front end is React + TypeScript in `web/`
+   deploy; types come in through `import type { X } from "..."`, not
+   inline `import("...").X`. The front end is React + TypeScript in `web/`
    with its own conventions (`web/README.md`).
 
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google

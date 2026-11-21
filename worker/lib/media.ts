@@ -2,6 +2,7 @@
 
 import { b64urlDecode, b64urlEncode, hmacSha256 } from "./crypto.js";
 import { CORS, json, parseRange } from "./http.js";
+import type { MediaViewer } from "../room/media.js";
 
 // Signed media URLs (media plan phase E): media reads accept a
 // short-lived signature instead of a credential:
@@ -105,7 +106,7 @@ export const MEDIA_CACHE = "private, max-age=3600, immutable";
 // own buffered R2 read (getMedia) is the second try; there is no in-DB copy
 // (phase B).
 /** @param stub the room */
-export async function serveMedia(request: Request, env: Env, stub: DurableObjectStub, id: number, kind: string, room: string, viewer: import("../room/media.js").MediaViewer) {
+export async function serveMedia(request: Request, env: Env, stub: DurableObjectStub, id: number, kind: string, room: string, viewer: MediaViewer) {
   const meta = await stub.mediaMeta(id, kind, viewer);
   if (meta && meta.r2key && env.MEDIA) {
     try {

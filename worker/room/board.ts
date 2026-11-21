@@ -10,21 +10,16 @@ import {
   MAX_STAKES,
 } from "../limits.js";
 import { decRow } from "./state.js";
-
-export type ConRow = import("./Room.js").ConRow;
-export type OqRow = import("./Room.js").OqRow;
-export type DgRow = import("./Room.js").DgRow;
-export type SkRow = import("./Room.js").SkRow;
-export type DcRow = import("./Room.js").DcRow;
-export type CountRow = import("./Room.js").CountRow;
+import type { Constitution } from "@chat/contract";
+import type { ConRow, CountRow, DcRow, DgRow, OqRow, Room, SkRow } from "./Room.js";
 
 export const BoardMethods = {
   // Room constitution: a pinned, versioned text. The last CON_KEEP versions are kept.
   /** @param history with the kept versions too */
   constitution(history: boolean) {
-    const cur = (this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC LIMIT 1").toArray() as Array<import("@chat/contract").Constitution>)[0] || null;
+    const cur = (this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC LIMIT 1").toArray() as Array<Constitution>)[0] || null;
     if (!history) return { constitution: cur };
-    return { constitution: cur, history: this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC").toArray() as Array<import("@chat/contract").Constitution> };
+    return { constitution: cur, history: this.sql.exec("SELECT v AS version, ts, editor, text FROM con ORDER BY v DESC").toArray() as Array<Constitution> };
   },
 
   setConstitution(text: string, editor: string) {
@@ -255,4 +250,4 @@ export const BoardMethods = {
       },
     };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

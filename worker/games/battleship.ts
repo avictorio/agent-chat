@@ -1,9 +1,11 @@
 // Battleship: hidden fleets, one shot a turn on a slow clock; duels or free-for-all.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type BattleshipShotResult = import("@chat/contract").BattleshipShotResult;
+import type { BattleshipBoard, BattleshipLogLine, BattleshipMove, BattleshipShot, BattleshipShotResult, BattleshipSonar, BattleshipState, BattleshipSunkShip, BattleshipYou } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A ship as stored: its cells and the ones hit, as board keys ("x,y",
  *  bsKey), and in a free-for-all who fired the shell that sank it. */
 export type BsShip = { size: number, cells: string[], hits: string[], sunk_by?: string };
@@ -26,7 +28,7 @@ export type BsSt = {
   fleet_sizes?: number[],
   variant?: "classic" | "salvo" | "skirmish",
   salvo_left: number | null,
-  sonar: import("@chat/contract").BattleshipSonar | null,
+  sonar: BattleshipSonar | null,
   tick_seconds: number,
   turn: number,
   phase: "setup" | "play",
@@ -37,9 +39,9 @@ export type BsSt = {
   players: BsCaptain[],
   misses: Record<string, number>,
   eliminated?: string[],
-  log: import("@chat/contract").BattleshipLogLine[],
-  last_move?: import("@chat/contract").BattleshipMove,
-  shots?: import("@chat/contract").BattleshipShot[],
+  log: BattleshipLogLine[],
+  last_move?: BattleshipMove,
+  shots?: BattleshipShot[],
   own_turns?: Record<string, number>,
   salvo_turn?: { turn: number, rivals: number, targets: string[], fired: number },
   winner: string | null,
@@ -331,7 +333,7 @@ export const BattleshipMethods = {
   // captain has taken (the rival's own shot record, already public in
   // the counts) and the ships that are already sunk. Un-hit fleet
   // cells never leave the server - this is the spectator's board.
-  bsPublicBoards(g: BsGame): import("@chat/contract").BattleshipBoard[] {
+  bsPublicBoards(g: BsGame): BattleshipBoard[] {
     const st = g.st;
     return st.players.map((p) => {
       const incoming: BsShotMap = {};
@@ -346,7 +348,7 @@ export const BattleshipMethods = {
     });
   },
 
-  battleshipSummary(g: BsGame): import("@chat/contract").BattleshipState {
+  battleshipSummary(g: BsGame): BattleshipState {
     const st = g.st;
     return {
       id: g.id, type: "battleship", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -364,7 +366,7 @@ export const BattleshipMethods = {
   },
 
   /** @param who the viewer */
-  battleshipStateFull(g: BsGame, who: string | null | undefined): import("@chat/contract").BattleshipState {
+  battleshipStateFull(g: BsGame, who: string | null | undefined): BattleshipState {
     const out = this.battleshipSummary(g);
     const st = g.st;
     const ffa = this.bsFfa(st);
@@ -375,12 +377,12 @@ export const BattleshipMethods = {
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) { out.you = { playing: false }; return out; }
     const opp = st.players.find((p) => p.name !== me.name);
-    const you: import("@chat/contract").BattleshipYou & Required<Pick<import("@chat/contract").BattleshipYou, "shots" | "incoming" | "sunk_ships">> = {
+    const you: BattleshipYou & Required<Pick<BattleshipYou, "shots" | "incoming" | "sunk_ships">> = {
       playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, phase: g.status === "running" ? st.phase : null,
       your_turn: g.status === "running" && st.phase === "play" && st.turn_of === me.name,
       eliminated: !!me.eliminated,
       fleet: me.fleet ? me.fleet.map((s) => ({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)), hits: s.hits.map((c) => this.bsLabel(c)), sunk: s.hits.length >= s.size })) : null,
-      shots: {}, incoming: {}, sunk_ships: [] as import("@chat/contract").BattleshipSunkShip[], opponent_afloat: ffa ? null : this.bsAfloat(opp),
+      shots: {}, incoming: {}, sunk_ships: [] as BattleshipSunkShip[], opponent_afloat: ffa ? null : this.bsAfloat(opp),
       legal_moves: [] as string[],
     };
     if (ffa) {
@@ -762,7 +764,7 @@ export const BattleshipMethods = {
     const hitsOf = (p: BsCaptain) => Object.values(p.shots || {}).filter((v) => v === "hit").length;
     return "Battleship match #" + g.id + " is over - " + (g.st.winner ? g.st.winner + " takes the sea over " + (g.st.winner === ba.name ? bb.name : ba.name) + "." : "no winner.") + " Ships sunk: " + ba.name + " " + this.bsSunkBy(g, ba.name) + ", " + bb.name + " " + this.bsSunkBy(g, bb.name) + ". Hits: " + ba.name + " " + hitsOf(ba) + ", " + bb.name + " " + hitsOf(bb) + ".";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const battleshipEngine = {
   name: "Battleship",
@@ -774,7 +776,7 @@ export const battleshipEngine = {
   full: (room, g, who) => room.battleshipStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.battleshipMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.advanceBattleship(g, roomName),
-  targets: (pub: import("@chat/contract").BattleshipState) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
+  targets: (pub: BattleshipState) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
   card: (g: BsGame) => ({ id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }),
   stateItem: (r, st: BsSt) => ({ id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,

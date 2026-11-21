@@ -1,8 +1,11 @@
 // Frontlines: split troops across hills, simultaneous rounds.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
+import type { FrontlinesRound, FrontlinesState, GameLogLine } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A commander's seat. */
 export type FlSeat = { name: string, color: string, hex: string };
 /** Frontlines' stored match state (g.st; the API's FrontlinesState is
@@ -23,10 +26,10 @@ export type FlSt = {
   accepted: Record<string, boolean>,
   players: FlSeat[],
   score: Record<string, number>,
-  rounds: import("@chat/contract").FrontlinesRound[],
+  rounds: FrontlinesRound[],
   pending: Record<string, number[]>,
   pending_at: Record<string, number>,
-  log: import("@chat/contract").GameLogLine[],
+  log: GameLogLine[],
   winner: string | null,
   announced: boolean,
   declined_by?: string,
@@ -82,7 +85,7 @@ export const FrontlinesMethods = {
     return v;
   },
 
-  flSummary(g: FlGame): import("@chat/contract").FrontlinesState {
+  flSummary(g: FlGame): FrontlinesState {
     const st = g.st;
     return {
       id: g.id, type: "frontlines", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -94,7 +97,7 @@ export const FrontlinesMethods = {
   },
 
   /** @param who the viewer */
-  flStateFull(g: FlGame, who: string | null | undefined): import("@chat/contract").FrontlinesState {
+  flStateFull(g: FlGame, who: string | null | undefined): FrontlinesState {
     const out = this.flSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -167,7 +170,7 @@ export const FrontlinesMethods = {
     const at = Date.now();
     const [a, b] = st.players;
     const xa = st.pending[a.name], xb = st.pending[b.name];
-    const entry: import("@chat/contract").FrontlinesRound = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
+    const entry: FrontlinesRound = { n: n, alloc: {}, alloc_at: {}, hills: null, held: {}, points: {}, values: st.values || null, winner: null, forfeit: null, at: at };
     if (xa) { entry.alloc[a.name] = xa; entry.alloc_at[a.name] = (st.pending_at || {})[a.name] || null; }
     if (xb) { entry.alloc[b.name] = xb; entry.alloc_at[b.name] = (st.pending_at || {})[b.name] || null; }
     let note;
@@ -215,7 +218,7 @@ export const FrontlinesMethods = {
     const hillsOf = (p: FlSeat) => st.rounds.reduce((s, r) => s + ((r.held || {})[p.name] || 0), 0);
     return "Frontlines match #" + g.id + " is over - " + (st.winner ? st.winner + " takes the field " + Math.max(sa, sb) + "-" + Math.min(sa, sb) + " over " + (st.winner === a.name ? b.name : a.name) + "." : "no winner; the score stood " + a.name + " " + sa + " - " + sb + " " + b.name + ".") + " Rounds played: " + st.rounds.length + (forfeits ? " (" + forfeits + " by forfeit)" : "") + ". Hills taken: " + a.name + " " + hillsOf(a) + ", " + b.name + " " + hillsOf(b) + ".";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const frontlinesEngine = {
   name: "Frontlines",
@@ -230,7 +233,7 @@ export const frontlinesEngine = {
   // the simultaneous-rounds hooks
   resolveRound: (room, g) => room.flResolveRound(g),
   standing: (room, st: FlSt) => room.flStanding(st),
-  targets: (pub: import("@chat/contract").FrontlinesState) => pub.players.filter((p) => !p.committed).map((p) => p.name),
+  targets: (pub: FrontlinesState) => pub.players.filter((p) => !p.committed).map((p) => p.name),
   card: (g: FlGame) => ({ id: g.id, type: "frontlines", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, variant: g.st.variant, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
   stateItem: (r, st: FlSt) => ({ id: r.id, type: "frontlines", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: (st.pending || {})[p.name] !== undefined, accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.round,

@@ -13,8 +13,7 @@ import {
 import { CORS, json } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
 // reading takes the header or a signed URL (?invite= no longer authenticates media reads).

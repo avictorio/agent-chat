@@ -6,9 +6,11 @@
 // machinery in room/games.ts.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type LightCyclesDir = import("@chat/contract").LightCyclesDir;
+import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats, LightCyclesState, LightCyclesTrail } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A rider: seat, heading and bike cell (x right, y down, from 0). */
 export type LcRider = { name: string, color: string, hex: string, dir: LightCyclesDir, alive: boolean, x: number, y: number };
 /** Light Cycles' stored match state (g.st; the API's LightCyclesState is
@@ -28,12 +30,12 @@ export type LcSt = {
   lobby_deadline?: number,
   accepted?: Record<string, boolean>,
   players: LcRider[],
-  trails: import("@chat/contract").LightCyclesTrail[],
+  trails: LightCyclesTrail[],
   pending: Record<string, LightCyclesDir>,
   pending_at?: Record<string, number>,
-  move_stats?: Record<string, import("@chat/contract").LightCyclesMoveStats>,
-  move_log?: import("@chat/contract").LightCyclesMove[],
-  log: import("@chat/contract").GameLogLine[],
+  move_stats?: Record<string, LightCyclesMoveStats>,
+  move_log?: LightCyclesMove[],
+  log: GameLogLine[],
   record_keeper?: string | null,
   first_out_decided?: boolean,
   absent_streak?: Record<string, number>,
@@ -47,16 +49,16 @@ export type LcGame = Omit<GameRow, "st"> & { st: LcSt };
 
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
-  legalMoves(p: LcRider): import("@chat/contract").LightCyclesDir[] {
+  legalMoves(p: LcRider): LightCyclesDir[] {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
-    return (["up", "down", "left", "right"] as import("@chat/contract").LightCyclesDir[]).filter((d) => d !== rev[p.dir]);
+    return (["up", "down", "left", "right"] as LightCyclesDir[]).filter((d) => d !== rev[p.dir]);
   },
 
   // The subset of legal moves that does not crash on this tick as the
   // board stands: the target cell is in bounds and holds no trail and
   // no rider's head. (Another rider steering into the same cell can
   // still kill you - that is the game, not a wall.)
-  safeMoves(st: LcSt, p: LcRider): import("@chat/contract").LightCyclesDir[] {
+  safeMoves(st: LcSt, p: LcRider): LightCyclesDir[] {
     const dirs = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
     const occ = new Set(st.trails.map((c) => c[0] + "," + c[1]));
     for (const q of st.players) if (q.alive) occ.add(q.x + "," + q.y);
@@ -67,7 +69,7 @@ export const LightCyclesMethods = {
     });
   },
 
-  lcSummary(g: LcGame): import("@chat/contract").LightCyclesState {
+  lcSummary(g: LcGame): LightCyclesState {
     const st = g.st;
     return {
       id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
@@ -78,7 +80,7 @@ export const LightCyclesMethods = {
   },
 
   /** @param who the viewer */
-  lcStateFull(g: LcGame, who: string | null | undefined): import("@chat/contract").LightCyclesState {
+  lcStateFull(g: LcGame, who: string | null | undefined): LightCyclesState {
     const out = this.lcSummary(g);
     const st = g.st;
     out.trails = st.trails;
@@ -197,7 +199,7 @@ export const LightCyclesMethods = {
     await this.armGameAlarm();
     return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const lightcyclesEngine = {
   name: "Light Cycles",
@@ -209,7 +211,7 @@ export const lightcyclesEngine = {
   full: (room, g, who) => room.lcStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.lcMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.advanceLightCycles(g, roomName),
-  targets: (pub: import("@chat/contract").LightCyclesState) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
+  targets: (pub: LightCyclesState) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
   card: (g: LcGame) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
   stateItem: (r, st: LcSt) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.tick,
@@ -317,4 +319,4 @@ export const LightCyclesTickMethods = {
       st.log.push({ tick: st.tick, text: alive.length ? alive[0].name + " takes the grid." : "No survivors - the grid keeps itself." });
     }
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;

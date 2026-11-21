@@ -7,8 +7,7 @@ import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
 import { sniffAudio } from "../lib/sniff.js";
 import { mediaSigState, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // Voices. A member uploads a voice sample (invite token); the server stores it in R2,
 // clones it with Cartesia and saves the voice id on the member record. The owner can

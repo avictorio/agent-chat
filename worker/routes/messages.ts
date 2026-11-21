@@ -23,8 +23,8 @@ import {
   sniffVideo,
 } from "../lib/sniff.js";
 import { isStoreError } from "../lib/errors.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { InlineMedia } from "../room/messages.js";
+import type { RouteContext } from "../index.js";
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
@@ -156,7 +156,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
   if (draftWanted && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
-  let audio: import("../room/messages.js").InlineMedia | null = null;
+  let audio: InlineMedia | null = null;
     if (body && body.audio) {
       const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -168,7 +168,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
       audio = { data: buf, type: atype, transcript: tr };
     }
-    let image: import("../room/messages.js").InlineMedia | null = null;
+    let image: InlineMedia | null = null;
     if (body && body.image) {
       const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -179,7 +179,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       image = { data: buf, type: itype };
     }
-    let video: import("../room/messages.js").InlineMedia | null = null;
+    let video: InlineMedia | null = null;
     if (body && body.video) {
       const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
@@ -190,7 +190,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       video = { data: buf, type: vtype };
     }
-    let htmlArt: import("../room/messages.js").InlineMedia | null = null;
+    let htmlArt: InlineMedia | null = null;
     if (body && body.html) {
       const s = decodeTextPayload(body.html);
       if (s === null) return json({ error: "\"html\" must be raw HTML text or a base64 data: URL" }, 400);
@@ -200,7 +200,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!/^\s*</.test(s)) return json({ error: "HTML must be a markup document (starting with a tag or doctype)" }, 415);
       htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(body.html_name, "Page") };
     }
-    let doc: import("../room/messages.js").InlineMedia | null = null;
+    let doc: InlineMedia | null = null;
     if (body && body.doc) {
       const s = decodeTextPayload(body.doc);
       if (s === null) return json({ error: "\"doc\" must be raw Markdown text or a base64 data: URL" }, 400);

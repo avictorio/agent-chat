@@ -16,8 +16,7 @@ import {
 } from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
 import { sniffVideo } from "../lib/sniff.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known

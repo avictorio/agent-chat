@@ -1,10 +1,11 @@
 // Two Truths and a Lie: a rotating teller, everyone else votes.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type TwoTruthsRound = import("@chat/contract").TwoTruthsRound;
+import type { GameLogLine, GameStatus, TwoTruthsRound, TwoTruthsState, TwoTruthsYou } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createTwoTruths stores it (st.players). */
 export type TtSeat = { name: string, color: string, hex: string };
 /** The statements up for the vote: as shown (shuffled), and which (1-3) is the lie. */
@@ -79,7 +80,7 @@ export const TwoTruthsMethods = {
     return st.players.filter((p) => p.name !== st.teller);
   },
 
-  ttSummary(g: TtGame): import("@chat/contract").TwoTruthsState {
+  ttSummary(g: TtGame): TwoTruthsState {
     const st = g.st;
     const t = this.ttTally(st);
     const live = g.status === "running";
@@ -94,7 +95,7 @@ export const TwoTruthsMethods = {
     };
   },
 
-  ttStateFull(g: TtGame, who: string | null | undefined): import("@chat/contract").TwoTruthsState {
+  ttStateFull(g: TtGame, who: string | null | undefined): TwoTruthsState {
     const out = this.ttSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -107,7 +108,7 @@ export const TwoTruthsMethods = {
       out.you = { playing: false };
       return out;
     }
-    const you: import("@chat/contract").TwoTruthsYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, teller: live && st.teller === me.name, legal_moves: [] };
+    const you: TwoTruthsYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, teller: live && st.teller === me.name, legal_moves: [] };
     if (live && st.teller === me.name) {
       // the storyteller sees their own statements, the lie marked
       if (st.cur) {
@@ -144,7 +145,7 @@ export const TwoTruthsMethods = {
       log: [{ tick: 0, text: "Two Truths and a Lie created by " + creator + " - storytellers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Two Truths and a Lie #" + g.id + " - " + label + ". Each round a storyteller writes two truths and a lie about themselves; everyone else votes for the lie. " + names[0] + " tells first. Clock: " + clockWords(roundSeconds) + " to write, the same to vote. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
@@ -289,7 +290,7 @@ export const TwoTruthsMethods = {
     } else this.ttResolve(g);
     this.saveGame(g);
     // ttNext/ttResolve may have ended it (the check above narrowed status to running)
-    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Two Truths and a Lie #" + g.id + " is off - two quiet rounds and nothing played.", room);
+    if ((g.status as GameStatus) === "cancelled") this.postSystem("Two Truths and a Lie #" + g.id + " is off - two quiet rounds and nothing played.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
@@ -310,7 +311,7 @@ export const TwoTruthsMethods = {
     const best = st.rounds.filter((r) => !r.forfeit).sort((a, b) => b.fooled - a.fooled)[0];
     return "Two Truths and a Lie #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + t[st.winner].score + " points." : "a tie at the top, no winner.") + " " + lines + "." + (best && best.fooled ? " Best lie: " + best.teller + " fooled " + best.fooled + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const twotruthsEngine = {
   name: "Two Truths and a Lie",
@@ -323,7 +324,7 @@ export const twotruthsEngine = {
   move: (room, g, who, dir, roomName, fields) => room.ttMove(g, who, dir, roomName, fields),
   advance: (room, g, roomName) => room.ttAdvance(g, roomName),
   // pub is ttSummary's state; a running match has a teller
-  targets: (pub: import("@chat/contract").TwoTruthsState) => (pub.status !== "running" ? [] : pub.phase === "write" ? [pub.teller as string] : (pub.players || []).filter((p) => p.name !== pub.teller && !p.committed).map((p) => p.name)),
+  targets: (pub: TwoTruthsState) => (pub.status !== "running" ? [] : pub.phase === "write" ? [pub.teller as string] : (pub.players || []).filter((p) => p.name !== pub.teller && !p.committed).map((p) => p.name)),
   card: (g: TtGame) => {
     const t = room_ttTally(g.st);
     return { id: g.id, type: "twotruths", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, teller: g.status === "running" ? g.st.teller : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };

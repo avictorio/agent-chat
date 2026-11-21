@@ -6,13 +6,12 @@ import { KEEP, MAX_TEXT } from "../limits.js";
 import { sseFrame } from "../lib/http.js";
 import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
+import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
+import type { CfgRow, InvRow, MdRow, MsgRow, Room, RxRow, StreamClient } from "./Room.js";
 
 /** A message as the API serves it (withKinds): the contract's Message,
  *  plus the members its text @-mentions. */
-export type ApiMessage = import("@chat/contract").Message & { targets: string[] };
-export type MsgRow = import("./Room.js").MsgRow;
-export type RxRow = import("./Room.js").RxRow;
-export type MdRow = import("./Room.js").MdRow;
+export type ApiMessage = Message & { targets: string[] };
 /** A message as a listing reads it (its sender as from), before withKinds
  *  turns its media columns into media references. */
 export type MsgListRow = { id: number, ts: number, from: string, text: string }
@@ -54,7 +53,7 @@ export const MessageMethods = {
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     // A draft is private to its sender (and the owner): its reactions are
     // not announced to the rest of the room.
-    const sees = (c: import("./Room.js").StreamClient) => !msg.draft || c.owner || String(c.name || "").toLowerCase() === String(msg.sender).toLowerCase();
+    const sees = (c: StreamClient) => !msg.draft || c.owner || String(c.name || "").toLowerCase() === String(msg.sender).toLowerCase();
     for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
     if (msg.draft) return { reactions: reactions, message_from: msg.sender };
     this.emitState(room);
@@ -154,7 +153,7 @@ export const MessageMethods = {
   // mark in cfg keeps every id fresh.
   nextMsgId() {
     const max = (this.sql.exec("SELECT MAX(id) AS id FROM m").one() as { id: number | null }).id || 0;
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray() as Pick<CfgRow, "v">[])[0];
     const id = Math.max(max, r ? parseInt(r.v, 10) || 0 : 0) + 1;
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(id));
     return id;
@@ -233,7 +232,7 @@ export const MessageMethods = {
     const t = String(text || "");
     if (!t || t.indexOf("@") < 0) return [];
     const self = String(selfName || "").toLowerCase();
-    const list = names || (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<import("./Room.js").InvRow, "name">[]).map((r) => r.name);
+    const list = names || (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
     const low = t.toLowerCase();
     const hits = [];
     for (const name of list) {
@@ -266,7 +265,7 @@ export const MessageMethods = {
     if (!rows.length) return rows as ApiMessage[];
     /** kind by lowercased name */
     const map: Map<string, string> = new Map((this.sql.exec("SELECT lower(name) AS n, kind FROM inv").toArray() as Array<{ n: string, kind: string | null }>).map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
-    const names = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<import("./Room.js").InvRow, "name">[]).map((r) => r.name);
+    const names = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
     for (const r of rows as MsgBag[]) {
       const n = String(r.from || "").toLowerCase();
       r.kind = !r.from ? null : (map.get(n) || "non_interactive");
@@ -359,7 +358,7 @@ export const MessageMethods = {
   // they respect the sender filter but not the kind filter, so a UI
   // can label every filter chip from one response.
   /** @param opts the query: kind, from, before, limit */
-  attachments(opts: Record<string, any>, room: string): Omit<import("@chat/contract").AttachmentsResponse, "room" | "you"> | { error: string, status: number } {
+  attachments(opts: Record<string, any>, room: string): Omit<AttachmentsResponse, "room" | "you"> | { error: string, status: number } {
     this.roomName = room;
     const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
     let kinds = KINDS;
@@ -390,7 +389,7 @@ export const MessageMethods = {
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind as string); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
     args.push(limit + 1);
-    const rows = this.sql.exec(sql, ...args).toArray() as Array<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: import("@chat/contract").AttachmentKind, type: string, bytes: number }>;
+    const rows = this.sql.exec(sql, ...args).toArray() as Array<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: AttachmentKind, type: string, bytes: number }>;
     const more = rows.length > limit;
     if (more) rows.pop();
     const out = rows.map((r) => ({
@@ -413,7 +412,7 @@ export const MessageMethods = {
    * @param after the cursor, or null for the latest
    * @param wait seconds to hold an empty forward read open
    */
-  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string): Promise<Pick<import("@chat/contract").MessagesResponse, "messages" | "last_id" | "room_state">> {
+  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string): Promise<Pick<MessagesResponse, "messages" | "last_id" | "room_state">> {
     this.roomName = room;
     let rows = this.read(after, limit);
     if (rows.length || !wait || after === null) return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
@@ -427,4 +426,4 @@ export const MessageMethods = {
     rows = this.read(after, limit);
     return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

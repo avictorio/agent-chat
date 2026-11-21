@@ -33,12 +33,8 @@ import {
   uploadPlanDirect,
 } from "../uploads/plan.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
+import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 
-export type MsgRow = import("./Room.js").MsgRow;
-export type MdRow = import("./Room.js").MdRow;
-export type UppRow = import("./Room.js").UppRow;
-export type UtRow = import("./Room.js").UtRow;
-export type CountRow = import("./Room.js").CountRow;
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
 export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode">;
@@ -493,4 +489,4 @@ export const UploadMethods = {
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = 'video'", id);
     return { status: 200 };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

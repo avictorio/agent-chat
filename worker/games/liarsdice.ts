@@ -1,11 +1,11 @@
 // Liar's Dice: hidden dice, rising bids, call liar; ones are wild.
 
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type LiarsDiceBid = import("@chat/contract").LiarsDiceBid;
-export type LiarsDiceRound = import("@chat/contract").LiarsDiceRound;
+import type { GameLogLine, LiarsDiceBid, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createLiarsDice stores it (st.players). */
 export type LdSeat = { name: string, color: string, hex: string };
 /** Liar's Dice's stored match state (g.st): what createLiarsDice builds and
@@ -124,7 +124,7 @@ export const LiarsDiceMethods = {
     return (st.cups[nm] || []).slice().sort((a, b) => a - b);
   },
 
-  ldSummary(g: LdGame): import("@chat/contract").LiarsDiceState {
+  ldSummary(g: LdGame): LiarsDiceState {
     const st = g.st;
     const last = st.rounds.length ? st.rounds[st.rounds.length - 1] : null;
     return {
@@ -136,7 +136,7 @@ export const LiarsDiceMethods = {
     };
   },
 
-  ldStateFull(g: LdGame, who: string | null | undefined): import("@chat/contract").LiarsDiceState {
+  ldStateFull(g: LdGame, who: string | null | undefined): LiarsDiceState {
     const out = this.ldSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -182,7 +182,7 @@ export const LiarsDiceMethods = {
       log: [{ tick: 0, text: "Liar's Dice created by " + creator + " - " + names.join(", ") + " in seat order, " + each + " dice each, ones " + (wild ? "wild" : "not wild") + "; " + names[0] + " opens. The clock starts when everyone accepts." }],
       winner: null, places: null, forfeit: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Liar's Dice #" + g.id + " - " + label + ". " + each + " hidden dice each" + (wild ? ", ones wild" : "") + ": raise the bid or call liar; the last one with dice wins. " + names[0] + " opens. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
@@ -296,7 +296,7 @@ export const LiarsDiceMethods = {
     const how = st.rounds.filter((r) => r.out).map((r) => r.loser + " (round " + r.n + (r.reason === "forfeit" ? ", timed out" : "") + ")");
     return "Liar's Dice #" + g.id + " is over - " + w + " wins with " + (st.count[w] || 0) + (st.count[w] === 1 ? " die" : " dice") + " left after " + st.rounds.length + " rounds." + (rest.length ? " Out in order: " + how.join(", ") + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const liarsdiceEngine = {
   name: "Liar's Dice",

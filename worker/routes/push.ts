@@ -3,8 +3,7 @@
 import { json, readBody } from "../lib/http.js";
 import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 export async function pushKeyRoute(rc: RouteContext) {
   const { env } = rc;

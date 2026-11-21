@@ -2,12 +2,11 @@
 
 import LG_WORDS_TXT from "../data/lettergrid-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type LetterGridCell = import("@chat/contract").LetterGridCell;
-export type LetterGridMove = import("@chat/contract").LetterGridMove;
-export type LetterGridRound = import("@chat/contract").LetterGridRound;
+import type { GameLogLine, LetterGridCell, LetterGridMove, LetterGridRound, LetterGridState } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createLetterGrid stores it (st.players). */
 export type LgSeat = { name: string, color: string, hex: string };
 /** A player's running record (st.prog): score, cells claimed, longest
@@ -246,7 +245,7 @@ export const LetterGridMethods = {
     return { word: word, path: path };
   },
 
-  lgSummary(g: LgGame): import("@chat/contract").LetterGridState {
+  lgSummary(g: LgGame): LetterGridState {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
     return {
@@ -261,7 +260,7 @@ export const LetterGridMethods = {
     };
   },
 
-  lgStateFull(g: LgGame, who: string | null | undefined): import("@chat/contract").LetterGridState {
+  lgStateFull(g: LgGame, who: string | null | undefined): LetterGridState {
     const out = this.lgSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -311,7 +310,7 @@ export const LetterGridMethods = {
       log: [{ tick: 0, text: "Letter Grid created by " + creator + " - " + names.join(", ") + ", a " + size + "x" + size + " grid, " + rounds + " rounds. The clock starts when everyone accepts." }],
       winner: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Letter Grid match #" + g.id + " - " + label + ". One " + size + "x" + size + " grid of letters for everyone; each round, trace one secret word through touching cells (diagonals count). 1 point a letter, plus 1 for every cell you claim first. " + rounds + " rounds; round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
@@ -341,7 +340,7 @@ export const LetterGridMethods = {
     const at = Date.now();
     const N = st.size;
     const active = this.lgActive(st);
-    const entry: import("@chat/contract").LetterGridRound = { n: n, at: at, words: {}, missed: [], dropped: [], points: {}, totals: {} };
+    const entry: LetterGridRound = { n: n, at: at, words: {}, missed: [], dropped: [], points: {}, totals: {} };
     /** how many players sent each word */
     const count: Record<string, number> = {};
     for (const p of active) { const mv = st.pending[p.name]; if (mv) count[mv.word] = (count[mv.word] || 0) + 1; }
@@ -421,7 +420,7 @@ export const LetterGridMethods = {
     const R = st.rounds.length;
     return "Letter Grid match #" + g.id + " is over after " + R + (R === 1 ? " round" : " rounds") + " - " + (st.winner ? st.winner + " wins with " + st.prog[st.winner].score + " points." : "a tie at the top, no winner.") + " Scores: " + scores + "." + (longest ? " Longest word: " + longest.w.toUpperCase() + " (" + longest.nm + ")." : "") + (st.top_words && st.top_words.length ? " The grid's longest words: " + st.top_words.slice(0, 3).map((w) => w.toUpperCase()).join(", ") + "." : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const lettergridEngine = {
   name: "Letter Grid",
@@ -437,7 +436,7 @@ export const lettergridEngine = {
   standing: (room, st) => room.lgStanding(st),
   active: (room, st) => room.lgActive(st),
   // pub is lgSummary's state
-  targets: (pub: import("@chat/contract").LetterGridState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
+  targets: (pub: LetterGridState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
   card: (g: LgGame) => ({ id: g.id, type: "lettergrid", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, size: g.st.size, grid: g.st.grid, claims: g.st.claims, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, score: pr.score || 0, cells: pr.cells || 0, out: !!pr.out }; }) }),
   stateItem: (r, st: LgStored) => ({ id: r.id, type: "lettergrid", status: r.status, round: st.round, min_len: st.min_len, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,

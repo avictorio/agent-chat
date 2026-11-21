@@ -5,9 +5,10 @@ import { mediaSig } from "../lib/media.js";
 import { isStoreError, storeError } from "../lib/errors.js";
 import { parseRange } from "../lib/http.js";
 import { STORE_MSG } from "../limits.js";
+import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
+import type { MediaBytes } from "../lib/media.js";
 
-export type MdRow = import("./Room.js").MdRow;
-export type DraftCols = Pick<import("./Room.js").MsgRow, "sender" | "draft">;
+export type DraftCols = Pick<MsgRow, "sender" | "draft">;
 /** Who is asking for a message's media: drafts are their sender's (and
  *  the owner's) alone. */
 export type MediaViewer = { name?: string | null, owner?: boolean };
@@ -24,7 +25,7 @@ export const MediaMethods = {
   // Worker for verification; the bytes themselves never leave the pair.
   mediaSigKeyBytes() {
     if (this._sigBytes) return this._sigBytes;
-    const row = (this.sql.exec("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
+    const row = (this.sql.exec("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray() as Pick<CfgRow, "v">[])[0];
     if (row && row.v) {
       try { const b = b64urlDecode(row.v); if (b.length === 32) { this._sigBytes = b; return b; } } catch (e) {}
     }
@@ -73,7 +74,7 @@ export const MediaMethods = {
   },
 
   /** @param range the request's Range header */
-  async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<import("../lib/media.js").MediaBytes | null> {
+  async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<MediaBytes | null> {
     if (viewer && !viewer.owner) {
       const m = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray() as DraftCols[])[0];
       if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
@@ -95,7 +96,7 @@ export const MediaMethods = {
 
   /** @param transcript undefined keeps the current one */
   async attachAudio(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, transcript: string | null | undefined, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<import("./Room.js").MsgRow, "sender">[])[0];
+    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
@@ -105,7 +106,7 @@ export const MediaMethods = {
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<import("./Room.js").MsgRow, "sender">[])[0];
+    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
@@ -114,11 +115,11 @@ export const MediaMethods = {
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<import("./Room.js").MsgRow, "sender">[])[0];
+    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     return { status: 200, type: type, bytes: data.byteLength };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

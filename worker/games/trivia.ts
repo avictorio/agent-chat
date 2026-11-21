@@ -1,11 +1,11 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
 
 import { clockWords, seatAccepted, tvMatch } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type GameLogLine = import("@chat/contract").GameLogLine;
-export type TriviaRound = import("@chat/contract").TriviaRound;
-export type TriviaQueued = import("@chat/contract").TriviaQueued;
+import type { GameLogLine, GameStatus, TriviaQueued, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
+import type { GmRow, Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A seat as createTrivia stores it (st.players). */
 export type TvSeat = { name: string, color: string, hex: string };
 /** The question up this round, with its sealed answer and variants. */
@@ -69,7 +69,7 @@ export const TriviaMethods = {
     return Math.max(0, Math.min(TV_MAX_WAGER, st.balance[name] || 0));
   },
 
-  tvSummary(g: TvGame): import("@chat/contract").TriviaState {
+  tvSummary(g: TvGame): TriviaState {
     const st = g.st;
     const live = g.status === "running";
     return {
@@ -86,7 +86,7 @@ export const TriviaMethods = {
     };
   },
 
-  tvStateFull(g: TvGame, who: string | null | undefined): import("@chat/contract").TriviaState {
+  tvStateFull(g: TvGame, who: string | null | undefined): TriviaState {
     const out = this.tvSummary(g);
     const st = g.st;
     out.rounds = st.rounds;
@@ -100,7 +100,7 @@ export const TriviaMethods = {
       return out;
     }
     const asker = live && st.asker === me.name;
-    const you: import("@chat/contract").TriviaYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, asker: asker, balance: st.balance[me.name], max_wager: this.tvMaxWager(st, me.name), legal_moves: [] };
+    const you: TriviaYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, asker: asker, balance: st.balance[me.name], max_wager: this.tvMaxWager(st, me.name), legal_moves: [] };
     if (asker) {
       if (st.cur) {
         you.answer = st.cur.answer;
@@ -108,7 +108,7 @@ export const TriviaMethods = {
       }
       if (st.phase === "ask") you.legal_moves = ['{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}'];
       if (st.phase === "judge") {
-        you.to_judge = (this.tvUnmatched(st).map((n) => ({ name: n, answer: st.answers[n].answer, accepted: !!st.judged[n] })) as import("@chat/contract").TriviaToJudge[]);
+        you.to_judge = (this.tvUnmatched(st).map((n) => ({ name: n, answer: st.answers[n].answer, accepted: !!st.judged[n] })) as TriviaToJudge[]);
         you.legal_moves = you.to_judge.filter((x) => !x.accepted).map((x) => "accept " + x.name).concat(["done"]);
       }
     } else if (live && st.phase === "answer") {
@@ -148,7 +148,7 @@ export const TriviaMethods = {
       log: [{ tick: 0, text: "Trivia created by " + creator + " - quizmasters in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<import("../room/Room.js").GmRow, "id">;
+    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trivia #" + g.id + " - " + label + ". Each round a quizmaster asks a question of their own; everyone else answers and wagers up to " + TV_MAX_WAGER + " of their " + TV_START + " points. " + names[0] + " asks first. Clock: " + clockWords(roundSeconds) + " a phase. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
@@ -290,7 +290,7 @@ export const TriviaMethods = {
     // quizmaster set (asker)
     const st = g.st as TvStored & { cur: TvCur, asker: string };
     const keys = [st.cur.answer].concat(st.cur.accept || []);
-    const rec: import("@chat/contract").TriviaRound = { n: st.round, asker: st.asker, question: st.cur.q, answer: st.cur.answer, accept: st.cur.accept || [], answers: {}, right: [], wrong: [], missed: [], deltas: {}, split: false, bonus: 0, totals: {}, forfeit: false, at: Date.now() };
+    const rec: TriviaRound = { n: st.round, asker: st.asker, question: st.cur.q, answer: st.cur.answer, accept: st.cur.accept || [], answers: {}, right: [], wrong: [], missed: [], deltas: {}, split: false, bonus: 0, totals: {}, forfeit: false, at: Date.now() };
     for (const p of this.tvAnswerers(st)) {
       const n = p.name;
       const a = st.answers[n];
@@ -368,7 +368,7 @@ export const TriviaMethods = {
     else this.tvResolve(g);
     this.saveGame(g);
     // tvNext may have called it off (the check above narrowed status to running)
-    if ((g.status as import("@chat/contract").GameStatus) === "cancelled") this.postSystem("Trivia #" + g.id + " is off - two quiet rounds and nothing answered.", room);
+    if ((g.status as GameStatus) === "cancelled") this.postSystem("Trivia #" + g.id + " is off - two quiet rounds and nothing answered.", room);
     this.afterGameChange(g, room, "Referee");
   },
 
@@ -391,7 +391,7 @@ export const TriviaMethods = {
     const qm = Object.keys(splits).sort((a, b) => splits[b] - splits[a])[0];
     return "Trivia #" + g.id + " is over - " + (st.winner ? st.winner + " wins with " + st.balance[st.winner] + " points." : "a tie at the top, no winner.") + " " + lines + "." + (qm ? " Best quizmaster: " + qm + " (split the table " + splits[qm] + (splits[qm] === 1 ? " time)." : " times).") : "");
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const triviaEngine = {
   name: "Trivia",
@@ -404,7 +404,7 @@ export const triviaEngine = {
   move: (room, g, who, dir, roomName, fields) => room.tvMove(g, who, dir, roomName, fields),
   advance: (room, g, roomName) => room.tvAdvance(g, roomName),
   // pub is tvSummary's state
-  targets: (pub: import("@chat/contract").TriviaState) => (pub.status !== "running" ? [] : pub.phase === "answer" ? (pub.players || []).filter((p) => p.name !== pub.asker && !p.committed).map((p) => p.name) : pub.asker ? [pub.asker] : []),
+  targets: (pub: TriviaState) => (pub.status !== "running" ? [] : pub.phase === "answer" ? (pub.players || []).filter((p) => p.name !== pub.asker && !p.committed).map((p) => p.name) : pub.asker ? [pub.asker] : []),
   card: (g: TvGame) => ({ id: g.id, type: "trivia", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, asker: g.status === "running" ? g.st.asker : null, question: g.status === "running" && g.st.cur ? g.st.cur.q : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, balance: g.st.balance[p.name] })) }),
   stateItem: (r, st: TvStored) => ({ id: r.id, type: "trivia", status: r.status, phase: st.phase, asker: st.asker, turn: (st.round || 0) * 3 + (st.phase === "answer" ? 1 : st.phase === "judge" ? 2 : 0), max_wager: TV_MAX_WAGER, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "answer" ? p.name === st.asker || (st.answers || {})[p.name] !== undefined : p.name !== st.asker), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => gm.turn,

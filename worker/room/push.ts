@@ -5,8 +5,9 @@ import { sendWebPush, vapidSubject } from "../platform/webpush.js";
 import { PUSH_MAX_PER_MEMBER } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
+import type { ApiMessage } from "./messages.js";
+import type { InvRow, PushRow, Room } from "./Room.js";
 
-export type PushRow = import("./Room.js").PushRow;
 /** The site's VAPID keypair (the meta row "vapid" on the __vapid object):
  *  the private key as a JWK and the public key in base64url. */
 export type VapidRecord = { jwk: JsonWebKey, pub: string };
@@ -57,7 +58,7 @@ export const PushMethods = {
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   },
-  async notifyPush(msg: import("./messages.js").ApiMessage, room: string | null) {
+  async notifyPush(msg: ApiMessage, room: string | null) {
     const sender = String(msg.from || "").toLowerCase();
     const text = String(msg.text || "").trim();
     const excerpt = text ? (text.length > 120 ? text.slice(0, 117) + "..." : text) : "(attachment)";
@@ -65,7 +66,7 @@ export const PushMethods = {
     // Only the owner ("") and members with an active invite hear about a
     // message: revoke() drops a leaving member's registrations, and this
     // keeps any that slipped through (older rows) from leaking text.
-    const active = new Set((this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<import("./Room.js").InvRow, "name">[]).map((r) => String(r.name).toLowerCase()));
+    const active = new Set((this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => String(r.name).toLowerCase()));
     const allowed = (m: string) => m === "" || active.has(m);
     // Web push (browser subscriptions).
     const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray() as Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">[];
@@ -88,4 +89,4 @@ export const PushMethods = {
     const member = String(name || "").toLowerCase();
     this.sql.exec("DELETE FROM push WHERE member = ?", member);
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

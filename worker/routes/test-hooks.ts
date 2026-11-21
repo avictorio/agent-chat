@@ -5,8 +5,7 @@
 import { json, readBody } from "../lib/http.js";
 import { ROOM_RE } from "../limits.js";
 import { sigv4Presign } from "../platform/r2-s3.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 export async function hookGameImages(rc: RouteContext) {
   const { request, env, owner } = rc;

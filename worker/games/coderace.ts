@@ -2,9 +2,11 @@
 
 import CR_WORDS_TXT from "../data/coderace-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
-export type GameRow = import("../room/games.js").GameRow;
-export type GameEngine = import("./engine.js").GameEngine;
-export type CodeRaceFeedback = import("@chat/contract").CodeRaceFeedback;
+import type { CodeRaceFeedback, CodeRaceGuess, CodeRaceRound, CodeRaceState, GameLogLine } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameEngine } from "./engine.js";
+
 /** A racer's seat. */
 export type CrSeat = { name: string, color: string, hex: string };
 /** A racer's progress: the round they cracked it in and when, out (three
@@ -13,7 +15,7 @@ export type CrSeat = { name: string, color: string, hex: string };
 export type CrProg = { solved: number | null, solved_at: number | null, out: boolean, missed: number, guesses: number, marks: number, best: number };
 /** A resolved round as stored: each guess keeps its word as g (crStateFull
  *  renames it guess, for whoever may see it). */
-export type CrRound = Omit<import("@chat/contract").CodeRaceRound, "guesses"> & { guesses: Record<string, { g: string, fb: CodeRaceFeedback, at: number }> };
+export type CrRound = Omit<CodeRaceRound, "guesses"> & { guesses: Record<string, { g: string, fb: CodeRaceFeedback, at: number }> };
 /** Code Race's stored match state (g.st; the API's CodeRaceState is built
  *  from it), but for mode and colors (CrSt). secret is the word, or the
  *  code's key letters ("RGBY"). pending holds each racer's guess for the
@@ -34,7 +36,7 @@ export type CrStBase = {
   pending: Record<string, string>,
   pending_at: Record<string, number>,
   places: string[] | null,
-  log: import("@chat/contract").GameLogLine[],
+  log: GameLogLine[],
   winner: string | null,
   announced: boolean,
   declined_by?: string,
@@ -203,10 +205,10 @@ export const CodeRaceMethods = {
     return top && st.prog[top].solved ? top : null;
   },
 
-  crSummary(g: CrGame): import("@chat/contract").CodeRaceState {
+  crSummary(g: CrGame): CodeRaceState {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
-    const out: import("@chat/contract").CodeRaceState = {
+    const out: CodeRaceState = {
       id: g.id, type: "coderace", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       round: st.round, max_rounds: st.max_rounds, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       mode: st.mode, length: st.length, colors: st.mode === "colors" ? st.colors : null,
@@ -224,13 +226,13 @@ export const CodeRaceMethods = {
   // Rounds as this viewer may see them: your own guesses in full, a
   // rival's only as feedback while the race runs; everything once over.
   /** @param who the viewer */
-  crStateFull(g: CrGame, who: string | null | undefined): import("@chat/contract").CodeRaceState {
+  crStateFull(g: CrGame, who: string | null | undefined): CodeRaceState {
     const out = this.crSummary(g);
     const st = g.st;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     const open = g.status !== "running" && g.status !== "lobby";
     out.rounds = st.rounds.map((r) => {
-      const gs: Record<string, import("@chat/contract").CodeRaceGuess> = {};
+      const gs: Record<string, CodeRaceGuess> = {};
       for (const name in r.guesses) {
         const x = r.guesses[name];
         gs[name] = open || (me && me.name === name) ? { guess: x.g, fb: x.fb, at: x.at } : { fb: x.fb };
@@ -369,7 +371,7 @@ export const CodeRaceMethods = {
     const head = st.winner ? st.winner + " cracked the " + what + " first, in round " + st.prog[st.winner].solved + "." : "nobody cracked the " + what + " in " + st.rounds.length + (st.rounds.length === 1 ? " round." : " rounds.");
     return "Code Race match #" + g.id + " is over - " + head + " Places: " + placeLine + ". The " + what + " was " + this.crShow(st, st.secret) + ".";
   },
-} satisfies ThisType<import("../room/Room.js").Room>;
+} satisfies ThisType<Room>;
 
 export const coderaceEngine = {
   name: "Code Race",
@@ -385,7 +387,7 @@ export const coderaceEngine = {
   resolveRound: (room, g) => room.crResolveRound(g),
   standing: (room, st: CrSt) => room.crStanding(st),
   active: (room, st: CrSt) => room.crActive(st),
-  targets: (pub: import("@chat/contract").CodeRaceState) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
+  targets: (pub: CodeRaceState) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
   card: (g: CrGame) => ({ id: g.id, type: "coderace", status: g.status, round: g.st.round, max_rounds: g.st.max_rounds, mode: g.st.mode, length: g.st.length, colors: g.st.colors, winner: g.st.winner || null, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0 }; }) }),
   stateItem: (r, st: CrSt) => ({ id: r.id, type: "coderace", status: r.status, round: st.round, mode: st.mode, length: st.length, colors: st.colors, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.solved || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
   turnOf: (gm) => gm.round,

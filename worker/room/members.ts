@@ -1,13 +1,12 @@
 // Room methods: members and invites (kinds, reserved names, revocation), avatars.
 
 import { nameFold } from "../lib/text.js";
+import type { Member, MemberKind } from "@chat/contract";
+import type { CountRow, InvRow, MvRow, Room } from "./Room.js";
 
-export type InvRow = import("./Room.js").InvRow;
-export type MvRow = import("./Room.js").MvRow;
-export type CountRow = import("./Room.js").CountRow;
 /** A member as the Room returns it; the members route turns avatar_version
  *  into the signed avatar URL and invite_token into invite_link (or drops it). */
-export type RoomMember = Omit<import("@chat/contract").Member, "avatar" | "invite_link" | "agent_onboarding"> & { avatar_version: number | null, invite_token: string };
+export type RoomMember = Omit<Member, "avatar" | "invite_link" | "agent_onboarding"> & { avatar_version: number | null, invite_token: string };
 export type VoiceCols = Pick<MvRow, "name" | "provider" | "voice_id" | "sample_key">;
 
 export const MemberMethods = {
@@ -94,7 +93,7 @@ export const MemberMethods = {
     };
   },
 
-  setKind(name: string, kind: import("@chat/contract").MemberKind) {
+  setKind(name: string, kind: MemberKind) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return false;
     this.sql.exec("UPDATE inv SET kind = ? WHERE lower(name) = lower(?)", kind, name);
     return true;
@@ -162,10 +161,10 @@ export const MemberMethods = {
   // The kind of an actor by name: "human" | "agent" from their invite,
   // "non_interactive" for a system actor with no invite (the Referee),
   // null for no actor at all.
-  memberKind(name: string | null | undefined): import("@chat/contract").MemberKind | "non_interactive" | null {
+  memberKind(name: string | null | undefined): MemberKind | "non_interactive" | null {
     if (!name) return null;
     const n = String(name).toLowerCase();
     const r = (this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray() as Pick<InvRow, "kind">[])[0];
     return r ? (r.kind === "human" ? "human" : "agent") : "non_interactive";
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

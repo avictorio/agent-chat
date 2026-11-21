@@ -1,6 +1,7 @@
 // Room methods behind the test hooks (inert in production: the routes need TEST_HOOKS).
 
 import { TICKET_TTL_MS } from "../limits.js";
+import type { CfgRow, Room } from "./Room.js";
 
 export const TestHookMethods = {
   // Test hooks (suite only): when the Worker runs with TEST_HOOKS set (the API
@@ -9,7 +10,7 @@ export const TestHookMethods = {
   // simulate an R2 outage and shorten upload-ticket TTLs in this room.
   r2TestFail() {
     if (!this.env || !this.env.TEST_HOOKS) return false;
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
+    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray() as Pick<CfgRow, "v">[])[0];
     return !!(r && r.v === "1");
   },
 
@@ -31,7 +32,7 @@ export const TestHookMethods = {
 
   ticketTtlMs() {
     if (this.env && this.env.TEST_HOOKS) {
-      const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_ticket_ttl_ms'").toArray() as Pick<import("./Room.js").CfgRow, "v">[])[0];
+      const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_ticket_ttl_ms'").toArray() as Pick<CfgRow, "v">[])[0];
       const n = r ? parseInt(r.v, 10) : NaN;
       if (n > 0) return n;
     }
@@ -42,4 +43,4 @@ export const TestHookMethods = {
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_ticket_ttl_ms', ?)", String(Math.max(0, Math.floor(Number(ms) || 0))));
     return { test_ticket_ttl_ms: this.ticketTtlMs() };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

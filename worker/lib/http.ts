@@ -1,5 +1,7 @@
 // HTTP helpers shared by the routes and the Room object.
 
+import type { Message } from "@chat/contract";
+
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -13,7 +15,7 @@ export const SSE_HEADERS = Object.assign({
 }, CORS);
 
 /** A message's stream frame ("event: message"). */
-export function sseFrame(room: string | null, m: import("@chat/contract").Message & { targets?: string[] }) {
+export function sseFrame(room: string | null, m: Message & { targets?: string[] }) {
   return "id: " + m.id + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
 }
 

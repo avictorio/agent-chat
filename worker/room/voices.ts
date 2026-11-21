@@ -3,11 +3,10 @@
 
 import { nameFold } from "../lib/text.js";
 import { VOICE_CLONES_PER_DAY } from "../limits.js";
+import type { MsgRow, MvRow, Room } from "./Room.js";
 
 /** speak syntheses in flight, by "room:message id" */
 export const SPEAK_INFLIGHT: Map<string, Promise<ArrayBuffer>> = new Map();
-
-export type MvRow = import("./Room.js").MvRow;
 
 export async function cloneAllowed(env: Env, room: string, who: string) {
   const k = "clone:" + room + ":" + nameFold(who) + ":" + new Date().toISOString().slice(0, 10);
@@ -80,7 +79,7 @@ export const VoiceMethods = {
   // A voice change makes every cached speak rendering of that member's messages
   // stale: drop them so the next play re-synthesizes in the new voice.
   async invalidateSpeakCache(name: string) {
-    const ids = this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray() as Pick<import("./Room.js").MsgRow, "id">[];
+    const ids = this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray() as Pick<MsgRow, "id">[];
     for (const r of ids) {
       const meta = this.mediaMeta(r.id, "speak");
       if (!meta) continue;
@@ -101,8 +100,8 @@ export const VoiceMethods = {
 
   // What a speak request needs: the message's sender and text. Drafts never speak.
   speakSource(id: number) {
-    const r = (this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray() as Pick<import("./Room.js").MsgRow, "sender" | "text" | "draft">[])[0];
+    const r = (this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender" | "text" | "draft">[])[0];
     if (!r || r.draft) return null;
     return { sender: r.sender, text: r.text };
   },
-} satisfies ThisType<import("./Room.js").Room>;
+} satisfies ThisType<Room>;

@@ -2,9 +2,11 @@
 // reactions_to_you, the picker's emoji list.
 
 import { EMOJI_KV_KEY, EMOJI_SOURCE, REACTION_ALIASES, STATE_MAX_BYTES } from "../limits.js";
+import type { RoomState } from "@chat/contract";
+import type { StateData } from "../room/state.js";
 
 // room_state.reactions_to_you: the latest reactions others left on your messages in the last 24 hours (up to 5).
-export function withReactions(s: import("@chat/contract").RoomState, d: import("../room/state.js").StateData | null, who: string | null | undefined): import("@chat/contract").RoomState {
+export function withReactions(s: RoomState, d: StateData | null, who: string | null | undefined): RoomState {
   if (!d || !d.rx || !who) return s;
   const w = String(who).toLowerCase();
   const mine = d.rx.filter((r) => String(r.to).toLowerCase() === w && String(r.who).toLowerCase() !== w).slice(0, 5);

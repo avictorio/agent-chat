@@ -15,8 +15,7 @@ import {
   mcpErr,
   mcpOk,
 } from "../agents/mcp.js";
-
-export type RouteContext = import("../index.js").RouteContext;
+import type { RouteContext } from "../index.js";
 
 // The wake recipe (Muse harnesses): a text document, plus the watcher
 // script it installs, served from single sources in worker/ with the room,

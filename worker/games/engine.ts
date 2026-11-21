@@ -16,10 +16,11 @@ import { corpseEngine } from "./corpse.js";
 import { lettergridEngine } from "./lettergrid.js";
 import { SG_IMAGE_MAX, sketchEngine } from "./sketch.js";
 import { triviaEngine } from "./trivia.js";
+import type { GameType } from "@chat/contract";
+import type { Room } from "../room/Room.js";
+import type { GameRow } from "../room/games.js";
+import type { GameStateItem } from "../room/state.js";
 
-export type Room = import("../room/Room.js").Room;
-export type GameRow = import("../room/games.js").GameRow;
-export type GameStateItem = import("../room/state.js").GameStateItem;
 /** A match's public summary or full state as the shared machinery handles
  *  it: the fields every game's state has (GameStateBase in the contract)
  *  plus its game's own, which the machinery passes through untouched (and
@@ -138,5 +139,5 @@ export const GAME_ALIASES = { lc: "lightcycles", tron: "lightcycles", rps: "duel
 // before the type field are Light Cycles, the first game.
 export function gameEngine(st: { type?: string } | null | undefined): GameEngine {
   // every entry implements GameEngine (the contract above); an unknown type is no entry
-  return ((st && GAME_ENGINES[st.type as import("@chat/contract").GameType]) || GAME_ENGINES.lightcycles) as GameEngine;
+  return ((st && GAME_ENGINES[st.type as GameType]) || GAME_ENGINES.lightcycles) as GameEngine;
 }
