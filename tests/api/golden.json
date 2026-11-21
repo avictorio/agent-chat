@@ -1,0 +1,590 @@
+{
+  "docs /api": {
+    "status": 200,
+    "type": "text"
+  },
+  "docs /llms.txt": {
+    "status": 200,
+    "type": "text"
+  },
+  "build": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "build"
+    ]
+  },
+  "room page": {
+    "status": 200,
+    "type": "html"
+  },
+  "home page": {
+    "status": 200,
+    "type": "html"
+  },
+  "read: no token": {
+    "status": 401,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This room is invite-only. Open your invite link to join."
+  },
+  "read: unknown token": {
+    "status": 403,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This invite link isn't valid for this room."
+  },
+  "read: revoked token": {
+    "status": 403,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This invite link has been revoked. Ask the room owner for a new one."
+  },
+  "read: no such room": {
+    "status": 404,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "No room with that name yet. Create it from the home page."
+  },
+  "read: query token on media": {
+    "status": 401,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This room is invite-only. Open your invite link to join."
+  },
+  "post: message": {
+    "status": 201,
+    "type": "json",
+    "keys": [
+      "for_agents",
+      "from",
+      "id",
+      "kind",
+      "reactions",
+      "room",
+      "room_state",
+      "targets",
+      "text",
+      "ts"
+    ]
+  },
+  "post: bad JSON": {
+    "status": 400,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "Couldn't read the body. Send JSON like {\"from\":\"agent-a\",\"text\":\"hi\"}"
+  },
+  "read: first, human": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "for_agents",
+      "invite_only",
+      "last_id",
+      "messages",
+      "room",
+      "room_state",
+      "welcome",
+      "you",
+      "you_kind"
+    ],
+    "rows": {
+      "messages": [
+        "audio",
+        "doc",
+        "file",
+        "from",
+        "game",
+        "html",
+        "id",
+        "image",
+        "kind",
+        "reactions",
+        "targets",
+        "text",
+        "ts",
+        "video"
+      ]
+    }
+  },
+  "read: first, agent": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "agent_onboarding",
+      "for_agents",
+      "invite_only",
+      "last_id",
+      "messages",
+      "room",
+      "room_state",
+      "welcome",
+      "you",
+      "you_kind"
+    ],
+    "rows": {
+      "messages": [
+        "audio",
+        "doc",
+        "file",
+        "from",
+        "game",
+        "html",
+        "id",
+        "image",
+        "kind",
+        "reactions",
+        "targets",
+        "text",
+        "ts",
+        "video"
+      ]
+    }
+  },
+  "read: after": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "for_agents",
+      "invite_only",
+      "last_id",
+      "messages",
+      "room",
+      "room_state",
+      "you",
+      "you_kind"
+    ],
+    "rows": {
+      "messages": [
+        "audio",
+        "doc",
+        "file",
+        "from",
+        "game",
+        "html",
+        "id",
+        "image",
+        "kind",
+        "reactions",
+        "targets",
+        "text",
+        "ts",
+        "video"
+      ]
+    }
+  },
+  "read: query token": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "for_agents",
+      "invite_only",
+      "last_id",
+      "messages",
+      "room",
+      "room_state",
+      "welcome",
+      "you",
+      "you_kind"
+    ],
+    "rows": {
+      "messages": [
+        "audio",
+        "doc",
+        "file",
+        "from",
+        "game",
+        "html",
+        "id",
+        "image",
+        "kind",
+        "reactions",
+        "targets",
+        "text",
+        "ts",
+        "video"
+      ]
+    }
+  },
+  "reactions: add": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "from",
+      "id",
+      "message_from",
+      "reaction",
+      "reactions",
+      "room"
+    ]
+  },
+  "get welcome": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "constitution",
+      "decisions",
+      "last_id",
+      "open_questions",
+      "recent_digests",
+      "recommendations",
+      "room",
+      "stakes"
+    ]
+  },
+  "get members": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "invite_only",
+      "members",
+      "room"
+    ],
+    "rows": {
+      "members": [
+        "avatar",
+        "invite_link",
+        "invited",
+        "invited_by",
+        "joined",
+        "kind",
+        "last_seen",
+        "name",
+        "revoked",
+        "status",
+        "voice"
+      ]
+    }
+  },
+  "get constitution": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "constitution",
+      "room"
+    ]
+  },
+  "get questions": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "questions",
+      "resolved",
+      "room"
+    ]
+  },
+  "get decisions": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "decisions",
+      "room"
+    ]
+  },
+  "get stakes": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "done",
+      "room",
+      "stakes"
+    ]
+  },
+  "get digests": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "digests",
+      "room"
+    ]
+  },
+  "get games": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "games",
+      "ladder",
+      "record",
+      "room"
+    ]
+  },
+  "owner: invites list": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "invite_only",
+      "invites",
+      "room"
+    ],
+    "rows": {
+      "invites": [
+        "created",
+        "kind",
+        "link",
+        "name",
+        "revoked",
+        "token",
+        "used"
+      ]
+    }
+  },
+  "invite: bad JSON": {
+    "status": 400,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "The request body is not valid JSON (Unexpected end of JSON input). Send a JSON object, with Content-Type: application/json."
+  },
+  "invite: name taken": {
+    "status": 409,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "goldh already has an active invite (names match regardless of case). Revoke it first to make a new one."
+  },
+  "invite: by a member": {
+    "status": 201,
+    "type": "json",
+    "keys": [
+      "agent_onboarding",
+      "created",
+      "invited_by",
+      "kind",
+      "link",
+      "name",
+      "revoked",
+      "room",
+      "token"
+    ]
+  },
+  "invite: member daily cap": {
+    "status": 429,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "You can create up to 5 invites a day"
+  },
+  "invite: active cap": {
+    "status": 429,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This room already has 50 active invites"
+  },
+  "digest: daily cap": {
+    "status": 429,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "This room already has 3 digests today (UTC). Try again tomorrow."
+  },
+  "ticket: minted": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "draft",
+      "message_id",
+      "room",
+      "upload"
+    ]
+  },
+  "ticket: outstanding cap": {
+    "status": 429,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "Too many outstanding upload tickets (20). Finish one or let one expire first."
+  },
+  "create-room: email cap": {
+    "status": 429,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "Too many rooms created - try again tomorrow."
+  },
+  "create-room: bad JSON": {
+    "status": 400,
+    "type": "json",
+    "keys": [
+      "error"
+    ],
+    "error": "The request body is not valid JSON (Unterminated string in JSON at position 14 (line 1 column 15)). Send a JSON object, with Content-Type: application/json."
+  },
+  "mcp: initialize": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "id",
+      "jsonrpc",
+      "result"
+    ],
+    "resultKeys": [
+      "capabilities",
+      "catalog",
+      "instructions",
+      "protocolVersion",
+      "serverInfo"
+    ]
+  },
+  "mcp: initialize, bad token": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "id",
+      "jsonrpc",
+      "result"
+    ],
+    "resultKeys": [
+      "capabilities",
+      "catalog",
+      "instructions",
+      "protocolVersion",
+      "serverInfo"
+    ]
+  },
+  "mcp: tools/list": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "id",
+      "jsonrpc",
+      "result"
+    ],
+    "resultKeys": [
+      "catalog",
+      "tools"
+    ],
+    "firstTool": [
+      "annotations",
+      "description",
+      "inputSchema",
+      "name"
+    ]
+  },
+  "mcp: tools/list, no token": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "error",
+      "id",
+      "jsonrpc"
+    ],
+    "rpcError": {
+      "code": -32001,
+      "message": "This room is invite-only. Open your invite link to join."
+    }
+  },
+  "mcp: tools/list, unknown token": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "error",
+      "id",
+      "jsonrpc"
+    ],
+    "rpcError": {
+      "code": -32001,
+      "message": "This invite link isn't valid for this room."
+    }
+  },
+  "mcp: tools/list, revoked token": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "error",
+      "id",
+      "jsonrpc"
+    ],
+    "rpcError": {
+      "code": -32001,
+      "message": "This invite link has been revoked. Ask the room owner for a new one."
+    }
+  },
+  "mcp: whoami": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "id",
+      "jsonrpc",
+      "result"
+    ],
+    "resultKeys": [
+      "content",
+      "structuredContent"
+    ],
+    "toolKeys": [
+      "invite_only",
+      "kind",
+      "name",
+      "owner",
+      "room"
+    ]
+  },
+  "mcp: get_members": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "id",
+      "jsonrpc",
+      "result"
+    ],
+    "resultKeys": [
+      "content",
+      "structuredContent"
+    ],
+    "toolKeys": [
+      "invite_only",
+      "members",
+      "room"
+    ]
+  },
+  "mcp: unknown method": {
+    "status": 200,
+    "type": "json",
+    "keys": [
+      "error",
+      "id",
+      "jsonrpc"
+    ],
+    "rpcError": {
+      "code": -32601,
+      "message": "Method not found: no/such"
+    }
+  },
+  "mcp: parse error": {
+    "status": 400,
+    "type": "json",
+    "keys": [
+      "error",
+      "id",
+      "jsonrpc"
+    ],
+    "rpcError": {
+      "code": -32700,
+      "message": "Parse error: send one JSON-RPC request object"
+    }
+  },
+  "stream": {
+    "status": 200,
+    "type": "sse"
+  }
+}
