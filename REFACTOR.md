@@ -403,8 +403,15 @@ Agreed with the owner on 2026-11-21, in this order:
         `scripts/extract-renderer.mjs` does the move: scope-aware
         rewriting to `ctx.`, imports carried over, calls updated.
         games.ts 3,145 -> 1,857 lines
-  - [ ] 5.2b Battleship and Light Cycles' views (Battleship writes
-        `bsRefocus`: give ctx a setter first)
+  - [x] 5.2b Battleship and Light Cycles' views: all 16 games' arena
+        views are now in their folders behind `GAME_VIEWS`. Battleship's
+        renderer took its module-level helpers along (shot dressing,
+        placement drafts, the banner) and remembers a focused scene
+        through `ctx.rememberBsFocus()` instead of writing the store's
+        state; Light Cycles' view, inline at the end of `renderGameView`,
+        became its own function first. `renderGameView` is now only the
+        dispatch (a match without a type is Light Cycles, as on the
+        server). games.ts 1,857 -> 1,313 lines
   - [ ] 5.2c The rest of the per-type branches: the chat cards
         (`shared/gamecard.tsx`), history rows, the frame merge's type
         list, and each game's catalog entry into its folder

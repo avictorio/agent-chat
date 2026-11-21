@@ -94,6 +94,12 @@ export interface GameViewCtx {
   claimRender(key: string, force?: boolean): boolean;
   arenaHint(key: string, text: string): HTMLElement | null;
   arenaTabs(g: GL): HTMLElement;
+  bsScene(g: GL, wrap: HTMLElement, under?: HTMLElement): void;
+  bsStrips3d(g: GL, fleets: { label: string; hex: string; sunk: number[] }[]): HTMLElement;
+  dropBs3d(): void;
+  dropLc3d(): void;
+  paintLc3d(g: GL, h: Host3d): void;
+  rememberBsFocus(): void;
   drop3d(): void;
   dropDuel3d(): void;
   historyList(g: GL): HTMLElement;
