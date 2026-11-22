@@ -626,8 +626,11 @@ const shot = (page, f) => page.screenshot({ path: OUT + f });
 async function run(name, o, fn) {
   // ONLY=name1,name2 runs just those scenarios (a quick re-check)
   if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;
+  // UI_TIMES=1 prints where each scenario's time goes (launch, load, body)
+  const tm = { t0: Date.now(), launch: 0, load: 0 };
   const b = await chromium.launch({ args: o.args || [] });
-  const ctx = await b.newContext({ colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch, timezoneId: 'UTC', locale: 'en-US' });
+  tm.launch = Date.now() - tm.t0;
+  const ctx = await b.newContext({ reducedMotion: process.env.UI_REDUCED_MOTION ? 'reduce' : (o.reducedMotion || 'no-preference'), colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch, timezoneId: 'UTC', locale: 'en-US' });
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
   const S = fresh(o.state); const calls = [];
@@ -636,8 +639,10 @@ async function run(name, o, fn) {
   await setup(page, S, calls);
   if (o.init) await page.addInitScript(o.init);
   try {
+    const tl = Date.now();
     await page.goto('https://chat.victorio.cloud/r/demo' + (o.hash || ''));
     await settle(page);
+    tm.load = Date.now() - tl;
     const r = await fn(page, S, calls);
     const fatal = errs.filter(e => !e.startsWith('console:'));
     if (fatal.length) throw new Error('uncaught page errors: ' + JSON.stringify(fatal));
@@ -653,6 +658,7 @@ async function run(name, o, fn) {
     console.log('FAIL ' + name + ': ' + (e && e.message ? String(e.message).split('\n')[0] : String(e)));
   } finally {
     await b.close();
+    if (process.env.UI_TIMES) console.log('TIME ' + ((Date.now() - tm.t0) / 1000).toFixed(1) + 's launch ' + tm.launch + 'ms load ' + tm.load + 'ms ' + name);
   }
 }
 /* No WebGL (2026-11-20, the 2D views are retired): the arena box

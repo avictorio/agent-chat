@@ -103,7 +103,15 @@ looked at in both sizes.
    `battleship`, each `<feature>.test.js`), and `run.js` runs the files in
    parallel (`npm test` in `web/`; `JOBS=n` sets how many at once,
    `FILES=chat,games` picks files, `ONLY=name1,name2` picks scenarios; one
-   file alone is `node tests/ui/<feature>.test.js`). In a Claude cloud
+   file alone is `node tests/ui/<feature>.test.js`). The full suite takes
+   about 7 minutes on a 4-core sandbox and is CPU-bound: the 3D scenes
+   render in software (SwiftShader) on every core, so more jobs at once
+   only slow each other down. `UI_TIMES=1` prints each scenario's time
+   (browser launch, page load, the rest); `UI_REDUCED_MOTION=1` runs every
+   scenario with prefers-reduced-motion, about 4 minutes, for iterating
+   (the 3D scenes stop animating, so it doesn't exercise the motion code
+   or give the screenshots people see - run the full suite before a
+   deploy). In a Claude cloud
    sandbox add `-r ./tests/system-chromium.js` after `node` (from `web/`)
    to use the preinstalled Chromium. The suite runs on a fixed clock
    (`NOW` in `harness.js`, UTC; `CLOCK=real` for the machine's), so two
