@@ -13,7 +13,14 @@ export const BS_SHOTS_TAIL = 24;
 
 /** A ship as stored: its cells and the ones hit, as board keys ("x,y",
  *  bsKey), and in a free-for-all who fired the shell that sank it. */
+/** The longest "Name:Cell" entry read as a free-for-all target. */
+const BS_TARGET_MAX = 200;
 export type BsShip = { size: number, cells: string[], hits: string[], sunk_by?: string };
+/** Every cell of the ship has been hit. Counted by cell, not by the length
+ *  of hits: matches stored before 2026-11-22 can list a cell twice. */
+export function bsSunk(ship: BsShip) {
+  return ship.cells.every((c) => ship.hits.indexOf(c) >= 0);
+}
 /** A shot record against one board, by key: hit or miss. */
 export type BsShotMap = Record<string, BattleshipShotResult>;
 /** A captain as stored. fleet is null until placed; shots is the one shot
@@ -94,7 +101,10 @@ export const BattleshipMethods = {
   // names could) is still reachable; a split whose remainder parses as a
   // cell wins.
   bsTargetOf(st: BsSt, entry: string) {
+    // "Name:Cell" is short; the loop below reads the entry once per colon,
+    // and a move made of a few hundred thousand colons held the whole room
     let best: { target: BsCaptain, cellPart: string } | null = null;
+    if (entry.length > BS_TARGET_MAX) return best;
     for (let ci = entry.indexOf(":"); ci >= 0; ci = entry.indexOf(":", ci + 1)) {
       const tName = entry.slice(0, ci).trim().toLowerCase();
       const p = st.players.find((q) => q.name.toLowerCase() === tName);
@@ -181,7 +191,7 @@ export const BattleshipMethods = {
 
   bsAfloat(player: BsCaptain | null | undefined) {
     if (!player || !player.fleet) return 0;
-    return player.fleet.filter((s) => s.hits.length < s.size).length;
+    return player.fleet.filter((s) => !bsSunk(s)).length;
   },
 
   // Free-for-all helpers. A match is FFA when it seats
@@ -235,12 +245,12 @@ export const BattleshipMethods = {
     if (!this.bsFfa(g.st)) {
       const opp = g.st.players.find((p) => p.name !== name);
       if (!opp || !opp.fleet) return 0;
-      return opp.fleet.filter((s) => s.hits.length >= s.size).length;
+      return opp.fleet.filter((s) => bsSunk(s)).length;
     }
     let n = 0;
     for (const p of g.st.players) {
       if (p.name === name || !p.fleet) continue;
-      for (const s of p.fleet) if (s.hits.length >= s.size && s.sunk_by === name) n++;
+      for (const s of p.fleet) if (bsSunk(s) && s.sunk_by === name) n++;
     }
     return n;
   },
@@ -263,7 +273,7 @@ export const BattleshipMethods = {
     if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || Math.ceil(st.turn / 2) % 3 !== 0) return;
     // two captains, both placed (the play phase)
     const opp = st.players.find((p) => p.name !== shooter.name) as BsCaptain;
-    const ship = (opp.fleet as BsShip[]).find((s) => s.hits.length < s.size);
+    const ship = (opp.fleet as BsShip[]).find((s) => !bsSunk(s));
     if (!ship) return;
     const open = ship.cells.filter((c) => ship.hits.indexOf(c) < 0).map((c) => c.split(",").map(Number));
     if (!open.length) return;
@@ -333,7 +343,7 @@ export const BattleshipMethods = {
         for (const k of Object.keys(map)) incoming[this.bsLabel(k)] = map[k];
       }
       const sunkShips = [];
-      if (p.fleet) for (const s of p.fleet) if (s.hits.length >= s.size) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+      if (p.fleet) for (const s of p.fleet) if (bsSunk(s)) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
       return { name: p.name, hex: p.hex, incoming: incoming, sunk_ships: sunkShips, eliminated: !!p.eliminated };
     });
   },
@@ -381,7 +391,7 @@ export const BattleshipMethods = {
       playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, phase: g.status === "running" ? st.phase : null,
       your_turn: g.status === "running" && st.phase === "play" && st.turn_of === me.name,
       eliminated: !!me.eliminated,
-      fleet: me.fleet ? me.fleet.map((s) => ({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)), hits: s.hits.map((c) => this.bsLabel(c)), sunk: s.hits.length >= s.size })) : null,
+      fleet: me.fleet ? me.fleet.map((s) => ({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)), hits: Array.from(new Set(s.hits)).map((c) => this.bsLabel(c)), sunk: bsSunk(s) })) : null,
       shots: {}, incoming: {}, sunk_ships: [] as BattleshipSunkShip[], opponent_afloat: ffa ? null : this.bsAfloat(opp),
       legal_moves: [] as string[],
     };
@@ -394,7 +404,7 @@ export const BattleshipMethods = {
         const shots: BsShotMap = {};
         for (const k of Object.keys(map)) shots[this.bsLabel(k)] = map[k];
         const sunkShips = [];
-        if (t.fleet) for (const s of t.fleet) if (s.hits.length >= s.size) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+        if (t.fleet) for (const s of t.fleet) if (bsSunk(s)) sunkShips.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
         return { name: t.name, hex: t.hex, eliminated: !!t.eliminated, afloat: this.bsAfloat(t), shots: shots, sunk_ships: sunkShips };
       });
       // The fire your own waters have taken, from every rival.
@@ -406,7 +416,7 @@ export const BattleshipMethods = {
     } else {
       for (const k of Object.keys(me.shots || {})) you.shots[this.bsLabel(k)] = me.shots[k];
       if (opp) for (const k of Object.keys(opp.shots || {})) you.incoming[this.bsLabel(k)] = opp.shots[k];
-      if (opp && opp.fleet) for (const s of opp.fleet) if (s.hits.length >= s.size) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
+      if (opp && opp.fleet) for (const s of opp.fleet) if (bsSunk(s)) you.sunk_ships.push({ size: s.size, cells: s.cells.map((c) => this.bsLabel(c)) });
     }
     if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
     if (g.status === "running" && st.phase === "play" && you.your_turn && !me.eliminated) {
@@ -494,8 +504,12 @@ export const BattleshipMethods = {
     let sunkSize: number | null = null;
     if (ship) {
       map[key] = "hit";
-      ship.hits.push(key);
-      if (ship.hits.length >= ship.size) { sunkSize = ship.size; ship.sunk_by = me.name; }
+      // In a free-for-all several captains can fire at the same cell: it
+      // is a hit for each of them, and one hole in the hull. Counting it
+      // again sank the ship early and published the cells nobody had hit.
+      const afloat = !bsSunk(ship);
+      if (ship.hits.indexOf(key) < 0) ship.hits.push(key);
+      if (afloat && bsSunk(ship)) { sunkSize = ship.size; ship.sunk_by = me.name; }
     } else {
       map[key] = "miss";
     }

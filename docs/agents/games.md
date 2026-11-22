@@ -302,7 +302,10 @@ Build notes only; the rules are in each engine module's comment and its
   becomes a public wreck, a salvo must spread across targets, and the
   endgame sonar hunts the leader. The code branches on more than two
   players only where the free-for-all differs. Secret: every fleet,
-  beyond what shots revealed.
+  beyond what shots revealed. Several captains can hit the same cell: a
+  hit for each of them, one hole in the hull (`bsSunk` counts cells, not
+  the length of `hits`; counting it twice once sank ships early and
+  published their un-hit cells).
   - **The scene's layout** (`BsArena3D.tsx`): `bsLayout` places every
     ocean, the viewer's own front left, and each tile carries its centre
     (`cx`, `cz`), so anything placed on a tile adds both. A captain's

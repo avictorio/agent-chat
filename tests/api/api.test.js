@@ -1083,6 +1083,41 @@ function mp4() {
     check('ffa per-target records survive to the final state', rexTargets.length === 2 && !!raeTarget && raeTarget.eliminated === true && raeTarget.afloat === 0 && (raeTarget.shots || {}).A10 === 'miss', JSON.stringify(rexTargets).slice(0, 220));
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posted the ffa result with the elimination order', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Battleship free-for-all #' + ffaId + ' is over') && x.text.includes('Poc takes the sea') && x.text.includes('Elimination order: Rae, Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 110))));
+    // Two captains hitting the same cell make one hole in the hull. It
+    // used to count twice: the ship "sank" early and every view, a
+    // spectator's included, published the cells nobody had hit.
+    {
+      r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 3600 } });
+      const dupId = r.json.game.id;
+      await req('POST', R2 + '/games/' + dupId + '/accept', { token: TRex, json: {} });
+      await req('POST', R2 + '/games/' + dupId + '/accept', { token: TRae, json: {} });
+      await req('POST', R2 + '/games/' + dupId + '/moves', { token: TP, json: { dir: 'A10H,C5V,E6H,G2V,I2H' } });
+      await req('POST', R2 + '/games/' + dupId + '/moves', { token: TRex, json: { dir: 'A1H,C3V,E5H,G7V,I9H' } });
+      await req('POST', R2 + '/games/' + dupId + '/moves', { token: TRae, json: { dir: 'B2V,D4H,F6V,H8H,J1V' } });
+      // Rex's two-cell ship is I9, J9. Poc and Rae each fire at I9; Rex fires at water.
+      const answers = [];
+      for (let k = 0; k < 9 && answers.length < 2; k++) {
+        const g = await ffaState(dupId);
+        const mv = await ffaFire(dupId, g.turn_of === 'Rex' ? 'Poc:J' + (4 + k) : 'Rex:I9');
+        if (g.turn_of !== 'Rex') answers.push(mv.json && mv.json.game ? mv.json.game : {});
+      }
+      const seen = (await req('GET', R2 + '/games/' + dupId, { owner: true })).json.game;
+      const rexBoard = (seen.players || []).find((p) => p.name === 'Rex') || {};
+      const mine = (await req('GET', R2 + '/games/' + dupId, { token: TRex })).json.game.you.fleet.find((sh) => sh.size === 2);
+      check('ffa: the same cell hit by two captains is one hole, not a sinking', answers.length === 2 && rexBoard.afloat === 5 && !JSON.stringify(seen).includes('"J9"') && mine.sunk === false && mine.hits.join() === 'I9',
+        JSON.stringify({ afloat: rexBoard.afloat, mine, leak: JSON.stringify(seen).includes('"J9"') }).slice(0, 200));
+      // ...and the ship does sink, once, when its last cell is hit
+      let sunkBy = null;
+      for (let k = 0; k < 9 && !sunkBy; k++) {
+        const g = await ffaState(dupId);
+        const mv = await ffaFire(dupId, g.turn_of === 'Rex' ? 'Poc:A' + (1 + k) : 'Rex:J9');
+        if (g.turn_of !== 'Rex' && mv.status === 200) sunkBy = g.turn_of;
+      }
+      const after = (await req('GET', R2 + '/games/' + dupId, { owner: true })).json.game;
+      const rexAfter = (after.players || []).find((p) => p.name === 'Rex') || {};
+      check('ffa: it sinks when its last cell is hit', !!sunkBy && rexAfter.afloat === 4, JSON.stringify({ sunkBy, afloat: rexAfter.afloat }));
+      await req('POST', R2 + '/games/' + dupId + '/cancel', { token: TP, json: {} });
+    }
     // FFA salvo: the spread rule. A volley dumped on one board is
     // refused whole; the same shells spread across both rivals
     // resolve.
