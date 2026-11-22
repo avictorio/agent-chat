@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { deny, json, readBody } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyText } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
 import {
@@ -135,7 +135,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
   const body = await readBody(request);
   if (step === "start") {
     const direct = body && (body.direct === "force" ? "force" : !!body.direct);
-    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? String(body.fingerprint) : null, direct);
+    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? bodyText(body.fingerprint, "fingerprint") : null, direct);
     if (r.status !== 200) return json({ error: r.error }, r.status);
     return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, direct: !!r.direct, expires_at: new Date(r.expires_at).toISOString() });
   }
@@ -143,10 +143,9 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
     if (r.status !== 200) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
     /** the answer, with the media under its kind */
-    const out: Record<string, any> = { room: room, id: id, kind: kind, published: !!r.published };
-    out[kind] = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
-    if (kind === "file") out[kind].name = r.name;
-    return json(out);
+    const media: { type: string, bytes: number, url: string, name?: string } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
+    if (kind === "file") media.name = r.name;
+    return json({ room: room, id: id, kind: kind, published: !!r.published, [kind]: media });
   }
   const r = await stub.uploadAbort(id, kind, who, owner);
   if (r.status !== 200) return json({ error: r.error }, r.status);
@@ -183,14 +182,14 @@ export function sessionUpload(origin: string, room: string, kind: string, t: Upl
 // (always) and for any kind given a size past its single-shot cap.
 // Answers null (single-shot), { size, type, name } or { error }.
 /** @param a the request's fields (a JSON body or MCP arguments) */
-export function uploadSessionWanted(kind: string, a: Record<string, any>) {
+export function uploadSessionWanted(kind: string, a: Body) {
   const has = a.size !== undefined && a.size !== null && a.size !== "";
   if (!has) return kind === "file" ? { error: "\"size\" (the file's exact length in bytes) is required for kind file" } : null;
   const size = Math.floor(Number(a.size));
   if (!Number.isFinite(size) || size < 1) return { error: "\"size\" must be the file's exact length in bytes" };
   const cap = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : kind === "video" ? VIDEO_MAX : 0;
   if (kind !== "file" && size <= cap) return null;
-  return { size: size, type: a.type ? String(a.type) : null, name: a.name ? String(a.name) : null, direct: a.direct === true || a.direct === "true" };
+  return { size: size, type: bodyText(a.type, "type") || null, name: bodyText(a.name, "name") || null, direct: a.direct === true || a.direct === "true" };
 }
 
 // The upload object begin_upload and the REST upload-ticket route hand out
@@ -345,9 +344,9 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
-  const kind = String((body && body.kind) || "");
+  const kind = bodyText(body?.kind, "kind");
   if (UP_KINDS.indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio, video or file" }, 400);
-  const member = acc.name || String((body && body.from) || "");
+  const member = acc.name || bodyText(body?.from, "from");
   const sess = uploadSessionWanted(kind, body || {});
   if (sess && sess.error) return json({ error: sess.error }, 400);
   const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
@@ -369,7 +368,7 @@ export async function uploadResumeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
-  const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(String(body.kind)) >= 0 ? String(body.kind) : null);
-  const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? String(body.fingerprint) : null, owner, kind);
+  const kind = m[2] === "video" ? "video" : (body && UP_KINDS.indexOf(bodyText(body.kind, "kind")) >= 0 ? bodyText(body.kind, "kind") : null);
+  const r = await stub.findResumableUpload(acc.name || "", +((body && body.size) || 0), body && body.fingerprint ? bodyText(body.fingerprint, "fingerprint") : null, owner, kind);
   return json({ room: room, found: !!r.found, id: r.id || null, kind: r.kind || null, received: r.received || [], part_size: r.part_size || null, parts: r.parts || null, direct: !!r.direct });
 }

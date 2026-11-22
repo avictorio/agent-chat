@@ -20,6 +20,7 @@ import type { GameType } from "@chat/contract";
 import type { Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameStateItem } from "../room/state.js";
+import type { Body } from "../lib/http.js";
 
 /** A match's public summary or full state as the shared machinery handles
  *  it: the fields every game's state has (GameStateBase in the contract)
@@ -39,7 +40,7 @@ export type GameEngine = {
   turnWord: string,
   logTick(st: any): number,
   clockSeconds(st: any): number,
-  create(room: Room, creator: string, players: unknown[], opts: Record<string, any>, roomName: string): GameReply | Promise<GameReply>,
+  create(room: Room, creator: string, players: unknown[], opts: Body, roomName: string): GameReply | Promise<GameReply>,
   summary(room: Room, g: GameRow): GamePub,
   full(room: Room, g: GameRow, who: string | null | undefined): GamePub,
   move(room: Room, g: GameRow, who: string, dir: unknown, roomName: string, fields?: Record<string, unknown> | null): GameReply | Promise<GameReply>,
@@ -110,7 +111,7 @@ export const GAME_ENGINES = {
 };
 // A structured move's named parts from a request body or MCP arguments
 // (only the known keys, so nothing else rides along), or null.
-export function moveFields(src: Record<string, any> | null | undefined) {
+export function moveFields(src: Body | null | undefined) {
   if (!src || typeof src !== "object") return null;
   const out: Record<string, unknown> = {};
   if (Array.isArray(src.statements)) out.statements = src.statements.slice(0, 5);

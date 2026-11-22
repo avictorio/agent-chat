@@ -6,6 +6,7 @@ import type { CodeRaceFeedback, CodeRaceGuess, CodeRaceRound, CodeRaceState, Gam
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A racer's seat. */
 export type CrSeat = { name: string, color: string, hex: string };
@@ -255,7 +256,7 @@ export const CodeRaceMethods = {
   },
 
   /** @param opts the create's options (mode, length, colors, max_rounds, tick_seconds, lobby_seconds) */
-  async createCodeRace(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createCodeRace(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "Code Race needs 2 to 6 players" };
     const modeIn = String(opts.mode || "colors").toLowerCase();
     if (modeIn !== "colors" && modeIn !== "words") return { status: 400, error: "mode must be colors or words" };

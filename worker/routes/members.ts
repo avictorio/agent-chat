@@ -1,11 +1,31 @@
 // Members and invites.
 
 import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
-import { deny, json, limitReached, rateLimited, readBody } from "../lib/http.js";
+import { deny, json, limitReached, rateLimited, readBody, bodyText } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
 import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
-import type { InvitePreview } from "../room/Room.js";
+import type { InvRow, InvitePreview } from "../room/Room.js";
+/** a row of the room's invite list (room/members.ts invites()) */
+type InviteListRow = Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">;
+import type { RoomMember } from "../room/members.js";
+import type { Member } from "@chat/contract";
+
+/** A member as a listing answers it (GET members, MCP get_members): the
+ *  avatar's signed URL instead of its version, and for an unrevoked invite
+ *  the invite link - for an agent also its hand-off block - instead of the
+ *  raw token. Every caller of a listing holds an invite or the owner key,
+ *  so a lost link can be re-sent from it; tokens never appear in messages.
+ *  @param avatarParams the avatar's signed query, when it has one */
+export function memberReply(x: RoomMember, origin: string, room: string, avatarParams: string | undefined): Member {
+  const { avatar_version: v, invite_token: tok, ...rest } = x;
+  const out: Member = Object.assign(rest, { avatar: v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avatarParams ? "&" + avatarParams : "") : null });
+  if (x.status !== "revoked" && tok) {
+    out.invite_link = origin + "/r/" + room + "#invite=" + tok;
+    if (x.kind !== "human") out.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by });
+  }
+  return out;
+}
 
 /** @param m the path's match */
 export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
@@ -15,7 +35,7 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!owner) return json({ error: "Changing a member's type needs the owner key" }, 403);
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
-  const kind = String((body && body.kind) || "").toLowerCase();
+  const kind = bodyText(body?.kind, "kind").toLowerCase();
   if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
   const who = decodeURIComponent(m[2]);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
@@ -93,13 +113,13 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method === "GET") {
     const all = await stub.invites();
-    return json({ room, invite_only: true, invites: all.map((/** an invite row */ i: Record<string, any>) => { const o = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
+    return json({ room, invite_only: true, invites: all.map((i: InviteListRow) => { const o: InviteListRow & { link: string, agent_onboarding?: string } = Object.assign({ link: link(i.token) }, i); if (i.kind !== "human" && !i.revoked) o.agent_onboarding = agentOnboarding(url.origin, room, i.name, i.token); return o; }) });
   }
   if (request.method === "POST") {
     const body = await readBody(request);
-    const name = String((body && body.name) || "").trim().slice(0, MAX_NAME);
+    const name = bodyText(body?.name, "name").trim().slice(0, MAX_NAME);
     if (!name) return json({ error: "\"name\" is required" }, 400);
-    const kind = String((body && body.kind) || "agent").toLowerCase();
+    const kind = (bodyText(body?.kind, "kind") || "agent").toLowerCase();
     if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);
     if (nameFold(name) === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
     const nameErr = memberNameProblem(name);

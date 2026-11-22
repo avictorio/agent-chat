@@ -317,6 +317,44 @@ async function queryToken(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+// Request bodies (2026-11-22): a body is a JSON object, and a field of the
+// wrong kind is refused with its name - an object or a list where text is
+// expected, rather than stored as "[object Object]". What a field has always
+// meant still works: a number as text, an id as a string.
+async function bodies(ctx) {
+  const { req, check, SUF } = ctx;
+  const room = 'apitest-bodies-' + SUF;
+  const R = '/api/rooms/' + room;
+  const rpc = (token, body) => req('POST', R + '/mcp', { token, json: body });
+  await req('POST', R, { owner: true });
+  const A = (await req('POST', R + '/invites', { owner: true, json: { name: 'BodyA', kind: 'agent' } })).json.token;
+
+  const toolText = (r) => (((r.json && r.json.result) || {}).content || []).map((c) => c.text).join(' ');
+  let r = await req('POST', R + '/questions', { token: A, headers: { 'Content-Type': 'application/json' }, body: '["hi"]' });
+  check('bodies: a JSON list as the body -> 400 that says to send an object', r.status === 400 && /must be a JSON object/.test((r.json || {}).error || ''), r.status + ' ' + r.text.slice(0, 120));
+  r = await req('POST', R + '/messages', { token: A, headers: { 'Content-Type': 'application/json' }, body: '["hi"]' });
+  check('bodies: ... and a message post says to send JSON like its example', r.status === 400 && /Send JSON like/.test((r.json || {}).error || ''), r.status + ' ' + r.text.slice(0, 120));
+  r = await req('POST', R + '/messages', { token: A, json: { text: { a: 1 } } });
+  check('bodies: an object where text belongs -> 400 naming the field', r.status === 400 && (r.json || {}).error === '"text" must be text', r.status + ' ' + r.text.slice(0, 120));
+  r = await req('POST', R + '/messages', { token: A, json: { text: 42 } });
+  check('bodies: a number as text still posts, as its digits', r.status === 201 && r.json.text === '42', r.status + ' ' + r.text.slice(0, 120));
+  const id = r.json && r.json.id;
+  r = await req('POST', R + '/questions', { token: A, json: { text: ['a', 'list'] } });
+  check('bodies: a list where text belongs on the board -> 400 naming the field', r.status === 400 && (r.json || {}).error === '"text" must be text', r.status + ' ' + r.text.slice(0, 120));
+  r = await req('POST', R + '/invites', { owner: true, json: { name: true } });
+  check('bodies: true as a name -> 400 naming the field', r.status === 400 && (r.json || {}).error === '"name" must be text', r.status + ' ' + r.text.slice(0, 120));
+
+  r = await rpc(A, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'post_message', arguments: { text: { a: 1 } } } });
+  check('bodies: MCP - an object as text is a tool error naming the field', !!(r.json && r.json.result) && r.json.result.isError === true && toolText(r) === '"text" must be text', JSON.stringify(r.json).slice(0, 160));
+  r = await rpc(A, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_reactions', arguments: { id: String(id) } } });
+  check('bodies: MCP - an id as a string still works', !!(r.json && r.json.result) && !r.json.result.isError, JSON.stringify(r.json).slice(0, 160));
+  r = await rpc(A, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_reactions', arguments: { id: { n: 1 } } } });
+  check('bodies: MCP - an object as an id is a tool error naming it', !!(r.json && r.json.result) && r.json.result.isError === true && toolText(r) === '"id" must be a number', JSON.stringify(r.json).slice(0, 160));
+
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
   await queryToken(ctx);
   await linkPage(ctx);
@@ -325,6 +363,7 @@ async function inviteApi(ctx) {
   await changesFeed(ctx);
   await preview(ctx);
   await me(ctx);
+  await bodies(ctx);
 }
 
 module.exports = { inviteApi };

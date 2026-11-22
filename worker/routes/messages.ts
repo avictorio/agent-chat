@@ -11,7 +11,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { deny, json, readBody } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyText } from "../lib/http.js";
 import { MAX_NAME, clamp } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
@@ -39,7 +39,7 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
-  const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? String(body.text) : undefined);
+  const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? bodyText(body.text, "text") : undefined);
   if (r.status !== 200) return json({ error: r.error }, r.status);
   return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
 }
@@ -77,12 +77,12 @@ export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method !== "POST" && request.method !== "PUT" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
   /** the request's JSON body */
-  let body: Record<string, any> = {};
+  let body: Body = {};
   if (request.method !== "DELETE") {
-    try { body = (await request.json()) || {}; } catch { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
+    try { body = (await readBody(request)) || {}; } catch { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
   }
   // An invite fixes the name, as with messages.
-  const from = acc.name || String(body.from || url.searchParams.get("from") || "").trim().slice(0, MAX_NAME);
+  const from = acc.name || (bodyText(body.from, "from") || url.searchParams.get("from") || "").trim().slice(0, MAX_NAME);
   if (!from) return json({ error: "\"from\" is required" }, 400);
   const reaction = request.method === "DELETE" ? null : normReaction(body.reaction);
   if (reaction === undefined) return json({ error: "\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours" }, 400);
@@ -136,10 +136,10 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
 
   if (request.method === "POST") {
-    let body;
+    let body: Body | null;
     const ct = request.headers.get("content-type") || "";
     try {
-      if (ct.includes("application/json")) body = await request.json();
+      if (ct.includes("application/json")) body = await readBody(request);
       else if (ct.includes("form")) {
         const f = await request.formData();
         body = { from: f.get("from"), text: f.get("text") };
@@ -148,29 +148,29 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       return json({ error: "Couldn't read the body. Send JSON like {\"from\":\"agent-a\",\"text\":\"hi\"}" }, 400);
     }
     // An invite fixes the sender's name to the one it was made for.
-    const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
-    const text = String((body && body.text) || "");
+    const from = acc.name || bodyText(body?.from, "from").trim().slice(0, MAX_NAME);
+    const text = bodyText(body?.text, "text");
     if (!from) return json({ error: "\"from\" is required" }, 400);
     if (!text.trim() && !(body && (body.audio || body.image || body.video || body.html || body.doc))) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
-  if (draftWanted && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
+  if (draftWanted && body && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
   let audio: InlineMedia | null = null;
     if (body && body.audio) {
-      const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+      const s = bodyText(body.audio, "audio").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"audio\" is empty" }, 400);
       if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
-      const tr = body && body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
+      const tr = body && body.transcript ? bodyText(body.transcript, "transcript").slice(0, MAX_TEXT) : null;
       audio = { data: buf, type: atype, transcript: tr };
     }
     let image: InlineMedia | null = null;
     if (body && body.image) {
-      const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+      const s = bodyText(body.image, "image").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"image\" is empty" }, 400);
@@ -181,7 +181,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     let video: InlineMedia | null = null;
     if (body && body.video) {
-      const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
+      const s = bodyText(body.video, "video").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"video\" is empty" }, 400);

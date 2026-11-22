@@ -661,8 +661,16 @@ features; mobile means the website in Android Chrome and iOS Safari.
   conflict, 413 too long, 429 cap reached), and keep error text
   human-readable. Read a JSON body with `readBody` (`worker/lib/http.ts`),
   never `request.json()` in a try: an empty body is `null` (every field
-  missing), a body that is not JSON throws `BadRequest`, which the
-  Worker's `fetch` answers with a 400 that says so.
+  missing), a body that is not JSON or not a JSON object throws
+  `BadRequest`, which the Worker's `fetch` answers with a 400 that says
+  so. Its fields are `unknown` (type `Body`): read them with `bodyText`,
+  `bodyNumber`, `bodyObject` and `bodyList`, which accept what a field
+  has always meant (a number as text, an id as a string) and refuse,
+  naming the field, what used to become nonsense - an object, a list or
+  true/false where text belongs ("[object Object]" in a message). Over
+  MCP the same refusal is a tool error. In the Durable Object coerce with
+  `String()` / `Number()` instead: a `BadRequest` thrown there crosses
+  the RPC and comes back as a 500.
 - **Failures and logging:** a catch either logs or says why it is quiet.
   Log an unexpected failure with `warn(label, err, ctx)`
   (`worker/lib/log.ts`): one JSON line in Workers Logs, labelled
@@ -720,9 +728,16 @@ deleting it here in the commit that finishes it (the first three -
 linting the whole repo, the effect dependencies and typed database rows -
 were done on 2026-11-22).
 
-1. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
-   `readBody`) and 18 explicit `any` in `worker/`: a body type per route
-   and a small field check would replace the defensive reads.
+1. **No `any` in the Worker.** Request bodies are typed and checked
+   (2026-11-22); what is left before `typescript/no-explicit-any` can
+   come on for `worker/` (it is off there in `web/.oxlintrc.json`): the
+   match state, `any` on `GameRow.st` and in the `GameEngine` methods
+   (`engine.ts`, `room/games.ts`; each game already has its stored type,
+   `TvStored` and the like), the open `[field: string]: any` of `GamePub`
+   and `GameStateItem`, `MsgBag` in `room/messages.ts` - and, outside
+   the rule's reach but the bigger hole, `type DurableObjectStub = any`
+   in `types/worker-env.d.ts`, which leaves every Room call from a route
+   untyped (typing it as the Room's methods made async would check them).
 2. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step

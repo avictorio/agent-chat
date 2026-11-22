@@ -1,6 +1,6 @@
 // Web Push: the site's public key and members' subscriptions.
 
-import { deny, json, readBody } from "../lib/http.js";
+import { deny, json, readBody, bodyText, bodyObject } from "../lib/http.js";
 import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
 import type { RouteContext } from "../index.js";
@@ -28,11 +28,11 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
   if (action === "subscribe") {
-    const sub = (body && body.subscription) || {};
-    const keysIn = sub.keys || {};
-    const endpoint = String(sub.endpoint || "");
-    const p256dh = String(keysIn.p256dh || "");
-    const auth = String(keysIn.auth || "");
+    const sub = bodyObject(body?.subscription, "subscription") || {};
+    const keysIn = bodyObject(sub.keys, "subscription.keys") || {};
+    const endpoint = bodyText(sub.endpoint, "subscription.endpoint");
+    const p256dh = bodyText(keysIn.p256dh, "subscription.keys.p256dh");
+    const auth = bodyText(keysIn.auth, "subscription.keys.auth");
     if (!/^https:\/\//.test(endpoint)) return json({ error: "subscription.endpoint must be an https URL" }, 400);
     let pushHost = "";
     try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch { /* not a URL: refused below */ }
@@ -46,11 +46,11 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (pLen !== 65) return json({ error: "subscription.keys.p256dh is not a 65-byte public key" }, 400);
     if (aLen < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
     // a missing body has no endpoint, refused above
-    const mode = (body as Record<string, any>).mode === "mentions" ? "mentions" : "all";
+    const mode = body && body.mode === "mentions" ? "mentions" : "all";
     await stub.pushSubscribe(acc.name || "", { endpoint: endpoint, p256dh: p256dh, auth: auth }, mode);
     return json({ room, subscribed: true, mode: mode });
   }
-  const endpoint = String((body && body.endpoint) || "");
+  const endpoint = bodyText(body?.endpoint, "endpoint");
   if (!endpoint) return json({ error: "\"endpoint\" is required" }, 400);
   await stub.pushUnsubscribe(acc.name || "", endpoint, owner);
   return json({ room, subscribed: false });

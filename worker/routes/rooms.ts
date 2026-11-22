@@ -2,7 +2,7 @@
 
 import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
-import { json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
+import { json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
 import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
@@ -64,9 +64,9 @@ export async function createRoomRoute(rc: RouteContext) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
   const cbody = await readBody(request);
-  const croom = String((cbody && cbody.room) || "").trim().toLowerCase();
-  const cname = String((cbody && cbody.name) || "").trim().slice(0, MAX_NAME);
-  const cemail = String((cbody && cbody.email) || "").trim().slice(0, 254);
+  const croom = bodyText(cbody?.room, "room").trim().toLowerCase();
+  const cname = bodyText(cbody?.name, "name").trim().slice(0, MAX_NAME);
+  const cemail = bodyText(cbody?.email, "email").trim().slice(0, 254);
   if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);
   if (!cname) return json({ error: "\"name\" is required" }, 400);

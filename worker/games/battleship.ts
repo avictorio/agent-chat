@@ -5,6 +5,7 @@ import type { BattleshipBoard, BattleshipLogLine, BattleshipMove, BattleshipShot
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A ship as stored: its cells and the ones hit, as board keys ("x,y",
  *  bsKey), and in a free-for-all who fired the shell that sank it. */
@@ -430,7 +431,7 @@ export const BattleshipMethods = {
   },
 
   /** @param opts the create's options (variant, tick_seconds, lobby_seconds) */
-  async createBattleship(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createBattleship(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 6) return { status: 400, error: "battleship needs 2 to 6 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;

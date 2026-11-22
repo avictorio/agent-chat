@@ -5,6 +5,7 @@ import type { FrontlinesRound, FrontlinesState, GameLogLine } from "@chat/contra
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A commander's seat. */
 export type FlSeat = { name: string, color: string, hex: string };
@@ -113,7 +114,7 @@ export const FrontlinesMethods = {
   },
 
   /** @param opts the create's options (best_of, variant, tick_seconds, lobby_seconds) */
-  async createFrontlines(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createFrontlines(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Frontlines needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;

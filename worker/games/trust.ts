@@ -5,6 +5,7 @@ import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/con
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A player's seat. */
 export type TrSeat = { name: string, color: string, hex: string };
@@ -133,7 +134,7 @@ export const TrustMethods = {
   },
 
   /** @param opts the create's options (rounds, tick_seconds, lobby_seconds) */
-  async createTrust(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createTrust(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 8) return { status: 400, error: "Trust needs 2 to 8 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;

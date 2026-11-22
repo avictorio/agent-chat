@@ -14,10 +14,11 @@ import {
   MAX_STAKES,
   ROOM_RE,
 } from "../limits.js";
-import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
+import { deny, json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
 import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
 import { mediaSigParams } from "../lib/media.js";
-import { agentOnboarding } from "../agents/onboarding.js";
+import { memberReply } from "./members.js";
+import type { RoomMember } from "../room/members.js";
 import type { RouteContext } from "../index.js";
 
 /** @param m the path's match */
@@ -34,9 +35,9 @@ export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method === "PUT" || request.method === "POST") {
     const body = await readBody(request);
-    const editor = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME) || (owner ? "owner" : "");
+    const editor = acc.name || bodyText(body?.from, "from").trim().slice(0, MAX_NAME) || (owner ? "owner" : "");
     if (!editor) return json({ error: "\"from\" is required" }, 400);
-    const text = String((body && body.text) || "");
+    const text = bodyText(body?.text, "text");
     if (!text.trim()) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_CON) return json({ error: "\"text\" is limited to " + MAX_CON + " characters" }, 413);
     const c = await stub.setConstitution(text, editor);
@@ -62,27 +63,27 @@ export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
   // An invite fixes the name, as with messages.
-  const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
+  const from = acc.name || bodyText(body?.from, "from").trim().slice(0, MAX_NAME);
   if (!from) return json({ error: "\"from\" is required" }, 400);
   if (qid === null) {
-    const text = String((body && body.text) || "").trim();
+    const text = bodyText(body?.text, "text").trim();
     if (!text) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_Q) return json({ error: "\"text\" is limited to " + MAX_Q + " characters" }, 413);
     const q = await stub.addQuestion(text, from);
     if (!q) return json({ error: "The board already has " + MAX_OPEN_Q + " open questions. Resolve some first." }, 409);
     return json({ room, question: q }, 201);
   }
-  if (String((body && body.action) || "") === "edit") {
-    const text = String((body && body.text) || "").trim();
+  if (bodyText(body?.action, "action") === "edit") {
+    const text = bodyText(body?.text, "text").trim();
     if (!text) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_Q) return json({ error: "\"text\" is limited to " + MAX_Q + " characters" }, 413);
     const q = await stub.editQuestion(qid, text);
     if (!q) return json({ error: "No question with that id" }, 404);
     return json({ room, question: q });
   }
-  const note = String((body && body.note) || "").trim().slice(0, MAX_NOTE);
-  if (String((body && body.action) || "") === "resolve" && isPlaceholder(note)) return json({ error: "\"note\" is still a placeholder. Replace the <...> with how the question was resolved." }, 400);
-  const r = await stub.updateQuestion(qid, String((body && body.action) || ""), from, note);
+  const note = bodyText(body?.note, "note").trim().slice(0, MAX_NOTE);
+  if (bodyText(body?.action, "action") === "resolve" && isPlaceholder(note)) return json({ error: "\"note\" is still a placeholder. Replace the <...> with how the question was resolved." }, 400);
+  const r = await stub.updateQuestion(qid, bodyText(body?.action, "action"), from, note);
   if (r.error) return json({ error: r.error }, r.status);
   return json({ room, question: r.question });
 }
@@ -107,24 +108,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     /** signed avatar params, by member name */
     const avq: Record<string, string> = {};
     for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-    mb.members = mb.members.map((/** a RoomMember, rewritten for the reply */ x: Record<string, any>) => {
-      const v = x.avatar_version;
-      delete x.avatar_version;
-      x.avatar = v ? url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avq[x.name] ? "&" + avq[x.name] : "") : null;
-      // Invite links are visible to members of an invite-only room (every caller
-      // here holds an invite or the owner key), so a lost link can be re-sent from
-      // the members list. Agent members also carry the full hand-off block, so the
-      // instructions can be re-copied from the same row. Tokens still never appear
-      // in messages or in open rooms.
-      const tok = x.invite_token;
-      delete x.invite_token;
-      if (x.status !== "revoked" && tok) {
-        x.invite_link = url.origin + "/r/" + room + "#invite=" + tok;
-        if (x.kind !== "human") x.agent_onboarding = agentOnboarding(url.origin, room, x.name, tok, { invitedBy: x.invited_by });
-      }
-      return x;
-    });
-    return json(Object.assign({ room }, mb));
+    return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name])) }));
   }
   if (request.method === "GET" && id === null) {
     // a missing limit parses as NaN, so the default applies
@@ -139,10 +123,10 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
-  const from = acc.name || String((body && body.from) || "").trim().slice(0, MAX_NAME);
+  const from = acc.name || bodyText(body?.from, "from").trim().slice(0, MAX_NAME);
   if (!from) return json({ error: "\"from\" is required" }, 400);
   if (kind === "digests") {
-    const text = String((body && body.text) || "").trim();
+    const text = bodyText(body?.text, "text").trim();
     if (!text) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_DIGEST) return json({ error: "\"text\" is limited to " + MAX_DIGEST + " characters" }, 413);
     if (isPlaceholder(text)) return json({ error: "\"text\" is still a placeholder. Replace the <...> with your own digest." }, 400);
@@ -156,10 +140,10 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, digest: d }, 201);
   }
   if (kind === "decisions") {
-    const dact = String((body && body.action) || "");
+    const dact = bodyText(body?.action, "action");
     if (id === null || dact === "edit") {
-      const title = String((body && body.title) || "").trim();
-      const note = String((body && body.note) || "").trim().slice(0, MAX_NOTE);
+      const title = bodyText(body?.title, "title").trim();
+      const note = bodyText(body?.note, "note").trim().slice(0, MAX_NOTE);
       if (!title) return json({ error: "\"title\" is required" }, 400);
       if (title.length > MAX_STAKE) return json({ error: "\"title\" is limited to " + MAX_STAKE + " characters" }, 413);
       if (id !== null) {
@@ -175,11 +159,11 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, decision: r.decision });
   }
-  const action = String((body && body.action) || "");
+  const action = bodyText(body?.action, "action");
   if (id === null || action === "edit") {
-    const title = String((body && body.title) || "").trim();
-    const date = String((body && body.date) || "").trim();
-    const note = String((body && body.note) || "").trim().slice(0, MAX_NOTE);
+    const title = bodyText(body?.title, "title").trim();
+    const date = bodyText(body?.date, "date").trim();
+    const note = bodyText(body?.note, "note").trim().slice(0, MAX_NOTE);
     if (!title) return json({ error: "\"title\" is required" }, 400);
     if (title.length > MAX_STAKE) return json({ error: "\"title\" is limited to " + MAX_STAKE + " characters" }, 413);
     if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) return json({ error: "\"date\" must look like YYYY-MM-DD" }, 400);

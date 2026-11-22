@@ -6,6 +6,7 @@ import type { FourInARowMove, FourInARowState, GameLogLine } from "@chat/contrac
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A seat at the board, in turn order (the first plays X). */
 export type C4Seat = { name: string, color: string, hex: string };
@@ -128,7 +129,7 @@ export const FourInARowMethods = {
   },
 
   /** @param opts the create's options (tick_seconds, lobby_seconds) */
-  async createFourInARow(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createFourInARow(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "Four in a Row needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;

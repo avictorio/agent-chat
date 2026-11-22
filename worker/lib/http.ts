@@ -82,14 +82,19 @@ export function html(body: string) {
  *  Worker's fetch (index.ts) answers it with a 400 carrying this message. */
 export class BadRequest extends Error {}
 
+/** A JSON object from a client - a request body, an object inside one, or
+ *  an MCP call's arguments. Its fields are unknown until read with one of
+ *  the readers below (or narrowed by hand). */
+export type Body = { readonly [field: string]: unknown };
+
 /**
- * The request's JSON body, or null when there is none: an empty body is
- * fine wherever every field is optional. A body that is there but is not
- * JSON throws BadRequest (a 400), so a client with a broken encoder hears
- * about it instead of getting an answer about missing fields. Any JSON
- * value can arrive, so its fields are read defensively.
+ * The request's JSON body, or null when there is none: an empty body (or
+ * JSON null) is fine wherever every field is optional. A body that is not
+ * JSON, or is JSON but not an object, throws BadRequest (a 400), so a
+ * client with a broken encoder hears about it instead of getting an
+ * answer about missing fields.
  */
-export async function readBody(request: Request): Promise<Record<string, any> | null> {
+export async function readBody(request: Request): Promise<Body | null> {
   let text: string;
   try {
     text = await request.text();
@@ -98,9 +103,56 @@ export async function readBody(request: Request): Promise<Record<string, any> | 
     return null;
   }
   if (!text.trim()) return null;
+  let v: unknown;
   try {
-    return JSON.parse(text);
+    v = JSON.parse(text);
   } catch (e) {
     throw new BadRequest("The request body is not valid JSON (" + String((e as Error).message).slice(0, 160) + "). Send a JSON object, with Content-Type: application/json.");
   }
+  if (v === null) return null;
+  if (!isObject(v)) throw new BadRequest("The request body must be a JSON object, like {\"text\": \"hi\"}.");
+  return v;
+}
+
+/** Whether a JSON value is an object (not null, not a list). */
+export function isObject(v: unknown): v is Body {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/* Field readers. Each accepts what a field has always been taken to mean
+   and refuses only what used to turn into nonsense - an object, a list or
+   true/false where text is expected, a list where a number is - with a
+   BadRequest naming the field (a 400 from a route, a tool error over MCP).
+   An absent field (undefined or null) reads as empty. */
+
+/** Text: a string as sent, a number as its digits; absent is "". */
+export function bodyText(v: unknown, name: string): string {
+  if (v === undefined || v === null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  throw new BadRequest("\"" + name + "\" must be text");
+}
+
+/** A number: a number, or a string read as one (parseInt for whole ones,
+ *  as before); absent is NaN, which each caller already turns into its
+ *  default or its "is required". */
+export function bodyNumber(v: unknown, name: string, whole?: boolean): number {
+  if (v === undefined || v === null) return NaN;
+  if (typeof v === "number") return whole ? Math.trunc(v) : v;
+  if (typeof v === "string") return whole ? parseInt(v, 10) : Number(v);
+  throw new BadRequest("\"" + name + "\" must be a number");
+}
+
+/** An object field (a Body); absent is null. */
+export function bodyObject(v: unknown, name: string): Body | null {
+  if (v === undefined || v === null) return null;
+  if (isObject(v)) return v;
+  throw new BadRequest("\"" + name + "\" must be an object");
+}
+
+/** A list field; absent is null. */
+export function bodyList(v: unknown, name: string): unknown[] | null {
+  if (v === undefined || v === null) return null;
+  if (Array.isArray(v)) return v as unknown[];
+  throw new BadRequest("\"" + name + "\" must be a list");
 }

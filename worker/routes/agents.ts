@@ -1,7 +1,7 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
 import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
-import { deny, json, rateLimited, readBody } from "../lib/http.js";
+import { bodyText, deny, isObject, json, rateLimited, readBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import AGENT_RECIPE from "../agents/agent-recipe.md";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
@@ -72,7 +72,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const tb = await readBody(request);
   const target = fetchTarget(tb && tb.url);
   if (!target) return json({ error: "Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)" }, 400);
-  const from = acc.name || String((tb && tb.from) || "").trim().slice(0, MAX_NAME);
+  const from = acc.name || bodyText(tb?.from, "from").trim().slice(0, MAX_NAME);
   const wantPost = !!(tb && tb.post);
   if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);
   if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) return rateLimited("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", await stub.toolWait());
@@ -119,29 +119,33 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
   const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
-  let rpcBody: Record<string, any> | null = null;
+  let rpcBody: unknown = null;
   try { rpcBody = await request.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
-  const handleRpc = async (/** one JSON-RPC request, as sent */ req: Record<string, any> | null | undefined) => {
-    if (!req || typeof req !== "object" || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
-    const isNotification = !("id" in req) || req.id === null && req.method.indexOf("notifications/") === 0;
-    if (isNotification || req.method.indexOf("notifications/") === 0) return null;
+  const handleRpc = async (/** one JSON-RPC request, as sent */ raw: unknown) => {
+    const req = isObject(raw) ? raw : null;
+    if (!req || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
+    const method = req.method;
+    const params = isObject(req.params) ? req.params : null;
+    const isNotification = !("id" in req) || req.id === null && method.indexOf("notifications/") === 0;
+    if (isNotification || method.indexOf("notifications/") === 0) return null;
     const id = req.id === undefined ? null : req.id;
     const ok = (result: unknown) => ({ jsonrpc: "2.0", id: id, result: result });
     const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id: id, error: data ? { code: code, message: message, data: data } : { code: code, message: message } });
-    if (req.method === "ping") return ok({});
-    if (req.method === "initialize") {
-      const pv = req.params && typeof req.params.protocolVersion === "string" ? req.params.protocolVersion : MCP_PROTOCOL_VERSION;
+    if (method === "ping") return ok({});
+    if (method === "initialize") {
+      const pv = params && typeof params.protocolVersion === "string" ? params.protocolVersion : MCP_PROTOCOL_VERSION;
       const cat = mcpCatalog();
       return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, changes: changesBody(url.origin), instructions: mcpInstructions(url.origin) });
     }
-    if (req.method !== "tools/call") {
+    if (method !== "tools/call") {
       const c = await checkToken();
       if (!c.ok) return fail(-32001, c.error, { code: c.code });
     }
-    if (req.method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
-    if (req.method === "tools/call") {
-      const tname = req.params && req.params.name ? String(req.params.name) : "";
-      const targs = (req.params && req.params.arguments) || {};
+    if (method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
+    if (method === "tools/call") {
+      const tname = params && typeof params.name === "string" ? params.name : "";
+      // arguments that are not an object are taken as none (each tool says what it misses)
+      const targs: Body = params && isObject(params.arguments) ? params.arguments : {};
       if (!tname) return fail(-32602, "tools/call needs params.name");
       if (tname === "get_invite") {
         const pv = await stub.previewInvite(invite);
@@ -150,14 +154,13 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       }
       const acc = await getAcc();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
-      const from = acc.name || (owner ? String(targs.as || "").trim().slice(0, MAX_NAME) : "");
-      try { return ok(await (async () => { const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
+      try { return ok(await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
       catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return ok(mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined)); }
     }
-    return fail(-32601, "Method not found: " + req.method);
+    return fail(-32601, "Method not found: " + method);
   };
   if (Array.isArray(rpcBody)) {
-    const out = [];
+    const out: unknown[] = [];
     for (const item of rpcBody) { const r = await handleRpc(item); if (r) out.push(r); }
     return out.length ? json(out) : new Response(null, { status: 202 });
   }

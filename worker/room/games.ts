@@ -9,6 +9,7 @@ import type { GameStatus } from "@chat/contract";
 import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub } from "../games/engine.js";
 import { warn } from "../lib/log.js";
+import type { Body } from "../lib/http.js";
 
 /** The engine of a game on the simultaneous-rounds machinery, which
  *  supplies resolveRound and standing. */
@@ -285,7 +286,7 @@ export const GameMachineryMethods = {
   // opts.game names the engine; no game is Light Cycles (the first game,
   // and still the API's default).
   /** @param opts the create's options (game names the engine) */
-  async createGame(creator: string, playersIn: unknown[], opts: Record<string, any> | null | undefined, room: string) {
+  async createGame(creator: string, playersIn: unknown[], opts: Body | null | undefined, room: string) {
     const key = String((opts && opts.game) || "lightcycles").toLowerCase().replace(/[\s_-]+/g, "");
     // an unknown spelling is no entry: the check below answers it
     const eng = (GAME_ENGINES as Record<string, GameEngine | undefined>)[(GAME_ALIASES as Record<string, string>)[key] || key];
@@ -343,7 +344,7 @@ export const GameMachineryMethods = {
      the table, so one duel expired 0-0 and another was a thirty-minute
      forfeit sweep. The lobby separates "invited" from "playing": a
      player who accepts has said they are here, at this clock. */
-  lobbySeconds(opts: Record<string, any> | null | undefined) {
+  lobbySeconds(opts: Body | null | undefined) {
     let sec = Math.floor(Number(opts && opts.lobby_seconds) || 0);
     if (!sec) sec = LOBBY_DEFAULT_SECONDS;
     return Math.min(86400, Math.max(5, sec));

@@ -10,7 +10,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { CORS, deny, json, readBody } from "../lib/http.js";
+import { CORS, deny, json, readBody, bodyText } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
@@ -115,7 +115,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
     const body = await readBody(request);
     const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
     try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
-    if (body && body.transcript !== undefined) putTranscript = body.transcript ? String(body.transcript).slice(0, MAX_TEXT) : null;
+    if (body && body.transcript !== undefined) putTranscript = body.transcript ? bodyText(body.transcript, "transcript").slice(0, MAX_TEXT) : null;
   } else {
     buf = await request.arrayBuffer();
   }

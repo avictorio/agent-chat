@@ -5,6 +5,7 @@ import type { DuelH2H, DuelRound, DuelState, DuelThrow, GameLogLine } from "@cha
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A duellist's seat. */
 export type DuelSeat = { name: string, color: string, hex: string };
@@ -176,7 +177,7 @@ export const DuelMethods = {
   },
 
   /** @param opts the create's options (best_of, tick_seconds, lobby_seconds) */
-  async createDuel(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createDuel(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length !== 2) return { status: 400, error: "a duel needs exactly 2 players" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;

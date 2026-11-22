@@ -359,7 +359,7 @@ export const MessageMethods = {
   // they respect the sender filter but not the kind filter, so a UI
   // can label every filter chip from one response.
   /** @param opts the query: kind, from, before, limit */
-  attachments(opts: Record<string, any>, room: string): Omit<AttachmentsResponse, "room" | "you"> | { error: string, status: number } {
+  attachments(opts: { kind: string, from: string, before: string, limit: string }, room: string): Omit<AttachmentsResponse, "room" | "you"> | { error: string, status: number } {
     this.roomName = room;
     const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
     let kinds = KINDS;

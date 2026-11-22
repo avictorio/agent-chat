@@ -10,6 +10,7 @@ import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
+import type { Body } from "../lib/http.js";
 
 /** A rider: seat, heading and bike cell (x right, y down, from 0). */
 export type LcRider = { name: string, color: string, hex: string, dir: LightCyclesDir, alive: boolean, x: number, y: number };
@@ -116,7 +117,7 @@ export const LightCyclesMethods = {
   },
 
   /** @param opts the create's options (mode, tick_seconds, w, h, lobby_seconds) */
-  async createLightCycles(creator: string, playersIn: unknown[], opts: Record<string, any>, room: string) {
+  async createLightCycles(creator: string, playersIn: unknown[], opts: Body, room: string) {
     if (!Array.isArray(playersIn) || playersIn.length < 2 || playersIn.length > 4) return { status: 400, error: "players must list 2 to 4 room members" };
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
