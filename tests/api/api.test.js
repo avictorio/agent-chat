@@ -291,7 +291,7 @@ async function waitUp() {
     r = await req('GET', R + '/messages?limit=1', { headers: { Authorization: 'Basic ' + Buffer.from('ApiA:' + TA).toString('base64') } });
     check('Authorization: Basic is not a token', r.status === 401, r.status);
     r = await req('GET', R + '/messages?limit=1&invite=bogus-token', { headers: bearer(TA) });
-    check('Bearer wins over the query token', r.status === 200, r.status);
+    check('Bearer is used, a URL token beside it ignored', r.status === 200, r.status);
     {
       const pf = await fetch(BASE + R + '/messages', { method: 'OPTIONS', headers: { Origin: 'https://example.test', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' } });
       check('CORS preflight allows Authorization', pf.status === 204 && /Authorization/i.test(pf.headers.get('access-control-allow-headers') || ''), pf.headers.get('access-control-allow-headers'));
@@ -394,7 +394,7 @@ async function waitUp() {
     r = await req('GET', barePath + '?invite=' + TA, {});
     check('media read with only ?invite= -> 401', r.status === 401, r.status);
     r = await req('GET', R + '/messages?limit=5', { token: TA });
-    check('?invite= retirement is media-only: listing still answers header auth', r.status === 200, r.status);
+    check('the listing answers header auth', r.status === 200, r.status);
     r = await req('GET', R + '/messages?limit=1000', { token: TA });
     const withImg = (r.json.messages || []).filter((x) => x.image);
     check('listing urls are signed, no invite= anywhere', withImg.length > 0 && withImg.every((x) => /[?&]exp=\d+&sig=/.test(x.image.url)) && !/invite=/.test(r.text), withImg.length + ' images');

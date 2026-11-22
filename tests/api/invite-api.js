@@ -281,6 +281,9 @@ async function linkPage(ctx) {
   await req('DELETE', '/api/rooms/' + room + '?confirm=' + room, { owner: true });
 }
 
+// The URL token, retired 2026-11-22: outside MCP ?invite= is not read. A
+// room answer to a request that carries one still says why, with the
+// Deprecation, Sunset and Link headers and a notice; MCP keeps the URL form.
 async function queryToken(ctx) {
   const { req, check, BASE, SUF } = ctx;
   const room = 'apitest-query-' + SUF;
@@ -290,29 +293,42 @@ async function queryToken(ctx) {
   const dep = (r) => ({ dep: r.headers.get('deprecation'), sunset: r.headers.get('sunset'), link: r.headers.get('link') });
   let r = await req('GET', R + '/messages?limit=1&invite=' + H);
   let d = dep(r);
-  check('query: a query token still reads', r.status === 200 && r.json.you === 'QryH', r.status);
-  check('query: ... with Deprecation, Sunset and a deprecation Link', /^@\d+$/.test(d.dep || '') && /21 Dec 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
-  check('query: ... and a notice saying what to change', /deprecated/.test(r.json.notice || '') && /X-Invite-Token/.test(r.json.notice || '') && /2026-12-21/.test(r.json.notice || ''), r.json.notice);
-  r = await req('POST', R + '/messages?invite=' + H, { json: { text: 'posted with a query token' } });
-  check('query: a post keeps its fields and gains the notice', r.status === 201 && r.json.from === 'QryH' && typeof r.json.id === 'number' && /deprecated/.test(r.json.notice || ''), r.status + ' ' + JSON.stringify(Object.keys(r.json || {})));
+  check('query: a URL token alone is refused 401 invite_missing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
+  check('query: ... its sentence says to use the header', /no longer read/.test(r.json.error || '') && /X-Invite-Token/.test(r.json.error || ''), r.json.error);
+  check('query: ... with Deprecation, Sunset (the retirement day) and a deprecation Link', /^@\d+$/.test(d.dep || '') && /22 Nov 2026/.test(d.sunset || '') && /\/api\/changes>; rel="deprecation"/.test(d.link || ''), JSON.stringify(d));
+  check('query: ... and a notice saying it was retired', /retired/.test(r.json.notice || '') && /X-Invite-Token/.test(r.json.notice || '') && /2026-11-22/.test(r.json.notice || ''), r.json.notice);
+  r = await req('POST', R + '/messages?invite=' + H, { json: { text: 'posted with a URL token' } });
+  check('query: a post with a URL token alone is refused and stores nothing', r.status === 401 && r.json.code === 'invite_missing', r.status + ' ' + JSON.stringify(r.json));
+  r = await req('GET', R + '/messages?limit=5', { token: H });
+  check('query: ... the room has no such message', r.status === 200 && !(r.json.messages || []).some((m) => m.text === 'posted with a URL token'), r.status);
   r = await req('GET', R + '/messages?limit=1&invite=bogus-token', { token: H });
-  check('query: header and query: the header wins, and the notice says the query was ignored', r.status === 200 && /ignored/.test(r.json.notice || '') && !!r.headers.get('deprecation'), r.status + ' ' + r.json.notice);
+  check('query: header and query: the header is used, and the notice says the URL one was ignored', r.status === 200 && r.json.you === 'QryH' && /ignored/.test(r.json.notice || '') && !!r.headers.get('deprecation'), r.status + ' ' + r.json.notice);
   r = await req('GET', R + '/messages?limit=1', { token: H });
-  check('query: no query token, no Deprecation and no notice', !r.headers.get('deprecation') && !('notice' in r.json), JSON.stringify(dep(r)));
+  check('query: no URL token, no Deprecation and no notice', !r.headers.get('deprecation') && !('notice' in r.json), JSON.stringify(dep(r)));
   r = await req('POST', R + '/mcp?invite=' + H, { json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
-  check('query: MCP keeps the query form, with no notice', r.status === 200 && r.json.result && !r.headers.get('deprecation') && !('notice' in r.json), r.status + ' ' + JSON.stringify(dep(r)));
+  check('query: MCP keeps the URL form, with no notice', r.status === 200 && r.json.result && !r.headers.get('deprecation') && !('notice' in r.json), r.status + ' ' + JSON.stringify(dep(r)));
+  r = await req('POST', R + '/mcp?invite=' + H, { json: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'whoami', arguments: {} } } });
+  check('query: ... and a tool call with it acts as the invite', r.status === 200 && r.json.result && /QryH/.test(JSON.stringify(r.json.result)), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
   r = await req('GET', R + '/messages/1/image?invite=' + H);
-  check('query: media reads still refuse it (401), with the headers', r.status === 401 && r.json.code === 'invite_missing' && !!r.headers.get('deprecation'), r.status + ' ' + r.json.code);
+  check('query: media reads refuse it too (401), with the headers', r.status === 401 && r.json.code === 'invite_missing' && !!r.headers.get('deprecation'), r.status + ' ' + r.json.code);
   r = await req('GET', R + '/messages?limit=1&invite=bogus-token');
-  check('query: a refusal keeps its sentence and code and gains the notice', r.status === 403 && r.json.code === 'invite_invalid' && r.json.error === "This invite link isn't valid for this room." && /deprecated/.test(r.json.notice || ''), r.status + ' ' + JSON.stringify(r.json));
+  check('query: a bad URL token is not checked: 401 invite_missing, not 403', r.status === 401 && r.json.code === 'invite_missing' && /retired/.test(r.json.notice || ''), r.status + ' ' + JSON.stringify(r.json));
+  r = await req('GET', R + '/messages?limit=1');
+  check('query: no token at all keeps its own sentence and no notice', r.status === 401 && r.json.code === 'invite_missing' && r.json.error === 'This room is invite-only. Open your invite link to join.' && !('notice' in r.json), r.status + ' ' + JSON.stringify(r.json));
   {
     const ac = new AbortController();
     const sr = await fetch(BASE + R + '/stream?invite=' + H, { signal: ac.signal });
-    check('query: the event stream gets the headers only', sr.status === 200 && /event-stream/.test(sr.headers.get('content-type') || '') && !!sr.headers.get('deprecation'), sr.status + ' ' + sr.headers.get('content-type'));
+    check('query: the event stream refuses a URL token too, with the headers', sr.status === 401 && !!sr.headers.get('deprecation'), sr.status + ' ' + sr.headers.get('content-type'));
+    ac.abort();
+  }
+  {
+    const ac = new AbortController();
+    const sr = await fetch(BASE + R + '/stream', { signal: ac.signal, headers: { 'X-Invite-Token': H } });
+    check('query: ... and opens with the header', sr.status === 200 && /event-stream/.test(sr.headers.get('content-type') || ''), sr.status + ' ' + sr.headers.get('content-type'));
     ac.abort();
   }
   r = await req('GET', '/api/changes');
-  check('query: the changes feed announces the retirement and its date', (r.json.notices || []).some((n) => /\?invite=/.test(n.text) && /2026-12-21/.test(n.text)), JSON.stringify(r.json.notices).slice(0, 200));
+  check('query: the changes feed announces the retirement', (r.json.notices || []).some((n) => /\?invite=/.test(n.text) && /retired/.test(n.text)) && !(r.json.notices || []).some((n) => /2026-12-21 at the earliest/.test(n.text)), JSON.stringify(r.json.notices).slice(0, 200));
   await req('DELETE', R + '/invites', { owner: true });
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }

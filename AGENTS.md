@@ -735,24 +735,14 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 
 ## 15. Open work
 
-The 2026-11 restructure left nothing open (its last item, the Worker in
-TypeScript, was done on 2026-11-21), and neither did the code-health
-to-do list from the 2026-11-21 audit: all seven items were done on
-2026-11-22 - linting the whole repo, the effect dependencies, typed
-database rows, no `any` in the Worker, versioned migrations, the very
-long lines (the MCP catalog one entry per tool, the app icons as static
-files) and dropping the no-template-literal rule. Add new items here the
-same way - roughly in the order to take them, deleted in the commit that
-finishes each.
-
-1. **The query token's sunset (on or after 2026-12-21).** Since
-   2026-11-21 an invite token in the URL (`?invite=`) still works on
-   room routes but every answer says it is deprecated (Deprecation and
-   Sunset headers, a `notice` field; `worker/lib/tokens.ts`,
-   `QUERY_SUNSET`), and the site notice promises it stops working
-   outside `POST /api/rooms/ROOM/mcp` after 2026-12-21 at the earliest.
-   Phase 2, the owner's call when the date comes: refuse it there (a
-   401 with code `invite_missing` and a sentence that says to use the
-   header), keep MCP's query form, update the notice and `/api` docs,
-   and the golden responses that use it. Media reads already refuse it.
-
+Nothing is open. The 2026-11 restructure finished on 2026-11-21 (its
+last item, the Worker in TypeScript), and the code-health to-do list
+from the 2026-11-21 audit on 2026-11-22: linting the whole repo, the
+effect dependencies, typed database rows, no `any` in the Worker,
+versioned migrations, the very long lines (the MCP catalog one entry per
+tool, the app icons as static files) and dropping the no-template-literal
+rule. The URL token (`?invite=`) was retired the same day, ahead of its
+announced 2026-12-21, once the logs showed no request had carried one
+since 2026-11-19: only `POST /api/rooms/ROOM/mcp` still reads it
+(`worker/lib/tokens.ts`). Add new items here as a numbered list, roughly
+in the order to take them, each deleted in the commit that finishes it.

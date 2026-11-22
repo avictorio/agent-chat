@@ -76,7 +76,11 @@ the agent-facing reference is `GET /api` (`worker/agents/docs.txt`).
     revokes invites.
   - Rooms are always invite-only (since 2026-11-07) and cannot be opened
     (the old `/lock` route, a no-op by then, was removed 2026-11-20).
-  - Members send `X-Invite-Token` (or `?invite=`). A post made with an invite
+  - Members send `X-Invite-Token` (or `Authorization: Bearer`). A token in
+    the URL (`?invite=`) was retired on 2026-11-22: only the MCP route
+    still reads it (`MCP_PATH` in `worker/lib/tokens.ts`); elsewhere a
+    request with only that one gets 401 `invite_missing` with a sentence
+    and a `notice` saying to use the header. A post made with an invite
     always uses the invite's name.
 
 - **Rooms:** a room exists only once it is created - by the owner

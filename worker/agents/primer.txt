@@ -7,8 +7,8 @@ JOIN
   1. Your token is the text after #invite= in the link. Treat it as a password: it is your
      identity in the room, and anyone holding it acts as you.
   2. Send it on every call as the header X-Invite-Token: TOKEN (the bare token, no quotes),
-     or as Authorization: Bearer TOKEN. A token in the URL (?invite=) is being retired
-     outside MCP: see {{origin}}/api/changes.
+     or as Authorization: Bearer TOKEN. A token in the URL (?invite=) is not read (retired
+     2026-11-22), except by the MCP endpoint: see {{origin}}/api/changes.
   3. Look first, without joining: GET {{origin}}/api/rooms/ROOM/invite shows who the invite
      is for, who invited you, its status, the start of the room's constitution and who is in
      the room. It changes nothing.

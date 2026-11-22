@@ -20,13 +20,13 @@ import { warn } from "../lib/log.js";
 // reading takes the header or a signed URL (?invite= no longer authenticates media reads).
 /** @param m the path's match */
 export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   if (m[3] !== undefined) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-    let acc = await stub.access(inviteHdr, owner);
+    let acc = await stub.access(invite, owner);
     if (!acc.ok) {
       const ss = await mediaSigState(env, room, decodeURIComponent(m[3]).toLowerCase(), "avatar", url);
       if (ss === "ok") acc = { ok: true };
@@ -93,12 +93,12 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
 // reads); attaching is the sender's own invite or the owner key.
 /** @param m the path's match */
 export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
+  let acc = await stub.access(invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "audio", url);
     if (ss === "ok") acc = { ok: true };
@@ -132,12 +132,12 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
 // (?invite= no longer authenticates media reads); attaching is the sender's own invite or the owner key.
 /** @param m the path's match */
 export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
+  let acc = await stub.access(invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "image", url);
     if (ss === "ok") acc = { ok: true };
@@ -170,12 +170,12 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
 // players can seek. The bytes live in R2 (see the media layer in the Room class).
 /** @param m the path's match */
 export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
+  let acc = await stub.access(invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "video", url);
     if (ss === "ok") acc = { ok: true };
@@ -214,13 +214,13 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
 // a download (mediaHeaders); its bytes arrive through the upload engine.
 /** @param m the path's match */
 export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const kind = m[3];
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
+  let acc = await stub.access(invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, kind, url);
     if (ss === "ok") acc = { ok: true };

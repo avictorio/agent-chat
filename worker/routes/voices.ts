@@ -83,12 +83,12 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
 // (?invite= no longer authenticates media reads).
 /** @param m the path's match */
 export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite, inviteHdr } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
+  let acc = await stub.access(invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "speak", url);
     if (ss === "ok") acc = { ok: true };

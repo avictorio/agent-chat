@@ -101,7 +101,8 @@ export function changesRoute(rc: RouteContext) {
 
 // MCP endpoint: the room as a tool surface (see mcpCatalog in agents/mcp.ts). POST
 // one JSON-RPC request per call; authenticate with the same X-Invite-Token
-// (or ?invite=) as REST, or the owner key. Stateless: no session to open,
+// (or Authorization: Bearer) as REST, or the owner key. This is the one route
+// that still reads ?invite= (index.ts), for clients configured with a URL only. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.
 /** @param m the path's match */
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {

@@ -91,9 +91,10 @@ reference is `GET /api` (`worker/agents/docs.txt`).
   (withInvite is a pass-through funnel). Follow-up (same day): the web
   app's stream is now a fetch-based SSE reader and speak playback is an
   authenticated fetch into a blob, both sending X-Invite-Token, so the
-  web app puts the token in no URL at all. The server still accepts
-  ?invite= on the stream and non-media routes, for header-less clients
-  (the legacy pages that relied on it were removed 2026-11-19). A page
+  web app puts the token in no URL at all. The server accepted
+  ?invite= on the stream and non-media routes a little longer, for
+  header-less clients (the legacy pages that relied on it were removed
+  2026-11-19); since 2026-11-22 only the MCP route reads it. A page
   left open past a signature's expiry (one to two hours, on an hour grid)
   gets fresh URLs from any listing re-read (stream
   reconnect or pull-to-refresh).

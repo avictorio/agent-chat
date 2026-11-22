@@ -11,6 +11,9 @@
 //
 // Record only from a commit whose behavior is the promise (the baseline
 // was taken before Phase A of the agent invite link design, 2026-11-21).
+// A deliberate break is edited into golden.json by hand and listed here:
+//   2026-11-22  "read: query token", "read: query token on media" - the URL
+//               token retired: 401 invite_missing with its own sentence.
 // Values that differ per run (ids, timestamps, tokens) are never compared.
 'use strict';
 const fs = require('fs');

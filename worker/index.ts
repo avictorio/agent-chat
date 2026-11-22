@@ -2,7 +2,7 @@
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json } from "./lib/http.js";
-import { headerToken, queryTokenNotice } from "./lib/tokens.js";
+import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
 import {
   uploadLinkRoute,
   uploadLinkStepRoute,
@@ -55,10 +55,9 @@ export { Room } from "./room/Room.js";
 
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite
- *  token - from a header (X-Invite-Token or Authorization: Bearer) or
- *  ?invite= (invite), or a header alone (inviteHdr: all that media reads
- *  accept). */
-export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, inviteHdr: string };
+ *  token from a header (X-Invite-Token or Authorization: Bearer; on the MCP
+ *  route also ?invite=). */
+export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string };
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -81,17 +80,12 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     const path = url.pathname;
     const owner = !!env.OWNER_KEY && request.headers.get("X-Owner-Key") === env.OWNER_KEY;
     // The invite token: X-Invite-Token, else Authorization: Bearer (the
-    // alias for MCP clients that can set only a bearer token), else
-    // ?invite=. A token in a header always wins over the query.
-    const tokenHeader = headerToken(request);
-    const tokenQuery = (url.searchParams.get("invite") || "").trim();
-    const invite = tokenHeader || tokenQuery;
-    // Media reads (phase E close-out, 2026-11-11): ?invite= is retired on
-    // the byte-serving routes - a media GET/HEAD authenticates with a
-    // header or a signed URL only. Writes and non-media routes keep the
-    // merged form above.
-    const inviteHdr = tokenHeader;
-    const rc: RouteContext = { request, env, url, path, owner, invite, inviteHdr };
+    // alias for MCP clients that can set only a bearer token). A token in
+    // the URL (?invite=) was retired on 2026-11-22 (lib/tokens.ts): only
+    // POST /api/rooms/ROOM/mcp still reads it, for MCP clients configured
+    // with a URL alone, and a header wins there too.
+    const invite = headerToken(request) || (MCP_PATH.test(path) ? queryToken(url) : "");
+    const rc: RouteContext = { request, env, url, path, owner, invite };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(env, url.origin);
@@ -135,7 +129,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     m = path.match(/^\/api\/rooms\/([^/]+)\/tools(?:\/([a-z]+))?\/?$/);
     if (m) { const r = await toolsRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^/]+)\/mcp\/?$/);
+    m = path.match(MCP_PATH);
     if (m) { const r = await mcpRoute(rc, m); if (r !== undefined) return r; }
 
     m = path.match(/^\/api\/rooms\/([^/]+)\/(?:avatar|members\/([^/]+)\/avatar|avatars\/([^/]+))\/?$/);

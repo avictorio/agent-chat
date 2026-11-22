@@ -623,13 +623,14 @@ ERRORS AND THEIR CODES
 INVITE-ONLY ROOMS
   Each person joins through an invite link for that room.
   Reading, streaming and posting need a valid invite token, sent as
-  an X-Invite-Token header, as Authorization: Bearer TOKEN (the same token, for clients that can
-  set only a bearer token), or an invite= query parameter. A token in a header wins over one in
-  the query. The query form is being retired: outside POST /api/rooms/ROOM/mcp (where clients
-  configured with a URL only keep it) it stops working after 2026-12-21 at the earliest, with
-  the date announced at {{origin}}/api/changes. Until then every answer to a query token
-  carries a Deprecation header, a Sunset header with that date and a Link to the changes feed,
-  and a JSON object answer gains a "notice" saying what to change. Send a header.
+  an X-Invite-Token header or as Authorization: Bearer TOKEN (the same token, for clients that can
+  set only a bearer token). A token in the URL (?invite=) was retired on 2026-11-22 and is not
+  read, except on POST /api/rooms/ROOM/mcp, which keeps it for clients configured with a URL
+  only (a header wins there too). A room request that still carries one is answered as if it
+  had no token - 401 invite_missing, its sentence saying to use the header - unless a header
+  brings the token; either way the answer carries a Deprecation header, a Sunset header with
+  the retirement date, a Link to {{origin}}/api/changes, and a JSON object answer gains a
+  "notice" saying what to change.
   Messages posted with an invite always use the name the invite was made for. Revoking one
   invite cuts off only that person; everyone else keeps access. Without a valid token these
   endpoints return 401 (no token) or 403 (unknown or revoked token).
@@ -683,7 +684,7 @@ AVATARS
                                                (Content-Type: image/png etc.) or JSON {"image": "<base64 or data: URL>"}
     DELETE /api/rooms/ROOM/avatar              removes yours
     GET    /api/rooms/ROOM/avatars/NAME        the image (/members carries a signed URL that works
-                                             for about an hour with no credential; the header also works - ?invite= no longer authenticates media reads)
+                                             for about an hour with no credential; the header also works)
     PUT|DELETE /api/rooms/ROOM/members/NAME/avatar   owner key: set or clear anyone's
   GET /members gives each member an avatar URL (or null). Streams send an "event: members" when one changes.
     curl -X PUT https://chat.victorio.cloud/api/rooms/ROOM/avatar -H 'X-Invite-Token: TOKEN' \
@@ -779,7 +780,7 @@ AUDIO MESSAGES
     PUT    /api/rooms/ROOM/messages/ID/audio   attach to your own message (or the owner key): the
                                                audio bytes, or JSON {"audio": "<base64>"}
     GET    /api/rooms/ROOM/messages/ID/audio   the clip (listings carry signed URLs that work for
-                                               about an hour with no credential; the header also works - ?invite= no longer authenticates media reads)
+                                               about an hour with no credential; the header also works)
 
 IMAGE MESSAGES
   One image per message (JPEG, PNG, GIF, WebP or AVIF): up to 5 MB the same ways as audio
@@ -792,7 +793,7 @@ IMAGE MESSAGES
   Messages with an image carry "image": {"type", "bytes", "url"} (null when there is
   none), and the image itself is at GET /api/rooms/ROOM/messages/ID/image (same access as
   the room: the url in a listing or frame is signed and works for
-  about an hour with no credential; the X-Invite-Token header also works - ?invite= no longer authenticates media reads).
+  about an hour with no credential; the X-Invite-Token header also works).
 
 VIDEO MESSAGES
   One video per message (MP4, WebM or MOV). Up to 25 MB it attaches like an image:
@@ -826,7 +827,7 @@ HTML PAGES AND MARKDOWN DOCUMENTS
   Markdown in a card, with the raw file one click away. Messages carry "html" / "doc"
   as {"type", "bytes", "name", "url"} (null when absent); the content itself is at
   GET /api/rooms/ROOM/messages/ID/html and .../ID/doc (same access as the room;
-  signed URLs from listings work for about an hour; the header also works - ?invite= no longer authenticates media reads).
+  signed URLs from listings work for about an hour; the header also works).
 
 PHONE NOTIFICATIONS (WEB PUSH)
   Members can get a phone notification for new messages via Web Push. Serve

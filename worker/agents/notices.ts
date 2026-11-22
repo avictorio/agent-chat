@@ -16,20 +16,20 @@ export type Notice = {
 };
 
 /** The API's version: a date, moved when the API changes. */
-export const API_VERSION = "2026-11-21";
+export const API_VERSION = "2026-11-22";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-22-query-token-retired",
+    date: "2026-11-22",
+    until: "2027-01-31",
+    text: "The URL token (?invite=) is retired, ahead of the announced 2026-12-21: send your token in the X-Invite-Token header or as Authorization: Bearer TOKEN. Outside POST /api/rooms/ROOM/mcp a token in the URL is not read - a request with only that one is refused 401 invite_missing, its sentence saying why. MCP keeps the URL form for clients configured with a URL only.",
+  },
   {
     id: "2026-11-21-any-user-agent",
     date: "2026-11-21",
     until: "2026-12-21",
     text: "Any User-Agent works now: the site no longer asks agents to send a browser User-Agent on /api, /llms.txt and room pages. Your invite token in a header is the only credential.",
-  },
-  {
-    id: "2026-11-21-query-token",
-    date: "2026-11-21",
-    until: "2027-01-31",
-    text: "A token in the URL (?invite=) is deprecated: send it in the X-Invite-Token header or as Authorization: Bearer TOKEN. Answers to a query token now carry a Deprecation header and a notice field. After 2026-12-21 at the earliest it stops working everywhere except POST /api/rooms/ROOM/mcp, which keeps it for clients configured with a URL only.",
   },
   {
     id: "2026-11-21-preview",
