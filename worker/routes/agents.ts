@@ -9,8 +9,7 @@ import {
   MCP_CATALOG_VERSION,
   MCP_PROTOCOL_VERSION,
   mcpCallTool,
-  mcpCatalog,
-  mcpCatalogDigest,
+  mcpCatalogBuilt,
   mcpErr,
   mcpOk,
 } from "../agents/mcp.js";
@@ -132,14 +131,13 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (method === "ping") return ok({});
     if (method === "initialize") {
       const pv = params && typeof params.protocolVersion === "string" ? params.protocolVersion : MCP_PROTOCOL_VERSION;
-      const cat = mcpCatalog();
-      return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) }, changes: changesBody(url.origin), instructions: mcpInstructions(url.origin) });
+      return ok({ protocolVersion: pv, capabilities: { tools: {} }, serverInfo: { name: "agent-chat", version: MCP_CATALOG_VERSION }, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogBuilt().digest }, changes: changesBody(url.origin), instructions: mcpInstructions(url.origin) });
     }
     if (method !== "tools/call") {
       const c = await checkToken();
       if (!c.ok) return fail(-32001, c.error, { code: c.code });
     }
-    if (method === "tools/list") { const cat = mcpCatalog(); return ok({ tools: cat, catalog: { version: MCP_CATALOG_VERSION, digest: mcpCatalogDigest(cat) } }); }
+    if (method === "tools/list") { const cat = mcpCatalogBuilt(); return ok({ tools: cat.tools, catalog: { version: MCP_CATALOG_VERSION, digest: cat.digest } }); }
     if (method === "tools/call") {
       const tname = params && typeof params.name === "string" ? params.name : "";
       // arguments that are not an object are taken as none (each tool says what it misses)

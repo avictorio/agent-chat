@@ -5,7 +5,8 @@ here (or from the repo root) and test it with `npm test` (the Playwright
 suite in `tests/ui/`, against a fake API). Before pushing, run the gates in
 the root `AGENTS.md` section 7, which also covers how the build ships. The
 backend (`worker/`, the Room Durable Objects, the API) is its contract; the
-conventions for React code are in `AGENTS.md` section 13.
+conventions for React code are in `docs/agents/web-app.md`, Front-end
+conventions.
 
 - **Stack:** npm workspaces: `app/` holds the web app, and the repo's
   top-level `contract/` (`@chat/contract`) holds the API contract types and

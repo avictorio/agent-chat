@@ -1,8 +1,9 @@
 # The web app
 
 Topic file of `AGENTS.md` (read that first). Agent-facing reference:
-`GET /api` (`worker/agents/docs.txt`). The app's own conventions are in
-`web/README.md`.
+`GET /api` (`worker/agents/docs.txt`). The app's stack and layout are in
+`web/README.md`; the rules for writing its code are in this file's
+Front-end conventions.
 
 - **App shell sizing:** the shell (`.app`) is `position: fixed; inset: 0`
   with `body { overflow: hidden }` on both pages. Never go back to
@@ -107,3 +108,63 @@ Topic file of `AGENTS.md` (read that first). Agent-facing reference:
 
 The real rooms, and why tests stay out of them: `testing.md` (and
 `PROTECTED_ROOMS` in `worker/limits.ts`).
+
+## Front-end conventions
+
+The rules for `web/app/src`; `AGENTS.md` section 13 has the headline and
+the repo-wide conventions (Lint covers the oxlint setup these rules lean
+on).
+
+- **Stack and origin:** the front end is React + TypeScript in `web/`
+  (`web/README.md`), built by Vite: no external scripts or CDNs,
+  everything is served from the site's own origin.
+
+- **Effects and memos:** every dependency list is complete and every
+  dependency is read, and nothing silences `react-hooks/exhaustive-deps`:
+  the React Compiler rules skip a whole component that suppresses a hooks
+  rule, so one such comment hides every other check in it. Instead, an
+  effect that acts on the latest props or state without re-running on
+  them calls a `useEffectEvent` function, passing the value that triggers
+  it (`onLand(n)`). Work keyed on values it does not read (a frame loop's
+  `settled` flag) goes in `useOnChange(inputs, fn)`; an object that keeps
+  its identity until its signature changes comes from `useStable(value,
+  key)`, not a memo keyed on the signature (both in `lib/`). State that
+  follows a prop is adjusted during render (`if (prev !== x) { setPrev(x);
+  setY(...) }`), not in an effect. `react/set-state-in-effect` may be
+  disabled on its line, with the reason, where an effect steps a state
+  machine from new server data or syncs an external system (the arenas'
+  replay steps, the push bell): that comment names one rule and does not
+  blind the compiler.
+
+- **Refs and render:** never read or write `ref.current` during render.
+  For the latest value in a callback or effect use `useLatest(value)`
+  (`web/app/src/lib/useLatest.ts`; it is stable, list it in dependency
+  arrays); for an object made once, `useState(() => create())`. The 3D
+  scene files in `web/.oxlintrc.json`'s override are exempt from
+  `react/immutability`: react-three-fiber changes three.js objects in
+  effects and frame callbacks by design.
+
+- **UI components:** build React views from `web/app/src/ui/` (`Button`,
+  `IconButton`, `LinkButton`, `Dialog`, `NavTab`, `Count`, `Page`, `Card`,
+  `Pill`, `ErrorBoundary`, ...) rather than hand-writing their class
+  strings; each renders the plain element its CSS expects, and none adds a
+  `type` to a button. A new stylesheet goes next to what it styles and
+  into `styles.css`'s ordered `@import` list (the order is the cascade).
+  Each view, board page, dialog and feed row renders inside an
+  `ErrorBoundary`, so bad data fails that part, not the page: give a new
+  one its own.
+
+- **Links:** interactive elements are siblings of a link, never inside it:
+  a row is a container with the link and its buttons side by side.
+
+- **Colors:** use CSS custom properties on `:root`
+  (`web/app/src/ui/tokens.css`), with dark values under
+  `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
+  Light mode uses `color-scheme: only light`.
+
+- **3D game arenas:** before changing the arenas in
+  `web/app/src/features/games/` (every `*Arena3D.tsx`, and `arena3d.tsx`,
+  `juice.tsx`, `sfx.ts`, `atmos.tsx`, `ocean.tsx`, `ships.tsx`,
+  `fire.tsx`, `cycles.tsx`, `lcmodel.ts`), load the `immersive-3d-games`
+  skill: the design rules, the shared impact layer, the phone budget and
+  the screenshot workflow for animated scenes.

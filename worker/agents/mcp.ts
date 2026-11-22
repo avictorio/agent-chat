@@ -32,6 +32,9 @@ import {
   MAX_STAKE,
   MAX_STAKES,
   MAX_TEXT,
+  mb,
+  mediaTooBig,
+  pageTooBig,
   UP_KINDS,
   UP_MAX_DIRECT_TEXT,
   UP_MAX_TEXT,
@@ -54,7 +57,6 @@ import { normReaction } from "../lib/reactions.js";
 import { mediaSigParams } from "../lib/media.js";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { GAME_ENGINES, moveFields } from "../games/engine.js";
-import { mb } from "./docs.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
 import { memberReply } from "../routes/members.js";
 import type { RoomMember } from "../room/members.js";
@@ -82,6 +84,13 @@ export type McpTool = { name: string, description: string, inputSchema: { type: 
 export function mcpTool(name: string, description: string, properties?: Record<string, object>, required?: string[]): McpTool {
   const props = Object.assign({ as: { type: "string", description: "Owner key only: act as this member." } }, properties || {});
   return { name: name, description: description, inputSchema: { type: "object", properties: props, required: required || [], additionalProperties: false } };
+}
+let built: { tools: McpTool[], digest: string } | null = null;
+/** The catalog and its digest, built once per isolate: both depend only on
+ *  constants, and hashing the catalog costs a few ms of CPU per connect. */
+export function mcpCatalogBuilt() {
+  if (!built) { const tools = mcpCatalog(); built = { tools, digest: mcpCatalogDigest(tools) }; }
+  return built;
 }
 export function mcpCatalog() {
   const id = { type: "integer", description: "The item's id." };
@@ -446,11 +455,11 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
       if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
       let audio = null as InlineMedia | null, image = null as InlineMedia | null, video = null as InlineMedia | null, htmlArt = null as InlineMedia | null, doc = null as InlineMedia | null;
-      if (A.audio_base64) { const buf = mcpDecodeB64(A.audio_base64, "audio_base64"); if (!buf.byteLength) throw new Error("\"audio_base64\" is empty"); if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); audio = { data: buf, type: t, transcript: A.audio_transcript ? bodyText(A.audio_transcript, "audio_transcript").slice(0, MAX_TEXT) : null }; }
-      if (A.image_base64) { const buf = mcpDecodeB64(A.image_base64, "image_base64"); if (!buf.byteLength) throw new Error("\"image_base64\" is empty"); if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); image = { data: buf, type: t }; }
-      if (A.video_base64) { const buf = mcpDecodeB64(A.video_base64, "video_base64"); if (!buf.byteLength) throw new Error("\"video_base64\" is empty"); if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); video = { data: buf, type: t }; }
-      if (A.html) { const s = decodeTextPayload(A.html); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error("HTML pages can be up to 2 MB"); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
-      if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error("Documents can be up to 1 MB"); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
+      if (A.audio_base64) { const buf = mcpDecodeB64(A.audio_base64, "audio_base64"); if (!buf.byteLength) throw new Error("\"audio_base64\" is empty"); if (buf.byteLength > AUDIO_MAX) throw new Error(mediaTooBig("audio", "inline")); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); audio = { data: buf, type: t, transcript: A.audio_transcript ? bodyText(A.audio_transcript, "audio_transcript").slice(0, MAX_TEXT) : null }; }
+      if (A.image_base64) { const buf = mcpDecodeB64(A.image_base64, "image_base64"); if (!buf.byteLength) throw new Error("\"image_base64\" is empty"); if (buf.byteLength > IMAGE_MAX) throw new Error(mediaTooBig("image", "inline")); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); image = { data: buf, type: t }; }
+      if (A.video_base64) { const buf = mcpDecodeB64(A.video_base64, "video_base64"); if (!buf.byteLength) throw new Error("\"video_base64\" is empty"); if (buf.byteLength > VIDEO_MAX) throw new Error(mediaTooBig("video", "inline")); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); video = { data: buf, type: t }; }
+      if (A.html) { const s = decodeTextPayload(A.html); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error(pageTooBig("HTML pages", HTML_MAX)); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
+      if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error(pageTooBig("Documents", DOC_MAX)); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
       const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
@@ -554,9 +563,9 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const id = bodyNumber(A.id, "id", true);
       const buf = mcpDecodeB64(A.base64, "base64");
       if (!buf.byteLength) throw new Error("\"base64\" is empty");
-      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
-      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
-      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
+      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error(mediaTooBig("image", "inline")); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
+      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error(mediaTooBig("audio", "inline")); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
+      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error(mediaTooBig("video", "inline")); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
       throw new Error("\"kind\" must be image, audio or video");
     }
     default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");

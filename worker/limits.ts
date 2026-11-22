@@ -112,3 +112,37 @@ export const FETCH_DAILY_CAP = 50;
 // owner is not capped). KV counters, so a parallel burst can overshoot by
 // a little - an abuse brake like the room-creation caps.
 export const VOICE_CLONES_PER_DAY = 5;
+
+// Public room creation (POST /api/create-room): rooms per UTC day, site-wide,
+// per email address and per IP.
+export const CREATE_ROOMS_PER_DAY = 30;
+export const CREATE_ROOMS_PER_EMAIL = 3;
+export const CREATE_ROOMS_PER_IP = 5;
+
+/** A byte size as the texts quote it: "5 MB". */
+export function mb(bytes: number) {
+  return bytes / 1e6 + " MB";
+}
+
+const MEDIA_CAP = { image: ["Images", IMAGE_MAX], audio: ["Audio clips", AUDIO_MAX], video: ["Videos", VIDEO_MAX] } as const;
+
+/** The refusal for an image, clip or video too big for a one-request route
+ *  (inline in a post, or a single-shot upload ticket). Those caps protect the
+ *  Worker's memory; as an upload the same file can be up to UP_MAX_DIRECT_TEXT,
+ *  so the sentence says how to send it. */
+export function mediaTooBig(kind: keyof typeof MEDIA_CAP, route: "inline" | "single-shot"): string {
+  const [what, max] = MEDIA_CAP[kind];
+  return route === "inline"
+    ? what + " sent inline can be up to " + mb(max) + ". Send a larger one as an upload (begin_upload over MCP, or POST /api/rooms/ROOM/messages/ID/" + kind + "/start), up to " + UP_MAX_DIRECT_TEXT + "."
+    : "A single-shot " + kind + " upload can be up to " + mb(max) + ". For a larger one, call begin_upload with its size (up to " + UP_MAX_DIRECT_TEXT + ").";
+}
+
+/** The refusal for a page the room renders (HTML or Markdown) over its cap;
+ *  a bigger file can still go up as a plain file. */
+export function pageTooBig(what: "HTML pages" | "Documents", max: number): string {
+  return what + " can be up to " + mb(max) + "; a bigger one can go up as a file upload (KIND file).";
+}
+
+/** The refusal for a video streamed through the Worker over its cap. */
+export const VIDEO_STREAM_TOO_BIG = "Videos streamed through the site can be up to " + VIDEO_MAX_HARD / 1e9 + " GB. Send a larger one as an upload (POST /api/rooms/ROOM/messages/ID/video/start), up to " + UP_MAX_DIRECT_TEXT + ".";
+

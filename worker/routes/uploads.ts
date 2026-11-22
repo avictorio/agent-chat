@@ -6,6 +6,7 @@ import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
 import {
   AUDIO_MAX,
   IMAGE_MAX,
+  mediaTooBig,
   ROOM_RE,
   STREAM_PART,
   UP_KINDS,
@@ -13,6 +14,7 @@ import {
   UP_SIGN_TTL,
   VIDEO_MAX,
   VIDEO_MAX_HARD,
+  VIDEO_STREAM_TOO_BIG,
 } from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
 import { sniffVideo } from "../lib/sniff.js";
@@ -233,7 +235,7 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
   const uroom = decodeURIComponent(um[1]).toLowerCase();
   if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB on a single-shot upload; larger files go through the upload engine (begin_upload with size)" }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("video", "single-shot") }, 413);
   const ubuf = await request.arrayBuffer();
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
   const ur = await ustub.redeemUpload(decodeURIComponent(um[2]), ubuf, uroom);
@@ -290,7 +292,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
       const value = chunk.value;
       if (value && value.byteLength) {
         counted += value.byteLength;
-        if (counted > VIDEO_MAX_HARD) return await fail(413, "Videos can be up to 5 GB");
+        if (counted > VIDEO_MAX_HARD) return await fail(413, VIDEO_STREAM_TOO_BIG);
         bufs.push(value); buflen += value.byteLength;
         // oxlint-disable-next-line no-unmodified-loop-condition -- take() shrinks buflen
         while (buflen >= STREAM_PART) { const p = await up.uploadPart(++n, take(STREAM_PART)); parts.push({ partNumber: n, etag: p.etag }); }

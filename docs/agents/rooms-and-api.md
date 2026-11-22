@@ -197,3 +197,49 @@ docs.txt section that owns its routes, caps and formats.
   `notifyPush` targets only the owner and active members. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device.
+
+## Storage
+
+What the Room Durable Object and the KV `REQUESTS` namespace hold. The
+bindings and ids are in `AGENTS.md` section 2; what must never be
+deleted or touched is in `AGENTS.md` section 1. Media bytes live in R2
+(`media.md`).
+
+### Durable Object storage (per room)
+
+The SQLite tables come from versioned steps (`SCHEMA_STEPS` in
+`worker/room/Room.ts`). `Room.ensureSchema()`, on wake and in `create()`,
+runs the steps a room has not run yet and counts them in `cfg`
+`schema_version`. Step 1 is the baseline, adding each column only if
+missing. `AGENTS.md` section 13, Schema changes, has how to add one.
+
+| Table | Holds |
+|---|---|
+| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) are kept |
+| `rx` | reactions: message, emoji, who, time |
+| `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state; `upp` holds its per-part receipts. The bytes live in R2. |
+| `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
+| `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
+| `push` | Web Push subscriptions per member |
+| `mv` | member voices: provider, voice id, the R2 key of the sample |
+| `tf` | timestamps of tool fetches (`FETCH_DAILY_CAP` per 24 hours) |
+| `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
+| `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
+| (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
+
+### KV keys (`REQUESTS` namespace)
+
+- `log:<ISO time>:<random>`: activity log lines (room deletions, push
+  errors), kept for 7 days.
+- `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
+  public room-creation counters (UTC day, 48 h TTL). They count attempts,
+  incremented before the work so failures still cost quota. KV counters
+  are not atomic, so a parallel burst can overshoot a cap slightly:
+  they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
+  count as different emails; the IP and site-wide caps are the real bind.
+- `clone:<room>:<folded name>:<day>`: voice clones per member per UTC day
+  (`VOICE_CLONES_PER_DAY`; the owner is not capped), 48 h TTL. Same
+  abuse-brake caveat.
+- `asset:emoji-<sha>.json` (`EMOJI_KV_KEY`): the web picker's emoji list,
+  built once from the pinned dataset (`EMOJI_SOURCE`).

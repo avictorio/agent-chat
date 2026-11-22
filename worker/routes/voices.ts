@@ -1,6 +1,6 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
-import { ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
+import { mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
@@ -49,7 +49,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, name: who, voice: v, cloned: true });
   }
   if ((request.method === "PUT" || request.method === "POST") && action === "sample") {
-    if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to 10 MB" }, 413);
+    if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
     let buf;
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
       const body = await readBody(request);
@@ -59,7 +59,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
       buf = await request.arrayBuffer();
     }
     if (!buf.byteLength) return json({ error: "Send the sample as the request body (or JSON {\"audio\": base64})" }, 400);
-    if (buf.byteLength > VOICE_SAMPLE_MAX) return json({ error: "Voice samples can be up to 10 MB" }, 413);
+    if (buf.byteLength > VOICE_SAMPLE_MAX) return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
     const type = sniffAudio(buf);
     if (!type) return json({ error: "Samples must be MP3, WAV, M4A, OGG or WebM audio" }, 415);
     const key = await stub.putVoiceSample(who, buf, type, room);

@@ -131,7 +131,7 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json(created, 201);
   }
   if (request.method === "DELETE") {
-    await stub.unlock();
+    await stub.revokeAll();
     return json({ room, invite_only: true });
   }
   return json({ error: "Method not allowed" }, 405);

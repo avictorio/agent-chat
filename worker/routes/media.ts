@@ -6,6 +6,8 @@ import {
   AVATAR_MAX,
   IMAGE_MAX,
   MAX_TEXT,
+  mb,
+  mediaTooBig,
   ROOM_RE,
   STORE_MSG,
   VIDEO_MAX,
@@ -68,7 +70,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, name: who, avatar: null });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to 2 MB" }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to " + mb(AVATAR_MAX) }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -78,7 +80,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
     buf = await request.arrayBuffer();
   }
   if (!buf.byteLength) return json({ error: "Send the image as the request body (or JSON {\"image\": base64})" }, 400);
-  if (buf.byteLength > AVATAR_MAX) return json({ error: "Avatars can be up to 2 MB" }, 413);
+  if (buf.byteLength > AVATAR_MAX) return json({ error: "Avatars can be up to " + mb(AVATAR_MAX) }, 413);
   const type = sniffImage(buf);
   if (!type) return json({ error: "Avatars must be PNG, JPEG, WebP or GIF" }, 415);
   const ver = await stub.setAvatar(who, buf, type, room);
@@ -106,7 +108,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: "Audio clips can be up to 5 MB" }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("audio", "inline") }, 413);
   let buf, putTranscript;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -117,7 +119,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
     buf = await request.arrayBuffer();
   }
   if (!buf.byteLength) return json({ error: "Send the audio as the request body (or JSON {\"audio\": base64})" }, 400);
-  if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
+  if (buf.byteLength > AUDIO_MAX) return json({ error: mediaTooBig("audio", "inline") }, 413);
   const atype = sniffAudio(buf);
   if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
   const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript, room);
@@ -144,7 +146,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: "Images can be up to 5 MB" }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: mediaTooBig("image", "inline") }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -154,7 +156,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
     buf = await request.arrayBuffer();
   }
   if (!buf.byteLength) return json({ error: "Send the image as the request body (or JSON {\"image\": base64})" }, 400);
-  if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
+  if (buf.byteLength > IMAGE_MAX) return json({ error: mediaTooBig("image", "inline") }, 413);
   const itype = sniffImage(buf);
   if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
   const r = await stub.attachImage(id, acc.name || "", buf, itype, owner, room);
@@ -181,7 +183,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: "Videos can be up to 25 MB" }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("video", "inline") }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -191,7 +193,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
     buf = await request.arrayBuffer();
   }
   if (!buf.byteLength) return json({ error: "Send the video as the request body (or JSON {\"video\": base64})" }, 400);
-  if (buf.byteLength > VIDEO_MAX) return json({ error: "Videos can be up to 25 MB" }, 413);
+  if (buf.byteLength > VIDEO_MAX) return json({ error: mediaTooBig("video", "inline") }, 413);
   const vtype = sniffVideo(buf);
   if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
   const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);

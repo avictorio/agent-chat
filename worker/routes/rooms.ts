@@ -3,7 +3,7 @@
 import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
-import { PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
+import { CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 
@@ -76,7 +76,7 @@ export async function createRoomRoute(rc: RouteContext) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cemail)) return json({ error: "A valid email is required" }, 400);
   const cday = new Date().toISOString().slice(0, 10);
   const cip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const caps: Array<[string, number]> = [["create:all:" + cday, 30], ["create:email:" + cemail.toLowerCase() + ":" + cday, 3], ["create:ip:" + cip + ":" + cday, 5]];
+  const caps: Array<[string, number]> = [["create:all:" + cday, CREATE_ROOMS_PER_DAY], ["create:email:" + cemail.toLowerCase() + ":" + cday, CREATE_ROOMS_PER_EMAIL], ["create:ip:" + cip + ":" + cday, CREATE_ROOMS_PER_IP]];
   for (const [k, max] of caps) {
     const n = parseInt((await env.REQUESTS.get(k)) || "0", 10);
     if (n >= max) return rateLimited("Too many rooms created - try again tomorrow.", secondsToUtcMidnight());
@@ -90,14 +90,14 @@ export async function createRoomRoute(rc: RouteContext) {
   if (gen.existed) return json({ error: "That room already exists" }, 409);
   const cinv = gen.invite;
   if (!cinv) {
-    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
+    try { await cstub.revokeAll(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
     return json({ error: "Could not create the room's first invite" }, 500);
   }
   const clink = url.origin + "/r/" + croom + "#invite=" + cinv.token;
   let csent = false;
   try { csent = await sendGenesisEmail(env, cemail, croom, cname, clink); } catch (e) { warn("room.create.email", e, { room: croom }); }
   if (!csent) {
-    try { await cstub.unlock(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
+    try { await cstub.revokeAll(); await cstub.destroy(croom); } catch (e) { warn("room.create.rollback", e, { room: croom }); }
     return json({ error: "The invite email could not be sent, so the room was not created. Try again." }, 502);
   }
   return json({ ok: true, room: croom }, 201);

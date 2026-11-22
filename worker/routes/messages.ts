@@ -7,6 +7,8 @@ import {
   IMAGE_MAX,
   KEEP,
   MAX_TEXT,
+  mediaTooBig,
+  pageTooBig,
   ROOM_RE,
   STORE_MSG,
   VIDEO_MAX,
@@ -157,7 +159,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"audio\" is empty" }, 400);
-      if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
+      if (buf.byteLength > AUDIO_MAX) return json({ error: mediaTooBig("audio", "inline") }, 413);
       const atype = sniffAudio(buf);
       if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
       const tr = body && body.transcript ? bodyText(body.transcript, "transcript").slice(0, MAX_TEXT) : null;
@@ -169,7 +171,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"image\" is empty" }, 400);
-      if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
+      if (buf.byteLength > IMAGE_MAX) return json({ error: mediaTooBig("image", "inline") }, 413);
       const itype = sniffImage(buf);
       if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
       image = { data: buf, type: itype };
@@ -180,7 +182,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       let buf;
       try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"video\" is empty" }, 400);
-      if (buf.byteLength > VIDEO_MAX) return json({ error: "Videos can be up to 25 MB" }, 413);
+      if (buf.byteLength > VIDEO_MAX) return json({ error: mediaTooBig("video", "inline") }, 413);
       const vtype = sniffVideo(buf);
       if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
       video = { data: buf, type: vtype };
@@ -191,7 +193,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (s === null) return json({ error: "\"html\" must be raw HTML text or a base64 data: URL" }, 400);
       if (!s.trim()) return json({ error: "\"html\" is empty" }, 400);
       const buf = new TextEncoder().encode(s);
-      if (buf.byteLength > HTML_MAX) return json({ error: "HTML pages can be up to 2 MB" }, 413);
+      if (buf.byteLength > HTML_MAX) return json({ error: pageTooBig("HTML pages", HTML_MAX) }, 413);
       if (!/^\s*</.test(s)) return json({ error: "HTML must be a markup document (starting with a tag or doctype)" }, 415);
       htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(body.html_name, "Page") };
     }
@@ -202,7 +204,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!s.trim()) return json({ error: "\"doc\" is empty" }, 400);
       if (s.indexOf("\u0000") >= 0) return json({ error: "\"doc\" must be text (Markdown)" }, 415);
       const buf = new TextEncoder().encode(s);
-      if (buf.byteLength > DOC_MAX) return json({ error: "Documents can be up to 1 MB" }, 413);
+      if (buf.byteLength > DOC_MAX) return json({ error: pageTooBig("Documents", DOC_MAX) }, 413);
       doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(body.doc_name, "Document.md") };
     }
     const trusted = owner;

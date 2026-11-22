@@ -4,6 +4,7 @@ import {
   AUDIO_MAX,
   IMAGE_MAX,
   MAX_TEXT,
+  mediaTooBig,
   STORE_MSG,
   STREAM_PART,
   TICKET_MAX_PER_MEMBER,
@@ -18,6 +19,7 @@ import {
   UP_SIGN_MAX,
   VIDEO_MAX,
   VIDEO_MAX_HARD,
+  VIDEO_STREAM_TOO_BIG,
   VIDEO_TYPES,
 } from "../limits.js";
 import { b64urlEncode, sha256hex } from "../lib/crypto.js";
@@ -125,7 +127,7 @@ export const UploadMethods = {
     if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The draft changed hands; open a fresh upload" };
     const kind = t.kind;
     if (!data.byteLength) return { status: 400, error: "The upload body is empty" };
-    if (data.byteLength > t.max_bytes) return { status: 413, error: kind === "image" ? "Images can be up to 5 MB" : kind === "audio" ? "Audio clips can be up to 5 MB" : "Videos can be up to 25 MB on a single-shot upload; larger files go through the upload engine (begin_upload with size)" };
+    if (data.byteLength > t.max_bytes) return { status: 413, error: mediaTooBig(kind as "image" | "audio" | "video", "single-shot") };
     const type = kind === "image" ? sniffImage(data) : kind === "audio" ? sniffAudio(data) : sniffVideo(data);
     if (!type) return { status: 415, error: kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV" };
     // Claim the ticket before the R2 write: the await lets a second PUT with
@@ -457,7 +459,7 @@ export const UploadMethods = {
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
-    if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 5 GB" };
+    if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: VIDEO_STREAM_TOO_BIG };
     const key = this.mediaKey(room, id, "video");
     const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };

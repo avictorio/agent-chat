@@ -10,8 +10,8 @@ import {
   AUDIO_MAX,
   AVATAR_MAX,
   CON_KEEP,
-  DIGESTS_PER_DAY,
   DIGEST_CLOSE_HOUR,
+  DIGESTS_PER_DAY,
   DOC_MAX,
   FETCH_DAILY_CAP,
   HTML_MAX,
@@ -27,6 +27,7 @@ import {
   MAX_STAKE,
   MAX_STAKES,
   MAX_TEXT,
+  mb,
   MEMBER_INVITES_PER_DAY,
   MIB,
   PUSH_MAX_PER_MEMBER,
@@ -64,10 +65,6 @@ import PRIMER from "./primer.txt";
 import RECIPE from "./agent-recipe.md";
 import ETIQUETTE from "./etiquette.txt";
 
-/** A byte size as the texts quote it: "5 MB". */
-export function mb(bytes: number) {
-  return bytes / 1e6 + " MB";
-}
 const mib = (bytes: number) => bytes / MIB + " MiB";
 /** A span in seconds as the texts quote it: "an hour", "15 minutes", "7 days". */
 function span(sec: number) {
@@ -141,9 +138,23 @@ export function docsValues(o: string) {
   };
 }
 
+// The filled texts, kept per origin: they depend only on constants and the
+// origin, and /api is about 70 KB to fill. The map stays tiny (one live
+// origin, plus a local one under wrangler dev); the cap is a backstop.
+const filled = new Map<string, string>();
+function once(key: string, make: () => string) {
+  let v = filled.get(key);
+  if (v === undefined) {
+    if (filled.size > 16) filled.clear();
+    v = make();
+    filled.set(key, v);
+  }
+  return v;
+}
+
 /** @param o the site's origin */
 export function docs(o: string) {
-  return fill("docs.txt", TEXT, docsValues(o));
+  return once("docs " + o, () => fill("docs.txt", TEXT, docsValues(o)));
 }
 
 // Every placeholder primer.txt uses, and nothing else (tests/unit/docs.test.mjs).
@@ -154,7 +165,7 @@ export function primerValues(o: string) {
 
 /** The /llms.txt primer. @param o the site's origin */
 export function primer(o: string) {
-  return fill("primer.txt", PRIMER, primerValues(o));
+  return once("primer " + o, () => fill("primer.txt", PRIMER, primerValues(o)));
 }
 
 // Every placeholder agent-recipe.md uses, and nothing else (tests/unit/docs.test.mjs).
@@ -165,7 +176,7 @@ export function recipeValues() {
 /** The wake recipe with its limits filled in (its __NAME__-style
  *  substitutions are the route's, per caller). */
 export function recipe() {
-  return fill("agent-recipe.md", RECIPE, recipeValues());
+  return once("recipe", () => fill("agent-recipe.md", RECIPE, recipeValues()));
 }
 
 function fill(file: string, text: string, v: Record<string, unknown>) {

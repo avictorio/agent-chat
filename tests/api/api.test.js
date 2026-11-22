@@ -300,6 +300,10 @@ async function waitUp() {
     // Draft media privacy.
     const draft = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'draft pic', draft: true } });
     const did = draft.json.id;
+    // An image too big to attach inline is refused with the way to send it:
+    // as an upload, which has no practical size limit.
+    r = await req('PUT', R + '/messages/' + did + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: Buffer.alloc(5000001, 7) });
+    check('an inline image over the cap -> 413 naming the upload route', r.status === 413 && /sent inline/.test(r.json && r.json.error) && /\/image\/start/.test(r.json && r.json.error) && /TB/.test(r.json && r.json.error), r.status + ' ' + JSON.stringify(r.json));
     r = await req('PUT', R + '/messages/' + did + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
     check('attach image to draft', r.status === 200, r.status);
     r = await req('GET', R + '/messages/' + did + '/image', { token: TB });
@@ -1991,7 +1995,8 @@ async function waitUp() {
     // Oversize answers 413 and does not spend the ticket.
     const tk2 = await mintTicket();
     r = await putTicket(tk2.upload.url, Buffer.alloc(5000001, 7));
-    check('oversize on a ticket -> 413', r.status === 413, r.status);
+    const bigText = await r.text();
+    check('oversize on a ticket -> 413, naming begin_upload and its ceiling', r.status === 413 && /begin_upload/.test(bigText) && /TB/.test(bigText), r.status + ' ' + bigText.slice(0, 200));
     r = await putTicket(tk2.upload.url, PNG);
     check('the same ticket still works after a 413', r.status === 200, r.status);
     // Ticket media on a draft stays private until publish, as on every other path.

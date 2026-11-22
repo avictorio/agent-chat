@@ -170,43 +170,14 @@ list and the optional entries), which powers the drift check in section 7.
 When a variable or secret is added or retired, update this table, the script
 and `wrangler.toml` in the same commit.
 
-### Durable Object storage (per room)
+### Storage
 
-The SQLite tables come from versioned steps (`SCHEMA_STEPS` in
-`worker/room/Room.ts`). `Room.ensureSchema()`, on wake and in `create()`,
-runs the steps a room has not run yet and counts them in `cfg`
-`schema_version`. Step 1 is the baseline, adding each column only if
-missing. Section 13, "Schema changes", has how to add one.
-
-| Table | Holds |
-|---|---|
-| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest 1000 are kept |
-| `rx` | reactions: message, emoji, who, time |
-| `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state; `upp` holds its per-part receipts. The bytes live in R2. |
-| `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
-| `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`docs/agents/media.md`) |
-| `push` | Web Push subscriptions per member |
-| `mv` | member voices: provider, voice id, the R2 key of the sample |
-| `tf` | timestamps of tool fetches (50 per 24 hours) |
-| `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
-| `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
-| (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
-
-### KV keys (`REQUESTS` namespace)
-
-- `log:<ISO time>:<random>`: activity log lines (room deletions, push
-  errors), kept for 7 days.
-- `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
-  public room-creation counters (UTC day, 48 h TTL). They count attempts,
-  incremented before the work so failures still cost quota. KV counters
-  are not atomic, so a parallel burst can overshoot a cap slightly:
-  they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
-  count as different emails; the IP and site-wide caps are the real bind.
-- `clone:<room>:<folded name>:<day>`: voice clones per member per UTC day
-  (5; the owner is not capped), 48 h TTL. Same abuse-brake caveat.
-- `asset:emoji-<sha>.json`: the web picker's emoji list, built once from
-  the pinned dataset (`EMOJI_SOURCE`).
+Each room's data is SQLite in its own `Room` Durable Object (versioned
+`SCHEMA_STEPS` in `worker/room/Room.ts`; adding one: section 13, Schema
+changes), media bytes are in R2 (`MEDIA`), and KV `REQUESTS` holds the
+counters, the emoji cache and the activity log. The object `__vapid`
+holds the Web Push VAPID keys, self-provisioned. **Never delete.** Every
+table and KV key: `docs/agents/rooms-and-api.md`, Storage.
 
 ---
 
@@ -219,8 +190,8 @@ before changing anything, and update it when you change behavior: its text is
 feature is built, and why, is in a topic file; read the one you are about to
 touch:
 
-- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push.
-- `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation.
+- `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push, and storage (the room's SQLite tables, the KV keys).
+- `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation, and the front-end conventions (effects and memos, refs, UI components, colors).
 - `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab, and the checklist for adding a game.
 - `docs/agents/media.md` - message media and drafts, the upload engine, the media shelf, message delete.
 
@@ -519,10 +490,7 @@ native-only features. The Android app is retired (section 8).
   only (no enums, namespaces or parameter properties); wrangler bundles
   them at deploy. Types come in through `import type { X } from "..."`,
   never inline `import("...").X`. Template literals are fine; older code
-  that builds strings with `+` changes only when someone works on it. The
-  front end is React + TypeScript in `web/` (`web/README.md`), built by
-  Vite: no external scripts or CDNs, everything is served from the site's
-  own origin.
+  that builds strings with `+` changes only when someone works on it.
 - **Types:** `types/` declares the runtime's modules and the Room's
   installed method objects. A Room method object ends `satisfies
   ThisType<Room>`; a game engine ends `satisfies GameEngineOf<S>`, its own
@@ -546,49 +514,12 @@ native-only features. The Android app is retired (section 8).
   when, and what it used to be go in the commit message. Dates stay only
   where they are data (a schema step, a field old rows still carry, a
   notice, a deprecation).
-- **Colors:** use CSS custom properties on `:root` (`web/app/src/ui/tokens.css`),
-  with dark values under `@media (prefers-color-scheme: dark)` and
-  `:root[data-theme="dark"]`. Light mode uses `color-scheme: only light`.
-- **UI components:** build React views from `web/app/src/ui/` (`Button`,
-  `IconButton`, `LinkButton`, `Dialog`, `NavTab`, `Count`, `Page`, `Card`,
-  `Pill`, `ErrorBoundary`, ...) rather than hand-writing their class
-  strings; each renders the plain element its CSS expects, and none adds a
-  `type` to a button. A new stylesheet goes next to what it styles and
-  into `styles.css`'s ordered `@import` list (the order is the cascade).
-  Each view, board page, dialog and feed row renders inside an
-  `ErrorBoundary`, so bad data fails that part, not the page: give a new
-  one its own.
-- **Links:** interactive elements are siblings of a link, never inside it:
-  a row is a container with the link and its buttons side by side.
-- **Refs and render:** never read or write `ref.current` during render.
-  For the latest value in a callback or effect use `useLatest(value)`
-  (`web/app/src/lib/useLatest.ts`; it is stable, list it in dependency
-  arrays); for an object made once, `useState(() => create())`. The 3D
-  scene files in `web/.oxlintrc.json`'s override are exempt from
-  `react/immutability`: react-three-fiber changes three.js objects in
-  effects and frame callbacks by design.
-- **Effects and memos:** every dependency list is complete and every
-  dependency is read, and nothing silences `react-hooks/exhaustive-deps`:
-  the React Compiler rules skip a whole component that suppresses a hooks
-  rule, so one such comment hides every other check in it. Instead, an
-  effect that acts on the latest props or state without re-running on
-  them calls a `useEffectEvent` function, passing the value that triggers
-  it (`onLand(n)`). Work keyed on values it does not read (a frame loop's
-  `settled` flag) goes in `useOnChange(inputs, fn)`; an object that keeps
-  its identity until its signature changes comes from `useStable(value,
-  key)`, not a memo keyed on the signature (both in `lib/`). State that
-  follows a prop is adjusted during render (`if (prev !== x) { setPrev(x);
-  setY(...) }`), not in an effect. `react/set-state-in-effect` may be
-  disabled on its line, with the reason, where an effect steps a state
-  machine from new server data or syncs an external system (the arenas'
-  replay steps, the push bell): that comment names one rule and does not
-  blind the compiler.
-- **3D game arenas:** before changing the arenas in
-  `web/app/src/features/games/` (every `*Arena3D.tsx`, and `arena3d.tsx`,
-  `juice.tsx`, `sfx.ts`, `atmos.tsx`, `ocean.tsx`, `ships.tsx`,
-  `fire.tsx`, `cycles.tsx`, `lcmodel.ts`), load the `immersive-3d-games`
-  skill: the design rules, the shared impact layer, the phone budget and
-  the screenshot workflow for animated scenes.
+- **Front end** (`web/app/src`): every effect and memo lists its real
+  dependencies, and nothing suppresses a React hooks rule (the React
+  Compiler then skips the whole component); views are built from the
+  `ui/` components, nothing loads from outside the site's own origin, and
+  the 3D arenas need the `immersive-3d-games` skill first. Details:
+  `docs/agents/web-app.md`, Front-end conventions.
 - **Game rules:** each game's rules live in its engine's `rules()`
   (`how_to_play`) for players, its `docs.txt` section for the pre-match
   reference, and its web catalog entry for people; keep the three in step.

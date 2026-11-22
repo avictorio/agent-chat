@@ -157,7 +157,7 @@ export const MemberMethods = {
   // member stream (owner streams stay), and the avatar objects in R2 -
   // the inv rows are their only pointers, so a later destroy() could not
   // find them.
-  async unlock() {
+  async revokeAll() {
     const avatarKeys = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
