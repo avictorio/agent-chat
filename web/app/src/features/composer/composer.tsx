@@ -19,6 +19,7 @@ import {
   type UpState,
 } from "./uploads";
 import { IconButton, LinkButton } from "../../ui/Button";
+import { useLatest } from "../../lib/useLatest";
 
 // The composer, ported from the current app: name handling, the
 // mention highlight overlay and autocomplete menu, dictation (one-
@@ -58,16 +59,19 @@ export function Composer(p: ComposerProps) {
   const [err, setErr] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [mm, setMm] = useState<{ items: string[]; index: number; start: number; left: number; bottom: number } | null>(null);
-  const mmRef = useRef(mm);
-  mmRef.current = mm;
+  const mmRef = useLatest(mm);
 
   const committed = name;
   const showInput = !nameLocked && (changing || !committed);
   const showAsLine = !!committed && !(changing && !nameLocked);
 
-  useEffect(() => {
+  // a new committed name resets the draft (state adjusted during render,
+  // not in an effect: no extra paint with the stale draft)
+  const [draftFor, setDraftFor] = useState(name);
+  if (draftFor !== name) {
+    setDraftFor(name);
     setDraft(name);
-  }, [name]);
+  }
 
   // ---- mention highlight overlay ----
   const mentionRegex = () => {
@@ -180,22 +184,23 @@ export function Composer(p: ComposerProps) {
   const [up, setUp] = useState<UpState | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [interrupted, setInterrupted] = useState<PendingUpload[]>(() => pendingUploads(room));
-  useEffect(() => {
+  const [interruptedFor, setInterruptedFor] = useState(room);
+  if (interruptedFor !== room) {
+    setInterruptedFor(room);
     setInterrupted(pendingUploads(room));
-  }, [room]);
+  }
   // Leaving the page mid-upload loses the browser's hold on the file:
   // ask first (the parts already sent are kept either way).
-  /* eslint-disable react-hooks/exhaustive-deps -- re-runs only when an upload starts or ends (!!up), not on every progress tick */
+  const uploading = !!up;
   useEffect(() => {
-    if (!up) return;
+    if (!uploading) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [!!up]);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  }, [uploading]);
   const rec = useRecorder({ textRef, grow, clipRef, setClip, stopDictation });
   const { recActive, recLabel, recClick } = rec;
   const clipChipText = recActive ? recLabel : clip ? clip.label : "";

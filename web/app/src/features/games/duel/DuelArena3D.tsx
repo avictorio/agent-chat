@@ -43,7 +43,8 @@
    once on its title card, sound and buzz. The throw pad, the verdict
    banner and the scoreboard stay in the DOM: the scene shows, the page
    acts. */
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useStable } from "../../../lib/useStable";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls, Sparkles } from "@react-three/drei";
 import {
@@ -296,8 +297,8 @@ function Paper({ hex, fx }: { hex: string; fx: Fx }) {
   });
   return (
     <group rotation={[0.12, 0.35, -0.1]}>
-      {[L, R].map((ref, i) => (
-        <group key={i} ref={ref}>
+      {[0, 1].map((i) => (
+        <group key={i} ref={i ? R : L}>
           <mesh geometry={halves[i]}>
             <meshStandardMaterial
               ref={(m) => {
@@ -667,43 +668,46 @@ function streakIn(rounds: DuelRound[], name: string): number {
   return n;
 }
 
+/* The record strip: one column per round, both throws, the winner underlined. */
+function recordTex(rounds: DuelRound[], L: Side, R: Side): { t: CanvasTexture; n: number } {
+  const n = Math.max(1, rounds.length);
+  const cw = 72;
+  const ch = 140;
+  const c = document.createElement("canvas");
+  c.width = cw * n;
+  c.height = ch;
+  const x = c.getContext("2d")!;
+  rounds.forEach((r, i) => {
+    const cx = i * cw + cw / 2;
+    const rows: [Side, number][] = [
+      [L, 36],
+      [R, 100],
+    ];
+    rows.forEach(([s, cy]) => {
+      const t = (r.throws || {})[s.name] || null;
+      const won = r.winner === s.name;
+      const tie = !r.winner;
+      x.globalAlpha = won ? 1 : tie ? 0.6 : 0.3;
+      drawThrow(x, t, cx, cy, 20, s.hex);
+      if (won) {
+        x.globalAlpha = 1;
+        x.fillStyle = s.hex;
+        x.fillRect(cx - 18, cy + 25, 36, 4);
+      }
+    });
+    x.globalAlpha = 0.25;
+    x.fillStyle = "#c4b5fd";
+    if (i) x.fillRect(i * cw, 14, 2, ch - 28);
+  });
+  const t = new CanvasTexture(c);
+  return { t, n };
+}
+
 function Record({ rounds, sides, phone }: { rounds: DuelRound[]; sides: Side[]; phone: boolean }) {
   const [L, R] = sides as [Side, Side];
-  const sig = rounds.map((r) => (r.throws ? (r.throws[L.name] || "-") + (r.throws[R.name] || "-") : "--") + (r.winner || "=")).join("|") + L.hex + R.hex;
-  const tex = useMemo(() => {
-    const n = Math.max(1, rounds.length);
-    const cw = 72;
-    const ch = 140;
-    const c = document.createElement("canvas");
-    c.width = cw * n;
-    c.height = ch;
-    const x = c.getContext("2d")!;
-    rounds.forEach((r, i) => {
-      const cx = i * cw + cw / 2;
-      const rows: [Side, number][] = [
-        [L, 36],
-        [R, 100],
-      ];
-      rows.forEach(([s, cy]) => {
-        const t = (r.throws || {})[s.name] || null;
-        const won = r.winner === s.name;
-        const tie = !r.winner;
-        x.globalAlpha = won ? 1 : tie ? 0.6 : 0.3;
-        drawThrow(x, t, cx, cy, 20, s.hex);
-        if (won) {
-          x.globalAlpha = 1;
-          x.fillStyle = s.hex;
-          x.fillRect(cx - 18, cy + 25, 36, 4);
-        }
-      });
-      x.globalAlpha = 0.25;
-      x.fillStyle = "#c4b5fd";
-      if (i) x.fillRect(i * cw, 14, 2, ch - 28);
-    });
-    const t = new CanvasTexture(c);
-    return { t, n };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
+  // redrawn only when a round or a colour changes, not on every re-render
+  const src = useStable({ rounds, L, R }, rounds.map((r) => (r.throws ? (r.throws[L.name] || "-") + (r.throws[R.name] || "-") : "--") + (r.winner || "=")).join("|") + L.hex + R.hex);
+  const tex = useMemo(() => recordTex(src.rounds, src.L, src.R), [src]);
   useEffect(() => () => tex.t.dispose(), [tex]);
   if (!rounds.length || sides.length < 2) return null;
   const cell = phone ? 0.62 : 0.5;
@@ -772,12 +776,13 @@ function Reveal({
   const iWon = !!winner && winner.toLowerCase() === meL;
   const full = item.mode === "full";
   const plan = useMemo(() => planFor(item.mode, forfeit, !!final), [item.mode, forfeit, final]);
-  const fxL = useMemo(newFx, []);
-  const fxR = useMemo(newFx, []);
+  const [fxL] = useState(newFx);
+  const [fxR] = useState(newFx);
   const a = useRef<Group>(null);
   const b = useRef<Group>(null);
-  const [beat, setBeat] = useState<"count" | "flip" | "contact" | "ko">("count");
-  const fired = useRef<Set<string>>(new Set());
+  // a skipped item starts at the verdict: the flight's beats are spent silently
+  const [beat, setBeat] = useState<"count" | "flip" | "contact" | "ko">(() => (item.skip ? "contact" : "count"));
+  const fired = useRef<Set<string>>(new Set(item.skip ? ["count", "flip", "contact"] : []));
   const pushed = useRef(false);
   const once = (k: string, fn: () => void) => {
     if (fired.current.has(k)) return;
@@ -802,14 +807,14 @@ function Reveal({
     return d < 0.12 * Math.hypot(h.pos[0], h.pos[1], h.pos[2]);
   };
 
-  useEffect(() => {
+  // The reveal's timeline starts when it mounts (each item mounts its
+  // own) and is handed back when it unmounts.
+  const begin = useEffectEvent(() => {
     if (!rv.current) return;
     rv.current.plan = plan;
     rv.current.absent = absentSide ? absentSide.name : null;
     if (item.skip) {
-      // straight to the verdict: the flight's beats are spent silently
-      ["count", "flip", "contact"].forEach((k) => fired.current.add(k));
-      setBeat("contact");
+      // straight to the verdict (the beats were marked spent up front)
       rv.current.t0 = j.t - plan.verdict;
     } else {
       rv.current.t0 = j.t;
@@ -818,32 +823,36 @@ function Reveal({
         lean(matchPoint ? 0.8 : 0.88);
       }
     }
-    /* eslint-disable react-hooks/exhaustive-deps -- the cleanup resets these refs' values as they stand when it runs, on purpose */
-    return () => {
-      if (rv.current) {
-        rv.current.t0 = null;
-        rv.current.plan = null;
-        rv.current.absent = null;
-      }
-      if (pushed.current) {
-        const h = homeRef.current;
-        if (h) goHome(ctl, h, !j.still);
-      }
-    };
-    /* eslint-enable react-hooks/exhaustive-deps */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  const end = useEffectEvent(() => {
+    if (rv.current) {
+      rv.current.t0 = null;
+      rv.current.plan = null;
+      rv.current.absent = null;
+    }
+    if (pushed.current) {
+      const h = homeRef.current;
+      if (h) goHome(ctl, h, !j.still);
+    }
+  });
+  useEffect(() => {
+    begin();
+    return () => end();
   }, []);
 
   /* Skips arriving mid-reveal (a tap) jump to the verdict. */
-  useEffect(() => {
-    if (!item.skip || !rv.current || rv.current.t0 === null) return;
+  const skipToVerdict = useEffectEvent(() => {
+    if (!rv.current || rv.current.t0 === null) return;
     const e = j.t - rv.current.t0;
     if (e < plan.verdict) {
       ["count", "flip", "contact"].forEach((k) => fired.current.add(k));
       setBeat("contact");
       rv.current.t0 = j.t - plan.verdict;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- a skip tap mid-reveal jumps the timeline to the verdict, measured on the juice clock
+    if (item.skip) skipToVerdict();
   }, [item.skip]);
 
   const matchupSound = (): SfxName[] => {
@@ -1245,10 +1254,10 @@ export default function DuelArena3D({
   }, [ready, go, firstVisit, still]);
 
   // Remember what this viewer has seen.
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, { n: shown, end: endShown && finished });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, endShown, finished]);
+    writeSeen(seenId, { n: shown, end: endShown && finished });
+  }, [seenId, shown, endShown, finished]);
 
   /* Your throw, sealed the moment you tap it (games.ts calls this
      before the request); the server's answer replaces it. */
@@ -1262,15 +1271,14 @@ export default function DuelArena3D({
     return () => registerCommit(null);
   }, [registerCommit, juice, rounds.length]);
   const queued: string | null = (g && g.you && g.you.queued) || null;
+  // the sealed throw clears once the server has it (or the round moved on),
+  // else after 8 s
+  if (pending && (queued === pending.t || rounds.length !== pending.round)) setPending(null);
   useEffect(() => {
     if (!pending) return;
-    if (queued === pending.t || rounds.length !== pending.round) {
-      setPending(null);
-      return;
-    }
     const t = setTimeout(() => setPending(null), 8000);
     return () => clearTimeout(t);
-  }, [pending, queued, rounds.length]);
+  }, [pending]);
 
   const revealing = !!current;
   const shownRounds = rounds.slice(0, shown);
@@ -1313,10 +1321,10 @@ export default function DuelArena3D({
      time) says so at once. */
   const prev = useRef({ n: rounds.length, finished });
   const [say, setSay] = useState("");
-  useEffect(() => {
-    const n = rounds.length;
+  const onRounds = useEffectEvent((count: number, over: boolean) => {
+    const n = count;
     const was = prev.current;
-    prev.current = { n, finished };
+    prev.current = { n, finished: over };
     if (n > was.n) {
       const r = rounds[n - 1]!;
       const final = finished && winner ? { winner } : null;
@@ -1361,7 +1369,10 @@ export default function DuelArena3D({
       juice.hit({ title: winner ? { big: winner + " wins", small: "Nobody threw in time · " + realScore, tone: winner.toLowerCase() === meL ? "good" : "neutral" } : { big: "Match over", small: "Nobody threw in time", tone: "neutral" } });
       setSay("The match is over" + (winner ? ": " + winner + " wins." : "."));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server queue their reveals (reduced motion lands them at once, with sound and buzz)
+    onRounds(rounds.length, finished);
   }, [rounds.length, finished]);
 
   /* A rival locking in, seen live: a click and a pop (your own lock

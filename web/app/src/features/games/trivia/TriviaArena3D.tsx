@@ -15,7 +15,7 @@
    adds the ceremony from the viewer's seat. Catch-up: the rounds seen are
    remembered per game (localStorage) and the latest unseen round replays
    on open (a tap skips); reduced motion lands it at once. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, Object3D, SRGBColorSpace, type InstancedMesh, type MeshStandardMaterial } from "three";
@@ -24,6 +24,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 import type { TriviaPlayer, TriviaRound, TriviaState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -278,9 +279,9 @@ function Chips({ seats, chips, still }: { seats: Seat[]; chips: number[]; still:
   const cur = useRef<number[]>(chips.slice());
   const lastT = useRef<number | null>(null);
   const dirty = useRef(true);
-  useEffect(() => {
+  useOnChange([chips, seats], () => {
     dirty.current = true;
-  }, [chips, seats]);
+  });
   useFrame((state) => {
     const m = ref.current;
     if (!m) return;
@@ -483,21 +484,22 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
     if (isLast(k) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onFinish = useEffectEvent(finish);
   useEffect(() => {
     if (!go || playing) return;
     const R = rounds.length;
     if (R <= shown) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: a live gap places all but the latest at once
     if (R - shown > 1) setShown(R - 1);
     const rd = rounds[R - 1];
-    if (still || (rd && rd.forfeit)) finish(R, false);
+    if (still || (rd && rd.forfeit)) onFinish(R, false);
     else setPlaying({ n: R, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [go, playing, rounds.length, shown, still]);
+  }, [go, playing, rounds, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) finish(playing.n, true);
@@ -536,15 +538,15 @@ export default function TriviaArena3D({ g, me = "", aspect, onReady, registerCom
   // the screen
   const asker = playRound ? playRound.asker : g.status === "running" ? g.asker : null;
   const accent = (seats.find((s) => s.name === asker) || { hex: "#c084fc" }).hex;
+  const answerUp = beat >= 0;
   const screen = useMemo(() => {
-    if (playRound && beat >= 0) return screenTex("Round " + playRound.n + " · " + playRound.asker + " asked", playRound.question || "", "ANSWER: " + String(playRound.answer || "").toUpperCase(), "#facc15");
+    if (playRound && answerUp) return screenTex("Round " + playRound.n + " · " + playRound.asker + " asked", playRound.question || "", "ANSWER: " + String(playRound.answer || "").toUpperCase(), "#facc15");
     if (playRound) return screenTex("Round " + playRound.n + " · " + playRound.asker + " asks", playRound.question || "", "", accent);
     if (g.status === "running") return screenTex("Round " + g.round + " of " + g.rounds_total + " · " + (g.asker || "") + " asks", g.question || (g.asker || "The quizmaster") + " is writing a question…", g.phase === "judge" ? "JUDGING…" : "", accent);
     const last = rounds[rounds.length - 1];
     if (finished) return screenTex("Final", g.winner ? g.winner + " wins" : "A tie at the top", last && !last.forfeit ? "LAST ANSWER: " + String(last.answer).toUpperCase() : "", "#facc15");
     return screenTex("Trivia", "Waiting for everyone to take their seat", "", accent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playRound, beat >= 0, g.status, g.round, g.question, g.asker, g.phase, finished, g.winner, accent]);
+  }, [playRound, answerUp, g.status, g.round, g.rounds_total, g.question, g.asker, g.phase, rounds, finished, g.winner, accent]);
 
   const cards: Record<string, { text: string; sub: string; tone: string } | null> = {};
   if (playRound) {

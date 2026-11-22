@@ -16,7 +16,7 @@
    seat. Catch-up: the rounds seen are remembered per game (localStorage)
    and the latest unseen round replays on open (a tap skips); reduced
    motion lands it at once with its title and sound. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, CurvePath, LineCurve3, Object3D, SRGBColorSpace, TubeGeometry, Vector3, type InstancedMesh, type Mesh, type MeshStandardMaterial } from "three";
@@ -25,6 +25,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 import type { LetterGridPlayer, LetterGridRound, LetterGridState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -183,9 +184,9 @@ function Tiles({
     return m;
   }, [seats]);
   const dirty = useRef(true);
-  useEffect(() => {
+  useOnChange([owners, draft, pulses, hover, seats], () => {
     dirty.current = true;
-  }, [owners, draft, pulses, hover, seats]);
+  });
   useFrame((state) => {
     const a = tiles.current;
     const h = halos.current;
@@ -505,20 +506,21 @@ export default function LetterArena3D({
     if (isLast(k) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onFinish = useEffectEvent(finish);
   useEffect(() => {
     if (!go || playing) return;
     const R = rounds.length;
     if (R <= shown) return;
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: a live gap places all but the latest at once
     if (R - shown > 1) setShown(R - 1);
-    if (still) finish(R, false);
+    if (still) onFinish(R, false);
     else setPlaying({ n: R, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) finish(playing.n, true);

@@ -27,7 +27,7 @@
    latest unseen round replays on open; under reduced motion a round
    lands at once with its title. The guess input and the full record
    stay in the page: the scene shows, the page acts. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, Object3D, SRGBColorSpace, type Group, type InstancedMesh, type Mesh, type MeshStandardMaterial } from "three";
@@ -36,6 +36,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, HorizonGrid, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 import type { CodeRaceColor, CodeRaceFeedback, CodeRacePlayer, CodeRaceRound, CodeRaceState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -218,21 +219,23 @@ function LedgerBoard({ g, rows, pal }: { g: CodeRaceState; rows: LedgerRow[]; pa
 
 /* ---------- the vault ---------- */
 
+/** the secret as single pegs or letters (null until it is revealed) */
+function secretOf(g: Pick<CodeRaceState, "secret" | "mode">): string[] | null {
+  return g.secret == null ? null : g.mode === "words" ? String(g.secret).split("") : (g.secret as string[]);
+}
 function Vault({ g, open, still, pal }: { g: CodeRaceState; open: number; still: boolean; pal: Record<string, string> }) {
   const len = g.length || 4;
   const j = useJuice();
   const rings = useRef<(Group | null)[]>([]);
   const mats = useRef<(MeshStandardMaterial | null)[]>([]);
-  const secret: string[] | null = g.secret == null ? null : g.mode === "words" ? String(g.secret).split("") : (g.secret as string[]);
-  const ringCols = useMemo(
-    () =>
-      Array.from({ length: len }, (_, i) => {
-        if (!secret) return new Color("#7c3aed");
-        return new Color(g.mode === "words" ? "#22c55e" : pal[secret[i] || ""] || "#c084fc");
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [len, secret && secret.join(""), g.mode]
-  );
+  const secret = secretOf(g);
+  const ringCols = useMemo(() => {
+    const code = secretOf({ secret: g.secret, mode: g.mode });
+    return Array.from({ length: len }, (_, i) => {
+      if (!code) return new Color("#7c3aed");
+      return new Color(g.mode === "words" ? "#22c55e" : pal[code[i] || ""] || "#c084fc");
+    });
+  }, [len, g.secret, g.mode, pal]);
   useFrame((state) => {
     let moving = false;
     for (let i = 0; i < len; i++) {
@@ -347,9 +350,9 @@ function Tumblers({
   const c = useMemo(() => new Color(), []);
   const len = g.length || 4;
   const settled = useRef(false);
-  useEffect(() => {
+  useOnChange([from, to, t0, racers, still], () => {
     settled.current = false;
-  }, [from, to, t0, racers, still]);
+  });
   useFrame((state) => {
     const a = discs.current;
     const b = rings.current;
@@ -770,22 +773,23 @@ export default function CodeRaceArena3D({
     }
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the vault opens once the replay has caught up with a finished race
       if (finished && open < 1 && n === shown) setOpen(1);
       return;
     }
-    if (still) land(n, false);
+    if (still) onLand(n, false);
     else setPlaying({ n, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [go, playing, rounds.length, shown, still]);
+  }, [go, playing, rounds.length, shown, still, finished, open]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -831,8 +835,7 @@ export default function CodeRaceArena3D({
       m[r.name] = states(g, l.fb);
     });
     return m;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, racers, fieldN, len]);
+  }, [g, racers, fieldN]);
   const playingRound = playing ? rounds[playing.n - 1] : null;
   const spinning = useMemo(() => {
     const m: Record<string, boolean> = {};

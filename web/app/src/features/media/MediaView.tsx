@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "@chat/contract";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import { rel } from "../../lib/dates";
@@ -7,6 +7,8 @@ import { md } from "../feed/markdown";
 import { Icon as I } from "../../ui/Icon";
 import { fmtBytes as fmtSize } from "../composer/uploads";
 import { Button } from "../../ui/Button";
+import { useLatest } from "../../lib/useLatest";
+import { useOnChange } from "../../lib/useOnChange";
 
 // The room's attachments as a browsable shelf: every photo, video,
 // clip and file shared in the room, newest first, filterable by
@@ -68,14 +70,17 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
   // A callback ref: the sentinel unmounts on an empty result and comes
   // back later, and the observer must follow the element it watches.
   const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
+  // the listing's latest inputs, for the fetch (which also marks a load
+  // as started here at once, before React re-renders)
   const stateRef = useRef({ group, sender, cursor, loading });
-  stateRef.current = { group, sender, cursor, loading };
+  useLayoutEffect(() => {
+    stateRef.current = { group, sender, cursor, loading };
+  });
   // Each listing request takes a number; only the newest one may land,
   // so a filter tap mid-load replaces the load instead of being dropped.
   const seqRef = useRef(0);
   const lastFetchRef = useRef(0);
-  const memberSetRef = useRef(memberSet);
-  memberSetRef.current = memberSet;
+  const memberSetRef = useLatest(memberSet);
 
   const fetchPage = useCallback(
     async (before: string | null, replace: boolean) => {
@@ -111,23 +116,23 @@ export function MediaView({ active, onJump }: { active: boolean; onJump: (id: nu
 
   // First load on activation; a quiet refresh when the shelf is
   // reopened after a while (new shares land here, not in a stream).
-  useEffect(() => {
-    if (!active) return;
+  const onActivate = useEffectEvent(() => {
     if (!loaded || Date.now() - lastFetchRef.current > 30000) void fetchPage(null, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (active) onActivate();
   }, [active]);
 
   // Filter changes restart the listing - but only once the shelf has
   // been opened, so entering a room never fetches it speculatively.
   const firstFilterRun = useRef(true);
-  useEffect(() => {
+  useOnChange([group, sender], () => {
     if (firstFilterRun.current) {
       firstFilterRun.current = false;
       return;
     }
     if (loaded || active) void fetchPage(null, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, sender]);
+  });
 
   // Infinite scroll: the sentinel sits after the grid.
   useEffect(() => {

@@ -13,7 +13,7 @@
    The transient effects run on the juice clock (juice.tsx), so they
    freeze in a hit-stop and crawl in slow motion with everything else,
    and request frames while they run (frameloop "demand"). */
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { AdditiveBlending, BackSide, CanvasTexture, Color, DoubleSide, Group, InstancedMesh, Mesh, Object3D, ShaderMaterial, Vector3, type MeshBasicMaterial } from "three";
 import { useJuice } from "./juice";
@@ -245,7 +245,9 @@ export function HorizonGrid({
   y?: number;
 }) {
   const j = useJuice();
-  const mat = useMemo(
+  // made once from the first props; the layout effect below follows the
+  // ones that move (fade, hole and line are fixed per scene)
+  const [mat] = useState(
     () =>
       new ShaderMaterial({
         vertexShader: GRID_V,
@@ -264,19 +266,17 @@ export function HorizonGrid({
           uA: { value: new Color(a) },
           uB: { value: new Color(b) },
         },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+      })
   );
-  /* eslint-disable react-hooks/exhaustive-deps -- keyed on the vectors' numbers, not the arrays rebuilt each render */
+  const [hx, hz] = half;
+  const [ox, oz] = off;
   useLayoutEffect(() => {
-    mat.uniforms.uHalf!.value = half;
-    mat.uniforms.uOff!.value = off;
+    mat.uniforms.uHalf!.value = [hx, hz];
+    mat.uniforms.uOff!.value = [ox, oz];
     mat.uniforms.uCell!.value = cell;
     (mat.uniforms.uA!.value as Color).set(a);
     (mat.uniforms.uB!.value as Color).set(b);
-  }, [mat, half[0], half[1], off[0], off[1], cell, a, b]);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  }, [mat, hx, hz, ox, oz, cell, a, b]);
   useFrame(() => {
     if (!j.still) mat.uniforms.uTime!.value = j.t;
   });
@@ -311,22 +311,20 @@ export function Burst({ at, hex, box = [1.6, 0.8, 0.5], count = 70, power = 2.6,
   const ref = useRef<InstancedMesh>(null);
   const t0 = useRef<number | null>(null);
   const done = useRef(false);
-  const parts = useMemo(
-    () =>
-      Array.from({ length: count }, () => {
-        const p = [(Math.random() - 0.5) * box[0], Math.random() * box[1], (Math.random() - 0.5) * box[2]] as const;
-        const len = Math.hypot(p[0], p[2]) || 1;
-        const sp = power * (0.35 + Math.random() * 0.9);
-        return {
-          p,
-          v: [(p[0] / len) * sp + (Math.random() - 0.5) * sp, (0.6 + Math.random() * 1.6) * rise * power * 0.6, (p[2] / len) * sp + (Math.random() - 0.5) * sp] as const,
-          s: piece * (0.6 + Math.random() * 0.9),
-          r: [Math.random() * 6, Math.random() * 6] as const,
-          life: 0.55 + Math.random() * 0.45,
-        };
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+  // scattered once, when the burst mounts (a burst is short-lived and keyed)
+  const [parts] = useState(() =>
+    Array.from({ length: count }, () => {
+      const p = [(Math.random() - 0.5) * box[0], Math.random() * box[1], (Math.random() - 0.5) * box[2]] as const;
+      const len = Math.hypot(p[0], p[2]) || 1;
+      const sp = power * (0.35 + Math.random() * 0.9);
+      return {
+        p,
+        v: [(p[0] / len) * sp + (Math.random() - 0.5) * sp, (0.6 + Math.random() * 1.6) * rise * power * 0.6, (p[2] / len) * sp + (Math.random() - 0.5) * sp] as const,
+        s: piece * (0.6 + Math.random() * 0.9),
+        r: [Math.random() * 6, Math.random() * 6] as const,
+        life: 0.55 + Math.random() * 0.45,
+      };
+    })
   );
   const color = useMemo(() => new Color(hex).multiplyScalar(2.6), [hex]);
   useFrame((state) => {

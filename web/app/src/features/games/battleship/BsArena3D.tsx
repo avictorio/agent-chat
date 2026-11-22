@@ -14,7 +14,7 @@
    never render. Shot animations replay from last_move diffs and are
    presentation only. Mounted by games.ts through a dynamic import so
    three.js stays in the lazy chunk. */
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
   ArenaFrame,
@@ -70,6 +70,7 @@ import type {
   BattleshipSunkShip,
   BattleshipTarget,
 } from "@chat/contract";
+import { useStable } from "../../../lib/useStable";
 
 const GRID_C = "#22d3ee";
 
@@ -184,6 +185,16 @@ function textScale(tex: CanvasTexture, height: number): [number, number, number]
 type GlowSpec = { x: number; y: number; z: number; r: number; a: number };
 type Spot = { x: number; z: number; hex?: string };
 
+/* Cells already fired at on an ocean, and what they are. */
+function takenOf(t: TileT | undefined): Map<string, string> {
+  const m = new Map<string, string>();
+  if (t) {
+    t.water.forEach((x) => m.set(x.label, x.result === "hit" ? "a hit" : "a miss"));
+    t.ships.forEach((s) => s.cells.forEach((c) => m.set(c, "a sunk ship")));
+  }
+  return m;
+}
+
 const _o = new Object3D();
 const _c = new Color();
 const FLAT = new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0));
@@ -193,11 +204,12 @@ const FLAT = new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0));
 function GlowField({ glows }: { glows: GlowSpec[] }) {
   const ref = useRef<InstancedMesh>(null);
   const n = glows.length;
-  const sig = glows.map((g) => g.x.toFixed(2) + "," + g.z.toFixed(2) + "," + g.r + "," + g.a).join("|");
+  // the same pools on a re-render keep their identity: no rewrite
+  const list = useStable(glows, glows.map((g) => g.x.toFixed(2) + "," + g.z.toFixed(2) + "," + g.r + "," + g.a).join("|"));
   useLayoutEffect(() => {
     const m = ref.current;
     if (!m) return;
-    glows.forEach((g, i) => {
+    list.forEach((g, i) => {
       _o.position.set(g.x, g.y, g.z);
       _o.quaternion.copy(FLAT);
       _o.scale.set(g.r, g.r, 1);
@@ -207,8 +219,7 @@ function GlowField({ glows }: { glows: GlowSpec[] }) {
     });
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
+  }, [list]);
   if (!n) return null;
   return (
     <instancedMesh key={"g" + n} ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
@@ -234,11 +245,11 @@ function FlatField({
 }) {
   const ref = useRef<InstancedMesh>(null);
   const n = spots.length;
-  const sig = spots.map((p) => p.x.toFixed(2) + "," + p.z.toFixed(2) + (p.hex || "")).join("|");
+  const list = useStable(spots, spots.map((p) => p.x.toFixed(2) + "," + p.z.toFixed(2) + (p.hex || "")).join("|"));
   useLayoutEffect(() => {
     const m = ref.current;
     if (!m) return;
-    spots.forEach((p, i) => {
+    list.forEach((p, i) => {
       _o.position.set(p.x, y, p.z);
       _o.quaternion.copy(FLAT);
       _o.scale.set(1, 1, 1);
@@ -248,8 +259,7 @@ function FlatField({
     });
     m.instanceMatrix.needsUpdate = true;
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, y]);
+  }, [list, y]);
   if (!n) return null;
   return (
     <instancedMesh key={geometry + n} ref={ref} args={[undefined, undefined, n]} frustumCulled={false}>
@@ -1161,7 +1171,10 @@ function Scene({
   // calm water over each shown board (and its labels)
   ocean.calms = tiles.map((t) => ({ x: t.cx, z: t.cz, hw: w / 2 + 0.7, hh: h / 2 + 0.7 }));
 
-  useEffect(() => {
+  // A new game state stages its effects: fresh wrecks start to burn, a
+  // new shot flies (or lands at once under reduced motion), a finish
+  // gets its title. Reads the rest of the scene as it is now.
+  const onGame = useEffectEvent((game: BattleshipState, boards: TileT[]) => {
     const fresh: Record<string, number> = {};
     let any = false;
     wreckKeys.forEach((k) => {
@@ -1172,7 +1185,7 @@ function Scene({
       }
     });
     if (any) setFreshWrecks((f) => ({ ...f, ...fresh }));
-    const status = String(g.status || "");
+    const status = String(game.status || "");
     if (seenLm.current === null) {
       seenLm.current = lmKey;
       seenStatus.current = status;
@@ -1184,11 +1197,11 @@ function Scene({
     if (lmKey && lmKey !== seenLm.current) {
       seenLm.current = lmKey;
       shot = true;
-      const target = shotTarget(lm!, g);
-      const tt = tiles.filter((t) => t.name === target)[0];
+      const target = shotTarget(lm!, game);
+      const tt = boards.filter((t) => t.name === target)[0];
       const ship = tt && lm!.sunk ? tt.ships.filter((sh) => sh.cells.includes(lm!.cell))[0] : undefined;
       // a free-for-all captain knocked out by this shot
-      const out = !!(lm!.sunk && ((g.eliminated || []) as string[]).some((n) => String(n).toLowerCase() === target.toLowerCase()));
+      const out = !!(lm!.sunk && ((game.eliminated || []) as string[]).some((n) => String(n).toLowerCase() === target.toLowerCase()));
       const imp = shotImpact(lm!, me, target, ship ? SHIP_NAME(ship.size, ship.variant) : lm!.sunk ? SHIP_NAME(lm!.sunk, 0) : "", ended, out);
       let sink: Sink | null = null;
       if (tt && ship) {
@@ -1207,17 +1220,20 @@ function Scene({
       } else juice.hit(imp);
     }
     if (ended) {
-      const winner = String(g.winner || "");
+      const winner = String(game.winner || "");
       const meL = (me || "").toLowerCase();
       const delay = shot && !still ? 2600 : 0;
-      const players = (g.players || []).map((p: BattleshipPlayer) => String(p.name).toLowerCase());
+      const players = (game.players || []).map((p: BattleshipPlayer) => String(p.name).toLowerCase());
       if (winner && winner.toLowerCase() === meL)
         juice.hit({ sound: "win", soundDelay: delay / 1000, title: { big: "Victory", small: "Enemy fleet destroyed", tone: "good" }, titleDelay: delay });
       else if (winner && players.includes(meL))
         juice.hit({ sound: "lose", soundDelay: delay / 1000, title: { big: "Fleet lost", small: winner + " wins", tone: "bad" }, titleDelay: delay });
       else if (winner) juice.hit({ sound: "win", soundDelay: delay / 1000, title: { big: winner + " wins", small: "Fleet destroyed", tone: "neutral" }, titleDelay: delay });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- a new game state from the server stages the shot, the sinking and the fresh wrecks
+    onGame(g, tiles);
   }, [g, tiles]);
 
   /* The ocean a captain aims at - the enemy's (a free-for-all: the
@@ -1599,15 +1615,6 @@ export default function BsArena3D({
   const [target, setTarget] = useState<string | null>(null);
   const foe = rivals.filter((t) => t.name === target)[0] || rivals[0];
   const canFire = !!(foe && foe.canFire);
-  /* Cells already fired at on an ocean, and what they are. */
-  const takenOf = (t: TileT | undefined) => {
-    const m = new Map<string, string>();
-    if (t) {
-      t.water.forEach((x) => m.set(x.label, x.result === "hit" ? "a hit" : "a miss"));
-      t.ships.forEach((s) => s.cells.forEach((c) => m.set(c, "a sunk ship")));
-    }
-    return m;
-  };
   const taken = useMemo(() => takenOf(foe), [foe]);
   const [aim, setAim] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -1631,12 +1638,14 @@ export default function BsArena3D({
      render, so the scene sees the right ocean on the shot's frame. */
   const lmK = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
   const [prevLm, setPrevLm] = useState(lmK);
-  const [landing, setLanding] = useState<number | null>(null);
+  // the ocean a new shot holds the view on, and which shot (a second
+  // shot into the same ocean restarts the hold)
+  const [landing, setLanding] = useState<{ idx: number; shot: string } | null>(null);
   const [manualIdx, setManualIdx] = useState<number | null>(null);
   if (prevLm !== lmK) {
     setPrevLm(lmK);
     if (lmK) {
-      setLanding(lastShotIdx);
+      setLanding({ idx: lastShotIdx, shot: lmK });
       // a new shot ends a manual peek: the view goes where the shell lands
       // (a spectator's choice used to stick for the rest of the view)
       setManualIdx(null);
@@ -1647,13 +1656,16 @@ export default function BsArena3D({
     // long enough for the shell, a sinking and its slow motion
     const t = setTimeout(() => setLanding(null), 4600);
     return () => clearTimeout(t);
-  }, [landing, lmK]);
-  const autoIdx = landing !== null ? landing : player ? (canFire ? foeIdx : 0) : lastShotIdx;
-  useEffect(() => {
+  }, [landing]);
+  const autoIdx = landing !== null ? landing.idx : player ? (canFire ? foeIdx : 0) : lastShotIdx;
+  // the turn moving on ends a manual peek too
+  const [prevFire, setPrevFire] = useState(canFire);
+  if (prevFire !== canFire) {
+    setPrevFire(canFire);
     setManualIdx(null);
-  }, [canFire]);
+  }
   // the landing hold wins over a manual pick: the shot must be seen
-  const shownIdx = Math.min(tiles.length - 1, landing !== null ? landing : manualIdx ?? autoIdx);
+  const shownIdx = Math.min(tiles.length - 1, landing !== null ? landing.idx : manualIdx ?? autoIdx);
   const shownTile = tiles[shownIdx];
   const shown = useMemo(() => {
     if (!single) return tiles;
@@ -1672,9 +1684,7 @@ export default function BsArena3D({
   /* The in-flight marker clears when the shot lands in state, when
      the turn moves on, or after 10 s (a refused shot changes nothing
      in state; its error shows in the arena's note). */
-  useEffect(() => {
-    if (pending && (taken.has(pending) || !canFire)) setPending(null);
-  }, [taken, canFire, pending]);
+  if (pending && (taken.has(pending) || !canFire)) setPending(null);
   useEffect(() => {
     if (!pending) return;
     const t = setTimeout(() => setPending(null), 10000);
@@ -1683,23 +1693,17 @@ export default function BsArena3D({
 
   /* Spoken updates for screen readers: each new shot, and the start
      of your turn. Nothing is announced for the state at open. */
-  const lmKey = lm ? lm.turn + ":" + lm.by + ":" + lm.cell : "";
-  const seen = useRef<{ lm: string; turn: boolean } | null>(null);
-  useEffect(() => {
-    if (!seen.current) {
-      seen.current = { lm: lmKey, turn: canFire };
-      return;
-    }
+  const [heard, setHeard] = useState({ lm: lmK, turn: canFire });
+  if (heard.lm !== lmK || heard.turn !== canFire) {
     const parts: string[] = [];
-    if (lm && lmKey && lmKey !== seen.current.lm)
+    if (lm && lmK && lmK !== heard.lm)
       parts.push(
         lm.by + " fired at " + (ffa ? shotTarget(lm, g) + "'s " : "") + lm.cell + ": " + (lm.result === "hit" ? (lm.sunk ? "hit, and a " + lm.sunk + "-ship sank" : "hit") : "miss") + "."
       );
-    if (canFire && !seen.current.turn) parts.push("Your shot.");
-    seen.current = { lm: lmKey, turn: canFire };
+    if (canFire && !heard.turn) parts.push("Your shot.");
+    setHeard({ lm: lmK, turn: canFire });
     if (parts.length) setSay(parts.join(" "));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lmKey, canFire]);
+  }
 
   const where = (t: TileT | undefined, label: string) => (ffa && t ? t.name + "'s " : "") + label;
   const describe = (label: string, t: TileT | undefined) => {

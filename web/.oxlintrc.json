@@ -24,8 +24,8 @@
     "react/use-memo": "error",
     "typescript/no-explicit-any": "error",
     "no-underscore-dangle": "off",
-    "react/exhaustive-effect-dependencies": "off",
-    "react/memo-dependencies": "off"
+    "react/exhaustive-effect-dependencies": "error",
+    "react/memo-dependencies": "error"
   },
   "ignorePatterns": [
     "app/dist/**",

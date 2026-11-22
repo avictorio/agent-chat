@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 import type { Message, RoomState } from "@chat/contract";
 import { same } from "../../lib/index";
 import { atBottom } from "./feed";
 import { useLatest } from "../../lib/useLatest";
+import { useOnChange } from "../../lib/useOnChange";
 
 // The feed's message state, colocated with the feed: the list and
 // its add() semantics (dedupe, richer-copy swap, the 1200 cap),
@@ -98,7 +99,8 @@ export function useMessages(opts: {
     });
   }, [tabRef, nameRef]);
 
-  useEffect(() => {
+  // after the list renders new messages: keep the bottom pinned, or offer the jump
+  useOnChange([messages, beginSettle], () => {
     const list = listRef.current;
     if (!list) return;
     if (initialSettleRef.current) {
@@ -114,7 +116,7 @@ export function useMessages(opts: {
       pendingJumpRef.current = false;
       setJumpVisible(true);
     }
-  }, [messages, beginSettle]);
+  });
 
   const onPosted = useCallback(
     (m: Message & { room_state?: RoomState }) => {

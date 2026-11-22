@@ -16,7 +16,7 @@
    ("Betrayed by Ada", "Trust held", "+8"). The last round adds the
    winner's pillar and shockwave. Catch-up, tap-to-skip and reduced
    motion work as in the other rounds arenas. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, Object3D, SRGBColorSpace, type InstancedMesh, type MeshStandardMaterial } from "three";
@@ -25,6 +25,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 import type { TrustChoice, TrustPlayer, TrustRound, TrustState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -154,9 +155,9 @@ function Threads({ seats, round, t0, gap, still }: { seats: Seat[]; round: Trust
   const j = useJuice();
   const o = useMemo(() => new Object3D(), []);
   const settled = useRef(false);
-  useEffect(() => {
+  useOnChange([round, t0, seats, still], () => {
     settled.current = false;
-  }, [round, t0, seats, still]);
+  });
   const pairs = useMemo(() => {
     const out: [Seat, Seat][] = [];
     if (!round) return out;
@@ -439,19 +440,20 @@ export default function TrustArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else setPlaying({ n, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);

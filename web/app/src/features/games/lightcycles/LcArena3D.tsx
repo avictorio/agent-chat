@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { CameraControls, MeshReflectorMaterial } from "@react-three/drei";
 import { AdditiveBlending, Color, DoubleSide, ShaderMaterial, Vector3, type Group, type Mesh, type PointLight } from "three";
@@ -638,7 +638,8 @@ void main() {
 function Fuse({ g, at, hex, race }: { g: LightCyclesState | null; at: [number, number] | null; hex: string; race: MutableRefObject<Race> }) {
   const j = useJuice();
   const mesh = useRef<Mesh>(null);
-  const mat = useMemo(
+  // made once, in the rider's colour when the ring first shows
+  const [mat] = useState(
     () =>
       new ShaderMaterial({
         vertexShader: FUSE_V,
@@ -647,9 +648,7 @@ function Fuse({ g, at, hex, race }: { g: LightCyclesState | null; at: [number, n
         depthWrite: false,
         blending: AdditiveBlending,
         uniforms: { uFrac: { value: 1 }, uHot: { value: 0 }, uTime: { value: 0 }, uCol: { value: new Color(hex) } },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+      })
   );
   useEffect(() => () => mat.dispose(), [mat]);
   const deadline = Number((g && g.deadline) || 0);
@@ -733,36 +732,46 @@ export default function LcArena3D({
 
   /* the race: on first sight, open where the viewer last left this
      match and replay the rest; later states extend it */
-  const race = useRef<Race>(new Race());
-  // a different match in the same view (a rematch) starts a new race
-  if (race.current.g && String(race.current.g.id) !== String(id)) race.current = new Race();
-  const R = race.current;
-  if (!R.g) {
-    const seen = seenTick(id);
-    R.target = tick;
-    R.T = seen === null || still || !(seen < tick) ? tick : Math.max(seen, tick - CATCH_MAX);
-    R.fast = R.target - R.T > 1;
-  } else if (tick > R.target) {
-    R.target = tick;
-    if (R.target - R.T > 1.0001) R.fast = true;
-  } else if (tick < R.target) {
-    R.T = R.target = tick;
-  }
-  R.list = list;
-  R.g = g;
+  // The race is a mutable timeline the frame loop advances (like the
+  // juice store); each commit hands it the latest state before the next
+  // frame reads it. A different match in the same view (a rematch)
+  // starts a new race.
+  const [firstRace] = useState(() => new Race());
+  const race = useRef<Race>(firstRace);
+  useLayoutEffect(() => {
+    if (race.current.g && String(race.current.g.id) !== String(id)) race.current = new Race();
+    const R = race.current;
+    if (!R.g) {
+      const seen = seenTick(id);
+      R.target = tick;
+      R.T = seen === null || still || !(seen < tick) ? tick : Math.max(seen, tick - CATCH_MAX);
+      R.fast = R.target - R.T > 1;
+    } else if (tick > R.target) {
+      R.target = tick;
+      if (R.target - R.T > 1.0001) R.fast = true;
+    } else if (tick < R.target) {
+      R.T = R.target = tick;
+    }
+    R.list = list;
+    R.g = g;
+    R.chase = chase;
+  });
   const [catching, setCatching] = useState<{ from: number; to: number } | null>(null);
-  useEffect(() => {
-    if (!ready) return;
+  const startRace = useEffectEvent(() => {
     const Rr = race.current;
     Rr.startAt = performance.now() + (firstVisit && !still ? 2700 : 450);
     if (Rr.T < Rr.target - 1) setCatching({ from: Math.floor(Rr.T), to: Rr.target });
     else if (Rr.T >= Rr.target) setSeenTick(id, Rr.target);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  });
   useEffect(() => {
+    if (ready) startRace();
+  }, [ready]);
+  const onTick = useEffectEvent((now: number) => {
     const Rr = race.current;
-    if (ready && Rr.target - Rr.T > 1.0001) setCatching({ from: Math.floor(Rr.T), to: Rr.target });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (ready && now - Rr.T > 1.0001) setCatching({ from: Math.floor(Rr.T), to: now });
+  });
+  useEffect(() => {
+    onTick(tick);
   }, [tick]);
   const skip = () => {
     const Rr = race.current;
@@ -805,6 +814,7 @@ export default function LcArena3D({
     Rr.fast = false;
     Rr.replay = true;
     Rr.replayDur = Math.min(0.4, Math.max(0.14, 16 / Math.max(1, tick)));
+    // oxlint-disable-next-line react/purity -- startReplay is the Replay button's click handler, never called during render
     Rr.startAt = performance.now() + 500;
     setFx([]);
     setCatching(null);
@@ -818,13 +828,13 @@ export default function LcArena3D({
   const [fx, setFx] = useState<Fx[]>([]);
   const tagEls = useRef<(HTMLDivElement | null)[]>([]);
   const [said, setSaid] = useState("");
-  const u = useRef<TrailUniforms>({ head: new Array(MAX_RIDERS).fill(0), live: new Array(MAX_RIDERS).fill(1), wave: new Array(MAX_RIDERS).fill(-99), flare: new Array(MAX_RIDERS).fill(0) });
+  // the trails' uniforms: made once, written by the director each frame
+  const [u] = useState<TrailUniforms>(() => ({ head: new Array(MAX_RIDERS).fill(0), live: new Array(MAX_RIDERS).fill(1), wave: new Array(MAX_RIDERS).fill(-99), flare: new Array(MAX_RIDERS).fill(0) }));
 
   /* zones and the chase camera */
   const [zones, setZones] = useState(false);
   const own = useMemo(() => (zones ? territory(list, w, h) : null), [zones, list, w, h]);
   const [chase, setChase] = useState<number | null>(null);
-  R.chase = chase;
   const meR = list.find((r) => r.me);
   const onGrid = () => list.filter((r) => poseAt(r, race.current.T).shown).map((r) => r.i);
   const nextChase = () => {
@@ -972,7 +982,7 @@ export default function LcArena3D({
             wz={wz}
             ctl={ctl}
             still={still}
-            u={u.current}
+            u={u}
             addFx={(f) => setFx((l) => [...l, ...f.filter((x) => !l.some((y) => y.id === x.id))])}
             say={setSaid}
             onCatch={(c) => setCatching(c)}
@@ -1026,7 +1036,7 @@ export default function LcArena3D({
           <GridFloor w={w} h={h} own={own} hexes={list.map((r) => r.hex)} terr={zones && !replaying ? 1 : 0} />
           <EdgeWall w={w} h={h} />
 
-          <TrailSystem list={list} wx={wx} wz={wz} u={u.current} />
+          <TrailSystem list={list} wx={wx} wz={wz} u={u} />
           <TagTracker race={race} wx={wx} wz={wz} els={tagEls} />
 
           {list.map((r) => (

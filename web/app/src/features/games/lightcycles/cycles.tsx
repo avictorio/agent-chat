@@ -40,6 +40,7 @@ import {
 } from "three";
 import { useJuice } from "../three/juice";
 import type { Rider } from "./lcmodel";
+import { useStable } from "../../../lib/useStable";
 
 /* ---------- the light cycle ---------- */
 
@@ -90,32 +91,29 @@ function glow(hex: string, k = 1): Color {
    target, so it belongs to the renderer that made it: a new Canvas (2D/3D
    toggle, reopening a match) or a restored context needs its own - three
    never re-uploads a render target, and a shared one reflected nothing. */
-const envTexByGl = new WeakMap<WebGLRenderer, Texture>();
+const envTexByGl = new WeakMap<WebGLRenderer, { gen: number; tex: Texture }>();
 function useStudio(): Texture | null {
   const gl = useThree((st) => st.gl);
   const [gen, setGen] = useState(0);
   useEffect(() => {
     const canvas = gl.domElement;
-    const onRestore = () => {
-      envTexByGl.delete(gl);
-      setGen((n) => n + 1);
-    };
+    // a restored context lost the old texture: the next generation rebuilds it
+    const onRestore = () => setGen((n) => n + 1);
     canvas.addEventListener("webglcontextrestored", onRestore);
     return () => canvas.removeEventListener("webglcontextrestored", onRestore);
   }, [gl]);
   return useMemo(() => {
     const have = envTexByGl.get(gl);
-    if (have) return have;
+    if (have && have.gen === gen) return have.tex;
     try {
       const pm = new PMREMGenerator(gl);
       const tex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
       pm.dispose();
-      envTexByGl.set(gl, tex);
+      envTexByGl.set(gl, { gen, tex });
       return tex;
     } catch {
       return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl, gen]);
 }
 
@@ -400,8 +398,10 @@ export type TrailUniforms = { head: number[]; live: number[]; wave: number[]; fl
 export function TrailSystem({ list, wx, wz, u }: { list: Rider[]; wx: (x: number) => number; wz: (y: number) => number; u: TrailUniforms }) {
   const j = useJuice();
   const sig = list.map((r) => r.i + ":" + r.cells.length).join("|") + "|" + wx(0) + "," + wz(0);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const geo = useMemo(() => trailGeometry(list, wx, wz), [sig]);
+  // rebuilt only when a trail grows or the grid moves (sig), not when the
+  // parent passes equal riders and mapping functions anew
+  const src = useStable({ list, wx, wz }, sig);
+  const geo = useMemo(() => trailGeometry(src.list, src.wx, src.wz), [src]);
   useEffect(() => () => geo.dispose(), [geo]);
   const mat = useMemo(
     () =>
@@ -496,7 +496,8 @@ export function GridFloor({ w, h, own, hexes, terr }: { w: number; h: number; ow
     return t;
   }, [w, h]);
   useEffect(() => () => tex.dispose(), [tex]);
-  const mat = useMemo(
+  // made once; the layout effect below keeps its size and texture current
+  const [mat] = useState(
     () =>
       new ShaderMaterial({
         vertexShader: GRID_V,
@@ -505,19 +506,17 @@ export function GridFloor({ w, h, own, hexes, terr }: { w: number; h: number; ow
         depthWrite: false,
         blending: AdditiveBlending,
         uniforms: { uSize: { value: [w, h] }, uTime: { value: 0 }, uTerr: { value: 0 }, uOwn: { value: tex } },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+      })
   );
+  const tints = useStable(hexes, hexes.join(","));
   useEffect(() => () => mat.dispose(), [mat]);
-  /* eslint-disable react-hooks/exhaustive-deps -- keyed on the colours' values (hexes.join), not the array rebuilt each render */
   useLayoutEffect(() => {
     mat.uniforms.uSize!.value = [w, h];
     mat.uniforms.uOwn!.value = tex;
     const d = tex.image.data as Uint8Array;
     d.fill(0);
     if (own) {
-      const cols = hexes.map((x) => new Color(x));
+      const cols = tints.map((x) => new Color(x));
       for (let i = 0; i < w * h; i++) {
         const o = own[i]!;
         if (o < 0 || !cols[o]) continue;
@@ -529,8 +528,7 @@ export function GridFloor({ w, h, own, hexes, terr }: { w: number; h: number; ow
       }
     }
     tex.needsUpdate = true;
-  }, [mat, tex, w, h, own, hexes.join(",")]);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  }, [mat, tex, w, h, own, tints]);
   const terrRef = useRef(0);
   useFrame((state, delta) => {
     mat.uniforms.uTime!.value = j.still ? 0 : j.t;

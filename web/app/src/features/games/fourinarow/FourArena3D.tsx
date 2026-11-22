@@ -13,7 +13,7 @@
    draw gets a quiet one. Catch-up: the moves seen are remembered per game
    (localStorage) and the latest unseen move drops in on open (a tap
    skips); reduced motion places it at once with its title and sound. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { Color, Object3D, type InstancedMesh, type Mesh, type MeshStandardMaterial } from "three";
@@ -22,6 +22,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ } from "../three/sfx";
 import type { FourInARowMove, FourInARowPlayer, FourInARowState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -120,12 +121,11 @@ function Discs({ discs, seats, fall, still, winCells, winT }: { discs: Disc[]; s
   const j = useJuice();
   const o = useMemo(() => new Object3D(), []);
   const c = useMemo(() => new Color(), []);
-  const hexOf = (p: "X" | "O") => (seats.find((s) => s.piece === p) || { hex: p === "X" ? "#fb923c" : "#22d3ee" }).hex;
-  const cols = useMemo(() => ({ X: new Color(hexOf("X")), O: new Color(hexOf("O")) }), [seats]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cols = useMemo(() => ({ X: new Color(pieceHex(seats, "X")), O: new Color(pieceHex(seats, "O")) }), [seats]);
   const settled = useRef(false);
-  useEffect(() => {
+  useOnChange([discs, fall, winT, still], () => {
     settled.current = false;
-  }, [discs, fall, winT, still]);
+  });
   useFrame((state) => {
     const a = solid.current;
     const b = rings.current;
@@ -353,6 +353,14 @@ function readSeen(id: unknown): number | null {
     return null;
   }
 }
+/** the piece a player drops (X when the seat is unknown) */
+function pieceIn(seats: Seat[], name: string): "X" | "O" {
+  return (seats.find((s) => s.name === name) || { piece: "X" as const }).piece;
+}
+/** a piece's colour: its seat's, else the default for X or O */
+function pieceHex(seats: Seat[], p: "X" | "O"): string {
+  return (seats.find((s) => s.piece === p) || { hex: p === "X" ? "#fb923c" : "#22d3ee" }).hex;
+}
 function writeSeen(id: unknown, n: number) {
   try {
     localStorage.setItem(seenKey(id), String(n));
@@ -405,13 +413,13 @@ export default function FourArena3D({
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
   const meL = me.toLowerCase();
   const players: FourInARowPlayer[] = (g && g.players) || NO_ITEMS;
-  const moves: FourInARowMove[] = (g && g.moves) || [];
+  const moves: FourInARowMove[] = (g && g.moves) || NO_ITEMS;
   const finished = !!g && g.status === "finished";
   const seats: Seat[] = useMemo(
     () => players.map((p: FourInARowPlayer) => ({ name: String(p.name), hex: String(p.hex || "#fb7185"), piece: p.piece === "O" ? "O" : "X", you: String(p.name).toLowerCase() === meL })),
     [players, meL]
   );
-  const pieceOf = (name: string): "X" | "O" => (seats.find((s) => s.name === name) || { piece: "X" as const }).piece;
+  const pieceOf = (name: string) => pieceIn(seats, name);
 
   const [init] = useState(() => {
     const n = moves.length;
@@ -448,21 +456,22 @@ export default function FourArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = moves.length;
     if (n <= shown) return;
     // several moves behind (a live gap): place all but the latest, drop that one
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: a live gap places all but the latest at once
     if (n - shown > 1) setShown(n - 1);
-    if (still) land(n, false);
+    if (still) onLand(n, false);
     else setPlaying({ n, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, moves.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -477,8 +486,7 @@ export default function FourArena3D({
 
   const settledN = playing ? playing.n - 1 : shown;
   const discs: Disc[] = useMemo(
-    () => moves.slice(0, settledN).map((m: FourInARowMove) => ({ col: m.col, row: m.row, piece: pieceOf(m.by), n: m.n })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => moves.slice(0, settledN).map((m: FourInARowMove) => ({ col: m.col, row: m.row, piece: pieceIn(seats, m.by), n: m.n })),
     [moves, settledN, seats]
   );
   const fallMove = playing ? moves[playing.n - 1] : null;

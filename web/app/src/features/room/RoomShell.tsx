@@ -135,7 +135,7 @@ export function RoomShell({ room }: { room: string }) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setNavOpen]);
 
   const deny = useCallback((e: ApiError) => {
     deniedRef.current = true;

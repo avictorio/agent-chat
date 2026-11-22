@@ -624,6 +624,27 @@ features; mobile means the website in Android Chrome and iOS Safari.
   `fire.tsx`, `cycles.tsx`) are exempt from `react/immutability` in
   `web/.oxlintrc.json`: changing three.js objects in effects and frame
   callbacks is how react-three-fiber is meant to be used.
+- **Effects and memos:** every dependency list is complete and every
+  dependency is read (`react/exhaustive-effect-dependencies` and
+  `react/memo-dependencies` refuse the rest), and nothing silences
+  `react-hooks/exhaustive-deps`: the React Compiler rules skip a whole
+  component that suppresses a hooks rule, so one such comment hid every
+  other check in it (removing the 81 that were here on 2026-11-22
+  surfaced 83 more findings). Instead:
+  an effect that acts on the latest props or state without re-running on
+  them calls a `useEffectEvent` function, passing the value that
+  triggers it (`onLand(n)`, `onGame(g, tiles)`); work keyed on values it
+  does not read (a frame loop's `settled` flag, re-drawing after a
+  version counter moves) goes in `useOnChange(inputs, fn)`
+  (`lib/useOnChange.ts`); an object that should keep its identity until
+  its signature changes comes from `useStable(value, key)`
+  (`lib/useStable.ts`), not a memo keyed on the signature; state that
+  follows a prop is adjusted during render (`if (prev !== x) { setPrev(x);
+  setY(...) }`), not in an effect. `react/set-state-in-effect` may be
+  disabled on its line, with the reason, where an effect steps a state
+  machine from new server data or syncs an external system (the arenas'
+  replay steps, the push bell): such a comment names one rule and does not
+  blind the compiler.
 - **3D game arenas:** before changing the arenas in `web/app/src/features/games/`
   (all sixteen `*Arena3D.tsx`, and `arena3d.tsx`, `juice.tsx`, `sfx.ts`,
   `atmos.tsx`, `ocean.tsx`, `ships.tsx`, `fire.tsx`, `cycles.tsx`,
@@ -693,32 +714,25 @@ The 2026-11 restructure left nothing open (its last item, the Worker in
 TypeScript, was done on 2026-11-21). What follows is the code-health
 to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it (the first, linting the
-whole repo, was done on 2026-11-22).
+deleting it here in the commit that finishes it (the first two, linting
+the whole repo and the effect dependencies, were done on 2026-11-22).
 
-1. **Effect dependencies.** 81 `eslint-disable` comments for
-   `react-hooks/exhaustive-deps` in `web/app/src`. React 19.3 has
-   `useEffectEvent` (unused so far), the standard fix for an effect
-   that reads the latest props or state without re-running on them.
-   The linter's `react/exhaustive-effect-dependencies` (12 hits) and
-   `react/memo-dependencies` (1) are off in `web/.oxlintrc.json` until
-   this item is done; turn them on with it.
-2. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
+1. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
    `worker/`; one typed helper (`rows<T>(sql, query, ...args)`) next to
    the row types in `room/Room.ts` would hold the cast in one place.
-3. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
+2. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
    `readBody`) and 18 explicit `any` in `worker/`: a body type per route
    and a small field check would replace the defensive reads.
-4. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
+3. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step
    once and drop the bare `catch {}` exception from section 13.
-5. **Very long lines.** The MCP tool descriptions in
+4. **Very long lines.** The MCP tool descriptions in
    `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
    characters; split them per tool. `worker/routes/pages.ts` inlines
    the app icons as base64 (lines up to ~65,000 characters); they can
    be Workers Static Assets files instead.
-6. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+5. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
    reason, the old API deploy that embedded the code in a template
    string, is gone now that wrangler bundles the Worker; it is house
    style only. The owner decides whether to keep it; if it goes,

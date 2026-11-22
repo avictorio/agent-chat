@@ -29,11 +29,13 @@ export function useViewerHost(opts?: {
   const buildRef = useRef<ViewerBuild | null>(null);
   const openRef = useRef(false);
   const pushedRef = useRef(false);
+  // a ref the room owns (stable): what to run when the viewer closes
+  const onCloseRef = opts && opts.onCloseRef;
 
   const close = useCallback((fromPop: boolean) => {
     if (!openRef.current) return;
     openRef.current = false;
-    if (opts && opts.onCloseRef && opts.onCloseRef.current) opts.onCloseRef.current();
+    if (onCloseRef && onCloseRef.current) onCloseRef.current();
     if (bodyRef.current) bodyRef.current.textContent = "";
     setV(null);
     if (!fromPop && pushedRef.current) {
@@ -44,8 +46,7 @@ export function useViewerHost(opts?: {
         // no history to go back to
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [onCloseRef]);
 
   const api = useMemo<ViewerApi>(
     () => ({
@@ -65,13 +66,12 @@ export function useViewerHost(opts?: {
         if (!openRef.current) return;
         openRef.current = false;
         pushedRef.current = false;
-        if (opts && opts.onCloseRef && opts.onCloseRef.current) opts.onCloseRef.current();
+        if (onCloseRef && onCloseRef.current) onCloseRef.current();
         if (bodyRef.current) bodyRef.current.textContent = "";
         setV(null);
       },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [onCloseRef]
   );
 
   useEffect(() => {

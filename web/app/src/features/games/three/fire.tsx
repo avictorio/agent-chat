@@ -27,6 +27,7 @@ import {
   type PointLight,
 } from "three";
 import { useJuice } from "./juice";
+import { useStable } from "../../../lib/useStable";
 
 export type FireKind = "ship" | "water" | "wreck";
 export type FireSpec = {
@@ -299,18 +300,15 @@ export function FireSystem({ fires, lite, still }: { fires: FireSpec[]; lite: bo
   const j = useJuice();
   // stable across re-renders that do not change the fires
   const sig = fires.map((f) => f.key + "@" + f.x.toFixed(2) + "," + f.y.toFixed(2) + "," + f.z.toFixed(2) + (f.kind || "") + "#" + (f.heat ?? 1).toFixed(2)).join("|");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const list = useMemo(() => fires, [sig]);
+  const list = useStable(fires, sig);
   /* Particles per fire. Burning oil over an unseen hull - the most
      numerous fire late in a game - smokes at half rate: big smoke
      quads are most of the fill cost, and the board stays readable. */
-  const per = lite ? { flame: 7, smoke: 7, spark: 6 } : { flame: 10, smoke: 12, spark: 10 };
-  const smokeFor = (f: FireSpec) => (f.kind === "water" ? Math.ceil(per.smoke / 2) : per.smoke);
-  const geos = useMemo(
-    () => ({ flame: particles(list, () => per.flame, 1), smoke: particles(list, smokeFor, 2), spark: particles(list, () => per.spark, 3) }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list, lite]
-  );
+  const geos = useMemo(() => {
+    const per = lite ? { flame: 7, smoke: 7, spark: 6 } : { flame: 10, smoke: 12, spark: 10 };
+    const smokeFor = (f: FireSpec) => (f.kind === "water" ? Math.ceil(per.smoke / 2) : per.smoke);
+    return { flame: particles(list, () => per.flame, 1), smoke: particles(list, smokeFor, 2), spark: particles(list, () => per.spark, 3) };
+  }, [list, lite]);
   useEffect(
     () => () => {
       geos.flame.dispose();

@@ -29,7 +29,7 @@
    Reduced motion: no deploy, push or camera moves; a round lands at
    once with its title card, sound and buzz. The planner, the score and
    the numbers stay in the DOM: the scene shows, the page acts. */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { BufferGeometry, CanvasTexture, CatmullRomCurve3, Color, DoubleSide, Float32BufferAttribute, Object3D, SphereGeometry, SRGBColorSpace, TubeGeometry, Vector3, type Group, type InstancedMesh, type MeshStandardMaterial, type Sprite } from "three";
@@ -38,6 +38,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 import type { FrontlinesPlayer, FrontlinesRound, FrontlinesState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -274,9 +275,9 @@ function Army({ side, alloc, hills, phone, t0, still }: { side: Side; alloc: num
   const j = useJuice();
   const tmp = useMemo(() => new Object3D(), []);
   const settled = useRef(false);
-  useEffect(() => {
+  useOnChange([alloc, hills, t0, phone, still], () => {
     settled.current = false;
-  }, [alloc, hills, t0, phone, still]);
+  });
   useFrame((state) => {
     const a = up.current;
     const b = down.current;
@@ -735,21 +736,22 @@ export default function FrontlinesArena3D({
     if (fin) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   // A round the field has not shown plays in (one at a time: the latest).
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else setPlaying({ n, t0: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
   // Remember what this viewer has seen.
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);

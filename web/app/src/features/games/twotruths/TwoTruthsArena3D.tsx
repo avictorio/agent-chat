@@ -14,7 +14,7 @@
    last round adds the winner's pillar. Catch-up, tap to skip and reduced
    motion as in the other arenas. The page under the scene carries the
    writing form, the votes, the scores and the full reveal. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, SRGBColorSpace, type Group, type Mesh, type MeshStandardMaterial } from "three";
@@ -535,22 +535,23 @@ export default function TwoTruthsArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else {
       setRt(0);
       setPlaying({ n, t0: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -571,8 +572,7 @@ export default function TwoTruthsArena3D({
     if (prev == null || !ready || prev === sig) return;
     if (prev.split(":")[0] === "write" && sig.split(":")[0] === "vote") sfx("whoosh");
     else juice.hit({ sound: "ping" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, ready]);
+  }, [sig, ready, juice]);
 
   const r = playing ? rounds[playing.n - 1] : null;
   const voters = r && !r.forfeit ? Object.keys(r.votes || {}).filter((n) => r.votes[n] != null) : [];

@@ -14,7 +14,7 @@
    stumped). The candles relight for the next round. Catch-up, tap to skip
    and reduced motion as in the other arenas; the Q/A log lives in the
    page under the scene. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, SRGBColorSpace, type Group, type Mesh, type MeshStandardMaterial } from "three";
@@ -153,7 +153,7 @@ function Box({ open, still }: { open: number; still: boolean }) {
 
 /* The ring of twenty candles. state[i]: "lit" | "yes" | "no"; `next` is
    the candle a waiting question will spend (it flickers). */
-function Candles({ state, next, snuffAt, still }: { state: ("lit" | "yes" | "no")[]; next: number; snuffAt: number[]; still: boolean }) {
+function Candles({ state, next, snuffAt, still }: { state: ("lit" | "yes" | "no")[]; next: number; snuffAt: { readonly current: number[] }; still: boolean }) {
   const flames = useRef<(Mesh | null)[]>([]);
   const j = useJuice();
   useFrame((st) => {
@@ -162,7 +162,7 @@ function Candles({ state, next, snuffAt, still }: { state: ("lit" | "yes" | "no"
       const f = flames.current[i];
       if (!f) continue;
       const lit = state[i] === "lit";
-      const at = snuffAt[i];
+      const at = snuffAt.current[i];
       const since = at != null ? j.t - at : 99;
       // a snuffed flame shrinks out over 0.4 s
       const k = lit ? 1 : since < 0.4 ? 1 - since / 0.4 : 0;
@@ -468,22 +468,23 @@ export default function TwentyArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else {
       setRt(0);
       setPlaying({ n, t0: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -502,10 +503,11 @@ export default function TwentyArena3D({
   const sig = running ? g.round + ":" + (g.phase || "") + ":" + liveQa.length + ":" + answered.length : "";
   const prev = useRef<{ sig: string; answered: number; round: number } | null>(null);
   const j0 = juice;
-  useEffect(() => {
+  // the reaction reads the latest answers; it runs when the signature moves
+  const onSig = useEffectEvent((now: string, live: boolean) => {
     const p = prev.current;
-    prev.current = { sig, answered: answered.length, round: running ? g.round : 0 };
-    if (!p || !ready || p.sig === sig) return;
+    prev.current = { sig: now, answered: answered.length, round: running ? g.round : 0 };
+    if (!p || !live || p.sig === now) return;
     if (running && p.round === g.round && answered.length > p.answered) {
       const last = answered[answered.length - 1]!;
       const yes = last.a === "yes" || last.a === "right";
@@ -514,7 +516,9 @@ export default function TwentyArena3D({
       j0.hit({ sound: yes ? "ping" : "snip", buzz: last.by === meName ? BUZZ.commit : undefined });
     } else if (running && g.phase === "answer") j0.hit({ sound: "beat" });
     else if (running && g.phase === "ask" && p.sig.split(":")[1] === "secret") sfx("whoosh");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    onSig(sig, ready);
   }, [sig, ready]);
 
   const state = r ? candleState(r.qa) : running ? candleState(g.qa) : finished && rounds.length ? candleState(rounds[rounds.length - 1]!.qa) : candleState([]);
@@ -593,7 +597,7 @@ export default function TwentyArena3D({
               <spriteMaterial map={textTex([{ text: "“" + secretShown + "”", color: "#fde68a", size: 46 }], 600, 150)} transparent depthWrite={false} depthTest={false} />
             </sprite>
           ) : null}
-          <Candles state={state} next={next} snuffAt={snuffAt.current} still={still} />
+          <Candles state={state} next={next} snuffAt={snuffAt} still={still} />
           {seats.map((s) => {
             const p: Partial<TwentyPlayer> = players.find((x) => x.name === s.name) || {};
             const isAns = s.name === answerer;

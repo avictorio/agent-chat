@@ -33,7 +33,7 @@
      page unless Ctrl or Cmd is held (then the scene zooms - a
      trackpad pinch arrives as Ctrl+wheel), a Reset view button
      returns the camera home, and scenes can lay controls over it. */
-import { createContext, useContext, useEffect, useRef, useState, type ComponentRef, type HTMLAttributes, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type ComponentRef, type HTMLAttributes, type ReactNode, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import type { CameraControls } from "@react-three/drei";
 import type { PerspectiveCamera } from "three";
@@ -156,9 +156,9 @@ export function Framer({
   const size = useThree((s) => s.size);
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
   const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => {
-    if (!size.width || !size.height) return;
-    const next = home(size.width / size.height, size.width);
+  // reframes from the latest home rule; runs when the host is resized
+  const reframe = useEffectEvent((width: number, height: number) => {
+    const next = home(width / height, width);
     const prev = homeRef.current;
     if (prev) {
       const dist = (p: Home) => Math.hypot(p.pos[0], p.pos[1], p.pos[2]);
@@ -173,7 +173,9 @@ export function Framer({
     camera.updateProjectionMatrix();
     if (ctl.current) void ctl.current.setLookAt(next.pos[0], next.pos[1], next.pos[2], 0, 0, next.tz || 0, false);
     invalidate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (size.width && size.height) reframe(size.width, size.height);
   }, [size.width, size.height]);
   return null;
 }

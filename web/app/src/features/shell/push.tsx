@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RoomClient } from "@chat/contract";
+import { useLatest } from "../../lib/useLatest";
 
 // Phone notifications: Web Push (service worker + the room's
 // subscription registry, with the quiet re-register when the room has
@@ -40,14 +41,15 @@ export interface PushApi {
 }
 
 export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) => void): PushApi {
-  const [state, setState] = useState<PushState>("off");
+  // painted from the support rule up front (the async pass refines it);
+  // gating the bell on serviceWorker.ready leaves it missing forever
+  // when registration fails (staging soak, 2026-11-09)
+  const [state, setState] = useState<PushState>(() => (iosNeedsInstall() ? "install" : "off"));
   const [mode, setMode] = useState<PushMode>("all");
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(() => pushSupported() || iosNeedsInstall());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
+  const stateRef = useLatest(state);
+  const modeRef = useLatest(mode);
   const modeKey = "chat-push-mode:" + client.basePath();
 
   const paint = useCallback((s: PushState, m: PushMode) => {
@@ -105,7 +107,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     } catch {
       paint("off", modeRef.current);
     }
-  }, [client, modeKey, paint]);
+  }, [client, modeKey, paint, modeRef]);
 
   const pushOn = useCallback(
     async (m: PushMode) => {
@@ -152,26 +154,19 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     void paintPushState();
   }, [client, modeKey, paintPushState, toast]);
 
-  // Boot: register the service worker and paint the initial state,
-  // exactly where the current app does it.
+  // Boot: register the service worker, then refine the painted state
+  // (and again whenever the page comes back into view).
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => {});
-      // Visibility is painted from the support rule up front, like
-      // the current app; the async pass below only refines the state.
-      // Gating the bell on serviceWorker.ready leaves it missing
-      // forever when registration fails (staging soak, 2026-11-09).
-      paint(iosNeedsInstall() ? "install" : "off", modeRef.current);
-      void paintPushState();
-      const onVis = () => {
-        if (!document.hidden) void paintPushState();
-      };
-      document.addEventListener("visibilitychange", onVis);
-      return () => document.removeEventListener("visibilitychange", onVis);
-    }
-    if (iosNeedsInstall()) paint("install", "all");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!("serviceWorker" in navigator)) return;
+    void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    // oxlint-disable-next-line react/set-state-in-effect -- syncs the browser's push permission and subscription (an external system) into state
+    void paintPushState();
+    const onVis = () => {
+      if (!document.hidden) void paintPushState();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [paintPushState]);
 
   const choose = useCallback(
     async (m: PushMode | "off") => {
@@ -184,7 +179,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         toast("Couldn't change notifications: " + (e instanceof Error ? e.message : String(e)), true);
       }
     },
-    [pushOff, pushOn, toast]
+    [pushOff, pushOn, toast, stateRef]
   );
 
   const bellClick = useCallback(
@@ -211,7 +206,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         return { x: left, y: top };
       });
     },
-    [toast]
+    [toast, stateRef]
   );
 
   // Menu dismissal: outside click and Escape, like the current app.

@@ -15,7 +15,7 @@
    A turn that ran out skips the reveal: the die just shatters. The last
    round adds the winner's pillar and shockwave. Catch-up, tap to skip and
    reduced motion as in the other arenas. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { BoxGeometry, CanvasTexture, Color, Euler, Object3D, Quaternion, SRGBColorSpace, Vector3, type Group, type InstancedMesh, type MeshStandardMaterial } from "three";
@@ -24,6 +24,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/atmos";
 import { BUZZ, sfx } from "../three/sfx";
 import type { LiarsDiceBid, LiarsDicePlayer, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
+import { useOnChange } from "../../../lib/useOnChange";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -504,9 +505,9 @@ function BidMark({ bid, opener, big, still, over }: { bid: LiarsDiceBid | null; 
   const j = useJuice();
   const flipAt = useRef<number | null>(null);
   const sig = bid ? bid.qty + "x" + bid.face + bid.by : "";
-  useEffect(() => {
+  useOnChange([sig], () => {
     flipAt.current = null;
-  }, [sig]);
+  });
   useFrame((state) => {
     const o = g.current;
     if (!o) return;
@@ -633,24 +634,25 @@ export default function LiarsArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else {
       setRt(0);
       setLit(0);
       setBroke(false);
       setPlaying({ n, t0: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -664,17 +666,18 @@ export default function LiarsArena3D({
 
   // a rival's new bid: a soft ping (the die flips on its own)
   const bidSig = g && g.bid ? g.bid.qty + "x" + g.bid.face + g.bid.by : "";
+  const bidBy = g && g.bid ? g.bid.by : null;
   const prevBid = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevBid.current;
     prevBid.current = bidSig;
     if (prev == null || !ready || !bidSig || prev === bidSig) return;
-    if (g.bid!.by !== meName) juice.hit({ sound: "ping" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bidSig, ready]);
+    if (bidBy !== meName) juice.hit({ sound: "ping" });
+  }, [bidSig, bidBy, ready, meName, juice]);
 
   const r = playing ? rounds[playing.n - 1] : null;
-  const plan = useMemo(() => (r ? planOf(r, wild, isLast(playing!.n)) : null), [r, wild]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lastPlaying = !!playing && isLast(playing.n);
+  const plan = useMemo(() => (r ? planOf(r, wild, lastPlaying) : null), [r, wild, lastPlaying]);
   const lift = r && plan && plan.lifted ? smooth(ANTIC, ANTIC + LIFT, rt) * (1 - smooth(plan.downAt, plan.downAt + 0.45, rt)) : 0;
 
   // dice counts as the scene shows them: the round's cups while it plays
@@ -698,7 +701,8 @@ export default function LiarsArena3D({
       let hitIdx = 0;
       seats.forEach((s) => {
         const cup: number[] = (r.cups || {})[s.name] || [];
-        const n = countOf(s.name);
+        // countOf, inlined: the loser's die is gone once it breaks
+        const n = broke && s.name === r.loser ? Math.max(0, cup.length - 1) : cup.length;
         cup.slice(0, n).forEach((d, i) => {
           const [x, y, z] = dieSpot(s, i, true, cup.length, REVEAL);
           let tint: DieSpec["tint"] = "plain";
@@ -719,7 +723,6 @@ export default function LiarsArena3D({
       });
     }
     return list;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [r, seats, lit, broke, running, g, wild]);
 
   const shownBid = r ? (r.call ? r.call.bid : null) : running ? g.bid : null;

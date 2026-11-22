@@ -230,8 +230,7 @@ export function useEditing() {
     if (!edit) return;
     api.editingDelta(1);
     return () => api.editingDelta(-1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edit]);
+  }, [edit, api]);
   return { edit, setEdit, close: () => setEdit(null) };
 }
 

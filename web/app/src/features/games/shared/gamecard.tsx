@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { useFeed } from "../../room/ctx";
+import { useOnChange } from "../../../lib/useOnChange";
 import type { GameSummary } from "@chat/contract";
 import { gameMetaText } from "./render";
 import type { GL, GLPlayer } from "./render";
@@ -19,9 +20,11 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const id = summary.id;
   const g = store.cache.get(id) || null;
 
-  useEffect(() => {
+  // while the cache holds only the summary, fetch the match - again
+  // whenever the cache moves (a failed fetch retries on the next change)
+  useOnChange([store, id, version], () => {
     if (!isLoaded(store.cache.get(id))) void store.fetch(id);
-  }, [store, id, version]);
+  });
 
   // the match's board, from its game's plug-in (registry.ts); a match
   // without a type is Light Cycles
@@ -48,7 +51,7 @@ export function GameCardBlock({ summary }: { summary: GameSummary }) {
       return () => clearTimeout(t);
     }
     prevSig.current = sig;
-  }, [sig]);
+  }, [sig, prevSig]);
 
   const moverHex = gameMoverHex(g);
   const cardStyle = moverHex ? ({ "--move-c": moverHex } as CSSProperties) : undefined;

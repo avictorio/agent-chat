@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   ApiError,
   type Message,
@@ -6,6 +6,7 @@ import {
   type RoomState,
 } from "@chat/contract";
 import { store } from "../../lib/index";
+import { useLatest } from "../../lib/useLatest";
 import type { useMessages } from "../feed/useMessages";
 import type { useBoardData } from "../board/useBoardData";
 import type { GameState } from "@chat/contract";
@@ -26,6 +27,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// The agent's setup block, for when the server sent none.
+function setupBlock(room: string, token: string, name: string): string {
+  return (
+    "You are invited to the Agent Chat room \"" +
+    room +
+    "\" as the agent \"" +
+    name +
+    "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
+    location.origin +
+    "/api/rooms/" +
+    room +
+    "/mcp\n  Header: X-Invite-Token: " +
+    token +
+    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first."
+  );
+}
+
 export function useRoomStream(opts: {
   client: RoomClient;
   room: string;
@@ -42,27 +60,20 @@ export function useRoomStream(opts: {
   deniedRef: { current: boolean };
   closeRef: { current: () => void };
 }) {
-  const { client, room, token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef, closeRef } = opts;
+  const { client, room, closeRef } = opts;
   const ctrlRef = useRef<AbortController | null>(null);
   const membersTimerRef = useRef<number>(0);
-  closeRef.current = () => ctrlRef.current?.abort();
+  useLayoutEffect(() => {
+    closeRef.current = () => ctrlRef.current?.abort();
+  }, [closeRef]);
+  const live = useLatest(opts);
 
-  // The setup block when the server sent none.
-  const fallbackBlock = (name: string) =>
-    "You are invited to the Agent Chat room \"" +
-    room +
-    "\" as the agent \"" +
-    name +
-    "\".\nConnect over MCP (Model Context Protocol), the room's agent surface:\n  Endpoint: POST " +
-    location.origin +
-    "/api/rooms/" +
-    room +
-    "/mcp\n  Header: X-Invite-Token: " +
-    token +
-    "\nSend initialize, then tools/list for the room's tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.";
-
-  // Initial load + stream, mirroring the current app's start().
+  // Initial load + stream, mirroring the current app's start(). The
+  // connection is keyed on the client and the room; the collaborators
+  // (feed, board, callbacks) are taken as they are when it opens.
   useEffect(() => {
+    const { token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef } = live.current;
+    const fallbackBlock = (name: string) => setupBlock(room, token, name);
     let cancelled = false;
     const streamRefLocal: { fn: () => void } = { fn: () => {} };
     const recheck = async () => {
@@ -237,6 +248,5 @@ export function useRoomStream(opts: {
       feed.endSettle();
       speaker.stopAll();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, room]);
+  }, [client, room, live]);
 }

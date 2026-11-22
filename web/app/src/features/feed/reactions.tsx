@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -9,6 +10,7 @@ import {
 import type { Message, RoomClient } from "@chat/contract";
 import { toast } from "../../lib/index";
 import { same } from "../../lib/index";
+import { useLatest } from "../../lib/useLatest";
 import { Picker, Placed } from "./EmojiPicker";
 import { addRecent, loadEmoji, myReaction, NAME2EMOJI, REACTIONS, rxLabel, rxOrder } from "./emoji";
 
@@ -72,16 +74,12 @@ export function useReactions(opts: {
   holdProps: Record<string, (e: never) => void>;
 } {
   const [pop, setPop] = useState<Pop | null>(null);
-  const popRef = useRef<Pop | null>(null);
-  popRef.current = pop;
+  const popRef = useLatest(pop);
   const swallowRef = useRef(false);
   const { client, who, getMessage, setMessages, listRef } = opts;
-  const whoRef = useRef(who);
-  whoRef.current = who;
-  const deniedRef = useRef(opts.denied);
-  deniedRef.current = opts.denied;
-  const meRef = useRef(opts.meName);
-  meRef.current = opts.meName;
+  const whoRef = useLatest(who);
+  const deniedRef = useLatest(opts.denied);
+  const meName = opts.meName;
 
   const closeAll = useCallback(() => setPop(null), []);
 
@@ -116,13 +114,13 @@ export function useReactions(opts: {
         })
         .catch((e: Error) => toast(e.message, true));
     },
-    [client, setMessages]
+    [client, setMessages, whoRef]
   );
 
   const openBar = useCallback((m: Message, row: HTMLElement) => {
     if (deniedRef.current) return;
     setPop({ kind: "bar", msg: m, row });
-  }, []);
+  }, [deniedRef]);
   const openWho = useCallback(
     (m: Message, key: string, chip: HTMLElement) => {
       const whoList = ((m.reactions || {})[key] || []).slice();
@@ -132,12 +130,7 @@ export function useReactions(opts: {
     },
     []
   );
-  const apiRef = useRef<RxApi | null>(null);
-  if (!apiRef.current) apiRef.current = { react, openBar, openWho };
-  apiRef.current.react = react;
-  apiRef.current.openBar = openBar;
-  apiRef.current.openWho = openWho;
-  const api = apiRef.current;
+  const api: RxApi = useMemo(() => ({ react, openBar, openWho }), [react, openBar, openWho]);
 
   /* document-level behavior: outside click closes, the click a hold
      produces is swallowed, Escape closes, resize/list-scroll close
@@ -183,8 +176,7 @@ export function useReactions(opts: {
       window.removeEventListener("resize", onResize);
       list?.removeEventListener("scroll", onScroll);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [listRef, popRef]);
 
   /* hold-to-open on the feed (mouse and touch via pointer events) */
   const holdRef = useRef<{
@@ -276,7 +268,7 @@ export function useReactions(opts: {
   let popovers: ReactNode = null;
   if (pop && pop.kind === "bar") {
     const cur = getMessage(pop.msg.id) || pop.msg;
-    const mine = myReaction(cur, meRef.current);
+    const mine = myReaction(cur, meName);
     popovers = (
       <Placed row={pop.row} className="rx-bar" role="toolbar" label="Reactions" focusRx>
         {REACTIONS.map(([emoji, label]) => (
@@ -349,7 +341,7 @@ export function useReactions(opts: {
         row={pop.row}
         onPick={(emoji) => react(pop.msg, emoji)}
         onClose={closeAll}
-        mine={myReaction(pop.msg, meRef.current)}
+        mine={myReaction(pop.msg, meName)}
       />
     );
   } else if (pop && pop.kind === "who") {
@@ -363,7 +355,7 @@ export function useReactions(opts: {
           <span>{(label !== pop.key ? label + " · " : "") + whoList.length}</span>
         </div>
         {whoList.map((w) => {
-          const mine = !!meRef.current && same(w, meRef.current);
+          const mine = !!meName && same(w, meName);
           return (
             <div key={w} className={"rx-who-name" + (mine ? " me" : "")}>
               {mine ? "You" : w}

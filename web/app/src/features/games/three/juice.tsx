@@ -26,7 +26,7 @@
 
    Under frameloop "demand" nothing renders unless asked, so every
    channel invalidates while it runs. */
-import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useEffectEvent, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Bloom, ChromaticAberration, EffectComposer, Noise, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { BlendFunction, ToneMappingMode, type BloomEffect, type ChromaticAberrationEffect } from "postprocessing";
@@ -260,8 +260,8 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
   /* The iris: the world's colour covers the canvas until the scene is
      ready, then opens from the centre (fades, under reduced motion)
      and the world's name comes up. */
-  useEffect(() => {
-    if (!intro || !ready) return;
+  const openIris = useEffectEvent(() => {
+    if (!intro) return;
     const el = irisRef.current;
     const t = setTimeout(() => juice.onTitle && juice.onTitle({ big: intro.title, small: intro.sub, tone: "neutral", hex: intro.color }), 350);
     if (!el) return () => clearTimeout(t);
@@ -282,7 +282,9 @@ export function ImpactLayer({ juice, intro, ready }: { juice: Juice; intro?: Int
     if (anim) anim.onfinish = () => setIrisOn(false);
     else setIrisOn(false);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (ready) return openIris();
   }, [ready]);
   const [card, setCard] = useState<(Title & { k: number }) | null>(null);
   const [word, setWord] = useState<{ text: string; hex?: string; k: number } | null>(null);
@@ -426,9 +428,9 @@ export function Intro({
       });
     }, 900);
   };
+  const onReady = useEffectEvent(() => go());
   useEffect(() => {
-    if (ready) go();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (ready) onReady();
   }, [ready]);
   /* A touch or click skips the entry: the camera snaps home before the
      scene handles the press, so a tap during the flight lands where
@@ -454,7 +456,6 @@ export function Intro({
       el.removeEventListener("pointerdown", skip, true);
       clearTimeout(timer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, gl, camera]);
+  }, [enabled, gl, camera, ctl, homeRef]);
   return null;
 }

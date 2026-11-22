@@ -135,6 +135,7 @@ const TABS: Tab[] = ["live", "history", "standings", "guide"];
 const TAB_LABEL: Record<Tab, string> = { live: "Live", history: "History", standings: "Standings", guide: "Guide" };
 const TAB_KEY = "ac-games-tab";
 const PAGE = 20;
+const NO_GAMES: GameListItem[] = [];
 
 function savedTab(): Tab {
   try {
@@ -298,7 +299,10 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   // /games scans up to 500 matches on the server: the first open loads at
   // once, later store changes (a burst of frames, a poll) coalesce into
   // one reload a beat later.
-  const listedRef = useRef(false);
+  // the store version the list last loaded at (null: never loaded)
+  const listedAt = useRef<number | null>(null);
+  // "today" and "yesterday" in the history, as of the latest load
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     if (!active) return;
     let dead = false;
@@ -307,7 +311,8 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
         client.listGames().then(
           (r) => {
             if (!dead) {
-              listedRef.current = true;
+              listedAt.current = version;
+              setNow(new Date());
               setGames(r.games || []);
               setRecord(r.record || {});
               setLadder(r.ladder || {});
@@ -319,7 +324,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
           }
         );
       },
-      listedRef.current ? 1200 : 0
+      listedAt.current === null ? 0 : 1200
     );
     return () => {
       dead = true;
@@ -327,9 +332,9 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     };
   }, [active, client, version]);
 
-  const all = games || [];
+  const all = games || NO_GAMES;
   const live = all.filter((g) => g.status === "lobby" || g.status === "running");
-  const done = all.filter((g) => g.status !== "lobby" && g.status !== "running");
+  const done = useMemo(() => all.filter((g) => g.status !== "lobby" && g.status !== "running"), [all]);
   const me = store.meName().toLowerCase();
   const isMine = (g: GameListItem) => !!me && waitingOn(g).some((n) => String(n).toLowerCase() === me);
   const byDeadline = (a: GameListItem, b: GameListItem) => (deadlineOf(a) || Infinity) - (deadlineOf(b) || Infinity);
@@ -341,8 +346,7 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
      here): what needs you is never behind a tap. */
   useEffect(() => {
     if (!picked.current && mineLive.length && tab !== "live") setTab("live");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mineLive.length]);
+  }, [mineLive.length, tab]);
   const pick = (t: Tab, focus?: boolean) => {
     picked.current = true;
     setTab(t);
@@ -367,10 +371,8 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const kindsDone = CATALOG.map((d) => d.id).filter((t) => done.some((g) => g.type === t));
   const filtered = useMemo(
     () => done.filter((g) => kind === "all" || g.type === kind).sort((a, b) => endedAt(b) - endedAt(a) || (b.id || 0) - (a.id || 0)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [games, kind]
+    [done, kind]
   );
-  useEffect(() => setShown(PAGE), [kind]);
 
   const row = (g: GameListItem) => {
     const isLive = g.status === "lobby" || g.status === "running";
@@ -461,7 +463,6 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
     );
   };
 
-  const now = new Date();
   const page = filtered.slice(0, shown);
   const groups: { name: string; items: GameListItem[] }[] = [];
   page.forEach((g) => {
@@ -631,7 +632,10 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
                 {kindsDone.length > 1 ? (
                   <div className="gm-chips" role="group" aria-label="Show matches of">
                     {(["all", ...kindsDone] as string[]).map((k) => (
-                      <button key={k} type="button" className={"gm-chip" + (kind === k ? " on" : "")} aria-pressed={kind === k} onClick={() => setKind(k)}>
+                      <button key={k} type="button" className={"gm-chip" + (kind === k ? " on" : "")} aria-pressed={kind === k} onClick={() => {
+                        setKind(k);
+                        setShown(PAGE);
+                      }}>
                         {k === "all" ? "All" : KIND[k]}
                         <span className="gm-chip-n">{k === "all" ? done.length : done.filter((g) => g.type === k).length}</span>
                       </button>

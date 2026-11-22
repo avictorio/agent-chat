@@ -12,7 +12,7 @@
    votes drop onto the pages as gold stars and the honours page lights,
    with the winner's pillar. Catch-up, tap to skip and reduced motion as
    in the other arenas; the full text lives in the page under the scene. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, SRGBColorSpace, type Group, type MeshStandardMaterial } from "three";
@@ -42,7 +42,10 @@ const PW = 1.6;
 const PH = 1.12;
 const GAP = 0.14;
 const DEAL = 0.22; // between pages
+const dealAt = (i: number) => 0.4 + i * DEAL;
 const FLIGHT = 0.55;
+/** a writer's ink colour, from the players list */
+const hexIn = (players: CorpsePlayer[], n: string) => (players.find((p) => p.name === n) || {}).hex || "#94a3b8";
 
 type Seat = { name: string; hex: string; you: boolean; x: number; z: number };
 
@@ -457,7 +460,7 @@ export default function CorpseArena3D({
   const revealed = !!g && !!g.story;
   const phone = hostW < PHONE_BELOW;
   const meName = (players.find((p) => String(p.name).toLowerCase() === meL) || {}).name || "";
-  const hexOf = (n: string) => (players.find((p) => p.name === n) || {}).hex || "#94a3b8";
+  const hexOf = (n: string) => hexIn(players, n);
   const total = ((g && g.turns_total) || 3) + 1;
   const L = layout(revealed ? (g.story || []).length + 1 : total, phone);
 
@@ -492,13 +495,12 @@ export default function CorpseArena3D({
     return () => clearTimeout(t);
   }, [ready, go, firstVisit, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, (dealt ? "r" : "") + (honoured ? "f" : ""));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dealt, honoured]);
+    writeSeen(seenId, (dealt ? "r" : "") + (honoured ? "f" : ""));
+  }, [seenId, dealt, honoured]);
 
-  const story: CorpseSegment[] = (g && g.story) || [];
-  const dealAt = (i: number) => 0.4 + i * DEAL;
+  const story: CorpseSegment[] = (g && g.story) || NO_ITEMS;
   const dealDone = dealAt(story.length + 1) + FLIGHT + 0.6;
   const starsAt = 0.5;
   const honoursDone = starsAt + 1.4 + 2.2;
@@ -517,10 +519,12 @@ export default function CorpseArena3D({
     }
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     if (revealed && !dealt) {
-      if (still) land("deal");
+      // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+      if (still) onLand("deal");
       else {
         setRt(0);
         setPlaying({ kind: "deal", t0: null });
@@ -528,13 +532,12 @@ export default function CorpseArena3D({
       return;
     }
     if (finished && dealt && !honoured) {
-      if (still) land("honours");
+      if (still) onLand("honours");
       else {
         setRt(0);
         setPlaying({ kind: "honours", t0: null });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, revealed, finished, dealt, honoured, still]);
 
   const skip = () => {
@@ -555,14 +558,13 @@ export default function CorpseArena3D({
     prevSig.current = sig;
     if (prev == null || !ready || prev === sig) return;
     juice.hit({ sound: "ping" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, ready]);
+  }, [sig, ready, juice]);
 
   // the pages, dealt out (or still in the pile)
   const pages: PageSpec[] = useMemo(() => {
     if (!revealed) return [];
     const pile: [number, number, number] = [0, 0.4, 0];
-    const all = [{ head: "The seed", hex: "#7c5c34", text: g.seed || "", italic: true, by: null as string | null, n: 0 }].concat(story.map((s) => ({ head: s.n + " · " + s.by, hex: hexOf(s.by), text: s.text, italic: false, by: s.by, n: s.n })));
+    const all = [{ head: "The seed", hex: "#7c5c34", text: g.seed || "", italic: true, by: null as string | null, n: 0 }].concat(story.map((s) => ({ head: s.n + " · " + s.by, hex: hexIn(players, s.by), text: s.text, italic: false, by: s.by, n: s.n })));
     const hs: number[] = g.honours || [];
     return all.map((p, i) => {
       const k = !dealt && playing && playing.kind === "deal" ? smooth(dealAt(i), dealAt(i) + FLIGHT, rt) : dealt ? 1 : 0;
@@ -570,8 +572,7 @@ export default function CorpseArena3D({
       const best = p.n > 0 && hs.indexOf(p.n) >= 0 && (honoured || (playing && playing.kind === "honours" && rt >= starsAt + 1.4));
       return { key: "p" + i, head: p.head, hex: p.hex, text: p.text, italic: p.italic, from: pile, to: L.spot(i), k, glow: best ? 1 : 0, stars: showStars && p.n ? (g.votes || {})[p.n] || 0 : 0 };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealed, story, dealt, playing, rt, finished, honoured, g, L]);
+  }, [revealed, story, players, dealt, playing, rt, finished, honoured, g, L]);
 
   const tail = running && g.you && g.you.writer ? g.you.tail || "" : null;
   const champion = finished && g.winner ? seats.find((s) => s.name === g.winner) || null : null;

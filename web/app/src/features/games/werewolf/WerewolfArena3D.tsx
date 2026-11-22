@@ -15,7 +15,7 @@
    winners' pillars. Catch-up, tap to skip and reduced motion as in the
    other arenas; the talk, the votes and the timeline live in the page
    under the scene. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import {
@@ -436,22 +436,23 @@ export default function WerewolfArena3D({
     if (isLast(n)) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = events.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else {
       setRt(0);
       setPlaying({ n, t0: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, events.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -471,8 +472,7 @@ export default function WerewolfArena3D({
     prevSig.current = sig;
     if (p == null || !ready || p === sig) return;
     juice.hit({ sound: "ping" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, ready]);
+  }, [sig, ready, juice]);
 
   const ev = playing ? events[playing.n - 1] : null;
   const fallAt = 0.6;

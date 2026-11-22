@@ -15,7 +15,7 @@
    pillar and shockwave. Catch-up, tap-to-skip and reduced motion as in
    the other rounds arenas. Bids are sealed until a lot resolves; the
    scene never shows a pending one. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { CameraControls } from "@react-three/drei";
 import { CanvasTexture, Color, Object3D, SRGBColorSpace, type Group, type InstancedMesh, type MeshStandardMaterial } from "three";
@@ -380,6 +380,22 @@ function readSeen(id: unknown): number | null {
     return null;
   }
 }
+/** Budgets and lots won as the scene shows them: after `upto` lots. */
+function tally(rounds: AuctionRound[], bidders: Bidder[], budget0: number, upto: number) {
+  const budgets: Record<string, number> = {};
+  const won: Record<string, number> = {};
+  bidders.forEach((b) => {
+    budgets[b.name] = budget0;
+    won[b.name] = 0;
+  });
+  rounds.slice(0, upto).forEach((r) => {
+    if (r.winner) {
+      budgets[r.winner] = (budgets[r.winner] ?? budget0) - r.price;
+      won[r.winner] = (won[r.winner] || 0) + 1;
+    }
+  });
+  return { budgets, won };
+}
 function writeSeen(id: unknown, n: number) {
   try {
     localStorage.setItem(seenKey(id), String(n));
@@ -524,23 +540,24 @@ export default function AuctionArena3D({
     if (isLast(n) && g.winner) setCeremony((c) => c + 1);
   };
 
+  const onLand = useEffectEvent(land);
   useEffect(() => {
     if (!go || playing) return;
     const n = rounds.length;
     if (n <= shown) return;
-    if (still) land(n, false);
+    // oxlint-disable-next-line react/set-state-in-effect -- new rounds from the server step the replay: reduced motion lands one at once, with its title, sound and buzz
+    if (still) onLand(n, false);
     else {
       setRt(0);
       setHammered(false);
       setPlaying({ n, t0: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, playing, rounds.length, shown, still]);
 
+  const seenId = g && g.id;
   useEffect(() => {
-    writeSeen(g && g.id, shown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+    writeSeen(seenId, shown);
+  }, [seenId, shown]);
 
   const skip = () => {
     if (playing) land(playing.n, true);
@@ -567,24 +584,8 @@ export default function AuctionArena3D({
     });
   }, [bidders, ready, juice]);
 
-  // Budgets and lots won as the scene shows them: after `upto` lots.
-  const tally = (upto: number) => {
-    const budgets: Record<string, number> = {};
-    const won: Record<string, number> = {};
-    bidders.forEach((b) => {
-      budgets[b.name] = budget0;
-      won[b.name] = 0;
-    });
-    rounds.slice(0, upto).forEach((r: AuctionRound) => {
-      if (r.winner) {
-        budgets[r.winner] = (budgets[r.winner] ?? budget0) - r.price;
-        won[r.winner] = (won[r.winner] || 0) + 1;
-      }
-    });
-    return { budgets, won };
-  };
   const settledN = playing ? (hammered ? playing.n : playing.n - 1) : shown;
-  const { budgets, won } = useMemo(() => tally(settledN), [settledN, rounds, bidders, budget0]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { budgets, won } = useMemo(() => tally(rounds, bidders, budget0, settledN), [settledN, rounds, bidders, budget0]);
   const playingRound = playing ? rounds[playing.n - 1] : null;
   // the reveal order: lowest bid first, passes never rise
   const order = useMemo(() => {
