@@ -115,6 +115,133 @@ export type CountRow = { n: number };
 export type StreamClient = { token: string, owner: boolean, name: string, kinds: Set<string> | null, games: Set<number> | null, stateSub: boolean,
   stateKey: string | null, send: (s: string) => void, close: () => void };
 
+/* ---------- the schema, as versioned steps ----------
+   Each step runs once per room (Room.ensureSchema counts them in cfg
+   "schema_version"). Add a change as a new step at the end; never edit a
+   step that has shipped - a room that ran it will not run it again.
+
+   Step 1 is the baseline: the whole schema as it stood when versioning
+   began (2026-11-22). Every room built before then had run some older
+   version of it on each start, so it brings a room of any older shape to
+   today's: each column is added only if missing, each dropped only if
+   present (read from PRAGMA table_info, not by letting an ALTER fail). */
+
+/** A table's column names. */
+function columnsOf(sql: SqlStorage, table: string): Set<string> {
+  return new Set(sql.exec<{ name: string }>("SELECT name FROM pragma_table_info(?)", table).toArray().map((r) => r.name));
+}
+/** Adds a column unless the table has it; true when it was added. */
+function addColumn(sql: SqlStorage, table: string, column: string, decl: string): boolean {
+  if (columnsOf(sql, table).has(column)) return false;
+  sql.exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl);
+  return true;
+}
+/** Drops a column if the table still has it. */
+function dropColumn(sql: SqlStorage, table: string, column: string): void {
+  if (columnsOf(sql, table).has(column)) sql.exec("ALTER TABLE " + table + " DROP COLUMN " + column);
+}
+
+function schemaBaseline(sql: SqlStorage): void {
+  sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL)");
+  sql.exec("CREATE TABLE IF NOT EXISTS rx (msg INTEGER NOT NULL, emoji TEXT NOT NULL, who TEXT NOT NULL, ts INTEGER NOT NULL)");
+  sql.exec("CREATE INDEX IF NOT EXISTS rx_msg ON rx (msg)");
+  // The in-room Claude bot was retired (2026-11-12); its per-room reply
+  // counter table is dropped wherever it still exists.
+  sql.exec("DROP TABLE IF EXISTS b");
+  sql.exec("CREATE TABLE IF NOT EXISTS inv (token TEXT PRIMARY KEY, name TEXT NOT NULL, created INTEGER NOT NULL, revoked INTEGER)");
+  sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+  addColumn(sql, "inv", "seen", "INTEGER");
+  addColumn(sql, "inv", "kind", "TEXT");
+  addColumn(sql, "inv", "invited_by", "TEXT");
+  // Avatars live in R2 only (phase D, finished 2026-11-19: every room was
+  // checked and held no blob), so the blob-era column goes wherever it
+  // still exists.
+  dropColumn(sql, "inv", "avatar");
+  addColumn(sql, "inv", "avatar_type", "TEXT");
+  addColumn(sql, "inv", "avatar_ver", "INTEGER");
+  addColumn(sql, "inv", "avatar_key", "TEXT");
+  sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
+  addColumn(sql, "tf", "url", "TEXT");
+  // The legacy in-DB media stores are gone (media plan phase B, 2026-11-11):
+  // every room was drained to R2 through the owner migrate/purge runs before
+  // this shipped, so the tables are dropped wherever they still exist.
+  sql.exec("DROP TABLE IF EXISTS au");
+  sql.exec("DROP TABLE IF EXISTS im");
+  sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
+  addColumn(sql, "md", "upload_id", "TEXT");
+  addColumn(sql, "md", "parts", "TEXT");
+  // Upload receipts: one row per part R2 has acknowledged, for every
+  // kind (the upload engine). It replaces mdp, the video-only table,
+  // whose rows move over the first time a room wakes on this code.
+  sql.exec("CREATE TABLE IF NOT EXISTS upp (msg INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, kind, n))");
+  if (sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mdp'").toArray().length) {
+    sql.exec("INSERT OR IGNORE INTO upp (msg, kind, n, etag) SELECT msg, 'video', n, etag FROM mdp");
+    sql.exec("DROP TABLE mdp");
+  }
+  // Upload tickets (media plan phase C, 2026-11-11): begin_upload mints a
+  // single-use, 15-minute ticket so a client that cannot present the invite
+  // token (an agent whose token lives in its gateway) can still PUT bytes.
+  // Only the ticket's SHA-256 is stored; the raw ticket exists solely in the
+  // begin_upload response and the PUT URL it authorizes.
+  sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
+  // owner: minted with the owner key, for a draft posted under any name
+  addColumn(sql, "ut", "owner", "INTEGER");
+  // sess: a resumable upload link (the engine), good for the whole upload
+  addColumn(sql, "ut", "sess", "INTEGER");
+  addColumn(sql, "m", "draft", "INTEGER");
+  addColumn(sql, "m", "pubauto", "INTEGER");
+  addColumn(sql, "m", "pub_ts", "INTEGER");
+  // owntrust records whether a post carried the owner key. Nothing reads it
+  // since the in-room bot was retired; it stays as provenance.
+  addColumn(sql, "m", "owntrust", "INTEGER");
+  addColumn(sql, "md", "fp", "TEXT");
+  addColumn(sql, "md", "part_size", "INTEGER");
+  // The upload engine: the file's name (a file's download name) and when
+  // its upload began (R2 keeps an unfinished upload 7 days from then).
+  addColumn(sql, "md", "name", "TEXT");
+  addColumn(sql, "md", "began", "INTEGER");
+  // "direct": the session's parts go straight to R2 (Phase 2)
+  addColumn(sql, "md", "mode", "TEXT");
+  addColumn(sql, "m", "audio_type", "TEXT");
+  addColumn(sql, "m", "audio_size", "INTEGER");
+  addColumn(sql, "m", "audio_transcript", "TEXT");
+  addColumn(sql, "m", "image_type", "TEXT");
+  addColumn(sql, "m", "image_size", "INTEGER");
+  addColumn(sql, "m", "video_type", "TEXT");
+  addColumn(sql, "m", "video_size", "INTEGER");
+  addColumn(sql, "m", "html_type", "TEXT");
+  addColumn(sql, "m", "html_size", "INTEGER");
+  addColumn(sql, "m", "html_name", "TEXT");
+  addColumn(sql, "m", "doc_type", "TEXT");
+  addColumn(sql, "m", "doc_size", "INTEGER");
+  addColumn(sql, "m", "doc_name", "TEXT");
+  // A general file of any type (the upload engine's kind "file").
+  addColumn(sql, "m", "file_type", "TEXT");
+  addColumn(sql, "m", "file_size", "INTEGER");
+  addColumn(sql, "m", "file_name", "TEXT");
+  addColumn(sql, "m", "game_id", "INTEGER");
+  sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
+  addColumn(sql, "push", "mode", "TEXT DEFAULT 'all'");
+  // The Android app's device-token table, dropped with the app (2026-11-20).
+  sql.exec("DROP TABLE IF EXISTS pushdev");
+  sql.exec("CREATE TABLE IF NOT EXISTS mv (name TEXT PRIMARY KEY, provider TEXT, voice_id TEXT, sample_key TEXT, sample_type TEXT, sample_ts INTEGER, ts INTEGER)");
+  sql.exec("CREATE TABLE IF NOT EXISTS gm (id INTEGER PRIMARY KEY, status TEXT NOT NULL, created INTEGER NOT NULL, created_by TEXT NOT NULL, card_msg INTEGER, state TEXT NOT NULL)");
+  sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
+  sql.exec("CREATE TABLE IF NOT EXISTS oq (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, claimed_by TEXT, resolved_by TEXT, resolution TEXT, updated INTEGER NOT NULL)");
+  sql.exec("CREATE TABLE IF NOT EXISTS dg (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL)");
+  sql.exec("CREATE TABLE IF NOT EXISTS sk (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, title TEXT NOT NULL, date TEXT, note TEXT, done INTEGER, done_by TEXT, updated INTEGER NOT NULL)");
+
+  sql.exec("CREATE TABLE IF NOT EXISTS dc (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, title TEXT NOT NULL, note TEXT, signers TEXT NOT NULL, updated INTEGER NOT NULL)");
+  // When each invite was first used.
+  addColumn(sql, "inv", "used", "INTEGER");
+  // When each member first posted as a member: the column, then a
+  // backfill from the kept history, once (when the column is new).
+  if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
+}
+
+/** The schema steps, in order (see above). */
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline];
+
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
   // set them), so the class carries no field initializers.
@@ -142,108 +269,17 @@ export class Room extends DurableObject {
     if (this.ready) this.ensureSchema();
   }
 
-  // Creates the room's tables, and adds columns introduced since it was
-  // created. Each ALTER TABLE runs on every start and throws once its
-  // column exists (or, for a DROP, is gone): that throw is the migration
-  // working, so those catches are empty on purpose.
+  // The room's schema, versioned: cfg "schema_version" counts the steps
+  // of SCHEMA_STEPS (below the class) this room has run, and a start runs
+  // only the ones it has not - each step once, in order, its count written
+  // only after it succeeds (a step that fails runs again next start).
   ensureSchema() {
-    this.sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS rx (msg INTEGER NOT NULL, emoji TEXT NOT NULL, who TEXT NOT NULL, ts INTEGER NOT NULL)");
-    this.sql.exec("CREATE INDEX IF NOT EXISTS rx_msg ON rx (msg)");
-    // The in-room Claude bot was retired (2026-11-12); its per-room reply
-    // counter table is dropped wherever it still exists.
-    this.sql.exec("DROP TABLE IF EXISTS b");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS inv (token TEXT PRIMARY KEY, name TEXT NOT NULL, created INTEGER NOT NULL, revoked INTEGER)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN seen INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN kind TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN invited_by TEXT"); } catch {}
-    // Avatars live in R2 only (phase D, finished 2026-11-19: every room was
-    // checked and held no blob), so the blob-era column goes wherever it
-    // still exists.
-    try { this.sql.exec("ALTER TABLE inv DROP COLUMN avatar"); } catch {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_ver INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN avatar_key TEXT"); } catch {}
-    this.sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
-    try { this.sql.exec("ALTER TABLE tf ADD COLUMN url TEXT"); } catch {}
-    // The legacy in-DB media stores are gone (media plan phase B, 2026-11-11):
-    // every room was drained to R2 through the owner migrate/purge runs before
-    // this shipped, so the tables are dropped wherever they still exist.
-    this.sql.exec("DROP TABLE IF EXISTS au");
-    this.sql.exec("DROP TABLE IF EXISTS im");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS md (msg INTEGER NOT NULL, kind TEXT NOT NULL, type TEXT NOT NULL, r2key TEXT, size INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (msg, kind))");
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN upload_id TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN parts TEXT"); } catch {}
-    // Upload receipts: one row per part R2 has acknowledged, for every
-    // kind (the upload engine). It replaces mdp, the video-only table,
-    // whose rows move over the first time a room wakes on this code.
-    this.sql.exec("CREATE TABLE IF NOT EXISTS upp (msg INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, etag TEXT NOT NULL, PRIMARY KEY (msg, kind, n))");
-    if (this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mdp'").toArray().length) {
-      this.sql.exec("INSERT OR IGNORE INTO upp (msg, kind, n, etag) SELECT msg, 'video', n, etag FROM mdp");
-      this.sql.exec("DROP TABLE mdp");
+    const row = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'schema_version'").toArray()[0];
+    for (let done = row ? Number(row.v) || 0 : 0; done < SCHEMA_STEPS.length; done++) {
+      SCHEMA_STEPS[done]!(this.sql);
+      this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('schema_version', ?)", String(done + 1));
     }
-    // Upload tickets (media plan phase C, 2026-11-11): begin_upload mints a
-    // single-use, 15-minute ticket so a client that cannot present the invite
-    // token (an agent whose token lives in its gateway) can still PUT bytes.
-    // Only the ticket's SHA-256 is stored; the raw ticket exists solely in the
-    // begin_upload response and the PUT URL it authorizes.
-    this.sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
-    // owner: minted with the owner key, for a draft posted under any name
-    try { this.sql.exec("ALTER TABLE ut ADD COLUMN owner INTEGER"); } catch {}
-    // sess: a resumable upload link (the engine), good for the whole upload
-    try { this.sql.exec("ALTER TABLE ut ADD COLUMN sess INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN draft INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN pubauto INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN pub_ts INTEGER"); } catch {}
-    // owntrust records whether a post carried the owner key. Nothing reads it
-    // since the in-room bot was retired; it stays as provenance.
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN owntrust INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN fp TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN part_size INTEGER"); } catch {}
-    // The upload engine: the file's name (a file's download name) and when
-    // its upload began (R2 keeps an unfinished upload 7 days from then).
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN name TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN began INTEGER"); } catch {}
-    // "direct": the session's parts go straight to R2 (Phase 2)
-    try { this.sql.exec("ALTER TABLE md ADD COLUMN mode TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN audio_transcript TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN image_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN video_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN html_name TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN doc_name TEXT"); } catch {}
-    // A general file of any type (the upload engine's kind "file").
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_type TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_size INTEGER"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN file_name TEXT"); } catch {}
-    try { this.sql.exec("ALTER TABLE m ADD COLUMN game_id INTEGER"); } catch {}
-    this.sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
-    try { this.sql.exec("ALTER TABLE push ADD COLUMN mode TEXT DEFAULT 'all'"); } catch {}
-    // The Android app's device-token table, dropped with the app (2026-11-20).
-    this.sql.exec("DROP TABLE IF EXISTS pushdev");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS mv (name TEXT PRIMARY KEY, provider TEXT, voice_id TEXT, sample_key TEXT, sample_type TEXT, sample_ts INTEGER, ts INTEGER)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS gm (id INTEGER PRIMARY KEY, status TEXT NOT NULL, created INTEGER NOT NULL, created_by TEXT NOT NULL, card_msg INTEGER, state TEXT NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS con (v INTEGER PRIMARY KEY, ts INTEGER NOT NULL, editor TEXT NOT NULL, text TEXT NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS oq (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL, claimed_by TEXT, resolved_by TEXT, resolution TEXT, updated INTEGER NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS dg (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, day TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL)");
-    this.sql.exec("CREATE TABLE IF NOT EXISTS sk (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, title TEXT NOT NULL, date TEXT, note TEXT, done INTEGER, done_by TEXT, updated INTEGER NOT NULL)");
-
-    this.sql.exec("CREATE TABLE IF NOT EXISTS dc (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, added_by TEXT NOT NULL, title TEXT NOT NULL, note TEXT, signers TEXT NOT NULL, updated INTEGER NOT NULL)");
-    // When each invite was first used (added later; fails harmlessly once the column exists).
-    try { this.sql.exec("ALTER TABLE inv ADD COLUMN used INTEGER"); } catch {}
-    // When each member first posted as a member. Runs once per room, backfilling from the kept history.
-    try {
-      this.sql.exec("ALTER TABLE inv ADD COLUMN posted INTEGER");
-      this.sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
-    } catch { /* the column exists, so the backfill ran already */ }
   }
 
   exists() {

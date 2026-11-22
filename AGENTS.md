@@ -194,9 +194,13 @@ and `wrangler.toml` in the same commit.
 
 ### Durable Object storage (per room)
 
-The SQLite tables are created in `Room.ensureSchema()` (run on wake for an
-existing room, and by `create()`) with `CREATE TABLE IF NOT EXISTS`. Columns added later use `try { ALTER TABLE ... } catch (e) {}`.
-There is no migration framework, so follow that pattern for schema changes.
+The SQLite tables come from versioned steps (`SCHEMA_STEPS` in
+`worker/room/Room.ts`, since 2026-11-22): `Room.ensureSchema()` (run on
+wake for an existing room, and by `create()`) runs the steps a room has
+not run yet, counting them in its `cfg` row `schema_version`. Step 1 is
+the baseline - the whole schema as of versioning, adding each column only
+if missing - which brought every older room up to date once. See section
+13, "Schema changes".
 
 | Table | Holds |
 |---|---|
@@ -686,8 +690,18 @@ features; mobile means the website in Android Chrome and iOS Safari.
   for 10 minutes. An expected failure stays quiet with its reason:
   `catch { /* already completed, aborted or expired */ }` (a multipart
   abort, a closed stream, a client that went away, input refused just
-  below). The ALTER TABLE migrations in `ensureSchema` are the one bare
-  `catch {}`. `npm run check` refuses any other empty catch.
+  below). `npm run check` refuses an empty catch with no reason - there
+  is no exception (the schema steps check columns instead of letting an
+  ALTER fail).
+- **Schema changes:** add a step at the end of `SCHEMA_STEPS`
+  (`worker/room/Room.ts`) - a function of `sql` that makes the change
+  once (`addColumn` / `dropColumn` read the table's columns first, so a
+  step is also safe to repeat) - and its row type next to the others.
+  Never edit a step that has shipped: a room that ran it will not run it
+  again. Before deploying, run `tests/upgrade/run.sh` (rooms written by
+  `origin/main`'s Worker, one of them aged by hand, read back by this
+  checkout's; about 2 minutes, local only), and give its `age.py` the
+  columns your step adds if they matter.
 - **New endpoints:** add them under `/api/rooms/ROOM/...`, put them behind
   `stub.access(invite, owner)`, document them in `docs()`, and link them
   from `for_agents` if agents should discover them.
@@ -727,20 +741,16 @@ The 2026-11 restructure left nothing open (its last item, the Worker in
 TypeScript, was done on 2026-11-21). What follows is the code-health
 to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it (the first four -
-linting the whole repo, the effect dependencies, typed database rows and
-no `any` in the Worker - were done on 2026-11-22).
+deleting it here in the commit that finishes it (the first five -
+linting the whole repo, the effect dependencies, typed database rows, no
+`any` in the Worker and versioned migrations - were done on 2026-11-22).
 
-1. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
-   on every Durable Object start and relies on each one throwing once
-   its column exists. A schema version in `cfg` would run each step
-   once and drop the bare `catch {}` exception from section 13.
-2. **Very long lines.** The MCP tool descriptions in
+1. **Very long lines.** The MCP tool descriptions in
    `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
    characters; split them per tool. `worker/routes/pages.ts` inlines
    the app icons as base64 (lines up to ~65,000 characters); they can
    be Workers Static Assets files instead.
-3. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+2. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
    reason, the old API deploy that embedded the code in a template
    string, is gone now that wrangler bundles the Worker; it is house
    style only. The owner decides whether to keep it; if it goes,

@@ -36,6 +36,13 @@ Test checklist:
   `DELETE /api/rooms/ROOM?confirm=ROOM`. Deleting is permanent. Rooms in
   `PROTECTED_ROOMS` in `worker/limits.ts` (`henry-hank-order-up`) can't be
   deleted through the API.
+- **Schema changes have an upgrade test:** `tests/upgrade/run.sh
+  [OLD_REF]` (default `origin/main`) runs the older Worker from a git
+  worktree on a temp state, fills two throwaway rooms, ages one by hand
+  (drops newer columns, clears its schema version), then reads both back
+  on this checkout and checks every room reached the latest schema step.
+  About 2 minutes, port 8799, local only. Run it before shipping a new
+  schema step (AGENTS.md section 13, "Schema changes").
 - **Server behavior has an automated suite:** `npm run test:api` boots
   wrangler dev (port 8798, its own temp state per run via `--persist-to`)
   and checks the access matrix, draft-media privacy, create-room

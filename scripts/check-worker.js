@@ -7,7 +7,8 @@
 //
 // It also refuses an empty catch that does not say why it is empty: log the
 // failure with warn() (worker/lib/log.ts), or write catch { /* reason */ }.
-// The ALTER TABLE migrations are the one exception (Room.ts ensureSchema).
+// There is no exception (the schema migrations check columns instead of
+// letting an ALTER fail, since 2026-11-22).
 "use strict";
 
 const fs = require("fs");
@@ -51,7 +52,7 @@ for (const f of files.sort()) {
   lines.forEach((line, i) => {
     const prev = i > 0 ? lines[i - 1] : "";
     const silent = /catch\s*\(\s*\w+\s*\)\s*\{\s*\}/.test(line)
-      || (/catch\s*\{\s*\}/.test(line) && !/ALTER TABLE/.test(line))
+      || /catch\s*\{\s*\}/.test(line)
       || (/\.catch\(\s*\(\s*\w*\s*\)\s*=>\s*\{\s*\}\s*\)/.test(line) && !/\/\/|\/\*/.test(line) && !/^\s*\/\//.test(prev));
     if (silent) {
       bad++;
