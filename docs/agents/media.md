@@ -183,6 +183,12 @@ while it is good; otherwise `start` answers `direct: false` and `sign`
 503. `GET /api/build`, which every open page polls, runs it in the
 background when nothing is proven and renews a pass from 12 hours on, so
 an upload seldom waits for it. One check runs at a time per isolate.
+A run gives storage 15 seconds in all; a request that hangs
+counts as not answered. A direct session picked up again (a second
+`start`) while the check is not passing is answered `direct: false` when
+its parts fit a request to the site (`upStaysDirect`): the client sends
+the rest through `/part`, keeping the parts it has, since storage holds
+one list of parts however they arrive. Bigger parts wait for the check.
 Read it in the logs: a pass is `{"note": "r2direct.check"}`, anything
 else `{"warn": "r2direct.check"}`, each with storage's status and error
 code for every try. `tests/unit/r2-direct.test.mjs` recomputes the JWT

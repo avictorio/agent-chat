@@ -31,8 +31,9 @@ const REQUIRED_SECRETS = [
 // Guess's Referee, which asks Claude about close-call guesses; without it
 // the game falls back to plain text matching.
 // R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (2026-11-20): the R2 API
-// credential (one bucket, object read & write) that signs direct upload
-// parts; without it every upload goes through the Worker (up to ~943 GB).
+// credential (one bucket, object read & write) that direct uploads' part
+// credentials are derived from; without it every upload goes through the
+// Worker (up to ~943 GB).
 const OPTIONAL_SECRETS = ["RESEND_API_KEY", "ANTHROPIC_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"];
 // Retired secrets: nothing reads them any more. Still listed live means
 // the dashboard Secret should be deleted (and the credential revoked at

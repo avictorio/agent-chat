@@ -101,7 +101,8 @@ export async function r2PartAddresses(env: R2DirectEnv, key: string, uploadId: s
 // Every part storage holds for an upload (S3 ListParts, 1,000 a page):
 // part number -> { etag, size }. Storage's own record is what a direct
 // upload's status and finish go by.
-export async function r2ListParts(env: Env, key: string, uploadId: string) {
+/** @param signal ends the reads early (a caller with a deadline) */
+export async function r2ListParts(env: Env, key: string, uploadId: string, signal?: AbortSignal) {
   if (!r2DirectConfigured(env)) throw new Error("Direct uploads are not configured");
   const a = r2Address(env, key);
   const parts: Map<number, { etag: string, size: number }> = new Map();
@@ -111,7 +112,7 @@ export async function r2ListParts(env: Env, key: string, uploadId: string) {
     if (marker) query["part-number-marker"] = String(marker);
     // signed with the API credential itself: this address never leaves the Worker
     const url = await sigv4Presign({ method: "GET", host: a.host, path: a.path, query: query, accessKey: env.R2_ACCESS_KEY_ID, secretKey: env.R2_SECRET_ACCESS_KEY, region: "auto", expires: 300, date: new Date() });
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: signal });
     const text = await res.text();
     if (!res.ok) throw new Error("ListParts " + res.status + " " + ((/<Code>([^<]*)<\/Code>/.exec(text) || [])[1] || ""));
     for (const m of text.matchAll(/<Part>([\s\S]*?)<\/Part>/g)) {

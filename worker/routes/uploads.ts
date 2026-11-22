@@ -8,8 +8,10 @@ import {
   AUDIO_MAX,
   IMAGE_MAX,
   mediaTooBig,
+  MIB,
   ROOM_RE,
   STREAM_PART,
+  UP_PART_MAX,
   UP_KINDS,
   UP_SIGN_MAX,
   UP_SIGN_TTL,
@@ -121,7 +123,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     const t = await stub.uploadSignTarget(id, kind, who, owner, nums);
     if (refused(t)) return json({ error: t.error }, t.status);
     // no address leaves unless storage has shown what one can do (r2-direct-check.ts)
-    if (!r2DirectConfigured(env) || !(await directUploadsProven(env))) return json({ error: "Direct uploads are paused for the moment: ask again in a few minutes. Or cancel this upload (its /abort) and start it again to send it through the site, if it fits" }, 503);
+    if (!r2DirectConfigured(env) || !(await directUploadsProven(env))) return json({ error: "Direct uploads are paused for the moment: ask again in a few minutes, or send each part through the site instead (PUT its /part?n=N) if the parts are " + Math.floor(UP_PART_MAX / MIB) + " MiB or less" }, 503);
     const now = new Date();
     /** each part's address */
     const urls = await r2PartAddresses(env, t.key, t.upload_id, t.parts, UP_SIGN_TTL, now);

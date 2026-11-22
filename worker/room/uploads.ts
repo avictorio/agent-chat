@@ -226,13 +226,26 @@ export const UploadMethods = {
   // Whether a session may send its parts straight to R2: the client asked
   // (direct), the credential is configured, the switch is on - or the
   // owner asked with "force", to try it live before the switch flips -
-  // and storage has shown that a part address can only take its part
-  // (platform/r2-direct-check.ts). Otherwise the parts go through the site.
+  // and storage has shown that an address's credential can only upload
+  // parts of its own object (platform/r2-direct-check.ts). Otherwise the
+  // parts go through the site.
   /** @param direct the client's direct: true, or "force" */
   async upDirectAllowed(direct: unknown, owner: boolean) {
     if (!direct || !r2DirectConfigured(this.env)) return false;
     if (this.env.R2_DIRECT !== "1" && !(direct === "force" && !!owner)) return false;
     return directUploadsProven(this.env);
+  },
+
+  // Whether a session that began direct is still to be sent that way when
+  // it is picked up again. Parts that fit one request to the site can go
+  // through it as well (PUT /part: storage keeps one list of parts however
+  // they arrive), and do while the direct check is not passing, so an
+  // upload in flight carries on with the parts it has. Bigger parts have
+  // no other way in: their sign waits for the check.
+  /** @param partSize the session's part length in bytes */
+  async upStaysDirect(mode: string | null | undefined, partSize: number) {
+    if (mode !== "direct") return false;
+    return partSize > UP_PART_MAX || directUploadsProven(this.env);
   },
 
   /**
@@ -261,11 +274,11 @@ export const UploadMethods = {
     if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp) && !this.upExpired(prev, a.msg)) {
       // The same file again (a retry after an interruption, or from
       // another device): keep the parts already stored, on the route the
-      // session began with.
+      // session began with (upStaysDirect has the one exception).
       const plan = this.upPlan(prev);
       let received: number[] = [];
       try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); } catch (e) { warn("upload.received", e, { room, id, kind }); }
-      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: prev.mode === "direct" };
+      return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size) };
     }
     if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }

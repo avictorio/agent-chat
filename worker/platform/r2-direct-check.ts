@@ -23,8 +23,8 @@
 // refused as a signature mismatch: R2, like AWS S3, counts an x-amz header
 // nobody signed against the signature. The local emulation acts on it.) Direct uploads are offered only
 // after all five come out as above. A try storage did not answer (a 5xx,
-// a 429, an error) settles nothing: the check is inconclusive and runs
-// again within a minute.
+// a 429, an error, no answer within CHECK_MS) settles nothing: the check
+// is inconclusive and runs again within a minute.
 //
 // The verdict is kept in KV with the version of this check and a
 // fingerprint of the credential, so a change to either is proven afresh:
@@ -47,6 +47,8 @@ const GOOD_S = 86400;
 const BAD_S = 900;
 const UNSURE_S = 60;
 const RENEW_MS = 12 * 3600 * 1000;
+/** How long one run may spend on its requests to storage. */
+const CHECK_MS = 15000;
 
 export type DirectVerdict = {
   /** all five tries came out as they must */
@@ -157,8 +159,10 @@ export async function r2DirectCheck(env: R2DirectEnv): Promise<DirectVerdict> {
     const uploadId = up.uploadId;
     const now = new Date();
     const ttl = 300;
+    // an upload's start may be waiting on this: storage that stalls is storage that did not answer
+    const deadline = AbortSignal.timeout(CHECK_MS);
     const send = async (name: string, url: string, init: RequestInit): Promise<Answer> => {
-      const res = await fetch(url, init);
+      const res = await fetch(url, Object.assign({ signal: deadline }, init));
       const text = await res.text();
       // the error's code and never its message: a signature error's message repeats the request, token and all
       const code = (/<Code>([A-Za-z0-9]{1,60})<\/Code>/.exec(text) || [])[1] || "";
@@ -183,7 +187,7 @@ export async function r2DirectCheck(env: R2DirectEnv): Promise<DirectVerdict> {
     const read = await send("read", await sigv4Presign(Object.assign({ method: "GET", host: otherAt.host, path: otherAt.path, region: "auto", expires: ttl, date: now }, held)), { method: "GET" });
     const control = await send("control", await partOf(4, api, copyFrom), { method: "PUT", headers: copyFrom });
 
-    const parts = await r2ListParts(env, mine, uploadId);
+    const parts = await r2ListParts(env, mine, uploadId, deadline);
     const holds = (n: number) => (parts.get(n) || { size: -1 }).size;
     const copied = header.copied || copy.copied || holds(2) === otherBytes.length || holds(3) === otherBytes.length;
     const unanswered = [part, header, copy, read, control].some((a) => a.status >= 500 || a.status === 429);

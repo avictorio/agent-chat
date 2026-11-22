@@ -10,7 +10,7 @@ import { r2Address, r2PartAddresses, r2PartCredential, sigv4Presign } from "../.
 import { CHECK_PREFIX, CHECK_VERSION, directUploadsProven, directVerdict, forgetDirectVerdict, r2DirectCheck, renewDirectVerdict } from "../../worker/platform/r2-direct-check.ts";
 import { UploadMethods } from "../../worker/room/uploads.ts";
 import { uploadStep } from "../../worker/routes/uploads.ts";
-import { ROOM_RE } from "../../worker/limits.ts";
+import { MIB, ROOM_RE, UP_PART_MAX } from "../../worker/limits.ts";
 import { resetWarnings } from "../../worker/lib/log.ts";
 
 const CRED = { R2_ACCESS_KEY_ID: "0123456789abcdef0123456789abcdef", R2_SECRET_ACCESS_KEY: "f".repeat(64), R2_ACCOUNT_ID: "acct123", R2_BUCKET: "my-bucket" };
@@ -436,5 +436,37 @@ test("the sign route hands out only addresses made with the upload's own credent
     const res = await sign(b.env);
     assert.equal(res.status, 503);
     assert.ok(!(await res.text()).includes("X-Amz"), "no address in a refusal");
+  });
+});
+
+test("an upload already in flight goes through the site while the check is not passing, if its parts fit", async () => {
+  const stays = (env, mode, partSize) => UploadMethods.upStaysDirect.call({ env }, mode, partSize);
+  await withBucket(SOUND, async (b) => {
+    assert.equal(await stays(b.env, "direct", 8 * MIB), true);
+    assert.equal(await stays(b.env, null, 8 * MIB), false, "a session through the site stays there");
+  });
+  await withBucket(Object.assign({}, LAX, { unsignedHeaders: "refuse" }), async (b) => {
+    assert.equal(await stays(b.env, "direct", 8 * MIB), false, "parts that fit a request to the site go through it");
+    assert.equal(await stays(b.env, "direct", UP_PART_MAX), false);
+    assert.equal(await stays(b.env, "direct", UP_PART_MAX + 1), true, "bigger parts have only storage: their sign waits");
+  });
+  assert.equal(await stays({}, "direct", 8 * MIB), false, "the credential gone: through the site");
+});
+
+test("the check gives storage a deadline: a request that hangs is a try not answered", async () => {
+  await withBucket(SOUND, async (b) => {
+    const real = AbortSignal.timeout;
+    AbortSignal.timeout = () => real.call(AbortSignal, 30);
+    const s3 = globalThis.fetch;
+    globalThis.fetch = (input, init = {}) => (init.method === "PUT" && String(input).includes("partNumber=3")
+      // never answers; the timer only keeps the test's event loop alive until the deadline fires
+      ? new Promise((_, reject) => { const t = setTimeout(reject, 5000); init.signal.addEventListener("abort", () => { clearTimeout(t); reject(init.signal.reason); }); })
+      : s3(input, init));
+    try {
+      const v = await r2DirectCheck(b.env);
+      assert.equal(v.ok, false);
+      assert.equal(v.inconclusive, true);
+      assert.equal(b.objects.size, 0, "and it still cleans up");
+    } finally { AbortSignal.timeout = real; }
   });
 });
