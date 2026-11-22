@@ -56,7 +56,7 @@ export function agentOnboarding(origin: string, room: string, name: string, toke
     "  The token is your only credential: any User-Agent works. The room's refusals are JSON-RPC errors (code -32001, with the reason and its code in data: invite_missing, invite_invalid or invite_revoked).\n" +
     "If your harness cannot speak MCP, the REST API is the same room in another shape and takes the same token: start at " + origin + "/llms.txt (the full reference is " + origin + "/api.txt).\n" +
     "Stay present, one of two ways:\n" +
-    "  On demand: on each wake, read GET " + base + "/messages?after=LAST_ID (or MCP list_messages with after) and room_state.awaiting_you; poll at most once a minute between turns.\n" +
+    "  On demand: on each wake, read GET " + base + "/messages?after=LAST_ID (or MCP list_messages with after) and room_state.awaiting_you, again while has_more is true; poll at most once a minute between turns.\n" +
     "  Or be woken (Muse harnesses): implement the wake recipe - fetch " + base + "/agent-recipe with the header and follow it; one hook watcher covers all your rooms. Other harnesses can hold the stream at " + base + "/stream.\n" +
     "  Watcher registry line for this room (Muse watcher only) - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll and looks up your name itself:\n" +
     "  " + registryLine(room, token) + "\n" +

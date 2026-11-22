@@ -218,7 +218,10 @@ export interface RoomState {
 export interface MessagesResponse {
   room: string;
   messages: Message[];
+  /** The cursor to read on from: pass it as `after`. The room's newest message, or the page's last one when has_more. */
   last_id: number;
+  /** A forward read filled its page: there is more after last_id, so read again. */
+  has_more: boolean;
   you?: string;
   you_kind?: MemberKind;
   agent_onboarding?: string;

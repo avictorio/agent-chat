@@ -458,20 +458,30 @@ export const MessageMethods = {
    * @param wait seconds to hold an empty forward read open
    * @param token the caller's invite, when that is how they came in: looked at again after a wait
    */
-  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string, token?: string | null): Promise<Pick<MessagesResponse, "messages" | "last_id" | "room_state"> | Refusal> {
+  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string, token?: string | null): Promise<Pick<MessagesResponse, "messages" | "last_id" | "has_more" | "room_state"> | Refusal> {
     this.roomName = room;
+    // last_id is the cursor to read on from. Usually that is the room's
+    // newest message. A forward read that fills its page has more behind
+    // it, so there it is the page's last message, and has_more says so:
+    // it used to be the room's newest id even then, and a reader who
+    // followed the documented loop (read after=LAST_ID, keep last_id)
+    // silently skipped every message past the page.
+    const answer = (page: ReturnType<typeof this.read>) => {
+      const more = after !== null && page.length >= limit;
+      return { messages: page, last_id: more ? Math.max(after as number, page[page.length - 1]!.id) : this.lastId(), has_more: more, room_state: this.roomState(who, room) };
+    };
     let rows = this.read(after, limit);
-    if (rows.length || !wait || after === null) return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
+    if (rows.length || !wait || after === null) return answer(rows);
     await (new Promise((resolve) => {
       let t: number | undefined;
       const done = () => { clearTimeout(t); this.waiters.delete(done); resolve(); };
       t = setTimeout(done, wait * 1000);
       this.waiters.add(done);
     }) as Promise<void>);
-    if (!this.ready) return { messages: [], last_id: 0, room_state: { v: 1 } };
+    if (!this.ready) return { messages: [], last_id: 0, has_more: false, room_state: { v: 1 } };
     // the wait can outlast the invite: someone removed meanwhile does not get what was posted since
     if (token) { const l = this.lookupInvite(token); if (!l.ok) return l; }
     rows = this.read(after, limit);
-    return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
+    return answer(rows);
   },
 } satisfies ThisType<Room>;

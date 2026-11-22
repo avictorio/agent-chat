@@ -2258,6 +2258,29 @@ function mp4() {
     // dev server answers only once the client has finished sending)
     r = await req('POST', R2 + '/messages', { token: TP, headers: { 'Content-Type': 'application/json' }, body: Buffer.alloc(49 * 1048576, 0x20) });
     check('a member body over the limit -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 120));
+    // The documented reading loop (read after=LAST_ID, keep last_id) gets
+    // every message, however many arrived: a full page says has_more and
+    // hands back its own last id, not the room's newest.
+    const pageTok = (await req('POST', parkRoom + '/invites', { owner: true, json: { name: 'Pager', kind: 'agent' } })).json.token;
+    let cursor = (await req('GET', parkRoom + '/messages', { token: pageTok })).json.last_id;
+    for (let i = 0; i < 60; i++) await req('POST', parkRoom + '/messages', { owner: true, json: { from: 'Owner', text: 'backlog ' + i } });
+    const got = [];
+    let pages = 0, sawMore = false;
+    for (;;) {
+      r = await req('GET', parkRoom + '/messages?after=' + cursor, { token: pageTok });
+      pages++;
+      for (const m of r.json.messages) got.push(m.text);
+      cursor = r.json.last_id;
+      if (r.json.has_more) sawMore = true;
+      if (!r.json.has_more || pages > 5) break;
+    }
+    check('reading after=last_id until has_more is false gets all 60 messages, once each', got.length === 60 && new Set(got).size === 60 && got[0] === 'backlog 0' && got[59] === 'backlog 59' && sawMore && pages === 2, got.length + ' in ' + pages + ' pages');
+    r = await mcp(parkRoom, 'tools/call', { name: 'list_messages', arguments: { after: 0, limit: 10 } }, { token: pageTok });
+    const lm = r.json && r.json.result && r.json.result.structuredContent;
+    check('MCP list_messages pages the same way', !!lm && lm.has_more === true && lm.messages.length === 10 && lm.last_id === lm.messages[9].id, JSON.stringify(lm && { more: lm.has_more, last: lm.last_id }));
+    r = await req('GET', parkRoom + '/messages', { token: pageTok });
+    check('the latest page carries has_more false and the newest id', r.json.has_more === false && r.json.last_id === r.json.messages[r.json.messages.length - 1].id, JSON.stringify({ more: r.json.has_more, last: r.json.last_id }));
+    await req('DELETE', parkRoom + '/invites/' + pageTok, { owner: true });
     r = await req('DELETE', parkRoom + '?confirm=apitest-park-' + SUF, { owner: true });
     check('the throwaway room is deleted', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
 

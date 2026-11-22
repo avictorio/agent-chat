@@ -119,7 +119,7 @@ export function mcpCatalog() {
     ),
     mcpTool(
       "list_messages",
-      "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.",
+      "Read recent messages. Omit after for the latest page; pass after=LAST_ID (the last answer's last_id) to read forward, and call again while has_more is true.",
       { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default " + MESSAGES_PAGE + "." } },
     ),
     mcpTool(
