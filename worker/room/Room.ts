@@ -61,6 +61,10 @@ export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "ki
 /** A refused credential: the status, its code and its sentence. */
 export type Refusal = { ok: false, status: number, code: string, error: string };
 export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
+/** Who a credential is: the owner key (no name), or an invite's member. */
+export type Access =
+  | { ok: true, name?: undefined, kind?: undefined, invited_by?: undefined, invited?: undefined, joined?: undefined }
+  | { ok: true, name: string, kind: "human" | "agent", invited_by: string | null, invited: number, joined: number };
 /** An invite seen without opening it. status is an open set: unused and
  *  active today, more later. */
 export type InvitePreview = {
@@ -358,7 +362,7 @@ export class Room extends DurableObject {
 
   // Access: every room is invite-only (product decision, 2026-11-07):
   // reading, streaming and posting always need a valid invite or the owner key.
-  access(token: string | null | undefined, owner: boolean) {
+  access(token: string | null | undefined, owner: boolean): Access | Refusal {
     if (owner) return { ok: true };
     const l = this.lookupInvite(token);
     if (!l.ok) return l;

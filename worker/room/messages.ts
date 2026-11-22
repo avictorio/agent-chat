@@ -68,7 +68,7 @@ export const MessageMethods = {
    * @param trusted the post carried the owner key (kept as provenance)
    * @param pubauto publish the draft once its upload verifies
    */
-  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null, image: InlineMedia | null, video: InlineMedia | null, draft: boolean, pubauto: boolean, html: InlineMedia | null, doc: InlineMedia | null) {
+  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null) {
     await this.sweepDrafts();
     this.roomName = room;
     const ts = Date.now();

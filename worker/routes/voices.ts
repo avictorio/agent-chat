@@ -91,7 +91,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "speak", url);
-    if (ss === "ok") acc = { ok: true, name: null };
+    if (ss === "ok") acc = { ok: true };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
   if (!acc.ok) return deny(acc);
@@ -101,7 +101,8 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   const src = await stub.speakSource(id);
   if (!src) return json({ error: "No message with that id" }, 404);
   const v = await stub.voiceOf(src.sender);
-  if (!v || !v.voice_id) return json({ error: src.sender + " has no voice yet" }, 404);
+  const voiceId = v && v.voice_id;
+  if (!voiceId) return json({ error: src.sender + " has no voice yet" }, 404);
   if (!env.CARTESIA_API_KEY) return json({ error: "Playback is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
   const text = speakableText(src.text);
   if (!text) return json({ error: "Nothing speakable in that message" }, 422);
@@ -114,7 +115,7 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   let buf;
   const synth = (async () => {
-    const b = await cartesiaSpeak(env, v.voice_id, text);
+    const b = await cartesiaSpeak(env, voiceId, text);
     // Cache only if the sender's voice is still the one synthesized. A
     // reclone landing mid-synthesis runs its invalidation against an
     // empty cache; caching this buffer anyway would resurrect the old

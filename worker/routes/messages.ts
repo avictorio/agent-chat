@@ -11,7 +11,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { deny, json, readBody, type Body, bodyText } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyText, refused } from "../lib/http.js";
 import { MAX_NAME, clamp } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
@@ -40,7 +40,7 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
   const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? bodyText(body.text, "text") : undefined);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
 }
 
@@ -57,7 +57,7 @@ export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   const r = await stub.deleteMessage(id, acc.name || "", owner);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room: room, deleted: r.deleted });
 }
 
@@ -106,7 +106,7 @@ export async function attachmentsRoute(rc: RouteContext, m: RegExpMatchArray) {
     before: url.searchParams.get("before") || "",
     limit: url.searchParams.get("limit") || "",
   }, room);
-  if (r.error) return json({ error: r.error }, r.status || 400);
+  if ("error" in r) return json({ error: r.error }, r.status || 400);
   const extra: { you?: string } = {};
   if (acc.name) extra.you = acc.name;
   return json(Object.assign({ room }, extra, r));

@@ -114,6 +114,13 @@ export async function readBody(request: Request): Promise<Body | null> {
   return v;
 }
 
+/** Whether a Room answer refused (any status but 200): the check the
+ *  routes always made, now also telling the checker which shape is left -
+ *  past it, the answer is the success one. */
+export function refused<T extends { status?: number }>(r: T): r is Extract<T, { error: string }> {
+  return r.status !== undefined && r.status !== 200;
+}
+
 /** Whether a JSON value is an object (not null, not a list). */
 export function isObject(v: unknown): v is Body {
   return typeof v === "object" && v !== null && !Array.isArray(v);

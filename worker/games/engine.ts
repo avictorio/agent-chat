@@ -29,7 +29,7 @@ import type { Body } from "../lib/http.js";
 export type GamePub = { id: number, type: string, status: string, players: Array<{ name: string, hex: string, accepted?: boolean }>, [field: string]: any };
 /** What a create or a move answers: the status to send, with the match's
  *  full state or the error (and, for a refused move, example moves). */
-export type GameReply = { status?: number, error?: string, game?: unknown, legal_moves?: unknown };
+export type GameReply = { status?: number, error?: string, game?: unknown, legal_moves?: string[], resolved?: boolean };
 /**
  * A game's plug-in: one entry of GAME_ENGINES, as described below. The
  * match state (st) is untyped JSON here, as on GameRow; each game's own

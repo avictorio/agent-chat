@@ -27,6 +27,7 @@ import type { StateMethods } from "../worker/room/state.js";
 import type { MessageMethods } from "../worker/room/messages.js";
 import type { GameMachineryMethods } from "../worker/room/games.js";
 import type { TestHookMethods } from "../worker/room/test-hooks.js";
+import type { Room } from "../worker/room/Room.js";
 
 // Room's methods live in one object per area, installed on the class with
 // Object.assign at the end of room/Room.ts; this tells the checker so.
@@ -64,4 +65,16 @@ declare module "../worker/room/Room.js" {
     /** Upload sessions ("msg:kind") with a finish in flight (uploadFinish). */
     _finishing?: Set<string>;
   }
+}
+
+// A Durable Object stub: an RPC proxy whose methods are the Room's, each
+// answering with a promise of what the method returns.
+type Promised<F> = F extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never;
+declare global {
+  type DurableObjectStub = {
+    [K in keyof Room as K extends "fetch" ? never : Room[K] extends (...args: never[]) => unknown ? K : never]: Promised<Room[K]>;
+  } & {
+    /** a stub's fetch takes a URL or a Request, like the global one */
+    fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  };
 }

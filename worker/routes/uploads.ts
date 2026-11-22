@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { deny, json, readBody, type Body, bodyText } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyText, refused } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
 import {
@@ -99,13 +99,13 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     const len = Number(cl);
     if (!request.body || !len) return refuse({ error: "Send the part as the request body" }, 400);
     const t = await stub.uploadPartTarget(id, kind, who, owner, n, len);
-    if (t.status !== 200) return refuse(t.expected ? { error: t.error, expected_bytes: t.expected } : { error: t.error }, t.status);
+    if (refused(t)) return refuse(t.expected ? { error: t.error, expected_bytes: t.expected } : { error: t.error }, t.status);
     let res;
     try { res = await streamUploadPart(env.MEDIA.resumeMultipartUpload(t.key, t.upload_id), n, request.body, len, t.sniff ? upSniff(kind) : null); }
     catch (e) { return json({ error: "Part " + n + " did not reach storage (" + String((e && (e as Error).message) || e) + "); send it again" }, 502); }
     if (!res.part) return json({ error: upTypeError(kind) + " (checked from the first bytes of part 1); nothing was stored" }, 415);
     const d = await stub.uploadPartDone(id, kind, t.upload_id, n, res.part.etag);
-    if (d.status !== 200) return json({ error: d.error }, d.status);
+    if (refused(d)) return json({ error: d.error }, d.status);
     return json({ room: room, id: id, kind: kind, part: n });
   }
   if (step === "sign") {
@@ -116,7 +116,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     if (request.method === "GET") nums = String(url.searchParams.get("n") || "").split(",").filter(Boolean);
     else { const sb = await readBody(request); nums = sb && Array.isArray(sb.parts) ? sb.parts : []; }
     const t = await stub.uploadSignTarget(id, kind, who, owner, nums);
-    if (t.status !== 200) return json({ error: t.error }, t.status);
+    if (refused(t)) return json({ error: t.error }, t.status);
     if (!r2DirectConfigured(env)) return json({ error: "Direct uploads are not configured right now; send the parts through the site (PUT /part?n=N) if they fit, or try again later" }, 503);
     /** each part's address */
     const urls: Record<number, string> = {};
@@ -135,20 +135,21 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
   const body = await readBody(request);
   if (step === "start") {
     const direct = body && (body.direct === "force" ? "force" : !!body.direct);
-    const r = await stub.uploadStart(id, kind, who, owner, room, body && body.size, body && body.type, body && body.name, body && body.fingerprint ? bodyText(body.fingerprint, "fingerprint") : null, direct);
-    if (r.status !== 200) return json({ error: r.error }, r.status);
+    const size = body && (typeof body.size === "number" || typeof body.size === "string") ? body.size : null;
+    const r = await stub.uploadStart(id, kind, who, owner, room, size, body && body.type, body && body.name, body && body.fingerprint ? bodyText(body.fingerprint, "fingerprint") : null, direct);
+    if (refused(r)) return json({ error: r.error }, r.status);
     return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, direct: !!r.direct, expires_at: new Date(r.expires_at).toISOString() });
   }
   if (step === "finish") {
     const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
-    if (r.status !== 200) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
+    if (refused(r)) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
     /** the answer, with the media under its kind */
-    const media: { type: string, bytes: number, url: string, name?: string } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
+    const media: { type: string, bytes: number, url: string, name?: string | null } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
     if (kind === "file") media.name = r.name;
     return json({ room: room, id: id, kind: kind, published: !!r.published, [kind]: media });
   }
   const r = await stub.uploadAbort(id, kind, who, owner);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room: room, id: id, kind: kind, aborted: true });
 }
 
@@ -217,7 +218,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
   const st = await ustub.uploadSessionTicket(decodeURIComponent(usm[2]));
-  if (st.status !== 200) {
+  if (refused(st)) {
     if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
     return json({ error: st.error }, st.status);
   }
@@ -261,7 +262,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!request.body) return json({ error: "Missing upload body" }, 400);
   const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
   const begun = await stub.streamBegin(id, acc.name || "", request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
-  if (begun.status !== 200) return json({ error: begun.error }, begun.status);
+  if (refused(begun)) return json({ error: begun.error }, begun.status);
   const key = begun.key, uploadId = begun.uploadId;
   const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
   const fail = async (status: number, error: string) => {
@@ -348,9 +349,9 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (UP_KINDS.indexOf(kind) < 0) return json({ error: "\"kind\" must be image, audio, video or file" }, 400);
   const member = acc.name || bodyText(body?.from, "from");
   const sess = uploadSessionWanted(kind, body || {});
-  if (sess && sess.error) return json({ error: sess.error }, 400);
+  if (sess && sess.error !== undefined) return json({ error: sess.error }, 400);
   const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
-  if (t.status !== 200) return deny(t);
+  if (refused(t)) return deny(t);
   return json({ room: room, message_id: id, draft: true, upload: sess ? sessionUpload(url.origin, room, kind, t) : ticketUpload(url.origin, room, t) });
 }
 

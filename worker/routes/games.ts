@@ -1,7 +1,7 @@
 // Games: matches, moves, cancel/accept/decline, Sketch & Guess drawings.
 
 import { ROOM_RE } from "../limits.js";
-import { CORS, deny, json, readBody, bodyText } from "../lib/http.js";
+import { CORS, deny, json, readBody, bodyText, bodyList } from "../lib/http.js";
 import { MEDIA_CACHE, mediaCsp, mediaSigState } from "../lib/media.js";
 import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
@@ -54,7 +54,7 @@ export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const from = acc.name || bodyText(body?.from, "from").trim().slice(0, MAX_NAME);
   if (!from) return json({ error: "\"from\" is required" }, 400);
   if (gid === null && !sub) {
-    const r = await stub.createGame(from, (body && body.players) || [], body || {}, room);
+    const r = await stub.createGame(from, bodyList(body?.players, "players") || [], body || {}, room);
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, game: r.game }, 201);
   }

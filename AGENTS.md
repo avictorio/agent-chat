@@ -734,10 +734,8 @@ were done on 2026-11-22).
    match state, `any` on `GameRow.st` and in the `GameEngine` methods
    (`engine.ts`, `room/games.ts`; each game already has its stored type,
    `TvStored` and the like), the open `[field: string]: any` of `GamePub`
-   and `GameStateItem`, `MsgBag` in `room/messages.ts` - and, outside
-   the rule's reach but the bigger hole, `type DurableObjectStub = any`
-   in `types/worker-env.d.ts`, which leaves every Room call from a route
-   untyped (typing it as the Room's methods made async would check them).
+   and `GameStateItem`, and `MsgBag` in `room/messages.ts`. (The Room
+   stub the routes call is typed as the Room's methods since 2026-11-22.)
 2. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step

@@ -123,5 +123,5 @@ export async function hookLiarsDice(rc: RouteContext) {
   const troom = bodyText(tb?.room, "room").toLowerCase();
   if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
   const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
-  return json(await tstub.setTestLiarsDice(bodyNumber(tb?.id, "id", true), tb && tb.cups, !!(tb && tb.expire)));
+  return json(await tstub.setTestLiarsDice(bodyNumber(tb?.id, "id", true), bodyObject(tb?.cups, "cups"), !!(tb && tb.expire)));
 }

@@ -55,12 +55,8 @@ interface KVNamespace {
   put(key: string, value: string, options?: { expiration?: number; expirationTtl?: number }): Promise<void>;
 }
 
-/** A Durable Object stub: an RPC proxy whose methods are the Room's,
- *  each returning a promise. Typed any for now: typed as the Room's
- *  methods, the routes' field-by-field reads of those methods' union
- *  results (and their calls that leave optional arguments out) come to
- *  about 50 strict errors, to be settled one by one as their own step. */
-type DurableObjectStub = any;
+// DurableObjectStub (the Room's methods over RPC, each returning a
+// promise) is declared with the Room in types/room-methods.d.ts.
 
 interface DurableObjectId {
   readonly name?: string;

@@ -10,7 +10,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { CORS, deny, json, readBody, bodyText } from "../lib/http.js";
+import { CORS, deny, json, readBody, bodyText, refused } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
 import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
@@ -29,7 +29,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
     let acc = await stub.access(inviteHdr, owner);
     if (!acc.ok) {
       const ss = await mediaSigState(env, room, decodeURIComponent(m[3]).toLowerCase(), "avatar", url);
-      if (ss === "ok") acc = { ok: true, name: null };
+      if (ss === "ok") acc = { ok: true };
       else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
     }
     if (!acc.ok) return deny(acc);
@@ -37,7 +37,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!a) return json({ error: "No avatar" }, 404);
     const fresh = url.searchParams.get("v") === String(a.ver);
     const aheaders: Record<string, string> = Object.assign({
-      "Content-Type": a.type, "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
+      "Content-Type": a.type || "application/octet-stream", "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
       "ETag": "\"" + a.ver + "\"", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
     }, CORS);
     // The bytes live in R2 only (phase D); stream them from the Worker.
@@ -101,7 +101,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "audio", url);
-    if (ss === "ok") acc = { ok: true, name: null };
+    if (ss === "ok") acc = { ok: true };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
   if (!acc.ok) return deny(acc);
@@ -124,7 +124,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   const atype = sniffAudio(buf);
   if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
   const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript, room);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } });
 }
 
@@ -140,7 +140,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "image", url);
-    if (ss === "ok") acc = { ok: true, name: null };
+    if (ss === "ok") acc = { ok: true };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
   if (!acc.ok) return deny(acc);
@@ -162,7 +162,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const itype = sniffImage(buf);
   if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
   const r = await stub.attachImage(id, acc.name || "", buf, itype, owner, room);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } });
 }
 
@@ -178,7 +178,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, "video", url);
-    if (ss === "ok") acc = { ok: true, name: null };
+    if (ss === "ok") acc = { ok: true };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
   if (!acc.ok) return deny(acc);
@@ -200,7 +200,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   const vtype = sniffVideo(buf);
   if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
   const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);
-  if (r.status !== 200) return json({ error: r.error }, r.status);
+  if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } });
 }
 
@@ -223,7 +223,7 @@ export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
   let acc = await stub.access(request.method === "GET" || request.method === "HEAD" ? inviteHdr : invite, owner);
   if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
     const ss = await mediaSigState(env, room, id, kind, url);
-    if (ss === "ok") acc = { ok: true, name: null };
+    if (ss === "ok") acc = { ok: true };
     else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
   }
   if (!acc.ok) return deny(acc);

@@ -84,7 +84,7 @@ export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const note = bodyText(body?.note, "note").trim().slice(0, MAX_NOTE);
   if (bodyText(body?.action, "action") === "resolve" && isPlaceholder(note)) return json({ error: "\"note\" is still a placeholder. Replace the <...> with how the question was resolved." }, 400);
   const r = await stub.updateQuestion(qid, bodyText(body?.action, "action"), from, note);
-  if (r.error) return json({ error: r.error }, r.status);
+  if ("error" in r) return json({ error: r.error }, r.status);
   return json({ room, question: r.question });
 }
 
@@ -156,7 +156,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
       return json({ room, decision: dc }, 201);
     }
     const r = await stub.updateDecision(id, dact, from);
-    if (r.error) return json({ error: r.error }, r.status);
+    if ("error" in r) return json({ error: r.error }, r.status);
     return json({ room, decision: r.decision });
   }
   const action = bodyText(body?.action, "action");
@@ -177,6 +177,6 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, stake: sk }, 201);
   }
   const r = await stub.updateStake(id, action, from);
-  if (r.error) return json({ error: r.error }, r.status);
+  if ("error" in r) return json({ error: r.error }, r.status);
   return json({ room, stake: r.stake });
 }

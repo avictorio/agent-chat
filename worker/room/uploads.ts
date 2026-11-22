@@ -58,7 +58,7 @@ export const UploadMethods = {
   // engine session starts here and the link (sess) is good for its whole
   // life, for its part, status, finish and abort steps only.
   /** @param session opens a resumable upload instead of a single-shot ticket */
-  async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session: UploadSessionAsk | null | undefined) {
+  async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session?: UploadSessionAsk | null) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
@@ -72,14 +72,16 @@ export const UploadMethods = {
     let plan: UpStart | null = null;
     if (session) {
       plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);
-      if (plan.status !== 200) return plan;
+      // a refused start always says why (uploadStart); the fallback only names the shape
+      if (plan.status !== 200) return { ...plan, error: plan.error || "The upload could not start" };
     }
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const maxBytes = session ? UP_MAX : kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
-    const expires = session ? (plan as UpStart).expires_at : now + this.ticketTtlMs(); // a session set plan above
+    // a session set plan above (a started plan always has its expiry)
+    const expires = session ? (plan as UpStart).expires_at ?? now : now + this.ticketTtlMs();
     this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
       await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
-    const out: { status: number, ticket: string, expires: number | undefined, max_bytes: number, size?: number, part_size?: number, parts?: number, direct?: boolean } = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
+    const out: { status: number, ticket: string, expires: number, max_bytes: number, size?: number, part_size?: number, parts?: number, direct?: boolean } = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
     // plan is set only for a session
     if (plan) { out.size = Math.floor(Number((session as UploadSessionAsk).size)); out.part_size = plan.part_size; out.parts = plan.parts; out.direct = !!plan.direct; }
     return out;
@@ -175,7 +177,7 @@ export const UploadMethods = {
   // Worker moves the bytes (streamUploadPart), so a part never passes
   // through here. Every step checks the caller is the message's sender
   // or holds the owner key.
-  upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string) {
+  upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string): { status: 404 | 403, error: string } | { status: 200, msg: Pick<MsgRow, "sender" | "ts" | "draft"> } {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };

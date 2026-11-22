@@ -39,7 +39,7 @@ import {
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
 import { codedError } from "../lib/errors.js";
-import { secondsToUtcMidnight, type Body, bodyNumber, bodyText } from "../lib/http.js";
+import { secondsToUtcMidnight, type Body, bodyNumber, bodyText, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { clamp, isPlaceholder } from "../lib/text.js";
@@ -160,6 +160,12 @@ export function mcpDecodeB64(s: unknown, what: string) {
   const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
   try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
 }
+// A tool that acts as a member needs a name: an invite has one; the owner
+// key passes it in "as".
+function needFrom(from: string | null | undefined): asserts from is string {
+  if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name.");
+}
+
 // Executes one tools/call against the Room stub. Identity (from) is already
 // resolved by the route from the credential - never from tool arguments,
 // except the owner-only "as" handled by the caller of this function.
@@ -172,7 +178,6 @@ export function mcpDecodeB64(s: unknown, what: string) {
  */
 export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined) {
   const A: Body = args || {};
-  const needFrom = () => { if (!from) throw new Error("This credential has no fixed name in the room. The owner key may pass \"as\" to act under a name."); };
   switch (name) {
     case "whoami": {
       // /me's fields (an invite caller is always active here: this call opened it), plus
@@ -180,7 +185,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (owner) return { room: room, name: from || null, kind: acc.kind || null, status: null, invited_by: null, invited: null, joined: null, invite_only: true, owner: true };
       return { room: room, name: from || null, kind: acc.kind || null, status: "active", invited_by: acc.invited_by || null, invited: acc.invited || null, joined: acc.joined || null, invite_only: true, owner: false };
     }
-    case "get_room_state": needFrom(); return await stub.roomState(from, room);
+    case "get_room_state": needFrom(from); return await stub.roomState(from, room);
     case "list_messages": {
       const after = A.after === undefined || A.after === null ? null : Math.max(0, bodyNumber(A.after, "after", true) || 0);
       const limit = clamp(bodyNumber(A.limit, "limit", true) || 50, 1, 100);
@@ -188,11 +193,11 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     }
     case "list_attachments": {
       const r = await stub.attachments({ kind: bodyText(A.kind, "kind"), from: bodyText(A.from, "from"), before: bodyText(A.before, "before"), limit: A.limit === undefined || A.limit === null ? "" : bodyText(A.limit, "limit") }, room);
-      if (r.error) throw new Error(r.error);
+      if ("error" in r) throw new Error(r.error);
       return Object.assign({ room: room, you: from || undefined }, r);
     }
     case "post_message": {
-      needFrom();
+      needFrom(from);
       const text = bodyText(A.text, "text");
       if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
@@ -207,10 +212,10 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
     }
-    case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (r.status !== 200) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
-    case "publish_message": { needFrom(); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (r.status !== 200) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(from, room) }); }
+    case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
+    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(from, room) }); }
     case "react": {
-      needFrom();
+      needFrom(from);
       const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
       if (reaction === undefined) throw new Error("\"reaction\" must be one emoji (or like, love, haha, wow, sad, angry), or null to remove yours");
       const r = await stub.react(bodyNumber(A.id, "id", true), from, reaction, room, owner);
@@ -227,39 +232,39 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
     case "get_constitution": return Object.assign({ room: room }, await stub.constitution(!!A.history));
-    case "set_constitution": { needFrom(); const text = bodyText(A.text, "text"); if (!text.trim()) throw new Error("\"text\" is required"); if (text.length > MAX_CON) throw new Error("\"text\" is limited to " + MAX_CON + " characters"); return { room: room, constitution: await stub.setConstitution(text, from) }; }
+    case "set_constitution": { needFrom(from); const text = bodyText(A.text, "text"); if (!text.trim()) throw new Error("\"text\" is required"); if (text.length > MAX_CON) throw new Error("\"text\" is limited to " + MAX_CON + " characters"); return { room: room, constitution: await stub.setConstitution(text, from) }; }
     case "get_decisions": return Object.assign({ room: room }, await stub.decisions());
-    case "create_decision": { needFrom(); const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const dc = await stub.addDecision(title, note, from); if (!dc) throw new Error("The board already has " + MAX_DECISIONS + " decisions. Delete some first."); return { room: room, decision: dc }; }
+    case "create_decision": { needFrom(from); const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const dc = await stub.addDecision(title, note, from); if (!dc) throw new Error("The board already has " + MAX_DECISIONS + " decisions. Delete some first."); return { room: room, decision: dc }; }
     case "decision_action": {
-      needFrom(); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true);
       if (A.action === "delete") { if (!(await stub.deleteDecision(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
       if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
-      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from); if (r.error) throw new Error(r.error); return { room: room, decision: r.decision };
+      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, decision: r.decision };
     }
     case "get_questions": return Object.assign({ room: room }, await stub.questions());
-    case "ask_question": { needFrom(); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.addQuestion(text, from); if (!q) throw new Error("The board already has " + MAX_OPEN_Q + " open questions. Resolve some first."); return { room: room, question: q }; }
+    case "ask_question": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.addQuestion(text, from); if (!q) throw new Error("The board already has " + MAX_OPEN_Q + " open questions. Resolve some first."); return { room: room, question: q }; }
     case "question_action": {
-      needFrom(); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true);
       if (A.action === "delete") { if (!(await stub.deleteQuestion(id))) throw new Error("No question with that id"); return { room: room, deleted: id }; }
       if (A.action === "edit") { const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text); if (!q) throw new Error("No question with that id"); return { room: room, question: q }; }
       const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE);
       if (A.action === "resolve" && isPlaceholder(note)) throw new Error("\"note\" is still a placeholder. Replace the <...> with how the question was resolved.");
-      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note); if (r.error) throw new Error(r.error); return { room: room, question: r.question };
+      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note); if ("error" in r) throw new Error(r.error); return { room: room, question: r.question };
     }
     case "get_stakes": return Object.assign({ room: room }, await stub.stakes());
-    case "create_stake": { needFrom(); const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const sk = await stub.addStake(title, date, note, from); if (!sk) throw new Error("The board already has " + MAX_STAKES + " open stakes. Close some first."); return { room: room, stake: sk }; }
+    case "create_stake": { needFrom(from); const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const sk = await stub.addStake(title, date, note, from); if (!sk) throw new Error("The board already has " + MAX_STAKES + " open stakes. Close some first."); return { room: room, stake: sk }; }
     case "stake_action": {
-      needFrom(); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true);
       if (A.action === "delete") { if (!(await stub.deleteStake(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
       if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
-      const r = await stub.updateStake(id, bodyText(A.action, "action"), from); if (r.error) throw new Error(r.error); return { room: room, stake: r.stake };
+      const r = await stub.updateStake(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, stake: r.stake };
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(bodyNumber(A.limit, "limit", true) || 10, 1, KEEP_DIGESTS)));
-    case "file_digest": { needFrom(); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw codedError("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", "rate_limited", secondsToUtcMidnight()); return { room: room, digest: d }; }
-    case "edit_digest": { needFrom(); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
-    case "delete_digest": { needFrom(); if (!(await stub.deleteDigest(bodyNumber(A.id, "id", true)))) throw new Error("Nothing with that id"); return { room: room, deleted: bodyNumber(A.id, "id", true) }; }
+    case "file_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw codedError("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", "rate_limited", secondsToUtcMidnight()); return { room: room, digest: d }; }
+    case "edit_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "delete_digest": { needFrom(from); if (!(await stub.deleteDigest(bodyNumber(A.id, "id", true)))) throw new Error("Nothing with that id"); return { room: room, deleted: bodyNumber(A.id, "id", true) }; }
     case "fetch_url": {
-      needFrom();
+      needFrom(from);
       const target = fetchTarget(A.url);
       if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw codedError("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", "rate_limited", await stub.toolWait());
@@ -271,44 +276,44 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
     case "get_game": { const r = await stub.gameState(bodyNumber(A.id, "id", true), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "create_game": { needFrom(); const opts: Record<string, unknown> = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; if (A.lots) opts.lots = A.lots; if (A.budget) opts.budget = A.budget; if (A.dice) opts.dice = A.dice; if (A.ones_wild !== undefined) opts.ones_wild = A.ones_wild; if (A.rotations) opts.rotations = A.rotations; if (A.seed) opts.seed = A.seed; if (A.genre) opts.genre = A.genre; const r = await stub.createGame(from, A.players || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "submit_move": { needFrom(); if (A.dir === undefined && !moveFields(A)) throw new Error("submit_move needs dir (or, for a structured move, its fields - e.g. statements and lie)"); const r = await stub.gameMove(bodyNumber(A.id, "id", true), from, A.dir, room, moveFields(A)); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
-    case "cancel_game": { needFrom(); const r = await stub.gameCancel(bodyNumber(A.id, "id", true), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "accept_game": { needFrom(); const r = await stub.gameAccept(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "decline_game": { needFrom(); const r = await stub.gameDecline(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "create_game": { needFrom(from); const opts: Record<string, unknown> = {}; if (A.game) opts.game = A.game; if (A.mode) opts.mode = A.mode; if (A.variant) opts.variant = A.variant; if (A.best_of) opts.best_of = A.best_of; if (A.tick_seconds) opts.tick_seconds = A.tick_seconds; if (A.lobby_seconds) opts.lobby_seconds = A.lobby_seconds; if (A.w) opts.w = A.w; if (A.h) opts.h = A.h; if (A.length) opts.length = A.length; if (A.colors) opts.colors = A.colors; if (A.max_rounds) opts.max_rounds = A.max_rounds; if (A.rounds) opts.rounds = A.rounds; if (A.lots) opts.lots = A.lots; if (A.budget) opts.budget = A.budget; if (A.dice) opts.dice = A.dice; if (A.ones_wild !== undefined) opts.ones_wild = A.ones_wild; if (A.rotations) opts.rotations = A.rotations; if (A.seed) opts.seed = A.seed; if (A.genre) opts.genre = A.genre; const r = await stub.createGame(from, bodyList(A.players, "players") || [], opts, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "submit_move": { needFrom(from); if (A.dir === undefined && !moveFields(A)) throw new Error("submit_move needs dir (or, for a structured move, its fields - e.g. statements and lie)"); const r = await stub.gameMove(bodyNumber(A.id, "id", true), from, A.dir, room, moveFields(A)); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
+    case "cancel_game": { needFrom(from); const r = await stub.gameCancel(bodyNumber(A.id, "id", true), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "accept_game": { needFrom(from); const r = await stub.gameAccept(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "decline_game": { needFrom(from); const r = await stub.gameDecline(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "speak_message": { const sid = bodyNumber(A.id, "id", true); return { room: room, id: sid, url: origin + "/api/rooms/" + room + "/messages/" + sid + "/speak?" + (await mediaSigParams(env, room, sid, "speak")), note: "Fetch this URL for the MP3 in the sender's cloned voice (first fetch synthesizes and caches it). The signed URL works for about an hour with no credential. The audio bytes do not ride this protocol." }; }
-    case "get_voice": { needFrom(); return { room: room, name: from, voice: await stub.voiceOf(from) }; }
+    case "get_voice": { needFrom(from); return { room: room, name: from, voice: await stub.voiceOf(from) }; }
     case "begin_upload": {
-      needFrom();
+      needFrom(from);
       const kind = bodyText(A.kind, "kind");
       if (UP_KINDS.indexOf(kind) < 0) throw new Error("\"kind\" must be image, audio, video or file");
       if (bodyText(A.text, "text").length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
       const sess = uploadSessionWanted(kind, A);
-      if (sess && sess.error) throw new Error(sess.error);
+      if (sess && sess.error !== undefined) throw new Error(sess.error);
       const msg = await stub.post(from, bodyText(A.text, "text"), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
       if (sess) {
         const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess);
-        if (st.status !== 200) { await stub.deleteMessage(msg.id, from, owner); throw st.code ? codedError(st.error, st.code) : new Error(st.error); }
+        if (refused(st)) { await stub.deleteMessage(msg.id, from, owner); throw st.code ? codedError(st.error, st.code) : new Error(st.error); }
         const sout = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: sessionUpload(origin, room, kind, st) };
         if (A.publish_on_complete) sout.upload.note += " publish_on_complete is set, so the message publishes itself the moment finish succeeds.";
         return sout;
       }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
-      if (t.status !== 200) throw t.code ? codedError(t.error, t.code) : new Error(t.error);
+      if (refused(t)) throw t.code ? codedError(t.error, t.code) : new Error(t.error);
       const out: { room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } } = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       if (A.publish_on_complete) out.upload.note += " publish_on_complete is set, so the message publishes itself the moment the upload lands.";
       out.upload.bigger = "For a bigger file (any size up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (the exact byte length) - and name for a file - for a resumable upload link.";
       return out;
     }
     case "attach_media": {
-      needFrom();
+      needFrom(from);
       const kind = bodyText(A.kind, "kind");
       const id = bodyNumber(A.id, "id", true);
       const buf = mcpDecodeB64(A.base64, "base64");
       if (!buf.byteLength) throw new Error("\"base64\" is empty");
-      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
-      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
-      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (r.status !== 200) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
+      if (kind === "image") { if (buf.byteLength > IMAGE_MAX) throw new Error("Images can be up to 5 MB"); const t = sniffImage(buf); if (!t) throw new Error("Image must be JPEG, PNG, GIF, WebP or AVIF"); const r = await stub.attachImage(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, image: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } }; }
+      if (kind === "audio") { if (buf.byteLength > AUDIO_MAX) throw new Error("Audio clips can be up to 5 MB"); const t = sniffAudio(buf); if (!t) throw new Error("Audio must be MP3, WAV, OGG, WebM or M4A"); const r = await stub.attachAudio(id, from, buf, t, owner, A.transcript ? bodyText(A.transcript, "transcript").slice(0, MAX_TEXT) : null, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, audio: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } }; }
+      if (kind === "video") { if (buf.byteLength > VIDEO_MAX) throw new Error("Videos can be up to 25 MB"); const t = sniffVideo(buf); if (!t) throw new Error("Video must be MP4, WebM or MOV"); const r = await stub.attachVideo(id, from, buf, t, owner, room); if (refused(r)) throw new Error(r.error); return { room: room, id: id, video: { type: r.type, bytes: r.bytes, url: origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } }; }
       throw new Error("\"kind\" must be image, audio or video");
     }
     default: throw new Error("Unknown tool: " + name + ". Call tools/list for the catalog.");

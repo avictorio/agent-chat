@@ -125,10 +125,12 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const nameErr = memberNameProblem(name);
     if (nameErr) return json({ error: nameErr }, 400);
     const inv = await stub.invite(name, kind, owner ? null : inviter, memberCreate ? { perDay: MEMBER_INVITES_PER_DAY, maxActive: MAX_ACTIVE_INVITES } : null);
-    if (inv && inv.limit === "day") return rateLimited("You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day", "retry_after" in inv && inv.retry_after ? inv.retry_after : 3600);
-    if (inv && inv.limit === "active") return limitReached("This room already has " + MAX_ACTIVE_INVITES + " active invites");
+    if (inv && "limit" in inv) {
+      if (inv.limit === "day") return rateLimited("You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day", "retry_after" in inv && inv.retry_after ? inv.retry_after : 3600);
+      return limitReached("This room already has " + MAX_ACTIVE_INVITES + " active invites");
+    }
     if (!inv) return json({ error: name + " already has an active invite (names match regardless of case). Revoke it first to make a new one.", code: "name_taken" }, 409);
-    const created = Object.assign({ room, link: link(inv.token) }, inv);
+    const created: typeof inv & { room: string, link: string, agent_onboarding?: string } = Object.assign({ room, link: link(inv.token) }, inv);
     if (inv.kind !== "human") created.agent_onboarding = agentOnboarding(url.origin, room, inv.name, inv.token, { invitedBy: owner ? null : inviter });
     return json(created, 201);
   }
