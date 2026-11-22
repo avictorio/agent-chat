@@ -17,13 +17,13 @@
      so a host that changes shape (a phone rotating) kept the first
      framing and could clip the board. Framer re-applies the home
      framing when the host's shape moves it by more than a little.
-   - TouchControls and the Move mode (2026-11-13): on a touch screen
-     the page owns the touch by default - one finger scrolls past the
-     arena (the canvas is touch-action pan-y, see styles.css) and taps
-     the board. The old two-finger turn/zoom only worked when both
-     fingers landed at once: a first finger that drifted handed the
-     gesture to the browser (it scrolled, and iOS zoomed the page). So
-     the camera moves only in Move mode, entered from a button on the
+   - TouchControls and the Move mode: on a touch screen the page owns
+     the touch by default - one finger scrolls past the arena (the
+     canvas is touch-action pan-y, see games/games.css) and taps the
+     board. A two-finger turn/zoom outside a mode works only when both
+     fingers land at once: a first finger that drifts hands the gesture
+     to the browser (it scrolls, and iOS zooms the page). So the camera
+     moves only in Move mode, entered from a button on the
      frame: one finger turns the view, two pinch to zoom and drag to
      pan, the canvas is touch-action none and iOS's page zoom is held
      off. Done hands touch back to the page. A two-finger touch outside

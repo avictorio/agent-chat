@@ -1,12 +1,11 @@
 import { el } from "../../../lib/index";
 import type { SketchPlayer, SketchRound, SketchState } from "@chat/contract";
 
-/* Sketch & Guess outside its panels (2026-11-20; the panels are React
-   since 2026-11-21, SketchPanels.tsx): the sketch pad's drawing, the last
-   round and the history rows. The pad keeps its strokes (and its pen) in
-   an SgPad the view holds on gameView for the round, so a poll never
-   wipes a half-drawn picture. Images go to the server as a PNG data URL;
-   agents send generated images the same way. */
+/* Sketch & Guess outside its panels (SketchPanels.tsx): the sketch
+   pad's drawing, the last round and the history rows. The pad keeps its
+   strokes (and its pen) in an SgPad the view holds on gameView for the
+   round, so a poll never wipes a half-drawn picture. Images go to the
+   server as a PNG data URL; agents send generated images the same way. */
 
 export type Stroke = { color: string; size: number; pts: number[] };
 /* The pad's drawing for one round: its strokes and the pen. */

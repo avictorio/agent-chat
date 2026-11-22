@@ -68,9 +68,9 @@ export function useRoomStream(opts: {
   }, [closeRef]);
   const live = useLatest(opts);
 
-  // Initial load + stream, mirroring the current app's start(). The
-  // connection is keyed on the client and the room; the collaborators
-  // (feed, board, callbacks) are taken as they are when it opens.
+  // Initial load + stream. The connection is keyed on the client and
+  // the room; the collaborators (feed, board, callbacks) are taken as
+  // they are when it opens.
   useEffect(() => {
     const { token, feed, board, gamesRef, speaker, setStatus, onYou, onAgentGate, deny, deniedRef } = live.current;
     const fallbackBlock = (name: string) => setupBlock(room, token, name);
@@ -88,11 +88,11 @@ export function useRoomStream(opts: {
       if (!cancelled) streamRefLocal.fn();
     };
     // The stream is read with fetch, not EventSource: EventSource
-    // cannot send headers, which is why the invite token used to ride
-    // in the stream URL. The reader below speaks just enough SSE —
+    // cannot send headers, and the invite token goes in the
+    // X-Invite-Token header like every other call this client makes,
+    // never in a URL. The reader below speaks just enough SSE —
     // event/data framing plus the server's retry: hint — to carry the
-    // same five frame kinds with the token in the X-Invite-Token
-    // header, like every other call this client makes.
+    // five frame kinds.
     const stream = () => {
       ctrlRef.current?.abort();
       if (deniedRef.current || cancelled) return;
@@ -142,8 +142,7 @@ export function useRoomStream(opts: {
               "/stream?after=" +
               (feed.lastRef.current ?? 0) +
               // state is opt-in on the server: naming it here is what subscribes
-              // this client to room_state as its own event (it no longer rides
-              // inside message frames).
+              // this client to room_state as its own event.
               "&events=message,reaction,game,members,state",
             {
               headers: {

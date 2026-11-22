@@ -43,11 +43,10 @@ export const MemberMethods = {
     };
   },
 
-  // Avatars: one small image per member. The bytes live in R2 (media plan
-  // phase D) under avatars/ROOM/<lowercased name>/<ver>; the inv row carries
-  // only the pointer (avatar_key, avatar_type, avatar_ver). There is no
-  // in-DB copy any more (the blob era ended 2026-11-19). Streams get a
-  // "members" event on change.
+  // Avatars: one small image per member. The bytes live in R2 only, under
+  // avatars/ROOM/<lowercased name>/<ver>; the inv row carries only the
+  // pointer (avatar_key, avatar_type, avatar_ver). Streams get a "members"
+  // event on change.
   avatarKey(room: string, name: string, ver: number) {
     return "avatars/" + room + "/" + String(name).toLowerCase() + "/" + ver;
   },
@@ -109,9 +108,9 @@ export const MemberMethods = {
   },
 
   // "Referee" is the room's game official - the name the DO itself
-  // posts match results under. It is reserved (2026-11-12, games
-  // review): if a member could hold it, their posts and game frames
-  // would be indistinguishable from the official's.
+  // posts match results under. It is reserved: if a member could hold
+  // it, their posts and game frames would be indistinguishable from the
+  // official's.
   isReservedName(name: unknown) {
     return nameFold(String(name || "").trim()) === "referee";
   },

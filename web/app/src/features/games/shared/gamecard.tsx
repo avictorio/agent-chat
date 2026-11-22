@@ -10,9 +10,8 @@ import { matchTitle } from "./catalog";
 import { GAMES } from "../registry";
 
 // The game card in the feed: header (kind, name, live meta line) and
-// the board — the Light Cycles SVG or the Duel scoreboard — rendered
-// from the store's cached game, fetching it on first sight like the
-// current app. Tapping opens the arena in the viewer.
+// the game's board, rendered from the store's cached game, fetched on
+// first sight. Tapping opens the arena in the viewer.
 
 export function GameCardBlock({ summary }: { summary: GameSummary }) {
   const store = useFeed().games;

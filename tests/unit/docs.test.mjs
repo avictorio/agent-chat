@@ -1,12 +1,15 @@
-// Unit tests for the agent-readable /api docs (worker/agents/docs.ts): the
-// text lives in docs.txt with {{name}} placeholders filled from docsValues.
+// Unit tests for the agent-readable texts (worker/agents/docs.ts): /api
+// lives in docs.txt with {{name}} placeholders filled from docsValues (the
+// primer and the recipe likewise).
 // A placeholder without a value would throw on every /api request, and a
 // value nothing uses is a limit the docs stopped quoting - catch both here.
 // Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import TEXT from "../../worker/agents/docs.txt";
-import { docs, docsValues } from "../../worker/agents/docs.ts";
+import RECIPE from "../../worker/agents/agent-recipe.md";
+import { docs, docsValues, recipe, recipeValues } from "../../worker/agents/docs.ts";
+import { GAME_ENGINES } from "../../worker/games/engine.ts";
 
 const used = new Set([...TEXT.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
 
@@ -55,13 +58,38 @@ test("the primer is short, starts by linking the full reference, and teaches the
   for (const l of ETIQUETTE_LINES) assert.ok(out.includes(l), "the primer carries the etiquette line: " + l);
 });
 
-test("the full reference's first example posts with the header and no from", () => {
+test("the full reference's first example posts with the header, and no request example sends from", () => {
   const out = docs("https://example.test");
   const send = out.slice(out.indexOf("SEND A MESSAGE"), out.indexOf("REACTIONS"));
   assert.ok(send.includes("-H 'X-Invite-Token: TOKEN'"), "the curl example sends the header");
-  assert.ok(!/"from"\s*:/.test(send), "no from in the member examples");
+  // the invite names the poster; only the server's own output (frames,
+  // awaiting_you calls) shows a from
+  const requests = out.split("\n").filter((l) => /^\s*(POST|PUT|DELETE)\s/.test(l) || l.includes("-d '"));
+  assert.ok(requests.length > 20, "found the request examples");
+  for (const l of requests) assert.ok(!/"from"\s*:/.test(l), "a request example sends from: " + l.trim());
   assert.ok(!out.includes("CLAUDE (RETIRED)"));
   assert.ok(out.includes("https://example.test/llms.txt"), "the reference points newcomers at the primer");
+});
+
+test("every game is in GAMES - CHOOSING, and its section follows in that order", () => {
+  const out = docs("https://example.test");
+  const choosing = out.slice(out.indexOf("\nGAMES - CHOOSING\n"), out.indexOf("\nGAMES - EVERY MATCH\n"));
+  const listed = [...choosing.matchAll(/^ {4}(\S.*?) \((\w+)\):/gm)];
+  assert.deepEqual(listed.map((m) => m[2]).sort(), Object.keys(GAME_ENGINES).sort(), "CHOOSING lists every game once");
+  let at = out.indexOf("\nGAMES - EVERY MATCH\n");
+  for (const [, name] of listed) {
+    const head = out.indexOf("\nGAMES - " + name.toUpperCase() + "\n");
+    assert.ok(head > at, "GAMES - " + name.toUpperCase() + " is missing or out of order");
+    at = head;
+  }
+});
+
+test("every placeholder in agent-recipe.md has a value, and every value is used", () => {
+  const usedR = new Set([...RECIPE.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
+  const have = Object.keys(recipeValues());
+  assert.deepEqual([...usedR].filter((k) => !have.includes(k)), [], "placeholders without a value");
+  assert.deepEqual(have.filter((k) => !usedR.has(k)), [], "values the recipe never uses");
+  assert.ok(!/\{\{\w+\}\}|undefined|NaN/.test(recipe()), "the filled recipe is whole");
 });
 
 test("the onboarding block: who invited you, the header, a look first, the etiquette", () => {
@@ -78,7 +106,6 @@ test("the onboarding block: who invited you, the header, a look first, the etiqu
 // No served text asks an agent for a browser User-Agent (or any particular
 // one): the edge rule in AGENTS.md section 7 turns Browser Integrity Check
 // off on the agent paths, and the token is the only credential.
-import RECIPE from "../../worker/agents/agent-recipe.md";
 import WATCHER from "../../worker/agents/agent-watch.sh";
 import { mcpInstructions } from "../../worker/agents/onboarding.ts";
 import { agentNoteText } from "../../worker/routes/pages.ts";
@@ -90,7 +117,7 @@ test("no served text asks for a browser User-Agent", () => {
     "/llms.txt (primer.txt)": primer(o),
     "agent_onboarding": agentOnboarding(o, "lima", "Hank", "tok_123", { invitedBy: "Henry", purpose: "x" }),
     "MCP initialize instructions": mcpInstructions(o),
-    "agent recipe": RECIPE,
+    "agent recipe": recipe(),
     "agent watcher": WATCHER,
     "room page note": agentNoteText(o, "lima"),
   };

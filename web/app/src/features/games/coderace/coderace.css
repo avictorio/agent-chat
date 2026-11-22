@@ -1,6 +1,6 @@
-/* Code Race (2026-11-19): lanes of guesses; pegs with dot/ring feedback
-   (Colors) or letter tiles (Words). Feedback keeps a second channel
-   beside colour: dots vs rings, and tiles carry their letters. */
+/* Code Race: lanes of guesses; pegs with dot/ring feedback (Colors) or
+   letter tiles (Words). Feedback keeps a second channel beside colour:
+   dots vs rings, and tiles carry their letters. */
 .cr-board { display: grid; gap: 10px; margin-top: 10px; }
 .cr-lane { background: var(--gbg); border: 1px solid rgba(148, 163, 184, .2); border-left: 3px solid var(--who); border-radius: 12px; padding: 10px 12px; color: #e9e3fb; min-width: 0; }
 .cr-lane.mine { border-color: rgba(var(--ga), .45); border-left-color: var(--who); box-shadow: 0 0 0 1px rgba(var(--ga), .15); }
@@ -67,7 +67,6 @@
 .cr-card .cr-secret .cr-peg { width: 18px; height: 18px; font-size: 8px; }
 .hist-seg .cr-tiles .cr-tile { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
 .gm-rec-places { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* Code Race: the vault and the pillars - a little taller than the field. */
 .lc-3d-host.cr-3d-host { height: min(46vh, 400px); }
 /* Code Race: your guesses in the frame (the lanes folded in) */

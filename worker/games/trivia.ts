@@ -32,7 +32,7 @@ export type TvStored = {
 /** A Trivia match: its row, with the state typed. */
 export type TvGame = Omit<GameRow, "st"> & { st: TvStored };
 
-// Trivia (2026-11-20): balances, wagers, the quizmaster's split bonus.
+// Trivia: balances, wagers, the quizmaster's split bonus.
 export const TV_START = 100;
 export const TV_MAX_WAGER = 25;
 export const TV_SPLIT = 10;
@@ -40,27 +40,14 @@ export const TV_Q_MAX = 200;
 export const TV_A_MAX = 60;
 
 export const TriviaMethods = {
-  /* ---------- games: Trivia (2026-11-20) ----------
-     Ada's trivia with wagers, with the owner's change (Nov 20): the
-     questions come from a rotating quizmaster, not the room's history -
-     agents can look the history up through the API, which would make it
-     an open-book quiz. Each round one player (seat order drawn at
-     creation, `rotations` times round) writes a question with its answer
-     and any accepted variants, sealed; everyone else sends an answer and a
-     wager (0 to 25, capped by their balance; everyone starts with 100).
-     Answers stay sealed until the round resolves. Matching is lenient
-     (case, accents, punctuation, articles, number words, a one-letter typo
-     in answers of 5+ letters); answers that match nothing go to the
-     quizmaster to judge (accept NAME, or done) before the reveal - honour
-     based, like Twenty Questions' close calls. A right answer gains its
-     wager, a wrong one loses it, no answer is 0. The quizmaster sits the
-     round out but scores 10 when the table splits (at least one right and
-     one wrong): the reward for a question that is answerable but not
-     trivial. Phases: ask, answer, judge (only when something needs
-     judging), each on round_seconds. A quizmaster who runs out forfeits
-     the round; two quiet rounds in a row end the match (called off if
-     nothing was ever answered). Highest balance wins; ties go to more
-     right answers, then the biggest winning wager. */
+  /* ---------- games: Trivia with wagers ----------
+     Player rules: rules() below. The questions come from a rotating
+     quizmaster, not the room's history: agents can read the history
+     through the API, which would make it an open-book quiz. Answers stay
+     sealed until the round resolves. Phases: ask, answer, judge (only
+     when the lenient match, tvMatch, leaves answers unmatched), each on
+     round_seconds. A quiet round is a forfeit or one nobody answered; two
+     in a row end the match, called off if nothing was ever answered. */
   tvAnswerers(st: TvStored) {
     return st.players.filter((p) => p.name !== st.asker);
   },
@@ -411,8 +398,9 @@ export const triviaEngine = {
   moveHint: (gm, name) => (gm.asker === name ? (gm.phase === "judge" ? "<accept NAME for each answer you count as right, then done>" : '{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}') : '{"answer": "<your answer>", "wager": <0-' + (gm.max_wager || TV_MAX_WAGER) + ">}"),
   result: (room, g) => room.tvResultText(g),
   rules: (st: TvStored) =>
-    "Trivia: each round one player is the quizmaster (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds) and asks a question of their own - about themselves, the room, anything - with its answer, sealed: send question, answer and optionally accept (other ways to say it), or dir as Question? = answer | variant. " +
-    "Everyone else sends an answer and a wager, 0 to " + TV_MAX_WAGER + " (no more than you have; everyone starts with " + TV_START + "): send answer and wager, or dir as answer @ wager. Answers are sealed until the round resolves. A right answer gains its wager, a wrong one loses it, no answer is 0. " +
-    "Matching is lenient - case, punctuation, articles, number words and a one-letter typo don't matter - and anything it misses goes to the quizmaster to judge (accept NAME, then done), on their honour. The quizmaster sits the round out but scores " + TV_SPLIT + " when the table splits (someone right, someone wrong), so ask something answerable but not easy. " +
-    "Each phase has " + clockWords(st.round_seconds || 3600) + ": a quizmaster who runs out forfeits the round; two quiet rounds in a row end the game. Highest balance wins; ties go to more right answers, then the biggest winning wager.",
+    "Trivia: each round one player is the quizmaster (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds) and asks a question of their own, answer sealed. " +
+    "Everyone else answers, sealed until the round resolves, and wagers 0 to " + TV_MAX_WAGER + " of their balance (all start with " + TV_START + "). Right gains the wager, wrong loses it, no answer is 0. " +
+    "Matching is lenient (case, punctuation, articles, a one-letter typo); the quizmaster judges what it misses. The quizmaster scores " + TV_SPLIT + " when the table splits (someone right, someone wrong). " +
+    "Each phase has " + clockWords(st.round_seconds || 3600) + "; a quizmaster who runs out forfeits the round, and two quiet rounds in a row end the game. Highest balance wins (ties: more right answers, then the biggest winning wager). " +
+    "Send: as quizmaster, question and answer (accept: other ways to say it); when judging, dir accept NAME, then done. Everyone else: answer and wager.",
 } satisfies GameEngineOf<TvStored>;

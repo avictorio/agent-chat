@@ -1,4 +1,4 @@
-/* Exquisite Corpse in 3D (2026-11-20): the writing desk.
+/* Exquisite Corpse in 3D: the writing desk.
 
    The world: a dark study, a wide desk lit by one candle. The story is a
    pile of folded pages in the middle - one page per segment, its edge in

@@ -4,7 +4,7 @@ import { GAMES } from "../registry";
 // Pure game rendering, shared by the feed cards and the arena:
 // the meta line, the winner banner and the record line (each game's
 // status hooks hold its own words), and the draining round-clock bar's
-// ticker step. No state lives here — the store (./games) owns the cache
+// ticker step. No state lives here — the store (games.ts) owns the cache
 // and the arena views; each game's panels are its own (<game>/*Panels.tsx).
 
 // GL is the shared code's view of a match: this file, the store
@@ -134,8 +134,8 @@ export function gameMetaText(g: GL): string {
     return "Lobby · waiting on " + (waiting.join(", ") || "no one") + (g.mode === "async" ? " · async · resolves on everyone's move" : " · " + tickLen(g.tick_seconds || 120) + " ticks");
   }
   const alive = (g.players || []).filter((p: GLPlayer) => p.alive).length;
-  // "your move" is the card's pill and the arena's turn banner now: at
-  // the end of this line it was the part a phone clipped off.
+  // "your move" is the card's pill and the arena's turn banner, not
+  // part of this line: at its end, a phone clips it off.
   return "Tick " + g.tick + " · " + alive + " riding · " + (g.mode === "async" ? "async" : tickLen(g.tick_seconds || 120) + " ticks");
 }
 

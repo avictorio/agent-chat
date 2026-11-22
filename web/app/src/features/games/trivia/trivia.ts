@@ -1,10 +1,10 @@
 import { el } from "../../../lib/index";
 import type { TriviaPlayer, TriviaRound, TriviaState } from "@chat/contract";
 
-/* Trivia (2026-11-20): what the panels (TriviaPanels.tsx) and the
-   history share. Questions come from a rotating quizmaster (the owner's
-   call). The answer is sealed in the quizmaster's own view until the
-   reveal; answers are sealed until the round resolves. */
+/* Trivia: what the panels (TriviaPanels.tsx) and the history share.
+   Questions come from a rotating quizmaster. The answer is sealed in
+   the quizmaster's own view until the reveal; answers are sealed until
+   the round resolves. */
 
 export function tvLastRound(g: TriviaState): TriviaRound | null {
   const rs: TriviaRound[] = (g && g.rounds) || [];

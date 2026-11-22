@@ -1,7 +1,5 @@
-/* The web app's stylesheet: the design system ported from the old
-   single-page client (web/PARITY.md), plus everything built since.
-   Split by area: each file sits next to what it styles,
-   and this list keeps their order, which is the cascade. */
+/* The web app's stylesheet, split by area: each file sits next to what
+   it styles, and this list keeps their order, which is the cascade. */
 @import "./ui/tokens.css";
 @import "./ui/base.css";
 @import "./ui/button.css";

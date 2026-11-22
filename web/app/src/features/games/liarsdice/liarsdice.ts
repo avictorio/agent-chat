@@ -1,10 +1,10 @@
 import { el } from "../../../lib/index";
 import type { LiarsDiceBid, LiarsDicePlayer, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
 
-/* Liar's Dice (2026-11-19): what the panels (LiarsDicePanels.tsx) and
-   the history share - the words for faces and bids, and which dice
-   count. Cups are secret: the server sends only your own (you.dice) and
-   the cups of closed rounds. */
+/* Liar's Dice: what the panels (LiarsDicePanels.tsx) and the history
+   share - the words for faces and bids, and which dice count. Cups are
+   secret: the server sends only your own (you.dice) and the cups of
+   closed rounds. */
 
 const WORD = ["", "one", "two", "three", "four", "five", "six"];
 

@@ -2,20 +2,20 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import type { CorpseBeat, CorpsePlayer, CorpseSegment, CorpseState, CorpseYou } from "@chat/contract";
 import { EC_MAX, ecSentences } from "./corpse";
 
-/* Exquisite Corpse's panels (2026-11-21, React), under the 3D desk: your
-   turn (the fold - only the segment before yours - and your segment),
-   the turn strip (who wrote, who missed; never what), the revealed story
-   with its authors and the favourite vote, the writers and the chat
-   card. The view (view.tsx) mounts them with ctx.panel, so the segment
-   you are writing is the writer's own state and survives the view's
-   repaints. Nothing of the text is shown before the reveal except a
-   writer's own tail. */
+/* Exquisite Corpse's panels, under the 3D desk: your turn (the fold -
+   only the segment before yours - and your segment), the turn strip
+   (who wrote, who missed; never what), the revealed story with its
+   authors and the favourite vote, the writers and the chat card. The
+   view (view.tsx) mounts them with ctx.panel, so the segment you are
+   writing is the writer's own state and survives the view's repaints.
+   Nothing of the text is shown before the reveal except a writer's own
+   tail. */
 
 const hexOf = (g: CorpseState, n: string) => (((g && g.players) || []).find((p: CorpsePlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 
 /* Your turn: the fold and the form. The view keys it by turn, so the
-   draft starts over each turn; the box keeps what you type in place (no
-   value attribute, as before). */
+   draft starts over each turn; the box keeps what you type in place.
+   Uncontrolled field: see docs/agents/games.md, Panels. */
 export function CorpseWriter({ g, onSend }: { g: CorpseState; onSend: (text: string) => void }) {
   const you: Partial<CorpseYou> = g.you || {};
   const [text, setText] = useState("");

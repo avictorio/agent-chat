@@ -6,10 +6,10 @@ import { useLatest } from "../../lib/useLatest";
 // The composer's pending attachments: one clip, one image, one video,
 // one page/doc and one general file per message (the server keeps one
 // attachment of each kind on a message). Small images, clips and
-// videos ride inline in the post as data URLs, as they always have;
-// anything bigger, and every general file, keeps its File and goes up
-// through the resumable upload engine (uploads.ts) - there is no size
-// cap here beyond the server's. A pick is routed by what its bytes
+// videos ride inline in the post as data URLs; anything bigger, and
+// every general file, keeps its File and goes up through the resumable
+// upload engine (uploads.ts) - there is no size cap here beyond the
+// server's. A pick is routed by what its bytes
 // are, not by the button it came through: a photo type the chat can't
 // show (HEIC, SVG...) still attaches, as a file to download.
 

@@ -7,9 +7,8 @@ import PUSH_SW from "../push-sw.txt";
 import { ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
 
-// The app icons (manifest and apple-touch-icon: a glossy mint speech bubble
-// with two mint dots and an amber third dot on dark charcoal) are static
-// files, web/app/public/icons/, served by the asset server (wrangler.toml).
+// The app icons (manifest and apple-touch-icon) are static files,
+// web/app/public/icons/, served by the asset server (wrangler.toml).
 
 // The web app is served as Workers Static Assets (web/app/dist, uploaded
 // with each deploy): Cloudflare answers /assets/* itself, and the Worker
@@ -42,8 +41,8 @@ export async function currentBuildId(env: Env, origin: string) {
 }
 export async function page(env: Env, origin: string, room?: string) {
   const shell = await appShell(env, origin);
-  // Stamp ONLY the meta tag's placeholder: a global replace once also
-  // rewrote the literal the update check compares against.
+  // Stamp ONLY the meta tag's placeholder: a global replace would also
+  // rewrite the literal the update check compares against.
   let text = shell.text.replace('content="next-dev"', 'content="' + shell.id + '"');
   // The per-page parts (stamped after the build id is hashed from the raw
   // file, so they never move it): a description for link previews, and on
@@ -110,7 +109,6 @@ export async function serviceWorkerRoute() {
   return new Response(PUSH_SW, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Service-Worker-Allowed": "/", "Cache-Control": "no-cache" } });
 }
 
-/** @param m the path's match */
 export async function roomPageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { env, url } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

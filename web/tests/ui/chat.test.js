@@ -187,15 +187,14 @@ const { settle, done, run, shot, ymd } = require('./harness');
   });
   await run('no-speech-api', { init: () => { delete window.webkitSpeechRecognition; delete window.SpeechRecognition; } }, async (page) => ({ micHidden: await page.$eval('#mic', b => b.hidden) }));
 
-  // --- M4 board / members / reactions scenarios (ported from
-  // tests/ui.test.js; fixture paths point at the original fixtures) ---
+  // --- board actions and reactions ---
   await run('actions', {}, async (page, S, calls) => {
     const out = {};
     await page.fill('#text', 'Hello from the test'); await page.keyboard.press('Enter'); await settle(page);
     out.lastMsg = await page.$eval('#msgs .msg:last-child .text', e => e.textContent);
     await page.click('.tab[data-tab="questions"]'); await settle(page);
-    // Board parity guards: Delete is a borderless quiet button in the
-    // current app, and relative times never pluralize ("5 hr ago").
+    // Board guards: Delete is a borderless quiet button, and relative
+    // times never pluralize ("5 hr ago").
     const qMeta = await page.$eval('#qList', e => e.textContent);
     if (qMeta.includes('hrs ago')) throw new Error('rel() pluralized hours: ' + qMeta.slice(0, 200));
     if (!qMeta.includes('5 hr ago')) throw new Error('question meta missing "5 hr ago": ' + qMeta.slice(0, 200));
@@ -247,13 +246,13 @@ const { settle, done, run, shot, ymd } = require('./harness');
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
     out.initial = await chips(3);
     const box = await page.$eval('.msg[data-id="1"] .text', e => { const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
-    // hold until the bar opens, then let go (a fixed hold raced the app's
+    // hold until the bar opens, then let go (a fixed hold races the app's
     // 450 ms timer, which runs late under load)
     await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.waitForSelector('.rx-bar', { timeout: 5000 }).catch(() => {}); await page.mouse.up(); await settle(page);
     out.barOpen = await page.$$eval('.rx-bar button.rx', b => b.map(x => x.textContent).join(''));
-    // The quick bar is production-shaped: six reactions ending in
-    // Angry, a plain-plus "More reactions" button, and a text-only
-    // Copy (an icon Copy once wrapped the mobile bar to two rows).
+    // The quick bar's shape: six reactions ending in Angry, a
+    // plain-plus "More reactions" button, and a text-only Copy (an icon
+    // Copy wraps the mobile bar to two rows).
     const barShape = await page.$$eval('.rx-bar button', bs => bs.map(b => ({ t: b.title || '', txt: b.textContent, cls: b.className, svg: !!b.querySelector('svg') })));
     if (!barShape.some(b => b.t === 'Angry')) throw new Error('reaction bar lacks the Angry quick reaction: ' + JSON.stringify(barShape));
     if (!barShape.some(b => b.cls.includes('rx-plus') && b.t === 'More reactions')) throw new Error('reaction bar plus button diverges: ' + JSON.stringify(barShape));
@@ -279,7 +278,7 @@ const { settle, done, run, shot, ymd } = require('./harness');
     return out;
   });
   /* The quick reaction bar fits a 360px phone whole, Copy and + included
-     (2026-11-19 sweep: at ~365px wide they were clipped). */
+     (at ~365px wide they can clip). */
   await run('reactions-bar-narrow', { w: 360, h: 760, touch: true }, async (page) => {
     const box = await page.$eval('.msg[data-id="1"] .text', e => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
     await settle(page);
@@ -302,9 +301,9 @@ const { settle, done, run, shot, ymd } = require('./harness');
     return fit;
   });
   /* Holding a reaction chip opens who reacted right above that chip,
-     its pointer on it (2026-11-19: it used to sit over the message
-     above, 40px in from the row's edge), with the chip outlined;
-     Escape closes it and clears the outline. Desktop and phone. */
+     its pointer on it (not over the message above, 40px in from the
+     row's edge), with the chip outlined; Escape closes it and clears the
+     outline. Desktop and phone. */
   for (const [label, o] of [['reactions-who-anchored', {}], ['reactions-who-anchored-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, o, async (page) => {
       await page.waitForSelector('.rx-chip', { timeout: 10000 });
@@ -339,14 +338,13 @@ const { settle, done, run, shot, ymd } = require('./harness');
     });
   }
   await run('reactions-hold-noclick', {}, async (page, S, calls) => {
-    // Regression (owner soak, 2026-11-09): "hold brings up the bar,
-    // but I have to click twice for the selection to take." A real
-    // touch long-press release often produces NO click event, so the
-    // swallow flag set when the bar opens must not outlive the
-    // gesture: production clears it 120ms after pointerup and exempts
-    // clicks inside the popover. A port missing both guards eats the
-    // first deliberate tap. Synthetic pointer events model the
-    // no-click release exactly (no native click follows them).
+    // Regression guard: the hold brings up the bar, but the selection
+    // must take on the first tap. A real touch long-press release often
+    // produces NO click event, so the swallow flag set when the bar
+    // opens must not outlive the gesture: the app clears it 120ms after
+    // pointerup and exempts clicks inside the popover. Without both
+    // guards the first deliberate tap is eaten. Synthetic pointer events
+    // model the no-click release exactly (no native click follows them).
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
     const holdOpen = async (id) => {
@@ -394,10 +392,10 @@ const { settle, done, run, shot, ymd } = require('./harness');
     out.barMine = await page.$$eval('.rx-bar button.rx.on', b => b.map(x => x.textContent));
     await page.click('.rx-bar .rx-plus'); await settle(page);
     out.recent = await page.$eval('.rx-picker .rx-sec', s => s.textContent + ':' + s.nextElementSibling.textContent);
-    // The picker highlights your current reaction's cell (.on), like
-    // the current app — the unicorn just picked on this message.
+    // The picker highlights your current reaction's cell (.on) — the
+    // unicorn just picked on this message.
     const pickerOn = await page.$$eval('.rx-picker .rx-cell.on', cs => cs.map(c => c.textContent));
-    // Production marks the mine emoji wherever it renders (Recent
+    // The app marks the mine emoji wherever it renders (Recent
     // row AND its home category), so: at least one, all the unicorn.
     if (!pickerOn.length || pickerOn.some(e => e !== '\u{1F984}')) throw new Error('picker mine-highlight diverges: ' + JSON.stringify(pickerOn));
     await page.click('.rx-picker .rx-tab[title="Food & Drink"]'); await settle(page);

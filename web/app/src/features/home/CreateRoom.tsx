@@ -124,5 +124,3 @@ export function CreateView({ hidden }: { hidden: boolean }) {
     </Page>
   );
 }
-
-/* ---------- static views ---------- */

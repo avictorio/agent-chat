@@ -3,14 +3,14 @@ import type { BattleshipBoard, BattleshipMove, BattleshipPlayer, BattleshipShip,
 import { recordLine } from "../shared/render";
 import { cardKey } from "../shared/cardkey";
 
-/* Battleship's panels (2026-11-21, React): the scoreboard (the chat card,
-   and the arena's for spectators and placement), the last shot's banner,
-   the fleet strips under the scene, the flat boards a device without
-   WebGL plays on (a spectator's, a free-for-all's, two captains' aiming
-   grid, the placement grid), the placement buttons, the sonar line and
-   the missed-turn warnings. The view (view.tsx) mounts them with
-   ctx.panel. They hold no draft: the fleet being placed and the fire
-   hook are shared with the 3D scene, so they stay with the view (bsDrafts,
+/* Battleship's panels: the scoreboard (the chat card, and the arena's
+   for spectators and placement), the last shot's banner, the fleet
+   strips under the scene, the flat boards a device without WebGL plays
+   on (a spectator's, a free-for-all's, two captains' aiming grid, the
+   placement grid), the placement buttons, the sonar line and the
+   missed-turn warnings. The view (view.tsx) mounts them with ctx.panel.
+   They hold no draft: the fleet being placed and the fire hook are
+   shared with the 3D scene, so they stay with the view (bsDrafts,
    gameView.bsPlace and bsFire), and each placement step repaints both. */
 
 function bsLabel(x: number, y: number): string {
@@ -93,7 +93,7 @@ export function FleetStrip({ hex, sunk, unit, sizes, style }: { hex: string; sun
 
 /* The pair (or more) of mini boards the card shows once the shooting
    starts, so the battle plays out in the feed, not only in the arena.
-   Each SVG goes into its holder as the string it always was. */
+   Each SVG goes into its holder as a string. */
 function BsMiniBoards({ g }: { g: BattleshipState }) {
   if (!g.boards || !g.boards.length) return null;
   if (!(g.phase === "play" || g.status === "finished")) return null;
@@ -149,8 +149,8 @@ export function BattleshipScores({ g, minis = true }: { g: BattleshipState; mini
 }
 
 /* The card: the scoreboard, built afresh for each new match object
-   (cardKey), as the painter did, so the last-shot ribbon and a sinking's
-   flash replay on each update. */
+   (cardKey), so the last-shot ribbon and a sinking's flash replay on
+   each update. */
 export function BattleshipCard({ g }: { g: BattleshipState; me: string }) {
   return <BattleshipScores key={cardKey(g)} g={g} />;
 }

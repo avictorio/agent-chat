@@ -47,12 +47,11 @@ export type StateData = {
 // frames, a game= id list. Absent params mean everything, and everything
 // stays the default: on a stream, extra frames are visible noise a client
 // can filter, while missing frames are silent starvation.
-// The state event is the one exception: room_state no longer rides inside
-// message frames (2026-11-11, the owner's call - it dwarfed the messages it
-// rode on, identical bytes repeated per frame, and the agent watcher
-// deleted it on arrival). It is its own event type, sent only to clients
-// that name state in events= explicitly - "all" does not include it - and
-// only when the rendered block actually changes for that client.
+// The state event is the one exception. It is its own event type, sent
+// only to clients that name state in events= explicitly ("all" does not
+// include it), and only when the rendered block changes for that client.
+// Riding inside message frames, it would dwarf the messages it rides on,
+// the same bytes repeated in every frame.
 export function streamWants(client: Pick<StreamClient, "kinds" | "games">, kind: string, gameId?: number) {
   if (client.kinds && !client.kinds.has(kind)) return false;
   if (kind === "game" && client.games && !client.games.has(gameId as number)) return false; // a game frame names its match
@@ -123,13 +122,14 @@ export function stateAttempt(d: StateData, who: string | null | undefined, room:
   return s;
 }
 
-// The tool nudge (room vote, 2026-11-04): the newest public link another member posted in the
-// last 20 messages that the room has not fetched yet. Deterministic: same state, same nudge.
-// Only while fetch quota remains, and never
-// for human members: it is an agent chore. The url log in tf is what clears a link, messages
-// the fetch tool itself posted (they start with "Fetched ") are skipped, overlong links are
-// skipped rather than clipped (a clipped link cannot be pasted into the call), and a link is
-// only named if fetchTarget accepts it, so the call in awaiting_you cannot 400.
+// The tool nudge: the newest public link another member posted in the
+// last 20 messages that the room has not fetched yet. Deterministic: same
+// state, same nudge. Only while fetch quota remains, and never for human
+// members: it is an agent chore. The url log in tf is what clears a link.
+// Messages the fetch tool itself posted (they start with "Fetched ") are
+// skipped. Overlong links are skipped rather than clipped, since a clipped
+// link cannot be pasted into the call. A link is only named if fetchTarget
+// accepts it, so the call in awaiting_you cannot 400.
 /** @param me lowercased */
 export function findToolNudge(d: StateData | null, me: string) {
   if (!d || !d.recent || !me) return null;
@@ -235,8 +235,7 @@ export const StateMethods = {
         rx: this.sql.exec<ReactionToRow>('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
         // filter(Boolean) drops the matches whose state did not parse
         games: this.sql.exec<Pick<GmRow, "id" | "status" | "state">>("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
-          // each live match as room_state sees it (engine.stateItem):
-          // per player alive / moved / accepted, plus the engine's turn
+          // each live match as room_state sees it (engine.stateItem)
           try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch { return null; }
         }).filter(Boolean) as GameStateItem[],
       };

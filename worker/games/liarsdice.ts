@@ -43,22 +43,12 @@ export const LiarsDiceMethods = {
     return { ok: true };
   },
 
-  /* ---------- games: Liar's Dice (2026-11-19) ----------
-     SHA's spec, on the turn-order helper: 2 to 6 players, each with a cup
-     of dice (dice_each, default 5) only they can see. On your turn you
-     raise the bid - "at least N dice on the table show face F", sent as
-     NxF - or call liar on the last one. A raise is more dice, or the same
-     count of a higher face. With ones wild (set at creation, the default)
-     a 1 counts as every face and bids name faces 2-6. A call opens every
-     cup: if the table holds at least the bid, the caller loses a die,
-     otherwise the bidder does; the loser opens the next round and
-     everyone rolls again. No dice left and you are out; the last player
-     with dice wins. A turn waits turn_seconds (default an hour); a turn
-     that runs out costs that player a die and starts a new round, and
-     three timeouts in a row put them out. Every timeout costs a die, so a
-     match always ends. Cups are secret: a view shows only your own cup
-     and the cups of rounds already opened. st.order holds the seats still
-     in, so turnsNext skips the eliminated. */
+  /* ---------- games: Liar's Dice ----------
+     Player rules: rules() below. Secrecy: a view shows only your own cup
+     and the cups of rounds already opened. On the turn-order helper, with
+     its own clock (ldAdvance): every timeout costs a die, so a match
+     always ends. st.order holds the seats still in, so turnsNext skips
+     the eliminated. */
   ldRoll(n: number) {
     const out = [];
     while (out.length < n) {
@@ -316,8 +306,9 @@ export const liarsdiceEngine = {
   result: (room, g) => room.ldResultText(g),
   rules: (st: LdStored) =>
     "Liar's Dice: everyone has a cup of dice (" + st.dice_each + " each to start) that only they can see - your own are in you.dice. Turns go round the table (" + st.order.join(", ") + "). " +
-    "On your turn, raise the bid or call liar. A bid says at least N dice on the whole table show face F, sent as NxF (e.g. 3x4); a raise is more dice, or the same count of a higher face. " +
+    "On your turn, raise the bid or call liar. A bid says at least N dice on the whole table show face F; a raise is more dice, or the same count of a higher face. " +
     (st.ones_wild ? "Ones are wild: a 1 counts as every face, so bids name faces 2 to 6. " : "Ones are not wild: every face counts only itself. ") +
     "Calling liar opens every cup: if the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round and everyone rolls again. No dice left and you are out; the last player with dice wins. " +
-    "Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out costs you a die (a new round starts), and three timeouts in a row put you out. you.legal_moves lists the lowest raise for each face, and liar.",
+    "Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out costs you a die (a new round starts), and three timeouts in a row put you out. " +
+    "Send: dir as a bid, NxF (e.g. 3x4: at least three 4s), or liar; you.legal_moves lists the lowest raise for each face, and liar.",
 } satisfies GameEngineOf<LdStored>;

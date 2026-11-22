@@ -2,11 +2,11 @@ import { useLayoutEffect, useRef, type CSSProperties, type ReactElement, type Re
 import type { LetterGridPlayer, LetterGridRound, LetterGridState, LetterGridYou } from "@chat/contract";
 import { lgLabel, lgLastRound, lgTrace, type LgDraft } from "./lettergrid";
 
-/* Letter Grid's panels (2026-11-21, React): the scoreboard, the word
-   panel under the scene, your words, the last round's words, the grid's
-   longest words at the end and the chat card. The view (view.tsx) mounts
-   them with ctx.panel. The word being made is not the panel's own state:
-   the scene edits it too (a tap on a tile traces it), so it stays on the
+/* Letter Grid's panels: the scoreboard, the word panel under the scene,
+   your words, the last round's words, the grid's longest words at the
+   end and the chat card. The view (view.tsx) mounts them with
+   ctx.panel. The word being made is not the panel's own state: the
+   scene edits it too (a tap on a tile traces it), so it stays on the
    open view (gameView.lgDraft) and the view renders the panel again
    whenever it changes, from either side. */
 
@@ -44,9 +44,9 @@ export function LetterGridScores({ g, me, compact }: { g: LetterGridState; me?: 
 /* The word panel: an input (typing traces the best path), the path as
    cells, what it would score, Send and Clear. Typing and Clear report
    the new draft (onDraft), and the view renders the panel again with
-   it, as it does after a tap in the scene. The field is uncontrolled (a
-   value prop would add a value attribute the old markup never had): it
-   follows the draft only when they differ, so typing keeps its caret. */
+   it, as it does after a tap in the scene. The field follows the draft
+   only when they differ, so typing keeps its caret. Uncontrolled field:
+   see docs/agents/games.md, Panels. */
 export function LetterGridWordPanel({ g, draft, onDraft, onSend }: { g: LetterGridState; draft: LgDraft; onDraft: (d: LgDraft) => void; onSend: (d: LgDraft) => void }) {
   const n: number = g.size || 5;
   const min: number = g.min_len || 3;
@@ -55,7 +55,7 @@ export function LetterGridWordPanel({ g, draft, onDraft, onSend }: { g: LetterGr
   const input = useRef<HTMLInputElement>(null);
   const w = draft.word;
   // the field spells the draft (a tap in the scene, Clear, a stray
-  // character typed), on every render, as the old panel's paint did
+  // character typed), on every render
   useLayoutEffect(() => {
     const f = input.current;
     if (f && f.value.toLowerCase() !== w) f.value = w.toUpperCase();

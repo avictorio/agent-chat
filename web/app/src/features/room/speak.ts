@@ -2,10 +2,10 @@ import { plainText } from "../feed/markdown";
 import { toast } from "../../lib/index";
 import type { Message } from "@chat/contract";
 
-// Read-aloud, ported from the current app: a message plays in the
-// sender's cloned voice when they have one (the server synthesizes and
-// caches it), otherwise the browser voice reads the markdown-stripped
-// text in sentence-sized chunks (browsers cut long utterances short).
+// Read-aloud: a message plays in the sender's cloned voice when they
+// have one (the server synthesizes and caches it), otherwise the
+// browser voice reads the markdown-stripped text in sentence-sized
+// chunks (browsers cut long utterances short).
 // Toggling the button stops playback on both paths.
 
 export const canSpeak =
@@ -97,7 +97,7 @@ export class Speaker {
       };
       // An <audio> element cannot send headers, so the clip is fetched
       // with the invite in the X-Invite-Token header and played from a
-      // blob URL — the token no longer rides in the speak URL.
+      // blob URL, so the token never rides in a URL.
       void (async () => {
         try {
           const res = await fetch(src, {

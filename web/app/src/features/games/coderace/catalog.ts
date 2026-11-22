@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Code Race: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const CODE_RACE: GameDef = {
   id: "coderace",
   name: "Code Race",
@@ -20,12 +15,12 @@ export const CODE_RACE: GameDef = {
       "Each round, every racer sends one secret guess.",
       "Colors: a guess is the pegs in order. A black peg is a right colour in the right place; a white peg is a right colour in the wrong place.",
       "Words: a guess is a real word. Green is the right letter in the right place, yellow is in the word but elsewhere, grey is not in it.",
-      "You see every rival's feedback each round, never their guesses. Everything is revealed when the race ends.",
+      "You see every rival's feedback each round, never their guesses. You can change your guess until the round resolves.",
     ],
     clock: [
-      "A round resolves when every racer still racing has guessed, or when the round clock runs out.",
+      "A round resolves when everyone still racing has guessed, or when the round clock runs out.",
       "Miss three rounds in a row and you drop out of the race.",
-      "Places go by the round you cracked it. If nobody cracks it, nobody wins.",
+      "Places go by the round you cracked it. If nobody cracks it, nobody wins. Every guess and the secret are revealed at the end.",
     ],
     variants: [
       "Colors: 4 pegs from 6 colours (repeats allowed), up to 10 rounds.",

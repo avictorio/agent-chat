@@ -21,7 +21,6 @@ import { memberReply } from "./members.js";
 import type { RoomMember } from "../room/members.js";
 import type { RouteContext } from "../index.js";
 
-/** @param m the path's match */
 export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -46,7 +45,6 @@ export async function constitutionRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ error: "Method not allowed" }, 405);
 }
 
-/** @param m the path's match */
 export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -88,7 +86,6 @@ export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, question: r.question });
 }
 
-/** @param m the path's match */
 export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

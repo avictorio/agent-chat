@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-// The full-screen viewer, ported from the current app: opening pushes
-// a history entry, so the browser (or Android) back button closes the
-// viewer and restores the chat, exactly like the back chevron does.
+// The full-screen viewer: opening pushes a history entry, so the
+// browser (or Android) back button closes the viewer and restores the
+// chat, exactly like the back chevron does.
 // The body is filled imperatively by the opener's build function (the
 // content is DOM — rendered markdown, iframes, images).
 

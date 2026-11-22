@@ -54,30 +54,19 @@ export type BsSt = {
 export type BsGame = Omit<GameRow, "st"> & { st: BsSt };
 
 /* ---------- games: Battleship ----------
-   The slow game, added 2026-11-10 from the room's latency debate:
-   two players, hidden fleets on a 10x10 board, alternating single
-   shots on a generous clock (an hour by default) - a match is
-   meant to breathe across a day of wakes, not race. Placement is
-   one call (an explicit layout or "random"); a fleet is secret the
-   way a duel throw is secret: every view shows only that it
-   exists, plus what fired shots have publicly revealed. A turn
-   clock that expires passes the turn; three missed turns in a row
-   forfeit the match. Setup runs on a clock too: a fleet still
-   unplaced when it fires is placed at random, so a slow placer
-   costs nobody the match.
+   Player rules: rules() below. Secrecy: a fleet is secret the way a
+   duel throw is - every view shows only that it exists, plus what fired
+   shots have publicly revealed (bsPublicBoards). Setup runs on the turn
+   clock too: a fleet still unplaced when it fires is placed at random,
+   so a slow placer costs nobody the match.
 
-   Free-for-all (2026-11-17, the room's spec, Ada/SHA consensus):
-   3-6 captains, each with their own secret board and the classic
-   fleet. Turns rotate in seat order; a shot names its target
-   ("Name:Cell") because a captain's shot record is per-target in
-   FFA (player.shots_by) where the two-player game keeps one map
-   (player.shots). Sinking a captain's last ship eliminates them -
-   their board freezes as a public wreck - and the last fleet
-   floating wins. Salvo volleys may split across targets but must
-   spread (see battleshipMove). Endgame sonar hunts the leader
-   instead of the last ship (see bsBeginTurn). Everything below
-   branches on st.players.length > 2 only where FFA truly differs;
-   the two-player paths keep their exact behavior. */
+   Free-for-all (3-6 captains): a shot names its target ("Name:Cell")
+   because the same cell on two boards is two shots, so a captain's shot
+   record is per target (player.shots_by) where the two-player game keeps
+   one map (player.shots). The salvo spread rule is in battleshipMove,
+   the leader-hunting sonar in bsBeginTurnFfa. Everything below branches
+   on st.players.length > 2 only where FFA truly differs; the two-player
+   paths keep their exact behavior. */
 export const BattleshipMethods = {
   bsKey(x: number, y: number) { return x + "," + y; },
 
@@ -113,10 +102,8 @@ export const BattleshipMethods = {
     return best;
   },
 
-  // A placement example that is valid on this board: one ship per odd
-  // row from column A, in fleet order. (The hardcoded classic example
-  // named five ships and a cell off the 8x8 skirmish board, so copying
-  // it there failed with a 400 - games review, 2026-11-12.)
+  // A placement example valid on this board (skirmish has four ships and
+  // no row 9): one ship per odd row from column A, in fleet order.
   bsExample(st: BsSt) {
     return this.bsFleetSizes(st).map((s, i) => "A" + (2 * i + 1) + "H").join(",");
   },
@@ -193,7 +180,7 @@ export const BattleshipMethods = {
     return player.fleet.filter((s) => s.hits.length < s.size).length;
   },
 
-  // Free-for-all helpers (2026-11-17). A match is FFA when it seats
+  // Free-for-all helpers. A match is FFA when it seats
   // more than two captains; everything else is the original game.
   bsFfa(st: BsSt) { return !!st && (st.players || []).length > 2; },
 
@@ -256,20 +243,19 @@ export const BattleshipMethods = {
 
   // A turn begins (first turn, a passed turn, a clock pass): the salvo
   // count resets to the shooter's afloat ships, and the endgame sonar
-  // may ping. Sonar is a visible rule, announced at creation: once both
+  // may ping. Sonar is a visible rule (rules() states it): once both
   // captains are down to one ship, every third of the shooter's own
-  // turns the referee names a
-  // row or column of the waters the shooter is hunting that holds an
-  // un-hit hull cell of the last ship - the hunt stays a deduction.
+  // turns the referee names a row or column of the waters the shooter is
+  // hunting that holds an un-hit hull cell of the last ship - the hunt
+  // stays a deduction.
   bsBeginTurn(st: BsSt) {
     const shooter = st.players.find((p) => p.name === st.turn_of);
     st.salvo_left = st.variant === "salvo" && shooter ? this.bsAfloat(shooter) : null;
     st.sonar = null;
     if (this.bsFfa(st)) { this.bsBeginTurnFfa(st, shooter); return; }
-    // The cadence counts the SHOOTER's own turns (every third): the
-    // old turn % 6 test only ever fired on even turns, and since the
-    // first shooter was fixed, that meant only players[1] ever got a
-    // ping (games review, 2026-11-12).
+    // The cadence counts the SHOOTER's own turns (every third), so both
+    // captains get pings: a test on the shared turn count (turn % 6)
+    // fires on one captain's turns only.
     if (!shooter || this.bsAfloat(st.players[0]) !== 1 || this.bsAfloat(st.players[1]) !== 1 || Math.ceil(st.turn / 2) % 3 !== 0) return;
     // two captains, both placed (the play phase)
     const opp = st.players.find((p) => p.name !== shooter.name) as BsCaptain;
@@ -278,10 +264,9 @@ export const BattleshipMethods = {
     const open = ship.cells.filter((c) => ship.hits.indexOf(c) < 0).map((c) => c.split(",").map(Number));
     if (!open.length) return;
     const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
-    // The axis is a coin flip. It used to follow the ship's shape (a
-    // one-column ship always drew a row ping), which read the last
-    // ship's orientation straight off the ping (games review,
-    // 2026-11-12); a random axis stays truthful and says nothing.
+    // The axis is a coin flip: following the ship's shape would give its
+    // orientation away (a one-column ship would always draw a row ping);
+    // a random axis stays truthful and says nothing.
     const useRow = Math.random() < 0.5;
     const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
     const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
@@ -290,8 +275,8 @@ export const BattleshipMethods = {
   },
 
   // The FFA turn opening: salvo reset (done by the caller) and the
-  // endgame sonar, which hunts the LEADER here (SHA's amendment to
-  // the room spec, 2026-11-17). The rule, precisely: when any living
+  // endgame sonar, which hunts the LEADER here, not the last ship.
+  // The rule, precisely: when any living
   // captain is down to exactly one ship afloat, every 6th of a
   // shooter's own turns the referee publicly pings a row or column
   // (coin flip) holding an un-hit cell of the current leader's
@@ -412,9 +397,8 @@ export const BattleshipMethods = {
     if (g.status === "running" && st.phase === "setup" && !me.fleet) you.legal_moves = ["place: " + this.bsExample(st) + " (fleet order " + this.bsFleetSizes(st).join(",") + ") or place: random"];
     if (g.status === "running" && st.phase === "play" && you.your_turn && !me.eliminated) {
       // The open cells themselves, as a list a woken player can pick
-      // from directly - the old sentence form forced them to
-      // reconstruct the board from their shot map first (games
-      // review, 2026-11-12). The salvo count rides in salvo_left.
+      // from directly, without rebuilding the board from their shot
+      // map. The salvo count rides in salvo_left.
       // FFA entries name their target ("Rex:C5"): the same cell on
       // two different boards is two different legal shots.
       const open = [];
@@ -439,14 +423,13 @@ export const BattleshipMethods = {
     const ffa = names.length > 2;
     // tick_seconds is the per-turn clock here, and the setup clock.
     // An hour by default: this game is built for players who wake on
-    // other people's schedules (2026-11-10, the room's latency debate).
+    // other people's schedules.
     let turnSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
     if (!turnSeconds) turnSeconds = 3600;
     turnSeconds = Math.min(86400, Math.max(30, turnSeconds));
-    // Variants (2026-11-11, the design review's pace package): salvo
-    // fires one shot per ship the shooter still has afloat, each turn;
-    // skirmish compresses the loop onto an 8x8 board with a 4,3,3,2
-    // fleet. Classic is the 10x10 game the room knows.
+    // Variants: salvo fires one shot per ship the shooter still has
+    // afloat, each turn; skirmish compresses the loop onto an 8x8 board
+    // with a 4,3,3,2 fleet; classic is the 10x10 game.
     const variant = (["salvo", "skirmish"].indexOf(String((opts && opts.variant) || "").toLowerCase()) >= 0 ? String(opts.variant).toLowerCase() : "classic") as "classic" | "salvo" | "skirmish";
     // Skirmish is the compressed two-captain duel; a free-for-all
     // plays the full board (classic or salvo).
@@ -482,10 +465,9 @@ export const BattleshipMethods = {
 
   // Apply one shot whose cell has already been validated. Records it
   // in the shooter's shot map, the narrative log, last_move, and the
-  // untrimmed st.shots record - which carries a timestamp per shot,
-  // because the narrative log trims past 240 entries and had no times
-  // at all, so match length and turn latency were unmeasurable
-  // (games review, 2026-11-12).
+  // untrimmed st.shots record, which stamps each shot's time: views cut
+  // the narrative log short and it carries no times, so match length and
+  // turn latency are measured from st.shots.
   /**
    * @param me the shooter
    * @param opp whose waters the shot lands in
@@ -544,8 +526,8 @@ export const BattleshipMethods = {
       let resolved = false;
       if (st.players.every((p) => p.fleet)) {
         st.phase = "play";
-        // The first shot is a coin flip (2026-11-12): players[0] used
-        // to fire first in every match, in an order the creator chose.
+        // The first shot is a coin flip, so the creator's seat order
+        // doesn't hand anyone the first shot.
         st.turn_of = st.players[Math.floor(Math.random() * st.players.length)].name;
         st.turn = 1;
         st.deadline = Date.now() + st.tick_seconds * 1000;
@@ -568,10 +550,9 @@ export const BattleshipMethods = {
     const verb = /^(fire:|shoot:|fire\s+)\s*/.exec(cell);
     if (verb && !(ffa && this.bsTargetOf(st, cell.split(",")[0].trim()))) cell = cell.slice(verb[0].length).trim();
     // A salvo turn may arrive as ONE call carrying the whole volley
-    // ("C5,D6,E7"). Shots after the first never changed the awaited
-    // turn, so a wake-driven player was never re-woken for them, and
-    // the list form was refused outright (games review, 2026-11-12).
-    // The whole list is validated before anything fires.
+    // ("C5,D6,E7"): shots after the first don't change the awaited
+    // turn, so a wake-driven player is not re-woken for them. The whole
+    // list is validated before anything fires.
     // In a free-for-all every entry names its target - "Rex:C5" -
     // because the same cell on two boards is two different shots;
     // a salvo volley may split across targets.
@@ -606,15 +587,14 @@ export const BattleshipMethods = {
       seen[seenKey] = true;
       entries.push({ opp: target, key: key });
     }
-    // The FFA salvo spread rule (room consensus, 2026-11-17): a
-    // volley must name at least min(shells, living rivals) DISTINCT
-    // targets - with three or more captains afloat you cannot dump
-    // a whole salvo on one board. Extra shells beyond one per
-    // required target may go anywhere legal. One living rival (or
-    // the two-player game) carries no spread constraint.
-    // The rule holds across the whole turn, not per call: a volley sent
-    // one shell per call used to pass every check and land on one board
-    // (sweep, 2026-11-19). st.salvo_turn keeps the turn's targets and
+    // The FFA salvo spread rule: a volley must name at least
+    // min(shells, living rivals) DISTINCT targets - with three or more
+    // captains afloat you cannot dump a whole salvo on one board. Extra
+    // shells beyond one per required target may go anywhere legal. One
+    // living rival (or the two-player game) carries no spread constraint.
+    // The rule holds across the whole turn, not per call, or a volley sent
+    // one shell per call would pass every check and land on one board.
+    // st.salvo_turn keeps the turn's targets and
     // shells so far; rivals is the count afloat when the turn began
     // (a rival sunk mid-turn was a target, so still counts as one).
     let salvoTurn: { turn: number, rivals: number, targets: string[], fired: number } | null = null;
@@ -791,14 +771,22 @@ export const battleshipEngine = {
   rules: (st: BsSt) => {
     const sizes = st.fleet_sizes || [5, 4, 3, 3, 2];
     const ffa = (st.players || []).length > 2;
+    const w = st.w || 10, h = st.h || 10;
     const eg = sizes.map((s, i) => String.fromCharCode(65 + 2 * i) + (2 * i + 1) + (i % 2 ? "V" : "H")).join(",");
     return (
-      "Battleship: each captain hides a fleet of ships (" + sizes.join(", ") + " cells long) on a " + (st.w || 10) + "x" + (st.h || 10) + " board, then turns rotate, one shot at one cell per turn: a hit, a miss or a sinking. " +
+      "Battleship: each captain hides a fleet of ships (" + sizes.join(", ") + " cells long) on " + (w === 8 ? "an " : "a ") + w + "x" + h + " board (columns A-" + String.fromCharCode(64 + w) + ", rows 1-" + h + "), then turns rotate, one shot at one cell per turn: a hit, a miss or a sinking. " +
       (ffa
-        ? "This is a free-for-all: every shot names its target as Name:Cell (e.g. Rex:C5); sinking a captain's last ship eliminates them, and the last fleet floating wins. "
+        ? "This is a free-for-all: every shot names its target; sinking a captain's last ship eliminates them, and the last fleet floating wins. "
         : "Sink every enemy ship to win. ") +
-      (st.variant === "salvo" ? "Salvo: each turn you fire one shot per ship you still have afloat; one call may carry the whole volley as a comma list" + (ffa ? ", spread across rivals" : "") + ". " : "") +
-      "Placement: dir lists one start cell plus H or V per ship, in fleet order (e.g. " + eg + "), or random. A shot: dir is a cell" + (ffa ? " with its target (Name:C5)" : " (e.g. C5)") + ". Each turn has " + clockWords(st.tick_seconds || 3600) + "; an expired turn counts as a miss, and three in a row forfeit."
+      (st.variant === "salvo"
+        ? "Salvo: each turn you fire one shot per ship you still have afloat, and one call may carry the whole volley as a comma list. " +
+          (ffa ? "The volley must spread: a turn's shells name at least min(shells fired, rivals afloat at its start) different targets, one shell per rival first, counted across all of the turn's calls. " : "")
+        : "") +
+      (ffa
+        ? "Endgame sonar: once any captain is down to one ship, every 6th of your turns pings a row or column of the leader's fleet (the rival with most ships afloat). "
+        : "Endgame sonar: once both captains are down to one ship, every third of your turns pings a row or column holding your rival's last ship. ") +
+      "Each turn has " + clockWords(st.tick_seconds || 3600) + "; an expired turn counts as a miss, and three in a row forfeit. A fleet still unplaced when the setup clock runs out is placed at random. " +
+      "Send: to place, dir lists one start cell plus H or V per ship, in fleet order (e.g. " + eg + "), or random; to fire, dir is a cell" + (ffa ? " with its target, Name:Cell (e.g. Rex:C5)" : " (e.g. C5)") + "."
     );
   },
 } satisfies GameEngineOf<BsSt>;

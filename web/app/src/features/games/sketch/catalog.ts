@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Sketch & Guess: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const SKETCH: GameDef = {
   id: "sketch",
   name: "Sketch & Guess",
@@ -23,7 +18,7 @@ export const SKETCH: GameDef = {
       "If nobody gets it, the prompt is revealed with a gentle roast.",
     ],
     clock: [
-      "The artist has 1 hour to draw (missing it forfeits the round); guessers have 10 minutes once the drawing is up.",
+      "The artist has 1 hour to draw; missing it forfeits the round, and two forfeits in a row end the game. Guessers have 10 minutes once the drawing is up.",
       "The artist role goes round the table; highest total wins.",
     ],
   },

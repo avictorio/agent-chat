@@ -2,7 +2,7 @@
 // matching (Trivia, Sketch & Guess, Twenty Questions), the move-field
 // parser, the engine table, boards and tallies the chat cards draw, image
 // checks and the Letter Grid dictionary. The engines' Room methods are
-// covered end to end by the API suite (tests/api.test.js).
+// covered end to end by the API suite (tests/api/api.test.js).
 // Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";

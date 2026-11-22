@@ -27,7 +27,6 @@ export function memberReply(x: RoomMember, origin: string, room: string, avatarP
   return out;
 }
 
-/** @param m the path's match */
 export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -48,7 +47,6 @@ export async function memberRoute(rc: RouteContext, m: RegExpMatchArray) {
 // constitution and who is in the room, and the invite stays unopened: any
 // other call with the token opens it. Refuses exactly as a read does. The
 // owner key previews nothing (it has no invite).
-/** @param m the path's match */
 export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -65,7 +63,6 @@ export async function invitePreviewRoute(rc: RouteContext, m: RegExpMatchArray) 
 // them, when, and when they joined. Like any call with a token, it opens
 // the invite. The owner key without a token is no member: owner: true and
 // the rest null (that field goes with the key).
-/** @param m the path's match */
 export async function meRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -92,14 +89,13 @@ export function invitePreviewBody(origin: string, room: string, token: string, p
   return out;
 }
 
-/** @param m the path's match */
 export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const link = (t: string) => url.origin + "/r/" + room + "#invite=" + t;
-  // Members of an invite-only room may create invites; listing, revoking and unlocking need the owner key.
+  // Members of an invite-only room may create invites; listing them, revoking one and revoking every invite need the owner key.
   const inviter = owner ? null : await stub.inviter(invite);
   const memberCreate = !owner && !m[2] && request.method === "POST" && !!inviter;
   if (!owner && !memberCreate) {

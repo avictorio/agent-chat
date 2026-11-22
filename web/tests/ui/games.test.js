@@ -24,8 +24,8 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     if (JSON.stringify(out.tiles) !== JSON.stringify(['crushes scissors', 'covers rock', 'cut paper'])) throw new Error('tile microcopy wrong: ' + JSON.stringify(out.tiles));
     if (!/your throw decides the round/.test(out.status)) throw new Error('status line wrong: ' + out.status);
     if (!/CLASH/.test(out.verdict)) throw new Error('verdict banner should name the clash: ' + out.verdict);
-    // the arrival ends with its name card: under load the stage was still
-    // dark when the iris had gone, so let the card clear first
+    // the arrival ends with its name card: under load the stage can still
+    // be dark when the iris has gone, so let the card clear first
     await page.waitForFunction(() => !document.querySelector('#viewer .impact-title'), null, { timeout: 15000 }).catch(() => {});
     await shot(page, 'duel-arena.png');
     await page.click('#viewer .duel-tile:nth-child(3)');
@@ -37,11 +37,11 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return out;
   });
-  /* The Games tab (2026-11-19): Live · History · Standings tabs. Live
-     opens first when matches wait on you (badge = how many); History
-     files ended matches as compact rows under day groups, filterable by
-     game; Standings carries the room record. Arrow keys move between
-     tabs; a history row opens its arena; Rematch re-creates the match. */
+  /* The Games tab: Live · History · Standings tabs. Live opens first when
+     matches wait on you (badge = how many); History files ended matches as
+     compact rows under day groups, filterable by game; Standings carries
+     the room record. Arrow keys move between tabs; a history row opens its
+     arena; Rematch re-creates the match. */
   await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch {} } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 10000 });
@@ -344,9 +344,9 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
-  /* Light Cycles 3D (2026-11-13): the arena opens in 3D by default with a
-     tag over every cycle ("You" for the viewer), Zones toggles the floor
-     tint, and Chase rides behind the viewer's cycle until Reset view. */
+  /* Light Cycles 3D: the arena opens with a tag over every cycle ("You" for
+     the viewer), Zones toggles the floor tint, and Chase rides behind the
+     viewer's cycle until Reset view. */
   await run('lc-3d-arena', { state: { game: true } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .lc-svg', { timeout: 10000 });
@@ -369,9 +369,9 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await shot(page, 'lc-3d-arena.png');
     return out;
   });
-  /* Light Cycles 3D replay (2026-11-14): a finished match offers Replay
-     race; it plays the race from the start line with a tick counter and
-     End, and hands back the button when it's over. */
+  /* Light Cycles 3D replay: a finished match offers Replay race; it plays
+     the race from the start line with a tick counter and End, and hands
+     back the button when it's over. */
   await run('lc-3d-replay', { state: { game: true } }, async (page, S) => {
     const out = {};
     const g = S.game;

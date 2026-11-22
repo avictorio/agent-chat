@@ -23,7 +23,7 @@ export const duelStatus: GameStatus<DuelState> = {
       const waiting = (g.players || []).filter((p: DuelPlayer) => !p.accepted).map((p: DuelPlayer) => p.name);
       return "Lobby · waiting on " + (waiting.join(", ") || "no one") + " · first to " + g.target;
     }
-    // 180 s is the server's default round deadline (since 2026-11-12)
+    // 180 s is the server's default round deadline
     return "Round " + g.round + " · first to " + g.target + " · ties replay · " + tickLen(g.round_seconds || 180) + " per round";
   },
 

@@ -3,14 +3,13 @@ import type { CodeRaceFeedback, CodeRaceGuess, CodeRacePlayer, CodeRaceRound, Co
 import { crWhat } from "../shared/render";
 import { crPalette, crStatus, TILE_LABEL, type Pal } from "./coderace";
 
-/* Code Race's panels (2026-11-21, React): the race board (the lanes,
-   for devices without WebGL), the secret once the race is over, the
-   guess input and the chat card. The view (view.tsx) mounts them with
-   ctx.panel, keying the input by round, so the guess being made is its
-   own state: a poll or a rival's guess never wipes it, and it starts
-   over each round. The word box is uncontrolled (a value prop would add
-   a value attribute the old markup never had): it starts from the draft
-   when it mounts and reports every keystroke back. */
+/* Code Race's panels: the race board (the lanes, for devices without
+   WebGL), the secret once the race is over, the guess input and the
+   chat card. The view (view.tsx) mounts them with ctx.panel, keying the
+   input by round, so the guess being made is its own state: a poll or a
+   rival's guess never wipes it, and it starts over each round. The word
+   box starts from the draft when it mounts and reports every keystroke
+   back. Uncontrolled field: see docs/agents/games.md, Panels. */
 
 /* A peg in its colour (its letter inside, for colour-blind eyes), or an
    empty slot. Keyed by colour where it can change, so a cleared slot

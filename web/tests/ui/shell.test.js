@@ -4,13 +4,11 @@
 const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
 (async () => {
-  // M1 smoke scenario (not a parity item): proves the harness discriminates
-  // and the skeleton's wiring works — invite fragment stored and scrubbed,
-  // fixture messages fetched through the typed client and rendered.
-  // Error boundaries (2026-11-21): a message the feed can't render (here
-  // malformed reactions from the API: one name where a list belongs) shows a one-line notice in its place; the
-  // rest of the chat, the message box and the other views keep working.
-  // Without the boundaries the render error unmounted the whole page.
+  // Error boundaries: a message the feed can't render (here malformed
+  // reactions from the API: one name where a list belongs) shows a
+  // one-line notice in its place; the rest of the chat, the message box
+  // and the other views keep working. Without the boundaries the render
+  // error would unmount the whole page.
   await run('error-boundary-row', { state: { broken: true }, allowConsole: /message 71|is not a function|Cannot read|Objects are not valid|The above error/ }, async (page) => {
     await page.waitForSelector('#msgs .msg', { timeout: 10000 });
     const out = await page.evaluate(() => ({
@@ -35,6 +33,9 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
     await shot(page, 'error-boundary-row-mobile-dark.png');
     return box;
   });
+  // Smoke: proves the harness discriminates and the wiring works —
+  // invite fragment stored and scrubbed, fixture messages fetched through
+  // the typed client and rendered.
   await run('skeleton', { hash: '#invite=tok_Anthony' }, async (page) => {
     const out = {};
     await page.waitForSelector('.msg', { timeout: 10000 });
@@ -104,17 +105,15 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
     return left;
   });
 
-  // --- M2 shell scenarios (ported verbatim from tests/ui.test.js) ---
+  // --- layout and themes, update banner, site notice, pull to refresh, the bell, access ---
   for (const scheme of ['light', 'dark']) {
     await run('desktop-' + scheme, { scheme }, async (page) => {
       await shot(page, scheme + '-chat.png');
       for (const t of ['constitution', 'decisions', 'questions', 'stakes', 'memory', 'members']) { await page.click('.tab[data-tab="' + t + '"]'); await settle(page); await shot(page, scheme + '-' + t + '.png'); }
       const counts = await page.$$eval('.tab .count', els => els.map(e => e.parentElement.dataset.tab + '=' + e.textContent + (e.classList.contains('alert') ? '!' : '')));
-      // Sidebar counts are production-derived for this fixture (the
-      // root suite only logs them; assert them here so a counts
-      // divergence cannot pass silently — stakes is due within
-      // SEVEN days in the current app, decisions count when an
-      // active member has not signed).
+      // Sidebar counts for this fixture, asserted so a counts
+      // divergence cannot pass silently: stakes count when due within
+      // SEVEN days, decisions when an active member has not signed.
       const wantCounts = ['chat=', 'games=', 'media=', 'constitution=', 'decisions=2!', 'questions=2', 'stakes=1!', 'memory=', 'members=3'];
       if (JSON.stringify(counts) !== JSON.stringify(wantCounts)) throw new Error('sidebar counts diverge from production: got ' + JSON.stringify(counts));
       return { counts, hash: await page.evaluate(() => location.hash) };
@@ -217,14 +216,11 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
     return out;
   });
   await run('push-bell', { init: () => { try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch {} } }, async (page) => {
-    // Soak defect S2 (2026-11-09): on the owner's phone (Chrome,
-    // permission undecided) the staging app showed no bell at all.
-    // Two causes stacked: staging served /sw.js as HTML, so
-    // registration failed and serviceWorker.ready never resolved -
-    // and the port only painted the bell at the end of that async
-    // check, while production paints visibility from the support
-    // rule. Here the harness 404s /sw.js the same way; with the
-    // permission stubbed to "default" the bell must still appear.
+    // Regression guard: when /sw.js fails to register,
+    // serviceWorker.ready never resolves, so the bell must be painted
+    // from the support rule up front, not at the end of that async
+    // check. The harness 404s /sw.js; with the permission stubbed to
+    // "default" (undecided) the bell must still appear.
     const out = {};
     out.perm = await page.evaluate(() => Notification.permission);
     if (out.perm !== 'default') throw new Error('permission stub did not take: ' + out.perm);
@@ -240,7 +236,7 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
   await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
   await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
 
-  // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
+  // --- message core: unread, naming yourself ---
   await run('unread', {}, async (page) => {
     await page.click('.tab[data-tab="stakes"]'); await settle(page);
     await page.evaluate(() => {});

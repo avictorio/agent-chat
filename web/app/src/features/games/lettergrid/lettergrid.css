@@ -1,7 +1,7 @@
-/* Letter Grid (2026-11-20): the word panel under the scene (typing
-   traces the path live; the cells show as chips, free ones in the
-   accent), the scores with cells claimed, the last round's words, and the
-   card's small flat grid. Game surfaces are dark in both themes. */
+/* Letter Grid: the word panel under the scene (typing traces the path
+   live; the cells show as chips, free ones in the accent), the scores
+   with cells claimed, the last round's words, and the card's small flat
+   grid. Game surfaces are dark in both themes. */
 .lg-panel { margin-top: 10px; display: grid; gap: 8px; background: var(--gbg); border: 1px solid rgba(var(--ga), .4); border-radius: 12px; padding: 12px; color: #fdf6dc; box-shadow: 0 0 0 1px rgba(var(--ga), .2), 0 0 18px rgba(var(--ga), .12); }
 .lg-word-row { display: flex; gap: 6px; align-items: center; }
 .lg-word { flex: 1 1 auto; width: 0; min-width: 0; height: 42px; border-radius: 10px; border: 1px solid rgba(var(--ga), .45); background: #070604; color: #fff7d6; font: inherit; font-size: 18px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 0 12px; }
@@ -48,7 +48,7 @@
 .lg-mini-cell.owned { background: var(--who); color: #fff; }
 .lg-card-side { flex: 1; min-width: 0; }
 .lg-card-cap { font-size: 12px; color: #c7b98a; padding: 0 10px 4px; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* This game's 3D host and frame pieces. */
 .lc-3d-host.lg-3d-host { height: min(52vh, 460px); }
 @media (max-width: 560px) {
   .lc-3d-host.lg-3d-host { height: min(48vh, 380px); }

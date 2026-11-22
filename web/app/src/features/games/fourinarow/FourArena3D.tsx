@@ -1,4 +1,4 @@
-/* Four in a Row in 3D (2026-11-19): the glass board.
+/* Four in a Row in 3D: the glass board.
 
    The world: a tall board of glass rings standing over a dark mirror
    lake, a rose dusk behind it. Discs are glowing coins in each player's

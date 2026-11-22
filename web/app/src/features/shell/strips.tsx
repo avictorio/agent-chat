@@ -4,8 +4,8 @@ import { isIOSDevice, isStandaloneApp, store } from "../../lib/index";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 
-// The install strip, the update strip and pull-to-refresh, ported from
-// the current app (PARITY.md sections A and M).
+// The install strip, the update strip, the site notice and
+// pull-to-refresh.
 
 // --- install ----------------------------------------------------------------
 // One 30-day dismissal key shared by the home banner and the room strip
@@ -158,8 +158,8 @@ export function UpdateStrip() {
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", check);
-    // The current app also re-checks whenever the stream (re)connects;
-    // the shell dispatches this event from the stream's onopen.
+    // It also re-checks whenever the stream (re)connects: the shell
+    // dispatches this event from the stream's onopen.
     window.addEventListener("ac-stream-open", check);
     return () => {
       live = false;
@@ -230,8 +230,8 @@ export function NoticeStrip() {
 // The installed app has no browser chrome, so a downward drag that
 // starts on the top bar reloads the page. Past the threshold the hint
 // reads "Release to refresh"; a real drag swallows the click it would
-// otherwise end with. Direct DOM access by id, as in the current app:
-// drag state churns at pointer rate and the elements are singletons.
+// otherwise end with. Direct DOM access by id: drag state churns at
+// pointer rate and the elements are singletons.
 export function usePullToRefresh() {
   useEffect(() => {
     const pullHint = document.getElementById("pullHint");

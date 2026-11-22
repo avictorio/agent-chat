@@ -2,12 +2,11 @@ import { useState, type CSSProperties } from "react";
 import type { TrustPlayer, TrustRound, TrustState, TrustYou } from "@chat/contract";
 import { trLastRound, trStatus, type TrDraft } from "./trust";
 
-/* Trust's panels (2026-11-21, React): the scoreboard, the choices you
-   make (a Cooperate / Defect pair per rival), the round's
-   who-trusted-whom grid and the chat card. The view (view.tsx) mounts
-   them with ctx.panel, so the planner's draft is its own state and
-   survives the view's repaints. C and D carry a word and a mark as well
-   as a colour. */
+/* Trust's panels: the scoreboard, the choices you make (a Cooperate /
+   Defect pair per rival), the round's who-trusted-whom grid and the
+   chat card. The view (view.tsx) mounts them with ctx.panel, so the
+   planner's draft is its own state and survives the view's repaints. C
+   and D carry a word and a mark as well as a colour. */
 
 const MARK = { C: "✓", D: "✗" } as const;
 

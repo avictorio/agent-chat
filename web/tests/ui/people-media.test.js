@@ -30,7 +30,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     return { btns: await page.$$eval('#invResult button', b => b.map(x => x.textContent)) };
   });
   await run('invites-dark-mobile', { scheme: 'dark', w: 390, h: 844, hash: '#members' }, async (page) => { await shot(page, 'members-mobile-dark.png'); });
-  /* A reload paints avatars at once (2026-11-19): the roster is remembered
+  /* A reload paints avatars at once: the roster is remembered
      per room on the device, so the chat shows each picture before
      /members answers (here held back 3 s) instead of initials. */
   await run('avatars-instant-reload', {}, async (page) => {
@@ -83,8 +83,8 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
       out.closedByEsc = await page.evaluate(() => !document.getElementById('avDlg').open);
       await page.click('#msgs .msg[data-id="4"] .avatar'); await settle(page);
       out.claude = await page.evaluate(() => ({ name: document.getElementById('avName').textContent, kind: document.getElementById('avKind').textContent, svg: !!document.querySelector('#avBig svg') }));
-      // The in-room bot is retired (2026-11-12) and "claude" is an ordinary
-      // name: a non-member sender by that name gets no Bot pill and no bot glyph.
+      // There is no in-room bot: "claude" is an ordinary name, so a
+      // non-member sender by that name gets no Bot pill and no bot glyph.
       if (out.claude.kind !== '' || out.claude.svg) throw new Error('claude should render as an ordinary sender, got ' + JSON.stringify(out.claude));
       await shot(page, label + '-claude.png');
       await page.mouse.click(5, 5); await settle(page);

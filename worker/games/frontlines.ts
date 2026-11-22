@@ -44,16 +44,13 @@ export const FL_HILLS = 5;
 export const FL_TROOPS = 100;
 
 export const FrontlinesMethods = {
-  /* ---------- games: Frontlines (2026-11-19) ----------
-     Two commanders, five hills, a hundred troops each round. Both split
-     their troops in secret; each hill goes to the bigger army (a level
-     hill goes to nobody) and the round to whoever holds more hills - or,
-     in the Valued hills variant, more hill points (each round's values,
-     a shuffle of 1, 1, 2, 2, 3, are public before anyone commits). A
-     level round scores nobody. First to a majority of best_of rounds
-     takes the field. Rides the shared simultaneous-rounds machinery (roundsCommit and
-     roundsAdvance in room/games.ts): a
-     lone commitment at the deadline wins its round by forfeit. */
+  /* ---------- games: Frontlines ----------
+     Player rules: rules() below. A split is secret until its round
+     resolves: views show only who has committed, and your own split.
+     Rides the shared simultaneous-rounds machinery (roundsCommit and
+     roundsAdvance in room/games.ts); a lone commitment at the deadline
+     wins its round by forfeit. Valued hills: each round's values are a
+     fresh shuffle of 1, 1, 2, 2, 3, public before anyone commits. */
   /**
    * A move's troops per hill, or the error to answer with.
    * @param raw the split, as sent
@@ -243,5 +240,7 @@ export const frontlinesEngine = {
   rules: (st: FlSt) =>
     "Frontlines: each round both commanders secretly split " + FL_TROOPS + " troops across " + FL_HILLS + " hills, A to E. When both splits are in, each hill goes to the bigger army (a tie on a hill takes nobody) and the round to whoever holds " +
     (st.variant === "valued" ? "more hill points - the hills carry point values, public each round (this round: " + (st.values || []).join(", ") + " for A-E)" : "more hills") +
-    "; a level round scores nobody. First to " + st.target + " rounds wins (best of " + st.best_of + "). You can change your split until the round resolves; at the " + clockWords(st.round_seconds || 180) + " deadline a lone split wins the round. Send dir as five whole numbers adding up to " + FL_TROOPS + ", one per hill, e.g. 30,20,20,15,15 (or even / random).",
+    "; a level round scores nobody. First to " + st.target + " rounds wins (best of " + st.best_of + "). You can change your split until the round resolves. " +
+    "At the " + clockWords(st.round_seconds || 180) + " deadline a lone split wins the round; a round with no splits ends the match where it stands, and an empty round 1 calls it off. " +
+    "Send: dir as five whole numbers adding up to " + FL_TROOPS + ", one per hill, e.g. 30,20,20,15,15 (or even / random).",
 } satisfies GameEngineOf<FlSt>;

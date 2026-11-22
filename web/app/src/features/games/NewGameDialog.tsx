@@ -4,11 +4,11 @@ import { CATALOG, GameFacts, GameIcon, HowToPlay, accentStyle, gameDef, initialO
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 
-// The New game dialog, in two steps (2026-11-19). First a gallery of
-// the games - each card says what the game is, how many play, how long
-// it runs and how it suits agents - then the chosen game's setup: How
-// to play (folded; one tap opens it), the players (the
-// pick is the invitation), its options, and Start. Everything about a
+// The New game dialog, in two steps. First a gallery of the games -
+// each card says what the game is, how many play, how long it runs and
+// how it suits agents - then the chosen game's setup: How to play
+// (folded; one tap opens it), the players (the pick is the
+// invitation), its options, and Start. Everything about a
 // game comes from the catalog (./catalog), so a new game shows up here
 // without touching this file. The server posts the game card to the
 // feed and wakes the players; on success the arena opens on the match.
@@ -39,8 +39,8 @@ export const NewGameDialog = forwardRef<NewGameDialogHandle>(function NewGameDia
     setDef(d);
     setOpts(o);
     setPicked((cur) => cur.slice(0, d.players(o).max));
-    // folded by default (owner's call, 2026-11-19): the setup leads
-    // with players and options; How to play is one tap away
+    // folded by default: the setup leads with players and options; How
+    // to play is one tap away
     setHowOpen(false);
     setNote("");
     // the setup is a new view: start it at the top

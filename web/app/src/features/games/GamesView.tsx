@@ -59,12 +59,13 @@ function standingsMotion(games: GameListItem[] | null) {
   return { streaks, prevRanks };
 }
 
-// The Games tab (2026-11-19): three tabs - Live (opens by default, and
-// whenever a match waits on you; matches waiting on YOU first), History
-// (every match that ended, as compact rows filed by the day it ended,
-// filterable by game) and Standings (the room record). Start a match
-// lives in the Live tab; the your-move chime toggle sits in the header. A tap on a row opens
-// the arena; the list refreshes whenever the store hears about a game.
+// The Games tab, in four tabs: Live (opens by default, and whenever a
+// match waits on you; matches waiting on YOU first), History (every
+// match that ended, as compact rows filed by the day it ended,
+// filterable by game), Standings (the room record) and Guide (every
+// game's rules). Start a match lives in the Live tab; the your-move
+// chime toggle sits in the header. A tap on a row opens the arena; the
+// list refreshes whenever the store hears about a game.
 
 // game names come from the catalog (./catalog)
 const KIND: Record<string, string> = Object.fromEntries(CATALOG.map((d) => [d.id, d.name]));
@@ -85,8 +86,8 @@ type RecordTable = Record<string, Array<{ name: string; hex: string; w: number; 
 type LadderTable = Record<string, Array<{ name: string; hex: string | null; rating: number; w: number; l: number; d: number; last: number }>>;
 type StandRow = { name: string; hex: string; w: number; l: number; d: number; p2?: number; p3?: number; rating: number | null; last: number };
 
-/* One game's standings (2026-11-19): with a ladder, rated players first by
-   Elo rating (their all-time W-L beside it, from the record), then anyone
+/* One game's standings: with a ladder, rated players first by Elo
+   rating (their all-time W-L beside it, from the record), then anyone
    only seen in free-for-alls, unrated; without one, the record as is. */
 function standRows(rec: RecordTable[string] | undefined, lad: LadderTable[string] | undefined): StandRow[] {
   const recBy: Record<string, RecordTable[string][number]> = {};
@@ -104,9 +105,9 @@ function standRows(rec: RecordTable[string] | undefined, lad: LadderTable[string
   return out;
 }
 
-/* The Games tab as a to-do list (2026-11-13): matches waiting on YOU
-   come first, soonest deadline first, each with what it wants ("Your
-   throw") and the time left; then the ones waiting on others; then the
+/* The Games tab as a to-do list: matches waiting on YOU come first,
+   soonest deadline first, each with what it wants ("Your throw") and
+   the time left; then the ones waiting on others; then the
    record and the history. Who a match waits on is the list's `targets`
    (the server's collapsed awaited set), else the full state's awaiting
    lists. The countdowns tick with the arena's turn clock (games.ts). */
@@ -178,11 +179,11 @@ function lengthLine(g: GL): string {
   return (g.tick || 0) + " ticks";
 }
 
-/* The your-move chime toggle (2026-11-19). It was a bell, which read
-   as the app's notifications; a speaker says sound. What it does is
-   one hover or long-press away: a tooltip on hover (desktop), keyboard
-   focus, or a hold on touch (the hold does not toggle), and a tap
-   confirms the new state for a moment ("Chime off"). */
+/* The your-move chime toggle: a speaker, not a bell (a bell reads as
+   the app's notifications). What it does is one hover or long-press
+   away: a tooltip on hover (desktop), keyboard focus, or a hold on
+   touch (the hold does not toggle), and a tap confirms the new state
+   for a moment ("Chime off"). */
 const SPEAKER = "M11 5 6 9H3v6h3l5 4V5z";
 const WAVES = ["M15.5 8.5a5 5 0 0 1 0 7", "M18.5 5.5a9 9 0 0 1 0 13"];
 const MUTED = ["M16 9.5l5 5", "M21 9.5l-5 5"];

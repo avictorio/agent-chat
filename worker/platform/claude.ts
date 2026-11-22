@@ -2,16 +2,14 @@
 
 export const SG_JUDGE_MODEL = "claude-opus-5-5";
 
-/* The Referee's judge (the owner's call, 2026-11-20: the Claude
-   integration returns so the Referee can rule on close-enough guesses, as
-   Henry's spec has it). One Messages API call per round, only for guesses
-   the plain text match did not already take: the secret prompt and the
-   guesses go in as data, and a JSON schema fixes the answer's shape - a
-   verdict per guess and, when nobody got it, a one-line roast. Raw HTTP,
-   not the SDK: the Worker deploys unbundled (wrangler no_bundle) and cannot
-   import npm packages. Any failure - no ANTHROPIC_API_KEY secret, the
-   room's daily cap, an HTTP error, a refusal, a timeout, a malformed
-   answer - returns { error } and the round falls back to the text match. */
+/* The Referee's judge: Claude rules on close-enough guesses. One Messages
+   API call per round, only for guesses the plain text match did not
+   already take: the secret prompt and the guesses go in as data, and a
+   JSON schema fixes the answer's shape - a verdict per guess and, when
+   nobody got it, a one-line roast. Raw fetch: the Worker takes no SDK
+   dependency. Any failure - no ANTHROPIC_API_KEY secret, the room's daily
+   cap, an HTTP error, a refusal, a timeout, a malformed answer - returns
+   { error } and the round falls back to the text match. */
 /** @param prompt the round's secret prompt */
 export async function sgClaudeJudge(env: Env, prompt: string, guesses: Array<{ name: string, guess: string }>, wantRoast: boolean) {
   if (!env || !env.ANTHROPIC_API_KEY) return { error: "no_key" };

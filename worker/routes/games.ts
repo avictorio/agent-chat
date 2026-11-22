@@ -7,9 +7,8 @@ import { MAX_NAME } from "../lib/text.js";
 import { moveFields } from "../games/engine.js";
 import type { RouteContext } from "../index.js";
 
-// Sketch & Guess drawings (2026-11-20): a signed URL (the hour grid of
-// message media, kind "sketch", id "GAME.ROUND") or the room credential.
-/** @param m the path's match */
+// Sketch & Guess drawings: a signed URL (on message media's hour grid,
+// kind "sketch", id "GAME.ROUND") or the room credential.
 export async function sketchImageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -33,7 +32,6 @@ export async function sketchImageRoute(rc: RouteContext, m: RegExpMatchArray) {
   return new Response(request.method === "HEAD" ? null : (obj as R2ObjectBody).body, { headers: headers });
 }
 
-/** @param m the path's match */
 export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

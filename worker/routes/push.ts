@@ -12,7 +12,6 @@ export async function pushKeyRoute(rc: RouteContext) {
 }
 
 // Web Push subscriptions for a room, tied to the invite's member name.
-/** @param m the path's match */
 export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

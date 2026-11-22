@@ -2,13 +2,13 @@ import { el } from "../../../lib/index";
 import type { LetterGridPlayer, LetterGridRound, LetterGridState } from "@chat/contract";
 import type { HistRow, HistWho } from "../shared/history";
 
-/* Letter Grid (2026-11-20): the word being made (the draft, shared by
-   the word panel and the scene), tracing a word on the grid, a tap on a
-   tile, the move text and the history. The scoreboard, the word panel,
-   the last round's words and the chat card are React
-   (LetterGridPanels.tsx). The grid itself is the 3D scene - the card
-   keeps a small flat thumbnail, like every card. Words are sealed until
-   the round resolves (the server sends only your own, in you.queued). */
+/* Letter Grid: the word being made (the draft, shared by the word panel
+   and the scene), tracing a word on the grid, a tap on a tile, the move
+   text and the history. The scoreboard, the word panel, the last
+   round's words and the chat card are React (LetterGridPanels.tsx). The
+   grid itself is the 3D scene - the card keeps a small flat thumbnail,
+   like every card. Words are sealed until the round resolves (the
+   server sends only your own, in you.queued). */
 
 export type LgDraft = { round: number; word: string; path: number[][] | null; tapped: boolean };
 

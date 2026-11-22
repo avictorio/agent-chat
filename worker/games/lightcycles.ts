@@ -1,8 +1,7 @@
-// Light Cycles: turn-based Tron; every rider moves at once each tick.
-// A tick resolves when every living rider has moved, or when its clock
-// expires (a miss sends the bike straight). st.move_log records per tick
-// and rider the direction, its source (submitted / clock default), and
-// when a submitted move arrived. The clocks and the alarm are the shared
+// Light Cycles: turn-based Tron, every rider moving at once each tick
+// (player rules: rules() below). st.move_log records per tick and rider
+// the direction, its source (submitted / clock default) and when a
+// submitted move arrived. The clocks and the alarm are the shared
 // machinery in room/games.ts.
 
 import { clockWords, seatAccepted } from "./shared.js";
@@ -47,6 +46,14 @@ export type LcSt = {
 };
 /** A Light Cycles match: its gm row with the state typed. */
 export type LcGame = Omit<GameRow, "st"> & { st: LcSt };
+
+// The default clocks. Live: a fixed 120 s tick - a hook-woken agent's
+// wake-to-act cycle runs one to two minutes, so shorter ticks are mostly
+// played by the clock. Async: a tick resolves the moment every living
+// rider has moved (lcMove resolves on the last one in), so its clock is
+// only the anti-stall cap for a rider who vanishes.
+const LC_TICK_DEFAULT = 120;
+const LC_ASYNC_CAP_DEFAULT = 3600;
 
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
@@ -122,21 +129,13 @@ export const LightCyclesMethods = {
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     const names = resolved.names as string[]; // gamePlayers sets names whenever it sets no error
-    // Async mode (2026-11-11, the design review's headline fix): the tick
-    // resolves the moment every living rider has submitted - lcMove
-    // already resolves on the last rider in - and tick_seconds is only the
-    // anti-stall cap for a rider who vanishes, defaulting to an hour. Live
-    // mode keeps the fixed clock: default 120s (owner's call, 2026-11-08,
-    // replacing the 900/3600 weekday/weekend scheme) - a hook-woken agent's
-    // full wake-to-act cycle runs one to two minutes, so anything shorter
-    // is mostly played by the clock.
     const mode = opts && String(opts.mode || "").toLowerCase() === "async" ? "async" : "live";
     let tickSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
-    if (!tickSeconds) tickSeconds = mode === "async" ? 3600 : 120;
+    if (!tickSeconds) tickSeconds = mode === "async" ? LC_ASYNC_CAP_DEFAULT : LC_TICK_DEFAULT;
     tickSeconds = Math.min(86400, Math.max(30, tickSeconds));
     const lobbySecs = this.lobbySeconds(opts);
     // A 2-rider grid defaults smaller (24x18): on 30x22 the first contact
-    // lands late and the opening is a long walk (design review, 2026-11-11).
+    // lands late and the opening is a long walk.
     const gridDef = names.length === 2 ? { w: 24, h: 18 } : { w: 30, h: 22 };
     const w = Math.min(40, Math.max(12, Math.floor(Number(opts && opts.w) || gridDef.w)));
     const h = Math.min(30, Math.max(10, Math.floor(Number(opts && opts.h) || gridDef.h)));
@@ -192,9 +191,9 @@ export const LightCyclesMethods = {
       this.afterGameChange(g, room, "Referee");
     } else {
       this.saveGame(g);
-      // A frame per submission (handoff, 2026-11-11): the summary's
-      // targets shrink the moment a move lands, so the stream says so
-      // too - watchers read any gap between the two as staleness.
+      // A frame per submission: the summary's targets shrink the moment
+      // a move lands, so the stream says so too - watchers read any gap
+      // between the two as staleness.
       this.broadcastGame(g, room, who);
     }
     await this.armGameAlarm();
@@ -221,9 +220,10 @@ export const lightcyclesEngine = {
   rules: (st: LcSt) =>
     "Light Cycles: every rider moves at once each tick - up, down, left or right, never straight back. Bikes leave permanent trails; hitting a wall, any trail or another bike head-on takes you out. The last rider on the grid wins. " +
     (st.mode === "async"
-      ? "A tick resolves the moment every living rider has moved (the " + clockWords(st.tick_seconds || 3600) + " clock is only a cap). "
-      : "Each tick lasts " + clockWords(st.tick_seconds || 120) + " (it resolves early once every living rider has moved); a rider who hasn't moved rides straight on. ") +
-    "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
+      ? "A tick resolves the moment every living rider has moved (the " + clockWords(st.tick_seconds || LC_ASYNC_CAP_DEFAULT) + " clock is only a cap). "
+      : "Each tick lasts " + clockWords(st.tick_seconds || LC_TICK_DEFAULT) + " and resolves early once every living rider has moved. ") +
+    "A rider who hasn't moved when the clock runs out rides straight on, and three ticks in a row carried by the clock take you out, so move every tick. " +
+    "Send: dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
 } satisfies GameEngineOf<LcSt>;
 
 export const LightCyclesTickMethods = {
@@ -289,11 +289,11 @@ export const LightCyclesTickMethods = {
       p.alive = false;
       st.log.push({ tick: st.tick, text: p.name + " is out at tick " + st.tick + " - the trail holds at (" + p.x + ", " + p.y + ")." });
     }
-    // Absence rule (2026-11-12): a rider the clock carries for three
-    // ticks in a row is taken out. Without it an async match with one
-    // absent rider burns the full stall cap on every tick - some 19
-    // hours on the 2-player grid - riding straight the whole way.
-    // It never decides a match the tick's own deaths already ended.
+    // Absence rule: a rider the clock carries for three ticks in a row is
+    // taken out. Without it an async match with one absent rider burns
+    // the full stall cap on every tick - some 19 hours on the 2-player
+    // grid - riding straight the whole way. It never decides a match the
+    // tick's own deaths already ended.
     if (!st.absent_streak) st.absent_streak = {};
     for (const a of attribution) st.absent_streak[a.name] = a.submitted ? 0 : (st.absent_streak[a.name] || 0) + 1;
     if (st.players.filter((p) => p.alive).length > 1) {
@@ -307,8 +307,8 @@ export const LightCyclesTickMethods = {
     }
     // The record keeper is the first rider out, crash or absence alike.
     // The first tick with any out decides it for good: one rider out
-    // keeps the record, several out together leave it with nobody (a
-    // later crash used to be credited after a pile-up - sweep, 2026-11-19).
+    // keeps the record, several out together leave it with nobody - not
+    // whoever crashes next after the pile-up.
     if (!firstOutDecided && outs.length) {
       st.first_out_decided = true;
       if (outs.length === 1) st.record_keeper = outs[0].name;

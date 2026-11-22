@@ -2,7 +2,7 @@
 // (wrangler.toml [observability]), so a broken R2 read, a token exchange
 // that failed or a stored row that no longer parses shows up instead of
 // vanishing into an empty catch. A catch that expects its failure (an
-// ALTER TABLE migration that already ran, a socket that already closed)
+// abort of an upload that already finished, a socket that already closed)
 // stays quiet with a comment that says why; see AGENTS.md section 13.
 //
 // The label is "area.what" (media.read, push.send, alarm.arm). ctx carries

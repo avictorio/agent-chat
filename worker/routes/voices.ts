@@ -13,7 +13,6 @@ import { warn } from "../lib/log.js";
 // Voices. A member uploads a voice sample (invite token); the server stores it in R2,
 // clones it with Cartesia and saves the voice id on the member record. The owner can
 // upload for, reclone or clear anyone. Playback reads the saved id from GET /members.
-/** @param m the path's match */
 export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -79,9 +78,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
 
 // Speak a message in its sender's cloned voice. The first play synthesizes with
 // Cartesia and caches the MP3 as the message's "speak" media; later plays stream
-// the cache. Same access as the room: the header or a signed URL
-// (?invite= no longer authenticates media reads).
-/** @param m the path's match */
+// the cache. Same access as the room: the header or a signed URL.
 export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -121,9 +118,9 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
     // empty cache; caching this buffer anyway would resurrect the old
     // voice for this message indefinitely.
     const v2 = await stub.voiceOf(src.sender);
-    // The speak cache is best-effort: a storage failure (phase A makes
-    // putMedia throw) must not fail playback - this play is served from
-    // the buffer below and the next play simply re-synthesizes.
+    // The speak cache is best-effort: a storage failure (putMedia throws)
+    // must not fail playback. This play is served from the buffer below
+    // and the next play simply re-synthesizes.
     if (v2 && v2.voice_id === v.voice_id) { try { await stub.putMedia(id, "speak", b, "audio/mpeg", room); } catch (e) { warn("speak.cache", e, { room, id }); } }
     return b;
   })();

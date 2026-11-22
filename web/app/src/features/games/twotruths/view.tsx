@@ -5,10 +5,10 @@ import { ttLastRound, type TtDraft } from "./twotruths";
 import { TwoTruthsReveal, TwoTruthsScores, TwoTruthsStatements, TwoTruthsWriter } from "./TwoTruthsPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
-/* Two Truths and a Lie: the campfire (3D only), then the storyteller's
-   form or the statements to vote on, the scores and the last reveal.
-   The panels are React (TwoTruthsPanels.tsx, mounted with ctx.panel):
-   the form keeps its own draft across repaints, keyed by round. */
+/* Two Truths and a Lie: the campfire, then the storyteller's form or
+   the statements to vote on, the scores and the last reveal. The panels
+   are React (TwoTruthsPanels.tsx, mounted with ctx.panel): the form
+   keeps its own draft across repaints, keyed by round. */
 export function renderTwoTruthsView(ctx: GameViewCtx, g: TwoTruthsState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

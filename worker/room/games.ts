@@ -1,6 +1,6 @@
 // Room methods: the game machinery every game shares - rows, lobby and accept,
 // clocks and the alarm's work, simultaneous rounds and turns, cards, listing,
-// the ladder. Each game's own rules are in games/<game>.js.
+// the ladder. Each game's own rules are in games/<game>.ts.
 
 import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
@@ -119,9 +119,9 @@ export const GameMachineryMethods = {
     return gameEngine(g.st).summary(this, g);
   },
 
-  // The full state carries how_to_play (2026-11-19): the match's rules in
-  // a few lines with its own settings, so an agent reading get_game never
-  // needs the rulebook - and one holding a stale tool list still gets them.
+  // The full state carries how_to_play: the match's rules in a few lines
+  // with its own settings, so an agent reading get_game never needs the
+  // rulebook - and one holding a stale tool list still gets them.
   gameStateFull(g: GameRow, who: string | null | undefined): GamePub {
     const eng = gameEngine(g.st);
     const out = eng.full(this, g, who);
@@ -129,21 +129,20 @@ export const GameMachineryMethods = {
     return out;
   },
 
-  /* ---------- games: simultaneous rounds (2026-11-19) ----------
+  /* ---------- games: simultaneous rounds ----------
      The shared machinery for games where every player moves secretly
-     and the round resolves together - built with Frontlines, for Trust,
-     the auction and Code Race next. The round resolves the moment every
-     seated player has committed. At the deadline, the round resolves
-     with whoever did commit (the engine scores the forfeits); a round
-     nobody committed ends the match where it stands - except round 1,
-     which calls it off (cancelled, nothing on anyone's record), as a
-     duel does. Commitments are secret: views show only THAT a player
-     has committed until the round resolves. The engine supplies
-     resolveRound(room, g) (score it, push the round, advance or
-     finish) and standing(room, st) (the winner if the match ends where
-     it stands, or null), and may add active(room, st): the players a
-     round waits on (default: all of them - Code Race leaves out racers
-     who have finished or dropped). */
+     and the round resolves together. The round resolves the moment every
+     seated player has committed. At the deadline it resolves with
+     whoever did commit, and the engine scores the forfeits. A round
+     nobody committed ends the match where it stands; in round 1 that
+     calls it off (cancelled, nothing on anyone's record), as a duel does.
+     Commitments are secret: views show only THAT a player has committed
+     until the round resolves. The engine supplies resolveRound(room, g),
+     which scores the round, pushes it and advances or finishes, and
+     standing(room, st): the winner if the match ends where it stands, or
+     null. It may add active(room, st), the players a round waits on. By
+     default that is all of them; Code Race leaves out racers who have
+     finished or dropped. */
   /** @param st the match state */
   roundsActive(st: StoredBase): Array<{ name: string }> {
     const eng = gameEngine(st);
@@ -195,15 +194,14 @@ export const GameMachineryMethods = {
     this.afterGameChange(g, room, "Referee");
   },
 
-  /* ---------- games: turn order (2026-11-19) ----------
-     Shared machinery for strictly turn-based games - built with Four in a
-     Row, for Liar's Dice and the rest next. st.order is the seats in turn
-     order, st.turn_of whose move it is, st.turn the turn count and
-     st.deadline its clock (turn_seconds). A move that ends a turn calls
-     turnsNext(g). An expired turn is a pass: the turn moves on and the
-     player's timeouts count up; the third timeout in a match forfeits it
-     (the rival wins), and pass_limit passes in all (st.pass_limit, when set)
-     call it a draw - so two absent players cannot keep a match alive
+  /* ---------- games: turn order ----------
+     Shared machinery for strictly turn-based games. st.order is the
+     seats in turn order, st.turn_of whose move it is, st.turn the turn
+     count and st.deadline its clock (turn_seconds). A move that ends a
+     turn calls turnsNext(g). An expired turn is a pass: the turn moves on
+     and the player's timeouts count up. The third timeout in a match
+     forfeits it (the rival wins), and st.pass_limit passes in all, when
+     set, call it a draw, so two absent players cannot keep a match alive
      forever. The engine's advance is turnsAdvance. */
   turnsNext(g: GameRowOf<TurnsStored>) {
     const st = g.st;
@@ -217,7 +215,7 @@ export const GameMachineryMethods = {
   turnsAdvance(g: GameRowOf<TurnsStored> | null, room: string) {
     if (!g || g.status !== "running" || Date.now() < (g.st.deadline || 0)) return;
     const st = g.st;
-    // (a turn is always someone's while the clock runs; String() keeps the key as before)
+    // a turn is always someone's while the clock runs; String() is for the type
     const who = String(st.turn_of);
     const timeouts = st.timeouts || (st.timeouts = {});
     timeouts[who] = (timeouts[who] || 0) + 1;
@@ -240,11 +238,10 @@ export const GameMachineryMethods = {
     this.afterGameChange(g, room, "Referee");
   },
 
-  /* ---------- games: rotating role (2026-11-19) ----------
-     Wave 3's shared piece: one player holds a special role each round
-     (storyteller, writer, answerer, artist), passing in seat order -
-     round n's holder is st.order[(n - 1) % seats]. Built with Two Truths
-     and a Lie. */
+  /* ---------- games: rotating role ----------
+     One player holds a special role each round (storyteller, writer,
+     answerer, artist), passing in seat order: round n's holder is
+     st.order[(n - 1) % seats]. */
   /**
    * @param st the match state
    * @param n the round
@@ -286,12 +283,12 @@ export const GameMachineryMethods = {
   },
 
   afterGameChange(g: GameRow, room: string, actor: string | null | undefined) {
-    // Ticks are quiet in the transcript (owner's call, 2026-11-08): a
-    // resolution travels as an event: game frame and through
-    // room_state.awaiting_you - that is what wakes players now. The
-    // per-tick Referee posts this replaces filled the room faster than
-    // anyone could play. The Referee posts only the result, below; the
-    // in-game log carries the full record, deaths included.
+    // Ticks are quiet in the transcript: a resolution travels as an
+    // event: game frame and through room_state.awaiting_you, which is
+    // what wakes players. A Referee post per tick would fill the room
+    // faster than anyone could play, so the Referee posts only the
+    // result, below; the in-game log carries the full record, deaths
+    // included.
     this.broadcastGame(g, room, actor);
     if (g.status === "finished" && !g.st.announced) {
       g.st.announced = true;
@@ -320,9 +317,8 @@ export const GameMachineryMethods = {
     return msg;
   },
 
-  // opts.game names the engine; no game is Light Cycles (the first game,
-  // and still the API's default).
-  /** @param opts the create's options (game names the engine) */
+  /** @param opts the create's options: game names the engine, and no
+   *  game is Light Cycles (the API's default) */
   async createGame(creator: string, playersIn: unknown[], opts: Body | null | undefined, room: string) {
     const key = String((opts && opts.game) || "lightcycles").toLowerCase().replace(/[\s_-]+/g, "");
     // an unknown spelling is no entry: the check below answers it
@@ -340,9 +336,9 @@ export const GameMachineryMethods = {
     return { status: 200, game: this.gameStateFull(g, who) };
   },
 
-  // fields: a structured move's named parts (2026-11-19, wave 3), beside
-  // or instead of dir - e.g. a storyteller's {statements, lie}. Engines
-  // that take only dir ignore them, so every string move keeps working.
+  // fields: a structured move's named parts, beside or instead of dir -
+  // e.g. a storyteller's {statements, lie}. Engines that take only dir
+  // ignore them, so every string move keeps working.
   async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
@@ -376,10 +372,9 @@ export const GameMachineryMethods = {
   /* ---------- games: the lobby ----------
      A match is created into a lobby, not into play: invited players
      accept (or decline) their seat, and the clock starts only when
-     everyone is in. Two overnight matches on 2026-11-10 died of the old
-     shape - the clock ran from creation while a player was never at
-     the table, so one duel expired 0-0 and another was a thirty-minute
-     forfeit sweep. The lobby separates "invited" from "playing": a
+     everyone is in. A clock that ran from creation would run while a
+     player was never at the table, so a match could expire 0-0 or end
+     in a forfeit sweep. The lobby separates "invited" from "playing": a
      player who accepts has said they are here, at this clock. */
   lobbySeconds(opts: Body | null | undefined) {
     let sec = Math.floor(Number(opts && opts.lobby_seconds) || 0);
@@ -411,7 +406,7 @@ export const GameMachineryMethods = {
 
   // Settle a lobby whose join window has closed: the match is called
   // off (status cancelled, like a creator cancel) and the Referee says
-  // so once - a card that silently dies is how the room got furniture.
+  // so once: a card that silently dies is dead furniture in the room.
   advanceLobby(g: GameRow | null, room: string) {
     if (!g || g.status !== "lobby" || !g.st.lobby_deadline || Date.now() < g.st.lobby_deadline) return;
     const missing = g.st.players.filter((pl: { name: string }) => !(g.st.accepted || {})[pl.name]).map((pl: { name: string }) => pl.name);
@@ -451,8 +446,8 @@ export const GameMachineryMethods = {
   },
 
   // Refuse your seat: the match is called off for everyone, and the
-  // Referee posts that it is off (declining is news; a silent card is
-  // how the room ended up with dead matches nobody could explain).
+  // Referee posts that it is off: declining is news, and a silent card
+  // leaves a dead match nobody can explain.
   async gameDecline(id: number, who: string | null | undefined, room: string) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
@@ -553,13 +548,13 @@ export const GameMachineryMethods = {
     return { games: live.concat(done).slice(0, 40), record, ladder: this.gameLadder() };
   },
 
-  /* The ladder (2026-11-19; the owner's call: every 2-player game): an Elo
-     rating per player per game, from 1000 with K = 32, replayed over every
-     finished 2-player match in order. A win scores 1 and a loss 0; a draw
-     (Four in a Row's full board or its pass limit) scores a half each; a
-     finish with no winner and no draw does not count. Free-for-alls stay
-     out (the record covers them). Recomputed on every read from the
-     matches themselves, so there is no stored table to drift.
+  /* The ladder: an Elo rating per player per game, from 1000 with K = 32,
+     replayed over every finished 2-player match in order. A win scores 1
+     and a loss 0; a draw (Four in a Row's full board or its pass limit)
+     scores a half each; a finish with no winner and no draw does not
+     count. Free-for-alls stay out (the record covers them). Recomputed on
+     every read from the matches themselves, so there is no stored table
+     to drift.
      Rows: { name, hex, rating, w, l, d, last } - last is the rating
      change from the player's most recent ladder match. */
   gameLadder() {

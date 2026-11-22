@@ -1,4 +1,4 @@
-/* The Duel in 3D (2026-11-13): rock-paper-scissors as a ceremony.
+/* The Duel in 3D: rock-paper-scissors as a ceremony.
 
    The world: a glass stage floating in a turning nebula. Each duellist
    stands as a pedestal with an orb of their colour above it - dim and
@@ -189,8 +189,8 @@ function Edges({ geometry, color, onMat }: { geometry: BufferGeometry; color: Co
   );
 }
 
-/* A rough boulder (a gem, before: rock against rock looked like two
-   gems): an icosahedron pushed in and out by a fixed lumpy field. */
+/* A rough boulder, not a gem (rock against rock reads as two gems): an
+   icosahedron pushed in and out by a fixed lumpy field. */
 let boulder: IcosahedronGeometry | null = null;
 function boulderGeometry(): IcosahedronGeometry {
   if (boulder) return boulder;
@@ -1304,8 +1304,8 @@ export default function DuelArena3D({
       last: lastShown && lastShown.throws ? lastShown.throws[p.name] || null : null,
       out,
       champ,
-      // a run of 2+ round wins rides the plate as a flame (the page's
-      // scoreboard carried it; the scene is the scoreboard now)
+      // a run of 2+ round wins rides the plate as a flame (the scene is
+      // the arena's scoreboard)
       sub: [champ ? "Winner" : out ? "Defeated" : current ? (thrownIn ? "Locked in" : "No throw") : locked ? "Locked in" : running ? "Thinking…" : "", streakIn(shownRounds, p.name) >= 2 ? "🔥" + streakIn(shownRounds, p.name) : ""]
         .filter(Boolean)
         .join(" · "),

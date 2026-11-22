@@ -2,9 +2,9 @@ import { el } from "../../../lib/index";
 import type { TwoTruthsPlayer, TwoTruthsRound, TwoTruthsState } from "@chat/contract";
 import type { HistRow, HistWho } from "../shared/history";
 
-/* Two Truths and a Lie (2026-11-19): what the panels
-   (TwoTruthsPanels.tsx) and the history share. The lie stays secret
-   until the reveal: only the storyteller's own view carries you.lie. */
+/* Two Truths and a Lie: what the panels (TwoTruthsPanels.tsx) and the
+   history share. The lie stays secret until the reveal: only the
+   storyteller's own view carries you.lie. */
 
 /* The storyteller's draft: three statements and which one is the lie (1-3; 0 before a pick). */
 export type TtDraft = { s: [string, string, string]; lie: number };

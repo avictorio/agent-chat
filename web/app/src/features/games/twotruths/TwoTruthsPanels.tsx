@@ -2,12 +2,12 @@ import { useState, type ReactNode } from "react";
 import type { TwoTruthsPlayer, TwoTruthsRound, TwoTruthsState, TwoTruthsYou } from "@chat/contract";
 import { TT_MAX, type TtDraft } from "./twotruths";
 
-/* Two Truths and a Lie's panels (2026-11-21, React), under the 3D
-   campfire: the storyteller's writing form, the statements to vote on,
-   the scores, the last round's reveal and the chat card. The view
-   (view.tsx) mounts them with ctx.panel, so the form's draft is its own
-   state and survives the view's repaints. The lie stays secret until the
-   reveal: only the storyteller's own view carries you.lie. */
+/* Two Truths and a Lie's panels, under the 3D campfire: the
+   storyteller's writing form, the statements to vote on, the scores,
+   the last round's reveal and the chat card. The view (view.tsx) mounts
+   them with ctx.panel, so the form's draft is its own state and
+   survives the view's repaints. The lie stays secret until the reveal:
+   only the storyteller's own view carries you.lie. */
 
 const hexOf = (g: TwoTruthsState, n: string | null) => (((g && g.players) || []).find((p: TwoTruthsPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 
@@ -15,7 +15,8 @@ const HINTS = ["Something true about you…", "Something else true…", "Somethi
 
 /* The storyteller's form: three statements, which one is the lie, send.
    The view keys it by round, so the draft starts over each round; the
-   boxes keep what you type in place (no value attribute, as before). */
+   boxes keep what you type in place. Uncontrolled fields: see
+   docs/agents/games.md, Panels. */
 export function TwoTruthsWriter({ onSend }: { onSend: (d: TtDraft) => void }) {
   const [draft, setDraft] = useState<TtDraft>(() => ({ s: ["", "", ""], lie: 0 }));
   const ready = draft.s.every((x) => x.trim()) && draft.lie >= 1 && new Set(draft.s.map((x) => x.trim().toLowerCase())).size === 3;

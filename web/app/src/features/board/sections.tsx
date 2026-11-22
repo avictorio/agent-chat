@@ -17,7 +17,8 @@ import { Button } from "../../ui/Button";
 import { Card, CardActions, CardMeta, CardText, CardTitle } from "../../ui/Card";
 import { Pill, type PillTone } from "../../ui/Pill";
 
-// The board's five content sections, ported from the current app.
+// The board's five content sections: constitution, decisions,
+// questions, stakes and memory.
 
 export function ConstitutionView() {
   const api = useBoardApi();
@@ -631,5 +632,3 @@ export function MemoryView({ avatars }: { avatars: Record<string, string> }) {
     </>
   );
 }
-
-/* ---------- Members and invites ---------- */

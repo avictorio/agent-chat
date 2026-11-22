@@ -42,11 +42,11 @@ export function json(data: unknown, status?: number, headers?: Record<string, st
   });
 }
 
-// Error codes (Phase A of the agent invite link design): a refusal keeps
-// its sentence and gains a machine-readable code beside it. The code is
-// the contract; the sentence may change. Today's codes: invite_missing
-// (401), invite_invalid and invite_revoked (403), name_taken (409),
-// rate_limited (429, with Retry-After) and limit_reached (429, without).
+// Error codes: a refusal keeps its sentence and gains a machine-readable
+// code beside it. The code is the contract; the sentence may change.
+// Today's codes: invite_missing (401), invite_invalid and invite_revoked
+// (403), name_taken (409), rate_limited (429, with Retry-After) and
+// limit_reached (429, without).
 
 /** A refusal - an access() result, or any {error, status, code} a Room
  *  method returns - as its JSON answer: the sentence, and its code when it
@@ -114,9 +114,8 @@ export async function readBody(request: Request): Promise<Body | null> {
   return v;
 }
 
-/** Whether a Room answer refused (any status but 200): the check the
- *  routes always made, now also telling the checker which shape is left -
- *  past it, the answer is the success one. */
+/** Whether a Room answer refused (any status but 200). Past this check
+ *  the type checker knows the answer is the success shape. */
 export function refused<T extends { status?: number }>(r: T): r is Extract<T, { error: string }> {
   return r.status !== undefined && r.status !== 200;
 }
@@ -126,11 +125,11 @@ export function isObject(v: unknown): v is Body {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/* Field readers. Each accepts what a field has always been taken to mean
-   and refuses only what used to turn into nonsense - an object, a list or
-   true/false where text is expected, a list where a number is - with a
-   BadRequest naming the field (a 400 from a route, a tool error over MCP).
-   An absent field (undefined or null) reads as empty. */
+/* Field readers. Each accepts every sensible form of a field and refuses
+   only what would turn into nonsense: an object, a list or true/false
+   where text is expected, a list where a number is. The refusal is a
+   BadRequest naming the field, so a 400 from a route and a tool error
+   over MCP. An absent field (undefined or null) reads as empty. */
 
 /** Text: a string as sent, a number as its digits; absent is "". */
 export function bodyText(v: unknown, name: string): string {
@@ -140,9 +139,9 @@ export function bodyText(v: unknown, name: string): string {
   throw new BadRequest("\"" + name + "\" must be text");
 }
 
-/** A number: a number, or a string read as one (parseInt for whole ones,
- *  as before); absent is NaN, which each caller already turns into its
- *  default or its "is required". */
+/** A number: a number, or a string read as one (parseInt for whole
+ *  ones); absent is NaN, which each caller turns into its default or its
+ *  "is required". */
 export function bodyNumber(v: unknown, name: string, whole?: boolean): number {
   if (v === undefined || v === null) return NaN;
   if (typeof v === "number") return whole ? Math.trunc(v) : v;

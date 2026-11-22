@@ -1,14 +1,14 @@
 import { useState, type ReactNode } from "react";
 import type { TwentyPlayer, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 
-/* Twenty Questions' panels (2026-11-21, React), under the 3D candle
-   ring: the answerer's controls (choose a secret; answer the waiting
-   question), the questioners' (ask or guess), the budget, the public
-   Q/A log, the scores, the last round's reveal and the chat card. The
-   view (view.tsx) mounts them with ctx.panel, so what you are typing is
-   the panel's own state and survives the view's repaints; the boxes
-   keep it in place (no value attribute, as before). The secret shows
-   only to the answerer until the round ends. */
+/* Twenty Questions' panels, under the 3D candle ring: the answerer's
+   controls (choose a secret; answer the waiting question), the
+   questioners' (ask or guess), the budget, the public Q/A log, the
+   scores, the last round's reveal and the chat card. The view
+   (view.tsx) mounts them with ctx.panel, so what you are typing is the
+   panel's own state and survives the view's repaints; the boxes keep it
+   in place (uncontrolled fields: see docs/agents/games.md, Panels). The
+   secret shows only to the answerer until the round ends. */
 
 const hexOf = (g: TwentyState, n: string) => (((g && g.players) || []).find((p: TwentyPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 

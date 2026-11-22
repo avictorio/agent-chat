@@ -47,20 +47,13 @@ export function ecRules() {
 }
 
 export const CorpseMethods = {
-  /* ---------- games: Exquisite Corpse (2026-11-20) ----------
-     SHA's spec: 3 to 6 writers in a rotation drawn at creation add to one
-     story, 1 to 3 sentences a turn, each seeing ONLY the segment before
-     theirs (the first writer sees the seed line). Everything else stays
-     hidden - from players and spectators alike - until the last turn;
-     then the whole story is revealed with every segment's author, and
-     everyone votes for a favourite segment (not their own). Most votes
-     takes the honours; ties share them. Length: rotations full turns of
-     the table (default 3). A turn that runs out is a silent beat (the
-     story goes on); two in a row and that writer leaves the rotation.
-     Variants: straight; genre (a declared genre, honoured on vibes); and
-     constraints (each writer is dealt a secret constraint card, revealed
-     with the story). Segments are never corrected - that is the game.
-     The Referee posts only the result; the story lives in the arena. */
+  /* ---------- games: Exquisite Corpse ----------
+     Player rules: rules() below. Secrecy: each writer sees only the
+     segment before theirs (you.tail); everything else - segments, authors,
+     constraint cards - stays hidden from players and spectators alike
+     until the last turn. The rotation is drawn at creation; a story
+     nobody wrote a word of is called off. The Referee posts only the
+     result; the story lives in the arena. */
   ecTail(st: EcStored) {
     return st.segments.length ? st.segments[st.segments.length - 1].text : st.seed;
   },
@@ -323,8 +316,9 @@ export const corpseEngine = {
   result: (room, g) => room.ecResultText(g),
   rules: (st: EcStored) =>
     "Exquisite Corpse: " + st.order.length + " writers add to one story in turn (" + st.order.join(", ") + "), " + st.turns_total + " turns in all, 1 to 3 sentences a turn (up to " + EC_MAX + " characters). " +
-    "On your turn you see ONLY the segment before yours (you.tail; the first writer sees the seed line) - everything else stays hidden until the end. Send your segment as dir. Never correct the story: a contradiction is the point. " +
+    "On your turn you see ONLY the segment before yours (you.tail; the first writer sees the seed line) - everything else stays hidden until the end. Never correct the story: a contradiction is the point. " +
     (st.variant === "genre" ? "Genre: " + st.genre + " - honour it, loosely. " : st.variant === "constraints" ? "You hold a secret constraint card (you.constraint): honour it in every segment; the cards are revealed with the story. " : "") +
-    "When the last turn lands, the whole story is revealed with its authors and everyone votes for a favourite segment, not their own: send dir as the segment's number. Most votes takes the honours; ties share them. " +
-    "Each turn has " + clockWords(st.turn_seconds || 86400) + "; a turn that runs out is a silent beat (the story goes on), and two in a row take you out of the rotation.",
+    "When the last turn lands, the whole story is revealed with its authors and everyone votes for a favourite segment, not their own. Most votes takes the honours; ties share them. " +
+    "Each turn has " + clockWords(st.turn_seconds || 86400) + "; a turn that runs out is a silent beat (the story goes on), and two in a row take you out of the rotation. " +
+    "Send: on your turn, dir is your segment; once the story is revealed, dir is your favourite segment's number.",
 } satisfies GameEngineOf<EcStored>;

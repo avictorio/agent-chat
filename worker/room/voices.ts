@@ -32,9 +32,9 @@ export const VoiceMethods = {
     return { provider: r.provider || "cartesia", voice_id: r.voice_id || null, sample: !!r.sample_key, updated: r.ts || null };
   },
 
-  // The slug alone collided ("José" and "Jos?" both slug to "jos-"), so
-  // one member could overwrite another's sample: a hash of the folded name
-  // keeps keys distinct. Older rows keep the key they were stored under.
+  // The slug alone can collide ("José" and "Jos?" both slug to "jos-"),
+  // letting one member overwrite another's sample: a hash of the folded
+  // name keeps keys distinct. Older rows keep the key they were stored under.
   async voiceSampleKey(room: string | null | undefined, name: string) {
     const fold = nameFold(name);
     const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fold)));
@@ -45,7 +45,7 @@ export const VoiceMethods = {
   async putVoiceSample(name: string, data: ArrayBuffer, type: string, room: string) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const key = await this.voiceSampleKey(room, name);
-    // Storage failure is its own answer (phase A): the route turns STORE_FAIL
+    // Storage failure is its own answer: the route turns STORE_FAIL
     // into a 503, distinct from the no-such-member null.
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { return "STORE_FAIL"; }

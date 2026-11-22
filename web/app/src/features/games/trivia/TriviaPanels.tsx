@@ -2,14 +2,14 @@ import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { TriviaPlayer, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import { tvLastRound } from "./trivia";
 
-/* Trivia's panels (2026-11-21, React): the scoreboard (balances), the
-   question, the quizmaster's question form, the answer-and-wager form,
-   the judge panel, the last round's reveal and the chat card. The view
-   (view.tsx) mounts them with ctx.panel, keying each form by round and
-   phase, so a form's draft is its own state and survives the view's
-   repaints. The fields are uncontrolled (a value prop would add a value
-   attribute the old markup never had): each starts from the draft when
-   it mounts and reports every keystroke back. */
+/* Trivia's panels: the scoreboard (balances), the question, the
+   quizmaster's question form, the answer-and-wager form, the judge
+   panel, the last round's reveal and the chat card. The view (view.tsx)
+   mounts them with ctx.panel, keying each form by round and phase, so a
+   form's draft is its own state and survives the view's repaints. Each
+   field starts from the draft when it mounts and reports every
+   keystroke back. Uncontrolled fields: see docs/agents/games.md,
+   Panels. */
 
 type AskDraft = { q: string; a: string; acc: string };
 

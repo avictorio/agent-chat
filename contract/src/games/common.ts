@@ -1,7 +1,7 @@
 // What every match state shares, whatever the game.
 // Each game's own state is in ./<game>.ts, built from its engine in
-// worker/games/<game>.js: the summary (summary()) is what a stream frame
-// and the Games list carry, the full state (full(), plus how_to_play from
+// worker/games/<game>.ts. The summary (summary()) is what a stream frame
+// and the Games list carry. The full state (full(), plus how_to_play from
 // the Room) adds the per-viewer and history fields, which are optional
 // here because a summary lacks them. When a type and the live API
 // disagree, the live API wins and the type is fixed.

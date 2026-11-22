@@ -28,7 +28,7 @@ export type LgStored = {
 /** A Letter Grid match: its row, with the state typed. */
 export type LgGame = Omit<GameRow, "st"> & { st: LgStored };
 
-// Letter Grid (2026-11-20): the dictionary (content as data,
+// Letter Grid: the dictionary (content as data,
 // worker/data/lettergrid-words.txt - sorted, one word a line), parsed on
 // first use. lgHasPrefix is a binary search on the sorted list, so a grid
 // can be searched without building a trie.
@@ -79,26 +79,16 @@ export const LetterGridMethods = {
     return { ok: true, word_count: words.size };
   },
 
-  /* ---------- games: Letter Grid (2026-11-20) ----------
-     Henry's letter-grid brawl. One public grid per match (size x size, 4
-     to 6; at least one vowel in every row and column; the richest of a
-     few draws by how many dictionary words it holds). Each round every
-     player sends one word traced through touching cells (diagonals count,
-     each cell once per word), at least min_len letters, from the
-     dictionary (worker/data/lettergrid-words.txt). Words are checked when
-     sent - a bad one is refused and can be sent again (the spec's
-     re-submit prompt) - and stay sealed until the round resolves. A word
-     scores 1 a letter, plus 1 for each cell it claims: a cell nobody has
-     claimed goes to the first player whose word uses it. The same word
-     from two players in one round scores letters only and claims nothing.
-     Deviations, where the spec is silent: a cell two different words both
+  /* ---------- games: Letter Grid ----------
+     Player rules: rules() below. One public grid per match: at least one
+     vowel in every row and column, the richest of a few draws by how many
+     dictionary words it holds. Words are checked when sent - a bad one is
+     refused and can be sent again - and stay sealed until the round
+     resolves. Where the spec is silent: a cell two different words both
      take first in the same round stays free; your own words cannot
      repeat; a word sent without a path takes the path that claims the
-     most free cells. Fixed rounds (default 8); highest total wins, then
-     most cells claimed, then the longest word, then the earlier
-     final-round word. A missed round scores nothing; three in a row take
-     a player out (their score stands). Rides the simultaneous-rounds
-     machinery, waiting only on players still in. */
+     most free cells. Rides the simultaneous-rounds machinery, waiting
+     only on players still in. */
   lgActive(st: LgStored) {
     return st.players.filter((p) => !st.prog[p.name].out);
   },
@@ -443,9 +433,9 @@ export const lettergridEngine = {
   moveHint: (gm) => "<a word of " + (gm.min_len || 3) + "+ letters traced through touching cells (diagonals count) - the word alone, or with its cells, e.g. stone B2 C2 C3 D4 E4>",
   result: (room, g) => room.lgResultText(g),
   rules: (st: LgStored) =>
-    "Letter Grid: everyone plays the same " + st.size + "x" + st.size + " grid of letters (grid lists the rows, top first; a cell is a column letter and a row number, A1 at the top left). " +
-    "Each round you send one secret word of at least " + st.min_len + " letters traced through touching cells - across, up, down or diagonal - using each cell once. It must be in the dictionary; a word that isn't, or can't be traced, is refused so you can send another. Your own words cannot repeat. " +
-    "Words stay sealed until the round resolves. A word scores 1 point a letter, plus 1 for each cell it claims: a cell nobody has claimed yet goes to the first player whose word uses it (claims lists each cell's owner, row by row). The same word from two players in one round scores letters only and claims nothing, and a cell two words both take first in the same round stays free. " +
-    st.rounds_total + " rounds; highest total wins, then most cells claimed, then the longest word, then the earlier final-round word. A round resolves when everyone still in has sent a word, or at the " + clockWords(st.round_seconds || 3600) + " deadline; a missed round scores nothing, and three in a row take you out. " +
-    "Send word, and optionally path - the cells in order, as labels like [\"B2\", \"C2\"] or [[row, col], ...] counted from 0 - or dir as the word, optionally followed by its cells (e.g. stone B2 C2 C3 D4 E4). Without a path, the server takes the one that claims the most free cells. You can change your word until the round resolves.",
+    "Letter Grid: everyone plays the same " + st.size + "x" + st.size + " letter grid (grid lists the rows, top first; A1 is the top-left cell). " +
+    "Each round you send one secret word of " + st.min_len + "+ letters traced through touching cells (diagonals count), each cell once. It must be in the dictionary and new for you (a bad word is refused: send another), and you can change it until the round resolves. " +
+    "A word scores 1 a letter, plus 1 for each free cell it claims (claims: each cell's owner, row by row). A word two players share scores letters only and claims nothing; a free cell two words take in one round stays free. " +
+    st.rounds_total + " rounds; highest total wins (ties: most cells, longest word, earlier final-round word). A round resolves when everyone still in has a word in, or at the " + clockWords(st.round_seconds || 3600) + " deadline; a missed round scores nothing, and three in a row take you out. " +
+    "Send: word and an optional path (its cells in order, e.g. [\"B2\", \"C2\"]), or dir as the word plus optional cells (e.g. stone B2 C2 C3 D4 E4). With no path, the server picks the one claiming the most free cells.",
 } satisfies GameEngineOf<LgStored>;

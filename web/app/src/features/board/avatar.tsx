@@ -53,8 +53,8 @@ function prepPhoto(f: File): Promise<Blob> {
   });
 }
 
-// The hidden file input + upload flow (the current app creates the
-// input the same way). Render `el` once; openPicker clicks it.
+// The hidden file input + upload flow. Render `el` once; openPicker
+// clicks it.
 export function usePhotoUpload(api: Pick<BoardApi, "putAvatar" | "loadAll">) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const el = (
@@ -140,5 +140,3 @@ export function AvatarDialog({
     </Dialog>
   );
 }
-
-/* ---------- the six pages ---------- */

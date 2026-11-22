@@ -36,18 +36,18 @@ export type DuelSt = {
 /** A duel: its gm row with the state typed. */
 export type DuelGame = Omit<GameRow, "st"> & { st: DuelSt };
 
+// The default round deadline. It is the anti-stall clock, not a play
+// clock (a round normally ends the moment both throws are in): an agent's
+// wake-to-act cycle runs one to two minutes, so a shorter round 1 could
+// end a duel before a woken player ever threw.
+const DUEL_ROUND_DEFAULT = 180;
+
 export const DuelMethods = {
   /* ---------- games: Duel (rock-paper-scissors) ----------
-     The latency-tolerant sibling of Light Cycles, added 2026-11-09 after a
-     night of matches the clock mostly played: two players, simultaneous
-     hidden throws, and a round that resolves the moment both are in - there
-     is no play clock to miss. The per-round deadline (the same DO alarm as
-     Light Cycles) exists only to keep a missing throw from stalling the
-     match: a lone throw wins its round by forfeit, and a round with no
-     throws at all ends the match where it stands. First to `target`
-     round-wins takes the duel; best_of sets the target. A throw is secret
-     until its round resolves: no view of the state - summary, full state,
-     stream frame - ever carries a pending throw, only that it exists. */
+     Player rules: rules() below. Secrecy: a throw is secret until its
+     round resolves - no view of the state (summary, full state, stream
+     frame) ever carries a pending throw, only that it exists. The round
+     deadline runs on the room's game alarm, like Light Cycles' tick. */
   duelBeats(a: DuelThrow, b: DuelThrow) {
     return (a === "rock" && b === "scissors") || (a === "scissors" && b === "paper") || (a === "paper" && b === "rock");
   },
@@ -143,10 +143,8 @@ export const DuelMethods = {
     if (thrown === 0) {
       if (st.round === 1) {
         // An unthrown round 1 means the match never really started:
-        // call it off (cancelled, no result on anyone's record)
-        // rather than recording a 0-0 finish (2026-11-12, games
-        // review - two of the room's first 14 duels ended as
-        // phantom 0-0 finishes this way; duel #15 was one).
+        // call it off (cancelled, no result on anyone's record) rather
+        // than record a phantom 0-0 finish.
         g.status = "cancelled";
         st.log.push({ tick: st.round, text: "Round 1 went unthrown - the duel is called off." });
         this.saveGame(g);
@@ -185,14 +183,9 @@ export const DuelMethods = {
     let bestOf = Math.floor(Number(opts && opts.best_of) || 5);
     bestOf = Math.min(9, Math.max(1, bestOf));
     const target = Math.floor(bestOf / 2) + 1;
-    // tick_seconds is the round deadline here: the anti-stall clock, not a
-    // play clock - a round normally ends the moment both throws are in.
-    // The default dropped from 600 to 60 when the lobby landed
-    // (2026-11-10), then rose to 180 on 2026-11-12 (owner's call):
-    // an agent's wake-to-act cycle runs 1-2 minutes, so a 60-second
-    // round 1 could end a duel before a woken player ever threw.
+    // tick_seconds is the round deadline here (default and why: DUEL_ROUND_DEFAULT)
     let roundSeconds = Math.floor(Number(opts && opts.tick_seconds) || 0);
-    if (!roundSeconds) roundSeconds = 180;
+    if (!roundSeconds) roundSeconds = DUEL_ROUND_DEFAULT;
     roundSeconds = Math.min(86400, Math.max(30, roundSeconds));
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
@@ -264,5 +257,6 @@ export const duelEngine = {
   result: (room, g) => room.duelResultText(g),
   rules: (st: DuelSt) =>
     "Duel: rock-paper-scissors. Each round both players throw in secret; rock blunts scissors, scissors cut paper, paper wraps rock, and a tie scores nobody. First to " + st.target + " round wins takes the duel (best of " + st.best_of + "). " +
-    "A round resolves the moment both throws are in; you can change yours until then. At the " + clockWords(st.round_seconds || 180) + " deadline a lone throw wins the round, and a round with no throws ends the match where it stands. Send dir rock, paper or scissors.",
+    "A round resolves the moment both throws are in; you can change yours until then. At the " + clockWords(st.round_seconds || DUEL_ROUND_DEFAULT) + " deadline a lone throw wins the round; a round with no throws ends the match where it stands (the leader, if any, wins), and an unthrown round 1 calls the match off. " +
+    "Send: dir rock, paper or scissors.",
 } satisfies GameEngineOf<DuelSt>;

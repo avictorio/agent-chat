@@ -145,25 +145,23 @@ function schemaBaseline(sql: SqlStorage): void {
   sql.exec("CREATE TABLE IF NOT EXISTS m (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL)");
   sql.exec("CREATE TABLE IF NOT EXISTS rx (msg INTEGER NOT NULL, emoji TEXT NOT NULL, who TEXT NOT NULL, ts INTEGER NOT NULL)");
   sql.exec("CREATE INDEX IF NOT EXISTS rx_msg ON rx (msg)");
-  // The in-room Claude bot was retired (2026-11-12); its per-room reply
-  // counter table is dropped wherever it still exists.
+  // The in-room Claude bot is gone; its per-room reply counter table is
+  // dropped wherever it still exists.
   sql.exec("DROP TABLE IF EXISTS b");
   sql.exec("CREATE TABLE IF NOT EXISTS inv (token TEXT PRIMARY KEY, name TEXT NOT NULL, created INTEGER NOT NULL, revoked INTEGER)");
   sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
   addColumn(sql, "inv", "seen", "INTEGER");
   addColumn(sql, "inv", "kind", "TEXT");
   addColumn(sql, "inv", "invited_by", "TEXT");
-  // Avatars live in R2 only (phase D, finished 2026-11-19: every room was
-  // checked and held no blob), so the blob-era column goes wherever it
-  // still exists.
+  // Avatars live in R2 only (every room was checked and held no blob), so
+  // the blob-era column goes wherever it still exists.
   dropColumn(sql, "inv", "avatar");
   addColumn(sql, "inv", "avatar_type", "TEXT");
   addColumn(sql, "inv", "avatar_ver", "INTEGER");
   addColumn(sql, "inv", "avatar_key", "TEXT");
   sql.exec("CREATE TABLE IF NOT EXISTS tf (ts INTEGER NOT NULL)");
   addColumn(sql, "tf", "url", "TEXT");
-  // The legacy in-DB media stores are gone (media plan phase B, 2026-11-11):
-  // every room was drained to R2 through the owner migrate/purge runs before
+  // The in-DB media stores are gone: every room was drained to R2 before
   // this shipped, so the tables are dropped wherever they still exist.
   sql.exec("DROP TABLE IF EXISTS au");
   sql.exec("DROP TABLE IF EXISTS im");
@@ -178,9 +176,9 @@ function schemaBaseline(sql: SqlStorage): void {
     sql.exec("INSERT OR IGNORE INTO upp (msg, kind, n, etag) SELECT msg, 'video', n, etag FROM mdp");
     sql.exec("DROP TABLE mdp");
   }
-  // Upload tickets (media plan phase C, 2026-11-11): begin_upload mints a
-  // single-use, 15-minute ticket so a client that cannot present the invite
-  // token (an agent whose token lives in its gateway) can still PUT bytes.
+  // Upload tickets: begin_upload mints a single-use, 15-minute ticket so a
+  // client that cannot present the invite token (an agent whose token lives
+  // in its gateway) can still PUT bytes.
   // Only the ticket's SHA-256 is stored; the raw ticket exists solely in the
   // begin_upload response and the PUT URL it authorizes.
   sql.exec("CREATE TABLE IF NOT EXISTS ut (h TEXT PRIMARY KEY, msg INTEGER NOT NULL, kind TEXT NOT NULL, member TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, max_bytes INTEGER NOT NULL, used INTEGER, tries INTEGER NOT NULL DEFAULT 0)");
@@ -191,8 +189,8 @@ function schemaBaseline(sql: SqlStorage): void {
   addColumn(sql, "m", "draft", "INTEGER");
   addColumn(sql, "m", "pubauto", "INTEGER");
   addColumn(sql, "m", "pub_ts", "INTEGER");
-  // owntrust records whether a post carried the owner key. Nothing reads it
-  // since the in-room bot was retired; it stays as provenance.
+  // owntrust records whether a post carried the owner key. Nothing reads
+  // it; it stays as provenance.
   addColumn(sql, "m", "owntrust", "INTEGER");
   addColumn(sql, "md", "fp", "TEXT");
   addColumn(sql, "md", "part_size", "INTEGER");
@@ -200,7 +198,7 @@ function schemaBaseline(sql: SqlStorage): void {
   // its upload began (R2 keeps an unfinished upload 7 days from then).
   addColumn(sql, "md", "name", "TEXT");
   addColumn(sql, "md", "began", "INTEGER");
-  // "direct": the session's parts go straight to R2 (Phase 2)
+  // "direct": the session's parts go straight to R2
   addColumn(sql, "md", "mode", "TEXT");
   addColumn(sql, "m", "audio_type", "TEXT");
   addColumn(sql, "m", "audio_size", "INTEGER");
@@ -222,7 +220,7 @@ function schemaBaseline(sql: SqlStorage): void {
   addColumn(sql, "m", "game_id", "INTEGER");
   sql.exec("CREATE TABLE IF NOT EXISTS push (member TEXT NOT NULL, endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, ts INTEGER NOT NULL)");
   addColumn(sql, "push", "mode", "TEXT DEFAULT 'all'");
-  // The Android app's device-token table, dropped with the app (2026-11-20).
+  // The Android app's device-token table, dropped with the app.
   sql.exec("DROP TABLE IF EXISTS pushdev");
   sql.exec("CREATE TABLE IF NOT EXISTS mv (name TEXT PRIMARY KEY, provider TEXT, voice_id TEXT, sample_key TEXT, sample_type TEXT, sample_ts INTEGER, ts INTEGER)");
   sql.exec("CREATE TABLE IF NOT EXISTS gm (id INTEGER PRIMARY KEY, status TEXT NOT NULL, created INTEGER NOT NULL, created_by TEXT NOT NULL, card_msg INTEGER, state TEXT NOT NULL)");
@@ -297,7 +295,8 @@ export class Room extends DurableObject {
   // creator's genesis invite as ONE call. Durable Object calls are
   // serialized, so two racing creates for the same name cannot interleave -
   // the loser is told the room existed and must not roll anything back
-  // (the check-then-create version let a loser destroy the winner's room).
+  // (with a separate check and create, a loser could destroy the winner's
+  // room).
   createGenesis(name: string) {
     if (this.ready) return { existed: true };
     this.ensureSchema();
@@ -396,7 +395,7 @@ export class Room extends DurableObject {
     };
   }
 
-  // Access: every room is invite-only (product decision, 2026-11-07):
+  // Access: every room is invite-only:
   // reading, streaming and posting always need a valid invite or the owner key.
   access(token: string | null | undefined, owner: boolean): Access | Refusal {
     if (owner) return { ok: true };
@@ -421,9 +420,8 @@ export class Room extends DurableObject {
     if (room && !this.roomName) this.roomName = room;
     // One match's bad state must not stop every clock in the room:
     // advance each match under its own try/catch, and re-arm in a
-    // finally - the old loop let a single throw skip the re-arm, so
-    // no match had a clock until somebody happened to read one
-    // (games review, 2026-11-12).
+    // finally, so a single throw cannot leave every match without a
+    // clock until somebody happens to read one.
     try {
       const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
       for (const r of rows) {
@@ -526,7 +524,7 @@ export class Room extends DurableObject {
 
 }
 
-// Every other area's methods, installed on the class (games first, as before).
+// Every other area's methods, installed on the class (games first).
 Object.assign(Room.prototype, FourInARowMethods);
 Object.assign(Room.prototype, TrustMethods);
 Object.assign(Room.prototype, AuctionMethods);

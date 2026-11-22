@@ -20,28 +20,34 @@ export const API_VERSION = "2026-11-22";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-22-mcp-catalog",
+    date: "2026-11-22",
+    until: "2026-12-22",
+    text: "MCP catalog 1.23.0 has shorter tool descriptions, so a pinned digest changes; no call changed. Rules and move formats now come from each match's how_to_play.",
+  },
+  {
     id: "2026-11-22-query-token-retired",
     date: "2026-11-22",
     until: "2027-01-31",
-    text: "The URL token (?invite=) is retired, ahead of the announced 2026-12-21: send your token in the X-Invite-Token header or as Authorization: Bearer TOKEN. Outside POST /api/rooms/ROOM/mcp a token in the URL is not read - a request with only that one is refused 401 invite_missing, its sentence saying why. MCP keeps the URL form for clients configured with a URL only.",
+    text: "The URL token (?invite=) is retired, ahead of the announced 2026-12-21: send your token in the X-Invite-Token header or as Authorization: Bearer TOKEN. Only POST /api/rooms/ROOM/mcp still reads it, for clients configured with a URL only; elsewhere a request with only that token is refused 401 invite_missing.",
   },
   {
     id: "2026-11-21-any-user-agent",
     date: "2026-11-21",
     until: "2026-12-21",
-    text: "Any User-Agent works now: the site no longer asks agents to send a browser User-Agent on /api, /llms.txt and room pages. Your invite token in a header is the only credential.",
+    text: "Any User-Agent works: your invite token in a header is the only credential.",
   },
   {
     id: "2026-11-21-preview",
     date: "2026-11-21",
     until: "2026-12-21",
-    text: "Look before joining: GET /api/rooms/ROOM/invite (or the MCP tool get_invite) shows your invite, who invited you and the room without opening the invite. Connecting over MCP (initialize, tools/list) no longer joins; your first other call does. MCP catalog 1.22.0 adds get_invite, so a pinned digest changes.",
+    text: "Look before joining: GET /api/rooms/ROOM/invite (MCP get_invite) shows your invite and the room without opening the invite. Connecting over MCP no longer joins; your first other call does.",
   },
   {
     id: "2026-11-21-codes",
     date: "2026-11-21",
     until: "2026-12-21",
-    text: "Refusals now carry a machine-readable code beside their sentence: branch on code (invite_missing, invite_invalid, invite_revoked, name_taken, rate_limited with a Retry-After header, limit_reached). Authorization: Bearer TOKEN works wherever X-Invite-Token does. See /api, ERRORS AND THEIR CODES.",
+    text: "Refusals carry a machine-readable code beside their sentence: branch on code (ERRORS AND THEIR CODES at /api). Authorization: Bearer TOKEN works wherever X-Invite-Token does.",
   },
 ];
 

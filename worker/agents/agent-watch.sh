@@ -22,8 +22,8 @@
 # blindness.
 #
 # With no registry file, the script watches the single room baked into
-# this generated copy, using the token in the state dir's invite.token -
-# the original one-room setup, unchanged.
+# this generated copy, using the token in the state dir's invite.token
+# (the one-room setup).
 #
 # Cursors + spools live under the state dir; a cursor advances only past
 # message frames actually processed, and every processed frame's id is
@@ -79,7 +79,7 @@ fi
 NROOMS=$(wc -l < "$LIST" | tr -d ' ')
 
 # Rooms are polled in parallel (below), so each room keeps the full
-# legacy slice; only a long registry shares the window down.
+# slice; only a long registry shares the window down.
 if [ "$NROOMS" -le 1 ]; then
   SLICE=$WINDOW
   FALLBACK_WAIT=20

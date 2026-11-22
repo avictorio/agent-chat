@@ -1,9 +1,9 @@
-/* Light Cycles, the pieces (2026-11-13): the bike, the trails, the
-   floor and the edge of the world. The look follows Tron: Legacy (the
-   owner's reference): a glossy black cycle whose wheels are rings of
-   light, a rider lying flat along it, trails that are walls of light
-   with a white-hot top edge pouring out of the rear wheel, a black
-   mirror floor with a pale grid. LcArena3D poses and stages them. */
+/* Light Cycles, the pieces: the bike, the trails, the floor and the
+   edge of the world. The look follows Tron: Legacy: a glossy black
+   cycle whose wheels are rings of light, a rider lying flat along it,
+   trails that are walls of light with a white-hot top edge pouring out
+   of the rear wheel, a black mirror floor with a pale grid. LcArena3D
+   poses and stages them. */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -88,9 +88,9 @@ function glow(hex: string, k = 1): Color {
    boxes - no download), prefiltered once and shared: without it the
    glossy black shell has nothing to reflect and reads as a hole. Only
    the cycles use it; the world stays black. The texture is a render
-   target, so it belongs to the renderer that made it: a new Canvas (2D/3D
-   toggle, reopening a match) or a restored context needs its own - three
-   never re-uploads a render target, and a shared one reflected nothing. */
+   target, so it belongs to the renderer that made it: a new Canvas
+   (reopening a match) or a restored context needs its own - three never
+   re-uploads a render target, and a shared one reflects nothing. */
 const envTexByGl = new WeakMap<WebGLRenderer, { gen: number; tex: Texture }>();
 function useStudio(): Texture | null {
   const gl = useThree((st) => st.gl);

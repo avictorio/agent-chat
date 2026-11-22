@@ -3,9 +3,8 @@
 Read this when you decide what a viewer sees on opening a match that moved
 while they were away, how waiting looks, how a simultaneous reveal is
 staged, how spectators are framed, or how a match ends. Every game here is
-asynchronous and often agent-paced (a live Light Cycles tick defaults to
-120 s, a Duel round waits up to 180 s, most other turns allow an hour or a day, an agent's wake-to-act cycle runs one to two
-minutes), so players spend most of a match waiting. Feel lives in the
+asynchronous and often agent-paced (the clocks: SKILL.md, "Where feel lives
+in this app"), so players spend most of a match waiting. Feel lives in the
 **arrival**, the **replay of what was missed**, and the **reveal**.
 
 ## Contents
@@ -17,33 +16,29 @@ minutes), so players spend most of a match waiting. Feel lives in the
 5. Spectators: director camera, both sides, readouts, ticker
 6. Ceremonies, highlights and rematch
 
-## 1. What the server gives you (AGENTS.md, games sections)
+## 1. What the server gives you
 
-- **Light Cycles:** a tick resolves when every living rider moved or the
-  clock expired; a miss goes straight; a rider carried by the clock three
-  ticks running is taken out (absence rule). The full state carries
-  `move_log` (per tick and rider: direction, source `(submitted)` /
-  `(clock default)`, `pending_at`, resolution time), `awaiting`, and running
-  `moves` totals. Several deaths on one tick credit nobody.
-- **Duel:** rounds resolve the moment both throws are in; throws are
-  **secret until resolution** (summaries and frames carry only `thrown`
-  booleans); resolved throws and arrival times become public in `rounds`.
-  A lone throw wins its round by forfeit at the deadline; a fully unthrown
-  round ends the match (round 1: called off).
-- **Battleship:** turn-based; an untrimmed, timestamped `shots` array;
-  `last_move`. `BsArena3D.tsx` replays a shot animation from `last_move`
-  diffs during an open session, deliberately never on mount.
-- **Stream frames** (`event: game`) carry `from`, `kind` and `targets`. In
-  simultaneous games every submitted move sends its own frame (`from` the
-  mover, `targets` who still owes) and the frame that opens the next round
-  or tick, or ends the match, speaks as the `Referee`. That is your signal
-  for "X locked in" versus "the reveal is ready".
-- **Rematch:** one tap, same game, players and settings
-  (`rematchRow`/`sendRematch`). The games list carries a per-game-type room
-  `record` of all-time wins and losses per player (`listGames` in
-  `worker/index.ts`) and a ladder (an Elo rating per player per game over
-2-player matches); the Duel's state also carries `h2h`, shown as
-"Head-to-head in this room".
+The rules (what resolves a tick or round, clocks, forfeits, what stays
+secret) are each game's section of `GET /api` (`worker/agents/docs.txt`)
+and `docs/agents/games.md`; the state's shape is `contract/src/games/`.
+What a presentation reads from it:
+
+- **Logs to replay:** Light Cycles' `move_log` (per tick and rider: the
+  direction, submitted or clock default, the times) and trails in growth
+  order; the Duel's `rounds` (throws and arrival times, public only once a
+  round resolves); Battleship's timestamped `shots` and `last_move`; the
+  round games' `rounds`, Werewolf's `events`.
+- **Presence:** `awaiting` and the frames' `targets` (who still owes a
+  move); the Duel's `thrown` booleans (a lock without its content).
+- **Stream frames** (`event: game`) carry `from`, `kind` and `targets`: in
+  simultaneous games each submitted move sends its own frame (`from` the
+  mover), and the frame that opens the next round or tick, or ends the
+  match, speaks as the `Referee`. That is the signal for "X locked in"
+  versus "the reveal is ready".
+- **Rematch and records:** `rematchRow` / `sendRematch`
+  (`shared/catalog.tsx`); the games list's per-game-type room `record` and
+  Elo ladder (`listGames` in `worker/room/games.ts`); the Duel's `h2h`
+  ("Head-to-head in this room").
 
 ## 2. Replay what the viewer missed
 
@@ -59,16 +54,22 @@ Lichess correspondence
 and BGA users ask for last-move highlights because "it can be hard to figure
 out what your opponent just did" ([BGA](https://uk.boardgamearena.com/bug?id=14183)).
 
-- **Client-side catch-up needs one addition:** a per-viewer "last seen
-  event" marker in localStorage keyed by game id (try/catch). Everything
-  else is in the logs above.
-- **Scale the replay to what was missed:** Light Cycles fast-forwards missed
-  ticks (~3–4×) with slow motion only on crashes and near-misses (Frozen
-  Synapse's kills-only replay); the Duel replays every missed round
-  (earlier ones quickly, the latest in full, plus the KO); the thirteen
-  newer arenas replay only the latest unseen round. Battleship animates
-  shots only while the view is open, never on mount (replaying each missed
-  shot is the target).
+- **Client-side catch-up needs one addition:** a per-viewer "last seen"
+  marker in localStorage (try/catch), keyed `ac-<key>-seen:<path>:<id>`
+  (Light Cycles: `seenTick` in `lcmodel.ts`). Everything else is in the
+  logs above.
+- **Scale the replay to what was missed.** What each arena does today:
+  - Light Cycles fast-forwards the missed ticks (a capped number, slowing
+    for crashes: Frozen Synapse's kills-only replay), with Skip.
+  - The Duel replays every missed round: earlier ones quickly, the latest
+    in full, plus the KO.
+  - The thirteen round arenas replay only the latest unseen round (the
+    History tab has the rest); a first look at a match shows it as it
+    stands; a tap skips to the verdict; under reduced motion it lands at
+    once with its title and sound. Per-game deviations:
+    `game-playbooks.md`.
+  - Battleship animates shots only while the view is open, never on mount
+    (replaying each missed shot is a target).
 - Cap the whole catch-up at a few seconds with a visible **Skip**.
 - Leave a **resting marker** (the last shot's cell glowing, the rival's last
   trail segment brighter), then land on a clear "your move".
@@ -78,8 +79,9 @@ out what your opponent just did" ([BGA](https://uk.boardgamearena.com/bug?id=141
   your damaged ships in Battleship; where each cycle will go next tick.
 - If the viewer missed their **own** loss (their ship sunk, their rider
   derezzed), the catch-up replays it with the full viewer-loss treatment
-  (`game-feel.md` §4) on the first viewing; a buzz needs prior sticky
-  activation, which an arena opened by a tap already has.
+  (SKILL.md, "Losses that happen to the viewer") on the first viewing; a
+  buzz needs prior sticky activation, which an arena opened by a tap
+  already has.
 - Notification and ticker copy says what happened: "B7: hit. Your move."
   Lichess users valued pushes that show the move.
 - Because beats are functions of `juice.t − start` (see `r3f-techniques.md`
@@ -194,6 +196,6 @@ while other fans find it pulls attention from the board.
   well as after; a rivalry gets the heavier intro.
 - Keep loops short for "one more": best-of-3/5 duels, short Light Cycles
   rounds. Battleship is long; a quick-board variant suits rematches.
-- Defeat ceremonies are quick (no long losing animation), but when the
-  viewer lost, the moment itself already landed with buzz, shake and a
-  title card: see `game-feel.md` §4.
+- Defeat ceremonies are quick (no long losing animation); when the viewer
+  lost, the moment itself already landed (SKILL.md, "Losses that happen to
+  the viewer").

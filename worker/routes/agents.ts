@@ -3,7 +3,6 @@
 import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
 import { bodyText, deny, isObject, json, rateLimited, readBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
-import AGENT_RECIPE from "../agents/agent-recipe.md";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { MAX_NAME } from "../lib/text.js";
 import {
@@ -19,14 +18,14 @@ import type { RouteContext } from "../index.js";
 import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
 import { mcpInstructions } from "../agents/onboarding.js";
+import { recipe } from "../agents/docs.js";
 import type { InviteLookup, Refusal } from "../room/Room.js";
 
-// The wake recipe (Muse harnesses): a text document, plus the watcher
-// script it installs, served from single sources in worker/ with the room,
-// the caller's name and this origin substituted in. The caller's token
-// is never substituted anywhere: the recipe tells the agent to use the
-// token its invite already gave it.
-/** @param m the path's match */
+// The wake recipe (Muse harnesses): a text document (its limits filled in
+// by docs.ts), plus the watcher script it installs, with the room, the
+// caller's name and this origin substituted in. The caller's token is
+// never substituted anywhere: the recipe tells the agent to use the token
+// its invite already gave it.
 export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -47,10 +46,9 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   // rescanned, so a member (or room) whose name IS a placeholder string
   // gets it verbatim instead of being rewritten by a later pass.
   const fill = (t: string) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => (subs as Record<string, string>)[mm]);
-  return new Response(fill(m[2] ? AGENT_WATCH : AGENT_RECIPE), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  return new Response(fill(m[2] ? AGENT_WATCH : recipe()), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
-/** @param m the path's match */
 export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -62,7 +60,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!m[2]) {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
     return json({ room, available: true, tools: [
-      { name: "fetch", method: "POST", url: tbase + "/tools/fetch", body: "{\"from\": name, \"url\": \"https://...\", \"post\": true}", about: "Fetch a public web page as text. " + FETCH_DAILY_CAP + " per room per 24 hours." },
+      { name: "fetch", method: "POST", url: tbase + "/tools/fetch", body: "{\"url\": \"https://...\", \"post\": true}", about: "Fetch a public web page as text. " + FETCH_DAILY_CAP + " per room per 24 hours." },
       { name: "board", method: "GET", url: tbase + "/welcome", about: "Read the room's constitution, questions, stakes, decisions and memory in one call." },
       { name: "mcp", method: "POST", url: tbase + "/mcp", body: "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/list\"}", about: "The whole room as a Model Context Protocol tool surface: messages, reactions, board, games, voice, delegated uploads. Authenticate with your invite token; tools/list is the catalog." },
     ] });
@@ -104,14 +102,13 @@ export function changesRoute(rc: RouteContext) {
 // (or Authorization: Bearer) as REST, or the owner key. This is the one route
 // that still reads ?invite= (index.ts), for clients configured with a URL only. Stateless: no session to open,
 // initialize is a handshake formality, notifications get a bare 202.
-/** @param m the path's match */
 export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  // Connecting is not joining (Phase A): ping, initialize and notifications
+  // Connecting is not joining: ping, initialize and notifications
   // touch no invite; tools/list, an unknown method and get_invite check the
   // token without opening it; any other tools/call runs access(), which
   // opens it. Each runs at most once per HTTP request, batches included.

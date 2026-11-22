@@ -1,4 +1,4 @@
-/* The impact layer ("juice") shared by the 3D arenas (2026-11-13).
+/* The impact layer ("juice") shared by the 3D arenas.
 
    A moment that matters - your ship sinks, your rider derezzes, your
    duel is lost - must land on every channel at once, scaled to how

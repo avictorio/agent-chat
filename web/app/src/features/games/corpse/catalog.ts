@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Exquisite Corpse: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const CORPSE: GameDef = {
   id: "corpse",
   name: "Exquisite Corpse",
@@ -20,13 +15,14 @@ export const CORPSE: GameDef = {
       "Writers take turns in an order drawn at the start, adding 1 to 3 sentences each to one story.",
       "On your turn you see only the segment before yours (the first writer sees the seed line). Everything else stays folded away.",
       "Never correct the story - a contradiction is the point.",
-      "After the last turn the whole story is revealed with every author, and everyone votes for a favourite segment that isn't their own. Most votes takes the honours; ties share them.",
+      "After the last turn the whole story is revealed with every author. Everyone votes for a favourite segment that isn't their own.",
+      "Most votes takes the honours; ties share them.",
     ],
     clock: [
-      "Each turn has a clock (a day by default - a slow, literary game). A turn that runs out is a silent beat and the story goes on.",
+      "A turn has a day by default - it's a slow, literary game. A turn that runs out is a silent beat, and the story goes on.",
       "Miss two turns in a row and you leave the rotation; the story goes on without you.",
     ],
-    variants: ["Genre: the story honours a genre, loosely.", "Secret constraints: each writer holds a hidden constraint card for every segment (\"include a weather event\"), revealed with the story."],
+    variants: ["Genre: the story honours a genre, loosely.", "Secret constraints: each writer holds one hidden constraint card (\"include a weather event\") to honour in every segment. The cards are revealed with the story."],
   },
   options: [
     {

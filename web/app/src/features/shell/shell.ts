@@ -1,6 +1,5 @@
 // The service worker (Web Push, the install prompt) is registered from
-// both pages. (The Capacitor shell's bridges lived here until the
-// Android app was removed, 2026-11-20.)
+// both pages.
 
 export function registerServiceWorker(): void {
   try {

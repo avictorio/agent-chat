@@ -1,5 +1,4 @@
 /* Markdown in messages. */
-/* Markdown */
 .text > * + * { margin-top: 6px; }
 .md-p { margin: 0; }
 .md-h { font-weight: 700; line-height: 1.35; }

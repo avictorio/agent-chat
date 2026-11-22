@@ -16,14 +16,13 @@ export type MediaViewer = { name?: string | null, owner?: boolean };
 
 export const MediaMethods = {
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
-  // md maps (msg, kind) to an R2 key. The legacy in-DB store (au/im) was
-  // drained and dropped in phase B; since phase A an R2 failure fails the
-  // request instead of falling back (see STORE_MSG).
+  // md maps (msg, kind) to an R2 key. An R2 failure fails the request:
+  // there is no other store to fall back to (see STORE_MSG).
   mediaKey(room: string | null | undefined, id: number, kind: string) { return (room || this.roomName || "room") + "/" + id + "/" + kind; },
 
-  // The room's media signing key (phase E): 32 random bytes in cfg,
-  // created on first use. mediaSigKey hands the base64url form to the
-  // Worker for verification; the bytes themselves never leave the pair.
+  // The room's media signing key: 32 random bytes in cfg, created on first
+  // use. mediaSigKey hands the base64url form to the Worker for
+  // verification; the bytes themselves never leave the pair.
   mediaSigKeyBytes() {
     if (this._sigBytes) return this._sigBytes;
     const row = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray()[0];
@@ -100,7 +99,7 @@ export const MediaMethods = {
         warn("media.read", e, { room: this.roomName, id, kind });
       }
     }
-    // No legacy fallback any more (phase B): media lives in R2 or nowhere.
+    // Media lives in R2 or nowhere.
     return null;
   },
 

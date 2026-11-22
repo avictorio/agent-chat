@@ -1,9 +1,9 @@
 import type { FourInARowMove, FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { el } from "../../../lib/index";
 
-/* Four in a Row (2026-11-19): the board's size and the move history.
-   The seats, the drop row a player taps on their turn and the card's
-   board are React (FourInARowPanels.tsx). */
+/* Four in a Row: the board's size and the move history. The seats, the
+   drop row a player taps on their turn and the card's board are React
+   (FourInARowPanels.tsx). */
 
 export const C4_COLS = 7;
 export const C4_ROWS = 6;

@@ -175,7 +175,7 @@ export function sessionUpload(origin: string, room: string, kind: string, t: Upl
     auth: "none - these URLs are the credential",
     expires_at: new Date(t.expires).toISOString(),
     direct: !!t.direct,
-    note: (t.direct ? "Parts go straight to storage: POST sign.url with {\"parts\": [n, ...]} (up to " + UP_SIGN_MAX + " at a time) for each part's address, good for an hour, and PUT the part's raw bytes there with no other headers. " : "") + "PUT part n (1.." + t.parts + ") " + (t.direct ? "to its signed address" : "to part.url with {n} replaced") + ": bytes [(n-1)*part_size, n*part_size) of the file, so every part is exactly part_size bytes except the last (the remainder). Parts may go in any order and in parallel; re-send any that fails. GET status lists the parts received; POST finish once all are in (409 with the missing part numbers otherwise). From a shell: dd if=FILE bs=" + t.part_size + " skip=$((n-1)) count=1 2>/dev/null | curl -X PUT --data-binary @- \"<part url>\". Then publish_message with message_id - unless publish_on_complete is set. No invite token or other credential: these URLs authorize this one upload until expires_at."
+    note: (t.direct ? "POST sign.url with {\"parts\": [n, ...]} (up to " + UP_SIGN_MAX + " a call) for each part's address and PUT part n's raw bytes there - " : "PUT part n to part.url with {n} replaced - ") + "bytes [(n-1)*part_size, n*part_size) of the file, n = 1.." + t.parts + ", in any order, re-sending any that fails; then POST finish.url, and publish_message with message_id unless publish_on_complete is set. These URLs are the credential until expires_at; see UPLOADING FILES at " + origin + "/api."
   };
 }
 
@@ -193,9 +193,9 @@ export function uploadSessionWanted(kind: string, a: Body) {
   return { size: size, type: bodyText(a.type, "type") || null, name: bodyText(a.name, "name") || null, direct: a.direct === true || a.direct === "true" };
 }
 
-// The upload object begin_upload and the REST upload-ticket route hand out
-// (media plan phase C). The URL is the credential: single-use, short-lived,
-// and the only place the raw ticket exists outside the client's hands.
+// The upload object begin_upload and the REST upload-ticket route hand out.
+// The URL is the credential: single-use, short-lived, and the only place
+// the raw ticket exists outside the client's hands.
 export function ticketUpload(origin: string, room: string, t: UploadTicket) {
   return {
     method: "PUT",
@@ -205,13 +205,12 @@ export function ticketUpload(origin: string, room: string, t: UploadTicket) {
     single_use: true,
     expires_at: new Date(t.expires).toISOString(),
     max_bytes: t.max_bytes,
-    note: "PUT the raw file bytes to url. No invite token or other credential: the URL itself authorizes this one upload, until expires_at. Then call publish_message with message_id."
+    note: "PUT the raw file bytes to url (single use; the URL is the credential until expires_at), then publish_message with message_id unless publish_on_complete is set; see UPLOADING FILES at " + origin + "/api."
   };
 }
 
 // Resumable upload links: the upload engine's part / sign / status /
 // finish / abort steps with the link as the credential, for one session.
-/** @param usm the path's match */
 export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArray) {
   const { request, env, url } = rc;
   const uroom = decodeURIComponent(usm[1]).toLowerCase();
@@ -225,11 +224,10 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
 }
 
-// Upload tickets (phase C): PUT /api/uploads/ROOM/TICKET redeems a
+// Upload tickets: PUT /api/uploads/ROOM/TICKET redeems a
 // begin_upload ticket. Deliberately NO access check: the ticket is the
 // credential (single-use, 15 minutes, hash-only at rest). The ticket is
 // never echoed back in any response.
-/** @param um the path's match */
 export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
   const { request, env } = rc;
   const uroom = decodeURIComponent(um[1]).toLowerCase();
@@ -248,7 +246,6 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
 // files use the upload engine), for a client that can send a file in one
 // request. The Worker assembles
 // R2 multipart parts as the bytes arrive; nothing holds the whole file.
-/** @param m the path's match */
 export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -317,9 +314,8 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
 }
 
 // The upload engine (UP_KINDS): start / part / sign / status / finish / abort
-// for any kind, with the sender's invite or the owner key. /video/...
-// was the first chunked flow (video only); it is this same route.
-/** @param m the path's match */
+// for any kind, with the sender's invite or the owner key. /video/... is
+// this same route.
 export async function uploadRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -331,10 +327,9 @@ export async function uploadRoute(rc: RouteContext, m: RegExpMatchArray) {
   return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner);
 }
 
-// Mint an upload ticket for one of your drafts (phase C): the REST twin
+// Mint an upload ticket for one of your drafts: the REST twin
 // of MCP begin_upload for a draft that already exists. The response is
 // the only place the raw ticket ever appears.
-/** @param m the path's match */
 export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -358,8 +353,7 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
 // Find one of your draft uploads that can resume: same file size + fingerprint
 // as an interrupted attempt, of any kind (or "kind" in the body). Returns the
 // draft message id, its kind and the parts received. /video/resume is the
-// first, video-only form.
-/** @param m the path's match */
+// video-only form.
 export async function uploadResumeRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

@@ -29,8 +29,8 @@ export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// The current app's run(): gate on a name, disable the button, toast
-// the outcome, reload the board. An fn that resolves to exactly false
+// Run a board action: gate on a name, disable the button, toast the
+// outcome, reload the board. An fn that resolves to exactly false
 // was called off (a cancelled confirm): no toast, no reload.
 export async function runWith(
   api: BoardApi,
@@ -89,9 +89,8 @@ export function DeleteButton({ path, noun }: { path: string; noun: string }) {
   );
 }
 
-// Plain-text URL linking for card titles and texts (the current app's
-// linkify): bare http(s) and www. URLs become anchors, everything else
-// stays a text node.
+// Plain-text URL linking for card titles and texts: bare http(s) and
+// www. URLs become anchors, everything else stays a text node.
 const LINK_RE = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/g;
 export function Linkify({ text }: { text: string }) {
   const parts = String(text || "").split(LINK_RE);

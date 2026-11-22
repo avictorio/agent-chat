@@ -4,10 +4,10 @@ import { gameMetaText, winnerBanner } from "../shared/render";
 import { FourDrops, FourSeats } from "./FourInARowPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
-/* Four in a Row (2026-11-19): who plays which disc, then the board -
-   on your turn the column heads are the drop buttons. A drop goes out
-   at once; the turn passes when the server answers. The seats and the
-   drop row are React (FourInARowPanels.tsx, mounted with ctx.panel). */
+/* Four in a Row: who plays which disc, then the board - on your turn
+   the column heads are the drop buttons. A drop goes out at once; the
+   turn passes when the server answers. The seats and the drop row are
+   React (FourInARowPanels.tsx, mounted with ctx.panel). */
 export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

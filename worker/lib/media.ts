@@ -5,16 +5,14 @@ import { CORS, json, parseRange } from "./http.js";
 import type { MediaViewer } from "../room/media.js";
 import { warn } from "./log.js";
 
-// Signed media URLs (media plan phase E): media reads accept a
-// short-lived signature instead of a credential:
-// sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)), exp a unix
-// timestamp on an hour grid, one to two hours out (the grid keeps the
-// URL - and so the browser's cache entry - stable within the hour).
-// The room key is 32 random bytes kept in the room's own cfg
-// (media_sig_key; room/media.ts), so there is no site-wide secret to
-// rotate. The HMAC is lib/crypto.ts's synchronous one. Header auth keeps
-// working on the same routes (?invite= no longer authenticates media
-// reads); signatures are what listings, frames and the web app use.
+// Signed media URLs: media reads accept a short-lived signature instead
+// of a credential: sig = base64url(HMAC-SHA256(room key, room|id|kind|exp)),
+// exp a unix timestamp on an hour grid, one to two hours out. The grid
+// keeps the URL, and so the browser's cache entry, stable within the hour.
+// The room key is 32 random bytes in the room's own cfg (media_sig_key;
+// room/media.ts), so there is no site-wide secret to rotate. Header auth
+// works on the same routes; signatures are what listings, frames and the
+// web app use.
 /**
  * @param id a message id, or "match.n" for a Sketch & Guess drawing
  * @param exp unix seconds
@@ -104,8 +102,7 @@ export const MEDIA_CACHE = "private, max-age=3600, immutable";
 // Stream one media object to the client. The fast path reads R2 directly here in
 // the Worker (the Room only supplies the index row), so even a 5 GB video never
 // materializes inside the Durable Object. If that direct read fails, the Room's
-// own buffered R2 read (getMedia) is the second try; there is no in-DB copy
-// (phase B).
+// own buffered R2 read (getMedia) is the second try; there is no in-DB copy.
 /** @param stub the room */
 export async function serveMedia(request: Request, env: Env, stub: DurableObjectStub, id: number, kind: string, room: string, viewer: MediaViewer) {
   const meta = await stub.mediaMeta(id, kind, viewer);

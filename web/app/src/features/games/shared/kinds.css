@@ -1,7 +1,7 @@
-/* Each game's accent colour and backdrop (--ga, --gbg), and --dim. */
-/* --dim was referenced by the arena (meta lines, notes, tabs, history,
-   the 2D/3D toggle) but never defined, so those fell back to inherited
-   text colour - dark-on-dark for the toggle in the light theme. */
+/* Each game's accent colour and backdrop (--ga, --gbg), and --dim. The
+   arena's meta lines, notes, tabs and history read --dim: left
+   undefined it falls back to the inherited text colour, dark-on-dark in
+   the light theme. */
 :root { --ga: 34, 211, 238; --gbg: #04060d; --dim: var(--muted); }
 .kind-battleship { --ga: 56, 189, 248; --gbg: #030b16; }
 .kind-duel { --ga: 245, 158, 11; --gbg: #0d0903; }

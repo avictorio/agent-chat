@@ -39,7 +39,6 @@
 .ec-segs { font-size: 12px; color: #fde68a; margin-left: auto; white-space: nowrap; flex: none; }
 .ec-st + .ec-segs { margin-left: 10px; }
 .ec-card-line { margin: 6px 10px 0; font-size: 13px; color: #fde68a; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* Exquisite Corpse: the desk from above. */
 .lc-3d-host.ec-3d-host { height: min(46vh, 420px); }
 @media (max-width: 560px) {

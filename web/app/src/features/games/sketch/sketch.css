@@ -1,6 +1,6 @@
-/* Sketch & Guess (2026-11-20): the artist's prompt and sketch pad (a white
-   page; the canvas takes touch-action: none so strokes never scroll), the
-   guess form, the scores, the reveal with the drawing, and the card's
+/* Sketch & Guess: the artist's prompt and sketch pad (a white page; the
+   canvas takes touch-action: none so strokes never scroll), the guess
+   form, the scores, the reveal with the drawing, and the card's
    thumbnail. Game surfaces are dark in both themes. */
 .sg-form { margin-top: 10px; display: grid; gap: 8px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); border-radius: 12px; padding: 12px; color: #fef3c7; box-shadow: 0 0 0 1px rgba(var(--ga), .2), 0 0 18px rgba(var(--ga), .12); }
 .sg-form-title { font-weight: 700; font-size: 15px; }
@@ -49,7 +49,7 @@
 .sg-card-img { width: 96px; height: 72px; object-fit: contain; background: #fff; border-radius: 6px; flex: none; }
 .sg-card-side { flex: 1; min-width: 0; }
 .sg-card-cap { font-size: 12.5px; color: #e7d9a8; padding: 0 10px 2px; font-weight: 600; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* This game's 3D host and frame pieces. */
 .lc-3d-host.sg-3d-host { height: min(50vh, 440px); }
 @media (max-width: 560px) {
   .lc-3d-host.sg-3d-host { height: min(44vh, 340px); }

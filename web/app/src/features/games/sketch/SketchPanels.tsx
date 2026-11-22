@@ -2,16 +2,15 @@ import { useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type
 import type { SketchPlayer, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import { PAD_COLORS, PAD_H, PAD_SIZES, PAD_W, sgLastRound, type SgPad, type Stroke } from "./sketch";
 
-/* Sketch & Guess's panels (2026-11-21, React): the scoreboard, the
-   artist's prompt and sketch pad (or an image of their own), the guess
-   form, the last round's reveal and the chat card. The view (view.tsx)
-   mounts them with ctx.panel. The guess keeps its draft as its own state
-   (keyed by round and phase); the field is uncontrolled (a value prop
-   would add a value attribute the old markup never had), starts from the
-   draft when it mounts and reports every keystroke. The pad draws the
-   SgPad the view keeps on gameView for the round: its strokes and pen
-   live there, as before, and the canvas stays the same element across
-   repaints, so a poll never wipes a half-drawn picture. */
+/* Sketch & Guess's panels: the scoreboard, the artist's prompt and
+   sketch pad (or an image of their own), the guess form, the last
+   round's reveal and the chat card. The view (view.tsx) mounts them
+   with ctx.panel. The guess keeps its draft as its own state (keyed by
+   round and phase); the field starts from the draft when it mounts and
+   reports every keystroke (uncontrolled field: see docs/agents/games.md,
+   Panels). The pad draws the SgPad the view keeps on gameView for the
+   round: its strokes and pen live there, and the canvas stays the same
+   element across repaints, so a poll never wipes a half-drawn picture. */
 
 function status(g: SketchState, p: SketchPlayer): string {
   if (g.status !== "running") return "";

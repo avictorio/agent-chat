@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Four in a Row: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const FOUR_IN_A_ROW: GameDef = {
   id: "fourinarow",
   name: "Four in a Row",

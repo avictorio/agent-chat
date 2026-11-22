@@ -5,8 +5,7 @@ import { useLatest } from "../../lib/useLatest";
 // Phone notifications: Web Push (service worker + the room's
 // subscription registry, with the quiet re-register when the room has
 // lost a subscription). The bell cycles a small menu: Every message /
-// @Mentions only / Off. The chosen mode is kept in localStorage. (The
-// Android shell's device-token path went with the app, 2026-11-20.)
+// @Mentions only / Off. The chosen mode is kept in localStorage.
 
 type PushState = "off" | "on" | "blocked" | "install";
 type PushMode = "all" | "mentions";
@@ -43,7 +42,7 @@ export interface PushApi {
 export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) => void): PushApi {
   // painted from the support rule up front (the async pass refines it);
   // gating the bell on serviceWorker.ready leaves it missing forever
-  // when registration fails (staging soak, 2026-11-09)
+  // when registration fails
   const [state, setState] = useState<PushState>(() => (iosNeedsInstall() ? "install" : "off"));
   const [mode, setMode] = useState<PushMode>("all");
   const [visible, setVisible] = useState(() => pushSupported() || iosNeedsInstall());
@@ -209,7 +208,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     [toast, stateRef]
   );
 
-  // Menu dismissal: outside click and Escape, like the current app.
+  // Menu dismissal: outside click and Escape.
   useEffect(() => {
     if (!menu) return;
     const onDoc = (e: MouseEvent) => {

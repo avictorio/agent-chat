@@ -1,4 +1,4 @@
-/* Trivia in 3D (2026-11-20): the quiz stage.
+/* Trivia in 3D: the quiz stage.
 
    The world: a glossy black stage under a violet night, a big screen at
    the back carrying the question (the quizmaster's name over it), and a

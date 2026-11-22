@@ -2,14 +2,14 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, ty
 import type { FrontlinesPlayer, FrontlinesRound, FrontlinesState } from "@chat/contract";
 import { FL_HILLS, FL_LETTERS, FL_TROOPS, flHex, flLastRound } from "./frontlines";
 
-/* Frontlines' panels (2026-11-21, React): the score line, the field as
-   a board (card and arena), the troop planner a commander fills in, and
-   the chat card. The view (view.tsx) mounts them with ctx.panel, so the
-   planner's draft is its own state and survives the view's repaints (a
-   poll, the rival committing); the view keys it by round, so it starts
-   over when a new round opens. A split is secret until the round
-   resolves, so the field shows the last RESOLVED round, plus only your
-   own pending split - never a rival's. */
+/* Frontlines' panels: the score line, the field as a board (card and
+   arena), the troop planner a commander fills in, and the chat card.
+   The view (view.tsx) mounts them with ctx.panel, so the planner's
+   draft is its own state and survives the view's repaints (a poll, the
+   rival committing); the view keys it by round, so it starts over when
+   a new round opens. A split is secret until the round resolves, so the
+   field shows the last RESOLVED round, plus only your own pending split
+   - never a rival's. */
 
 /* The score: each commander's rounds won, and (while the match runs)
    whether they have committed. */
@@ -109,10 +109,9 @@ export function FrontlinesField({ g, compact, round: given, me }: { g: Frontline
   );
 }
 
-/* A hill's number field. Its value follows the draft on every render,
-   as the old rebuilt field did, without a value attribute (a value prop
-   would add one); what you type counts when the field commits (change),
-   as before. */
+/* A hill's number field. Its value follows the draft on every render;
+   what you type counts when the field commits (change). Uncontrolled
+   field: see docs/agents/games.md, Panels. */
 function TroopField({ i, cur, onSet }: { i: number; cur: number; onSet: (i: number, v: number) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {

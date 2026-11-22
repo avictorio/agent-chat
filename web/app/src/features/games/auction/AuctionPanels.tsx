@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AuctionPlayer, AuctionRound, AuctionState, AuctionYou } from "@chat/contract";
 import { auStatus } from "./auction";
 
-/* The auction's panels (2026-11-21, React): the lot under the hammer,
-   the bidders (budget left, lots won, who has bid), your sealed bid, the
-   last lot's result and the chat card. The view (view.tsx) mounts them
-   with ctx.panel, so the bid's draft is its own state and survives the
-   view's repaints. Pending bids are secret (the server sends only your
-   own); resolved lots show every bid. */
+/* The auction's panels: the lot under the hammer, the bidders (budget
+   left, lots won, who has bid), your sealed bid, the last lot's result
+   and the chat card. The view (view.tsx) mounts them with ctx.panel, so
+   the bid's draft is its own state and survives the view's repaints.
+   Pending bids are secret (the server sends only your own); resolved
+   lots show every bid. */
 
 /* The lot under the hammer (or, once it's over, the season's end). */
 export function AuctionLot({ g }: { g: AuctionState }) {
@@ -53,8 +53,8 @@ export function AuctionPlayers({ g, me, compact }: { g: AuctionState; me?: strin
 /* Your bid: a number box with steps, quick amounts, and Bid. The draft
    starts from the bid you sent; the view keys the panel by lot, so it
    starts over each lot. The box shows the draft as its value property
-   (never a value attribute, as before) and takes what you type on
-   change (blur, Enter, the spinner), not per keystroke. */
+   and takes what you type on change (blur, Enter, the spinner), not per
+   keystroke. Uncontrolled field: see docs/agents/games.md, Panels. */
 export function AuctionBid({ g, onCommit }: { g: AuctionState; onCommit: (v: number) => void }) {
   const you: Partial<AuctionYou> = g.you || {};
   const max = you.budget || 0;

@@ -81,7 +81,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     const owner = !!env.OWNER_KEY && request.headers.get("X-Owner-Key") === env.OWNER_KEY;
     // The invite token: X-Invite-Token, else Authorization: Bearer (the
     // alias for MCP clients that can set only a bearer token). A token in
-    // the URL (?invite=) was retired on 2026-11-22 (lib/tokens.ts): only
+    // the URL (?invite=) is retired (lib/tokens.ts): only
     // POST /api/rooms/ROOM/mcp still reads it, for MCP clients configured
     // with a URL alone, and a header wins there too.
     const invite = headerToken(request) || (MCP_PATH.test(path) ? queryToken(url) : "");

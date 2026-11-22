@@ -7,7 +7,7 @@ import { getSR, phraseMode, type SREvent, type SRInstance } from "./speech";
 // composer textarea (see ./speech for the environment facts).
 // Phrase-mode browsers get short restarted sessions; continuous
 // browsers get one. The mic button's state flips synchronously
-// (flushSync) exactly where the current app toggles its class.
+// (flushSync) when a session ends.
 
 export function useDictation(opts: {
   textRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -78,9 +78,8 @@ export function useDictation(opts: {
           // fall through to stopping
         }
       }
-      // flushSync: the current app toggles the mic class synchronously
-      // in onend, and anything reading the button in the same task (the
-      // parity scenarios do) must see the stopped state immediately.
+      // flushSync: anything reading the mic button in the same task as
+      // onend (the UI tests do) must see the stopped state immediately.
       flushSync(() => setMic(false));
     };
     r.start();

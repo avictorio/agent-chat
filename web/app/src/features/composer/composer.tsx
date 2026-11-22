@@ -21,10 +21,10 @@ import {
 import { IconButton, LinkButton } from "../../ui/Button";
 import { useLatest } from "../../lib/useLatest";
 
-// The composer, ported from the current app: name handling, the
-// mention highlight overlay and autocomplete menu, dictation (one-
-// phrase mode on phones, continuous on desktop), the send flow, and
-// attachments — an audio clip, an image, a video, a file of any type
+// The composer: name handling, the mention highlight overlay and
+// autocomplete menu, dictation (one-phrase mode on phones, continuous
+// on desktop), the send flow, and attachments — an audio clip, an
+// image, a video, a file of any type
 // and size, an HTML page or a Markdown document, plus the voice-message
 // recorder. Small media rides inline in the post; anything bigger, and
 // every general file, goes up first under a draft in resumable parts

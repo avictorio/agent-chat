@@ -1,11 +1,9 @@
 import { el } from "../../lib/index";
-// The markdown renderer, ported from src/chat.html (PARITY.md section
-// C: ported, not replaced). It builds DOM nodes — text is never parsed
-// as HTML, which is the current app's XSS record — and the React side
+// The markdown renderer. It builds DOM nodes — text is never parsed as
+// HTML, so a message can never inject markup — and the React side
 // appends the resulting fragment into the message's .text element.
-// Behavior is transliterated line for line: same block rules, same
-// inline grammar, same quirks (underscore emphasis needs word
-// boundaries, snake_case stays plain, 2 * 3 * 4 stays arithmetic).
+// Its quirks are deliberate: underscore emphasis needs word
+// boundaries, snake_case stays plain, 2 * 3 * 4 stays arithmetic.
 
 type Parent = HTMLElement | DocumentFragment;
 

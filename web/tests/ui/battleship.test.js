@@ -15,7 +15,7 @@ const { settle, done, noGl, run, shot } = require('./harness');
     if (out.cardStrips !== 2) throw new Error('card should show two fleet strips, got ' + out.cardStrips);
     await shot(page, 'bs-card.png');
     await page.click('.game-card');
-    // two captains: the 3D scene is the only arena view (2D retired 2026-11-20)
+    // two captains: the 3D scene is the only arena view
     await page.waitForSelector('#viewer:not([hidden]) .bs-3d-host', { timeout: 10000 });
     out.grids = await page.$$eval('#viewer .bs-grid', els => els.length);
     out.banner = await page.$eval('#viewer .bs-verdict', e => e.textContent);
@@ -63,12 +63,11 @@ const { settle, done, noGl, run, shot } = require('./harness');
     await shot(page, 'bs-player-arena.png');
     return out;
   });
-  // Free-for-all (2026-11-17; in 3D since 2026-11-20): a four-captain
-  // match is one scene - your waters plus one ocean per rival, the
-  // eliminated captain a grey wreck chart - with every captain's fleet
-  // strip under it and no 2D boards. The keyboard aims at the first
-  // live rival; an arrow past the right edge crosses to the next one,
-  // and the shot names its target.
+  // Free-for-all: a four-captain match is one scene - your waters plus one
+  // ocean per rival, the eliminated captain a grey wreck chart - with every
+  // captain's fleet strip under it and no flat boards. The keyboard aims at
+  // the first live rival; an arrow past the right edge crosses to the next
+  // one, and the shot names its target.
   await run('battleship-ffa', { state: { bsFfa: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
@@ -149,8 +148,8 @@ const { settle, done, noGl, run, shot } = require('./harness');
     await page.click('.game-card');
     /* 20s, not the usual 4-8s: the canvas waits on the lazy three.js
        chunk loading plus software-GL init, which runs long on a
-       loaded box - an 8s wait flaked twice on 2026-11-12 while the
-       scene itself rendered fine. */
+       loaded box - an 8s wait flakes while the scene itself renders
+       fine. */
     await page.waitForSelector('#viewer:not([hidden]) .lc-3d-host canvas', { timeout: 20000 });
     out.toggle = !!(await page.$('#viewer .lc-view-btn'));
     if (out.toggle) throw new Error('the 2D views are retired: no 2D/3D toggle');
@@ -330,8 +329,8 @@ const { settle, done, noGl, run, shot } = require('./harness');
     return { swap, fired: moves[0] };
   });
   // Touch screens: the page owns touch until Move is on (two-finger camera
-  // gestures were unreliable - a drifting first finger handed the gesture to
-  // the browser, which scrolled or, on iOS, zoomed the page).
+  // gestures are unreliable - a drifting first finger hands the gesture to
+  // the browser, which scrolls or, on iOS, zooms the page).
   await run('arena-3d-phone-move-mode', { state: { bsPlay: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.tap('.game-card');
@@ -350,11 +349,11 @@ const { settle, done, noGl, run, shot } = require('./harness');
     if (!/^false/.test(off.btn) || off.ta !== 'pan-y') throw new Error('Done should hand touch back to the page: ' + JSON.stringify(off));
     return { before, on, off };
   });
-  /* Fleet placement in 3D (2026-11-20): your ocean in the scene, the
-     next hull a hologram, no grid. The keyboard moves the bow (from E5),
-     R rotates, Enter lays the hull, Backspace takes it back; a hull that
-     runs off the board is refused with the reason. The page keeps the
-     status line and the buttons. */
+  /* Fleet placement in 3D: your ocean in the scene, the next hull a
+     hologram, no grid. The keyboard moves the bow (from E5), R rotates,
+     Enter lays the hull, Backspace takes it back; a hull that runs off the
+     board is refused with the reason. The page keeps the status line and
+     the buttons. */
   await run('battleship-setup', { state: { bsSetup: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 10000 });

@@ -40,24 +40,14 @@ export function tqNorm(s: unknown) {
 }
 
 export const TwentyMethods = {
-  /* ---------- games: Twenty Questions (2026-11-20) ----------
-     SHA's spec, on the rotating role: 2 to 6 players, one round per
-     player as the answerer (rotations times round), the role passing in
-     seat order. The answerer registers a secret (a noun phrase; "random"
-     draws one from data) that stays hidden until the round ends. Everyone
-     else questions - head-to-head with 2 players, the whole table working
-     together with more: any questioner may ask a yes/no question or make a
-     guess when none is waiting; the answerer answers yes or no (a guess:
-     right or wrong) and may flag a question as unanswerable, which costs
-     nothing. Twenty questions a round, guesses included. An exact guess is
-     right on its own; a close one is the answerer's call, on their honour
-     - the public Q/A log and the revealed secret are the court of appeal.
-     Scoring: a right guess gives the questioners the questions left,
-     split evenly (rounded down); twenty spent gives the answerer 10. A
-     silent answerer forfeits the round (the questioners score as if they
-     had guessed); a table that asks nothing for three clocks in a row
-     hands the round to the answerer; a secret not chosen in time is drawn.
-     Highest total after the last round wins. */
+  /* ---------- games: Twenty Questions ----------
+     Player rules: rules() below. Secrecy: the secret reaches only the
+     answerer (you.secret) until the round ends; "random" draws one from
+     worker/data/twenty-secrets.txt. The answerer role passes in seat
+     order (roleOf). A close guess is the answerer's call, on their
+     honour - the public Q/A log and the revealed secret are the court of
+     appeal. The questioners' share of the questions left is rounded
+     down. */
   tqQuestioners(st: TqStored) {
     return st.players.filter((p) => p.name !== st.answerer).map((p) => p.name);
   },
@@ -343,8 +333,9 @@ export const twentyEngine = {
   moveHint: (gm, name) => (gm.answerer === name ? (gm.phase === "secret" ? "<your secret: a noun phrase, or random>" : "<yes or no; a guess: right or wrong; or unanswerable>") : "<a yes/no question, or guess: your answer>"),
   result: (room, g) => room.tqResultText(g),
   rules: (st: TqStored) =>
-    "Twenty Questions: each round one player is the answerer (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ") and holds a secret - a noun phrase they choose, or random to draw one - hidden until the round ends. " +
+    "Twenty Questions: each round one player is the answerer (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ") and holds a secret - a noun phrase they choose, or one drawn at random - hidden until the round ends. " +
     (st.players.length === 2 ? "The other player questions. " : "Everyone else questions together: any of you may ask when no question is waiting. ") +
-    "Send a yes/no question as dir, or guess: <answer>. The answerer replies yes or no (a guess: right or wrong; an exact guess is right on its own), with an optional note after a dash, or unanswerable - which costs nothing. Twenty questions a round, guesses included; the whole Q/A log is public. " +
-    "A right guess scores the questions left for the questioners, split evenly; twenty spent scores 10 for the answerer. Each move has " + clockWords(st.round_seconds || 3600) + ": an answerer who goes silent forfeits the round, a secret not chosen in time is drawn, and three clocks with no question hand the round to the answerer. Highest total wins.",
+    "Twenty questions a round, guesses included; the whole Q/A log is public. An exact guess is right on its own, a close one is the answerer's call, and a question flagged unanswerable costs nothing. " +
+    "A right guess scores the questions left for the questioners, split evenly; twenty spent scores 10 for the answerer. Each move has " + clockWords(st.round_seconds || 3600) + ": a secret not chosen in time is drawn, a silent answerer forfeits the round (the questioners score as if they had guessed), and three clocks with no question hand the round to the answerer. Highest total wins. " +
+    "Send: as the answerer, dir is first your secret (or random), then yes or no to each question (right or wrong to a guess, or unanswerable), with an optional note after a dash; as a questioner, dir is a yes/no question, or guess: <answer>.",
 } satisfies GameEngineOf<TqStored>;

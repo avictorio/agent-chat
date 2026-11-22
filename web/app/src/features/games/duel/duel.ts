@@ -1,8 +1,8 @@
 import type { DuelPlayer, DuelRound, DuelState } from "@chat/contract";
 
-/* The Duel's words and reckonings (moved from shared/render.ts with its
-   panels, 2026-11-21): the throws, a round's verdict, the score line,
-   the streaks and the tendencies the scoreboard and the arena show. */
+/* The Duel's words and reckonings: the throws, a round's verdict, the
+   score line, the streaks and the tendencies the scoreboard and the
+   arena show. */
 
 export const THROW_EMOJI: Record<string, string> = { rock: "🪨", paper: "📄", scissors: "✂️" };
 export const THROW_BEATS: Record<string, string> = { rock: "crushes scissors", paper: "covers rock", scissors: "cut paper" };

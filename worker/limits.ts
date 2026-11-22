@@ -35,9 +35,9 @@ export const PUSH_MAX_PER_MEMBER = 10;
 // so a member cannot point the room's fan-out at arbitrary hosts.
 export const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com)$/;
 export const AVATAR_MAX = 2000000;
-// Media storage failures are all-or-nothing (2026-11-11, media plan phase A):
-// an R2 failure fails the whole request with this message and leaves nothing
-// behind - no message without its media, no index row without an object.
+// Media storage failures are all-or-nothing: an R2 failure fails the whole
+// request with this message and leaves nothing behind - no message without
+// its media, no index row without an object.
 export const STORE_MSG = "Storage is unavailable right now. Nothing was saved; try again.";
 
 export const VOICE_SAMPLE_MAX = 10000000; // voice samples up to 10 MB
@@ -47,12 +47,12 @@ export const VIDEO_MAX = 25000000;
 export const VIDEO_MAX_HARD = 5000000000;
 export const HTML_MAX = 2000000;
 export const DOC_MAX = 1000000;
-export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes (phase C)
+export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes
 export const TICKET_MAX_PER_MEMBER = 20;
 export const TICKET_MAX_TRIES = 5;
 export const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
 export const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
-// ---- The resumable upload engine (2026-11-20) ----
+// ---- The resumable upload engine ----
 // Every attachment past its single-request cap - images, audio, video,
 // and general files of any type - uploads one way: start pins a part
 // plan, the client PUTs parts (any order, in parallel, any retry), the
@@ -75,7 +75,7 @@ export const UP_TARGET_PARTS = 2000;
 export const UP_MAX = UP_MAX_PARTS * UP_PART_MAX;
 export const UP_MAX_TEXT = Math.floor(UP_MAX / 1e9) + " GB";
 export const UP_SESSION_MS = 7 * 86400000;
-// Phase 2: parts straight to R2. With an R2 API credential (the
+// Direct uploads: parts straight to R2. With an R2 API credential (the
 // R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY Worker secrets, plus the
 // R2_ACCOUNT_ID and R2_BUCKET vars) and the switch on (R2_DIRECT = "1"), a
 // client that asks for it gets presigned addresses and sends each part to

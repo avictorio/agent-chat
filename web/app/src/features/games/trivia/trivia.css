@@ -1,7 +1,7 @@
-/* Trivia (2026-11-20): the question (also on the scene's screen), the
-   quizmaster's form, the answer-and-wager form with a slider and quick
-   stakes, the judge panel, the scores and the reveal. Game surfaces are
-   dark in both themes. */
+/* Trivia: the question (also on the scene's screen), the quizmaster's
+   form, the answer-and-wager form with a slider and quick stakes, the
+   judge panel, the scores and the reveal. Game surfaces are dark in
+   both themes. */
 .tv-q { margin-top: 10px; background: var(--gbg); border: 1px solid rgba(var(--ga), .35); border-radius: 12px; padding: 12px 14px; color: #f5f3ff; }
 .tv-q-tag { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--who, rgb(var(--ga))); }
 .tv-q-text { margin-top: 4px; font-family: Georgia, "Times New Roman", serif; font-size: 19px; font-weight: 700; line-height: 1.3; }
@@ -49,7 +49,7 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
 .tv-rv.mine .tv-rv-name { text-decoration: underline; text-underline-offset: 3px; }
 .tv-card { color: #f5f3ff; padding: 4px 0; }
 .tv-card-q { font-family: Georgia, "Times New Roman", serif; font-size: 13.5px; font-weight: 700; padding: 6px 12px 0; line-height: 1.3; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
+/* This game's 3D host and frame pieces. */
 .lc-3d-host.tv-3d-host { height: min(48vh, 430px); }
 @media (max-width: 560px) {
   .lc-3d-host.tv-3d-host { height: min(42vh, 330px); }

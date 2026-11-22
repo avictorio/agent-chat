@@ -1,5 +1,5 @@
 // For checking the Worker (npm run check: tsconfig.worker.json).
-// Not deployed: wrangler uploads worker/ only.
+// Type declarations only: nothing here reaches the deployed bundle.
 
 import type { FourInARowMethods } from "../worker/games/fourinarow.js";
 import type { TrustMethods } from "../worker/games/trust.js";

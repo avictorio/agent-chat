@@ -5,12 +5,12 @@ import { wwActionVerb } from "./werewolf";
 import { WerewolfAction, WerewolfEvents, WerewolfPlayers, WerewolfRole, WerewolfTalk } from "./WerewolfPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
-/* Werewolf: the village (3D only), then your role, your night action
-   or day vote, the discussion panel (town square; the den for wolves),
-   the timeline and the villagers. The panels are React
-   (WerewolfPanels.tsx, mounted with ctx.panel): the discussion panel
-   keeps its drafts across repaints, and a repaint gives the focus back
-   to the field you were typing in. */
+/* Werewolf: the village, then your role, your night action or day vote,
+   the discussion panel (town square; the den for wolves), the timeline
+   and the villagers. The panels are React (WerewolfPanels.tsx, mounted
+   with ctx.panel): the discussion panel keeps its drafts across
+   repaints, and a repaint gives the focus back to the field you were
+   typing in. */
 export function renderWerewolfView(ctx: GameViewCtx, g: WerewolfState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

@@ -73,8 +73,8 @@ export const MessageMethods = {
     this.roomName = room;
     const ts = Date.now();
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
-    // Inline media is all or nothing (phase A): every put lands in R2 before
-    // the message is announced at the end of this method, so on a storage
+    // Inline media is all or nothing: every put lands in R2 before the
+    // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
     // already written - no message, no frame, no push survives a failed post.
     try {
@@ -135,7 +135,7 @@ export const MessageMethods = {
     this.waiters = new Set();
     for (const w of ws) w();
     if (this.clients.size) {
-      // Message frames are lean and identical for every client now; the
+      // Message frames are lean and identical for every client; the
       // current room state travels as its own event (see emitState).
       const frame = sseFrame(room, msg);
       for (const c of this.clients) {
@@ -147,11 +147,11 @@ export const MessageMethods = {
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.activityLog(room, "push error: " + String((e && e.message) || e))));
   },
 
-  // Message ids never come back: SQLite hands out max(id)+1, so deleting
-  // the newest message freed its id for the next post - cursor readers
-  // past it never saw the repost, and a signed media URL for the deleted
-  // message served the new one's media (sweep, 2026-11-19). A high-water
-  // mark in cfg keeps every id fresh.
+  // Message ids never come back. SQLite hands out max(id)+1, so deleting
+  // the newest message would free its id for the next post: cursor
+  // readers past it would miss the repost, and a signed media URL for the
+  // deleted message would serve the new one's media. A high-water mark in
+  // cfg keeps every id fresh.
   nextMsgId() {
     const max = this.sql.exec<{ id: number | null }>("SELECT MAX(id) AS id FROM m").one().id || 0;
     const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray()[0];
@@ -207,7 +207,7 @@ export const MessageMethods = {
 
   // Delete one of your own messages (the owner can delete any). Removes the
   // row, its reactions, and any media: in-flight multipart uploads are
-  // aborted and R2 objects deleted (all media lives in R2 since phase B).
+  // aborted and R2 objects deleted.
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean) {
     const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };

@@ -1,4 +1,4 @@
-/* Light Cycles, as a timeline (2026-11-13).
+/* Light Cycles, as a timeline.
 
    The server keeps every rider's trail in growth order and resolves a
    tick for everyone at once (resolveTick in worker/games/lightcycles.ts): each live rider
@@ -14,7 +14,7 @@
    sprint (each tick's move plays as motion, not a teleport), the
    catch-up (ticks the viewer missed, fast-forwarded) and the crash
    staging (the bike races into the wall it hit). Positions are in
-   grid units (x right, y down, as the 2D board); the arena maps them
+   grid units (x right, y down, as the card's board); the arena maps them
    to world space. Nothing here touches three.js. */
 
 import type { GameLogLine, LightCyclesMove, LightCyclesPlayer, LightCyclesState } from "@chat/contract";

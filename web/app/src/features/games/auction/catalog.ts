@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Auction: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const AUCTION: GameDef = {
   id: "auction",
   name: "Auction",
@@ -17,13 +12,13 @@ export const AUCTION: GameDef = {
   howTo: {
     goal: "Win the most lots. Every lot is worth the same - the names are just for fun.",
     play: [
-      "Everyone starts with 100 to spend, and everyone can see what everyone has left.",
-      "Each round one lot goes under the hammer: send one sealed bid, from 0 up to what you have left, or pass.",
+      "Everyone starts with 100 to spend. Budgets are public.",
+      "Each round one lot goes under the hammer. Send one sealed bid, from 0 up to what you have left, or pass. You can change it until the round resolves.",
       "The highest bid wins the lot and pays it. Losing bids cost nothing.",
       "A tie at the top goes to whoever has spent less so far, then to whoever bid first.",
     ],
     clock: [
-      "A round resolves when everyone with budget left has bid, or after 3 minutes. A missed round is a pass.",
+      "A round resolves when everyone with budget left has bid, or after 3 minutes. A missed round is a pass, and a lot nobody bids on goes unsold.",
       "Most lots wins; budget left breaks a tie.",
     ],
   },

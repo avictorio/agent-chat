@@ -91,26 +91,18 @@ export const CodeRaceMethods = {
     return { ok: true };
   },
 
-  /* ---------- games: Code Race (2026-11-19) ----------
-     Everyone cracks the same secret at once. Colors mode: a code of
-     `length` pegs from `colors` colours (repeats allowed); a guess
-     scores black pegs (right colour, right place) and white pegs (right
-     colour, wrong place). Words mode: a secret word; each letter of a
-     guess scores G (right place), Y (in the word, elsewhere) or . (not
-     in it), with the classic rule for repeated letters; guesses must be
-     words from the list (worker/data/coderace-words.txt). One guess per
-     round per racer, secret until the round resolves - and a RIVAL's
-     guess stays hidden for the whole match: views show only its
-     feedback, so nobody races on someone else's clues (the owner's
-     call, 2026-11-19). The end reveals every guess and the secret.
-     Rounds ride the simultaneous-rounds machinery and wait only on
-     racers still racing. Three missed rounds in a row drop a racer.
+  /* ---------- games: Code Race ----------
+     Player rules: rules() below. Secrecy: a RIVAL's guess stays hidden
+     for the whole match - views show only its feedback, so nobody races
+     on someone else's clues; the end reveals every guess and the secret.
+     Words come from worker/data/coderace-words.txt. Rounds ride the
+     simultaneous-rounds machinery and wait only on racers still racing.
      The race ends when nobody is left racing, when only one racer is
      left and someone has already cracked it (their place is settled),
-     or at the round cap. Places: solvers first, by the round they
-     cracked it, then most marks across their guesses (pegs, or greens),
-     then the earliest solving guess; then the rest by their closest
-     guess, dropped racers last. Nobody cracking it means no winner. */
+     or at the round cap. Places (crPlaces): solvers first, by the round
+     they cracked it, then most marks across their guesses (pegs, or
+     greens), then the earliest solving guess; then the rest by their
+     closest guess, dropped racers last. */
   crActive(st: CrSt) {
     return st.players.filter((p) => { const pr = st.prog[p.name]; return !pr.solved && !pr.out; });
   },
@@ -398,6 +390,7 @@ export const coderaceEngine = {
     (st.mode === "words"
       ? "Code Race (Words): every racer cracks the same secret " + st.length + "-letter word. A guess must be a word from the list; each letter scores G (right letter, right place), Y (in the word, elsewhere) or . (not in it), and a repeated letter counts only as often as the word holds it. "
       : "Code Race (Colors): every racer cracks the same secret code of " + st.length + " pegs from " + st.colors + " colours (" + CR_PALETTE.slice(0, st.colors).map((c) => c.k + " " + c.name).join(", ") + "), repeats allowed. Each guess scores black pegs (right colour, right place) and white pegs (right colour, wrong place): fb is [black, white]. ") +
-    "One secret guess per round each; you see rivals' feedback, never their guesses, until the race ends. Crack it in the fewest rounds (up to " + st.max_rounds + "). A round resolves when everyone still racing has guessed, or at the " + clockWords(st.round_seconds || 3600) + " deadline; three missed rounds in a row drop you. " +
-    (st.mode === "words" ? "Send dir as one word, e.g. " + CR_EXAMPLE[st.length] + "." : "Send dir as the colours in order, e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" ") + " (or random)."),
+    "One secret guess per round each, changeable until the round resolves; you see rivals' feedback, never their guesses, until the race ends. Crack it in the fewest rounds (up to " + st.max_rounds + "): places go by the round you cracked it, and if nobody does, nobody wins. " +
+    "A round resolves when everyone still racing has guessed, or at the " + clockWords(st.round_seconds || 3600) + " deadline; three missed rounds in a row drop you. " +
+    (st.mode === "words" ? "Send: dir as one word, e.g. " + CR_EXAMPLE[st.length] + "." : "Send: dir as the colours in order, e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" ") + " (or random)."),
 } satisfies GameEngineOf<CrSt>;

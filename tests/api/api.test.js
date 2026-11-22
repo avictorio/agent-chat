@@ -3,8 +3,8 @@
 // invite-only invariants, public room creation (validation, name race
 // surface, rollback on email failure), publish-on-complete, draft-media
 // privacy, room destruction, the upload engine (direct-upload signing
-// included), MCP, stream frames and the game engines. Each run uses its
-// own temp state (--persist-to). Exits non-zero on any failure.
+// included), MCP, stream frames and the game engines. Exits non-zero on
+// any failure.
 //
 //   npm run build     (once, and after web/ changes: the page shell and
 //                      its assets come from web/app/dist)
@@ -12,10 +12,10 @@
 //
 // Uses port 8798 and a throwaway .dev.vars (backed up and restored).
 // Hermetic: each run gets its own local state directory (wrangler dev
-// --persist-to, removed afterwards). The create-room caps count in KV,
-// and one of them is room-wide (30 a day): with the shared .wrangler
-// state, the sixth same-day run failed its create checks as 429s. Room
-// names, emails and client IPs stay unique per run as well.
+// --persist-to, removed afterwards). The create-room caps count in KV and
+// one of them is room-wide (30 a day), so shared state would fail a later
+// same-day run's create checks as 429s. Room names, emails and client IPs
+// stay unique per run as well.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -25,9 +25,8 @@ const PORT = 8798;
 const BASE = 'http://localhost:' + PORT;
 const OWNER = 'api-test-owner-key';
 const SUF = Date.now().toString(36);
-// Per-run client IPs for the create-room checks: the creation caps count
-// attempts per IP in the persistent local KV, so fixed literals exhaust
-// their daily budget after a few same-day runs and fail as 429s.
+// Client IPs for the create-room checks: the creation caps count attempts
+// per IP, so each check sends its own address, under a per-run prefix.
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const DEV_VARS = path.join(ROOT, '.dev.vars');
 const { golden } = require('./golden.js');
@@ -86,7 +85,7 @@ async function waitUp() {
     // Today's promises first (tests/api/golden.js): every case keeps its
     // status, error sentence and fields, whatever this commit adds.
     await golden({ req, BASE, OWNER, SUF, IPO }, check);
-    // Phase A of the agent invite link design (tests/api/invite-api.js).
+    // The agent invite link API (tests/api/invite-api.js).
     await inviteApi({ req, check, BASE, OWNER, SUF, IPO });
     const R = '/api/rooms/apitest-main-' + SUF;
     let r = await req('POST', R, { owner: true });
@@ -192,7 +191,7 @@ async function waitUp() {
     check('push service endpoint accepted', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
     await req('POST', R + '/push/unsubscribe', { token: TA, json: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF } });
 
-    // Member names (2026-11-19 sweep): no markup or game syntax, and one
+    // Member names: no markup or game syntax, and one
     // member per name however it is cased or composed.
     r = await req('POST', R + '/invites', { owner: true, json: { name: '<img src=x onerror=alert(1)>', kind: 'agent' } });
     check('name with markup -> 400', r.status === 400, r.status);
@@ -218,9 +217,9 @@ async function waitUp() {
     if (accU.json && accU.json.token) await req('DELETE', R + '/invites/' + encodeURIComponent(accU.json.token), { owner: true });
 
     // Revoking a member drops their push registrations: no more message
-    // text reaches a device of someone who is out. (Probed with Web Push
-    // since the Android app's device-token routes went with the app,
-    // 2026-11-20: those, and its App Links file, now answer 404.)
+    // text reaches a device of someone who is out. Probed with Web Push:
+    // the Android app's device-token routes and App Links file are gone
+    // (404).
     const PG_EP = 'https://fcm.googleapis.com/fcm/send/pushgone-' + SUF;
     const PG_STATUS = R + '/push/status?endpoint=' + encodeURIComponent(PG_EP);
     const invPG = await req('POST', R + '/invites', { owner: true, json: { name: 'PushGone', kind: 'agent' } });
@@ -248,7 +247,7 @@ async function waitUp() {
     r = await req('GET', R + '/messages?after=' + idA, { token: TB });
     check('a reader past the deleted id sees the repost', (r.json.messages || []).some((x) => x.id === idB), JSON.stringify((r.json.messages || []).map((x) => x.id)));
 
-    // The docs answer at /api/docs too (the welcome packet used to send agents there).
+    // The docs answer at /api/docs too (older welcome packets send agents there).
     r = await req('GET', '/api/docs');
     check('/api/docs serves the API docs', r.status === 200 && r.text.includes('GAMES - LIGHT CYCLES') && r.text.includes('Absence rule'), r.status);
     r = await req('POST', R + '/mcp', { token: TA, json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
@@ -274,9 +273,9 @@ async function waitUp() {
     r = await req('POST', R + '/invites', { owner: true, headers: notJson, body: '  \n' });
     check('a whitespace-only body reads as no body', r.status === 400 && /"name" is required/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 120));
 
-    // Authorization: Bearer is an alias for X-Invite-Token (Phase A of the
-    // agent invite link design); a token in X-Invite-Token wins, other
-    // schemes are not a token, and browsers may send and read the headers.
+    // Authorization: Bearer is an alias for X-Invite-Token; a token in
+    // X-Invite-Token wins, other schemes are not a token, and browsers may
+    // send and read the headers.
     const bearer = (t) => ({ Authorization: 'Bearer ' + t });
     r = await req('GET', R + '/messages?limit=1', { headers: bearer(TA) });
     check('Bearer token reads', r.status === 200 && r.json && r.json.you === 'ApiA', r.status + ' ' + (r.json && r.json.you));
@@ -316,7 +315,7 @@ async function waitUp() {
     r = await req('GET', R + '/messages/' + did + '/image', { token: TB });
     check('published media is room-visible', r.status === 200, r.status);
 
-    // Phase A: an R2 outage fails media writes all-or-nothing (503, nothing saved).
+    // An R2 outage fails media writes all-or-nothing (503, nothing saved).
     const STORE_MSG = 'Storage is unavailable right now. Nothing was saved; try again.';
     const roomName = R.slice('/api/rooms/'.length);
     const setFail = (on) => req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: roomName, on } });
@@ -341,10 +340,9 @@ async function waitUp() {
     r = await req('PUT', R + '/messages/' + od.json.id + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
     check('same attach succeeds after the outage', r.status === 200, r.status);
 
-    // Phase D: avatars live in R2. Set -> served with the right type;
-    // replace -> new bytes served; an R2 outage on set -> 503 and the old
-    // avatar survives; clear -> 404; the owner migration pair answers and
-    // reports zeros when no legacy blobs exist.
+    // Avatars live in R2. Set -> served with the right type; replace ->
+    // new bytes served; an R2 outage on set -> 503 and the old avatar
+    // survives; clear -> 404.
     const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
     r = await req('PUT', R + '/avatar', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
     check('avatar set (R2) -> 200 with url', r.status === 200 && !!r.json.avatar, r.status + ' ' + r.text.slice(0, 100));
@@ -364,14 +362,14 @@ async function waitUp() {
     check('avatar clear -> 200', r.status === 200, r.status);
     r = await req('GET', R + '/avatars/ApiA', { token: TA });
     check('cleared avatar -> 404', r.status === 404, r.status);
-    // Phase D finished (2026-11-19): every room held its avatars in R2 only,
-    // so the owner migrate/purge pair is retired.
+    // Every room holds its avatars in R2 only, so the owner migrate/purge
+    // pair is gone.
     r = await req('POST', R + '/admin/migrate-avatars', { owner: true });
     check('retired migrate-avatars route -> 404', r.status === 404, r.status + ' ' + r.text.slice(0, 100));
     r = await req('POST', R + '/admin/purge-avatars', { owner: true });
     check('retired purge-avatars route -> 404', r.status === 404, r.status + ' ' + r.text.slice(0, 100));
 
-    // Phase E: signed media URLs. Listings mint them (and carry no
+    // Signed media URLs. Listings mint them (and carry no
     // invite= anywhere); a signed URL reads with no credential at all;
     // a tampered signature, a signature replayed against another kind,
     // and a past expiry all answer 403; header auth keeps working.
@@ -390,7 +388,7 @@ async function waitUp() {
     check('past exp -> 403', r.status === 403, r.status);
     r = await req('GET', barePath, { token: TA });
     check('bare url with header auth still -> 200', r.status === 200, r.status);
-    // Phase E close-out: ?invite= no longer authenticates a media read.
+    // ?invite= does not authenticate a media read.
     r = await req('GET', barePath + '?invite=' + TA, {});
     check('media read with only ?invite= -> 401', r.status === 401, r.status);
     r = await req('GET', R + '/messages?limit=5', { token: TA });
@@ -727,7 +725,7 @@ async function waitUp() {
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('referee posts the expiry', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('match #' + expId + ' never started') && x.text.includes('Rex')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 80))));
 
-    // Light Cycles absence rule (2026-11-12): a rider the clock
+    // Light Cycles absence rule: a rider the clock
     // carries for three ticks in a row is taken out. Rex rides on
     // safe_moves every tick; Poc never submits a move.
     r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30 } });
@@ -877,9 +875,9 @@ async function waitUp() {
     check('salvo opens with 5 shots for the first captain', r.status === 200 && r.json.game.phase === 'play' && (r.json.game.turn_of === 'Poc' || r.json.game.turn_of === 'Rex') && r.json.game.salvo_left === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     const svFirst = r.json.game.turn_of;
     const svFT = svFirst === 'Poc' ? TP : TRex;
-    // One call can carry the whole volley (2026-11-12): shots after
-    // the first never changed the awaited turn, so a wake-driven
-    // player was never re-woken for them, and the list was refused.
+    // One call can carry the whole volley: shots after the first do
+    // not change the awaited turn, so a wake-driven player would never
+    // be re-woken to send them one per call.
     r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'A1,B1' } });
     check('a salvo volley fires its whole list in one call', r.status === 200 && r.json.game.turn_of === svFirst && r.json.game.salvo_left === 3 && (r.json.game.you.shots || {}).A1 && (r.json.game.you.shots || {}).B1, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'A2,A3,A4,A5' } });
@@ -893,7 +891,7 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + svId + '/cancel', { token: TP, json: {} });
     check('salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
-    // Free-for-all (2026-11-17): three captains, per-target shot
+    // Free-for-all: three captains, per-target shot
     // records, seat-order rotation, elimination, the salvo spread
     // rule. Scripted fleets keep every outcome known in advance:
     // Poc A10-E10 / C5-C8 / E6-G6 / G2-G4 / I2-J2; Rex A1-E1 /
@@ -1015,7 +1013,7 @@ async function waitUp() {
     r = await req('GET', R2 + '/games/' + ffaSv, { token: ffaTok[svShooter] });
     check('ffa salvo: the refused volley fired nothing', r.status === 200 && r.json.game.salvo_left === 5 && (r.json.game.you.targets || []).every(t => !Object.keys(t.shots || {}).length), r.status + ' ' + JSON.stringify(r.json.game.you || {}).slice(0, 200));
     // The rule spans the turn, not one call: shells sent one per call
-    // must still spread (sweep, 2026-11-19).
+    // must still spread.
     r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: svRivals[0] + ':A1' } });
     check('ffa salvo: a single first shell is fine', r.status === 200 && r.json.game.salvo_left === 4, r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
     r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: svRivals[0] + ':A2' } });
@@ -1029,23 +1027,23 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + ffaSv + '/cancel', { token: TP, json: {} });
     check('ffa salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
-    // Game engines (groundwork, 2026-11-19): "game" names an engine. An
-    // unknown name is refused with the list (it used to become Light
-    // Cycles silently); spacing and case variants of a real one work.
+    // Game engines: "game" names an engine. An unknown name is refused
+    // with the list, not silently made Light Cycles; spacing and case
+    // variants of a real one work.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'chess', from: 'Poc', players: ['Poc', 'Rex'] } });
     check('unknown game -> 400 naming the games', r.status === 400 && /lightcycles, duel, battleship/.test(String(r.json && r.json.error)), r.status + ' ' + r.text.slice(0, 120));
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'Light Cycles', from: 'Poc', players: ['Poc', 'Rex'] } });
     check('"Light Cycles" spelled out still creates Light Cycles', r.status === 201 && r.json.game.type === 'lightcycles', r.status + ' ' + r.text.slice(0, 120));
     if (r.json && r.json.game) await req('POST', R2 + '/games/' + r.json.game.id + '/cancel', { token: TP, json: {} });
 
-    // Frontlines (2026-11-19): 100 troops over 5 hills, secret splits,
+    // Frontlines: 100 troops over 5 hills, secret splits,
     // hill by hill to the bigger army, the round to more hills held.
     // Earlier sections leave live matches behind, and awaiting_you shows
     // at most 3 items: clear them so a nudge check sees its own match.
     // The two abandoned Battleship tables stay - the late checks wait on
     // them - so a player can still owe up to 2 turns there. A cancel
-    // needs a from even for the owner (without one it's a 400, which
-    // left this sweep doing nothing and the column check flaky).
+    // needs a from even for the owner: without one it is a 400, and this
+    // sweep would do nothing and leave the column check flaky.
     const clearLive = async (label) => {
       const gl = await req('GET', R2 + '/games', { owner: true });
       const bad = [];
@@ -1103,7 +1101,7 @@ async function waitUp() {
     const vr = (r.json.game.rounds || [])[0] || {};
     check('valued hills: the round goes to more points, not more hills', vr.held.Rex === 4 && vr.points.Poc === 3 && vr.points.Rex === 6 && vr.winner === 'Rex' && r.json.game.status === 'finished', JSON.stringify(vr));
 
-    // Code Race (2026-11-19): everyone cracks the same secret; one secret
+    // Code Race: everyone cracks the same secret; one secret
     // guess a round; a rival's guess shows only as feedback until the
     // race ends; places by the round you cracked it. The suite sets the
     // secret through a TEST_HOOKS-only hook so a race can be solved.
@@ -1169,7 +1167,7 @@ async function waitUp() {
     const wr1 = ((r.json.game || {}).rounds || [])[0] || { guesses: {} };
     check('words feedback: paper vs apple is YYGY.', wr1.guesses.Rex && wr1.guesses.Rex.fb === 'GGGGG' && r.json.game.status === 'finished' && r.json.game.winner === 'Rex' && (r.json.game.rounds[0].guesses.Poc || {}).fb === 'YYGY.' && r.json.game.secret === 'apple', JSON.stringify(r.json.game).slice(0, 260));
 
-    // how_to_play (2026-11-19): every full state carries the match's rules
+    // how_to_play: every full state carries the match's rules
     // with its own settings, so an agent never needs the rulebook.
     const rulesOf = async (id) => ((await req('GET', R2 + '/games/' + id, { token: TP })).json.game || {}).how_to_play || '';
     let hp = await rulesOf(crw.id);
@@ -1193,7 +1191,7 @@ async function waitUp() {
     for (const id of extra) await req('POST', R2 + '/games/' + id + '/cancel', { token: TP, json: {} });
     await clearLive('before four in a row');
 
-    // Four in a Row (2026-11-19): turns on the turn-order helper, a 7x6
+    // Four in a Row: turns on the turn-order helper, a 7x6
     // board, four in a line wins; who moves first is drawn at creation.
     const tokOf = { Poc: TP, Rex: TRex };
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'fourinarow', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
@@ -1233,7 +1231,7 @@ async function waitUp() {
     const lad = (r.json.ladder || {}).fourinarow || [];
     const lw = lad.find((x) => x.name === F) || {}, ll = lad.find((x) => x.name === S) || {};
     check('the ladder rates the Four in a Row win: 1016 vs 984', lw.rating === 1016 && lw.w === 1 && lw.last === 16 && ll.rating === 984 && ll.l === 1 && ll.last === -16 && lad[0].name === F, JSON.stringify(lad));
-    // Trust (2026-11-19): pairwise C/D, payoffs 3/5/0/1, a hidden last round.
+    // Trust: pairwise C/D, payoffs 3/5/0/1, a hidden last round.
     const tokT = { Poc: TP, Rex: TRex, Rae: TRae };
     let rt = await req('POST', R2 + '/games', { token: TP, json: { game: 'trust', from: 'Poc', players: ['Poc'] } });
     check('trust needs 2 to 8 -> 400', rt.status === 400 && /2 to 8/.test(rt.json.error), rt.status);
@@ -1268,7 +1266,7 @@ async function waitUp() {
     check('trust ends at its secret last round; Rex wins by 2', trG.status === 'finished' && trG.winner === 'Rex' && trG.last_round === trG.rounds.length && trG.last_round >= 3 && trG.last_round <= 6 && trG.players.find((p) => p.name === 'Rex').score - trG.players.find((p) => p.name === 'Poc').score === 2, JSON.stringify({ status: trG.status, winner: trG.winner, last: trG.last_round, n: (trG.rounds || []).length, players: trG.players }));
     rt = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Trust result', (rt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trust match #' + tr0.id + ' is over after') && x.text.includes('Rex wins with')), JSON.stringify((rt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
-    // Sealed-bid auction (2026-11-19): lots from data, sealed bids, first
+    // Sealed-bid auction: lots from data, sealed bids, first
     // price, a tie at the top to the lower spender then the earlier bid.
     let rau = await req('POST', R2 + '/games', { token: TP, json: { game: 'auction', from: 'Poc', players: ['Poc'] } });
     check('an auction needs 2 to 6 -> 400', rau.status === 400 && /2 to 6/.test(rau.json.error), rau.status);
@@ -1297,7 +1295,7 @@ async function waitUp() {
     check('most lots takes the season', rau.json.game.status === 'finished' && rau.json.game.winner === 'Poc' && JSON.stringify(rau.json.game.places) === '["Poc","Rex","Rae"]' && rau.json.game.players.find((p) => p.name === 'Poc').won === 2, JSON.stringify(rau.json.game).slice(0, 240));
     rau = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the auction result', (rau.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Auction #' + au.id + ' is over - Poc takes the season with 2 lots')), JSON.stringify((rau.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 100)).slice(-2)));
-    // Liar's Dice (2026-11-19): hidden cups, raise or call liar, ones wild,
+    // Liar's Dice: hidden cups, raise or call liar, ones wild,
     // an expired turn costs a die. Cups are set through the test hook.
     const ldTok = { Poc: TP, Rex: TRex, Rae: TRae };
     const ldHook = (id, json) => req('POST', '/api/test-hooks/liarsdice', { owner: true, json: Object.assign({ room: roomOf2, id }, json) });
@@ -1355,7 +1353,7 @@ async function waitUp() {
     check('the last die gone ends the 2-player match', rld.json.game.status === 'finished' && rld.json.game.winner === M2 && (rld.json.game.rounds[1] || {}).count === 0, JSON.stringify(rld.json.game).slice(0, 200));
     rld = await req('GET', R2 + '/games', { token: TP });
     check("the ladder rates Liar's Dice", ((rld.json.ladder || {}).liarsdice || []).length === 2 && rld.json.ladder.liarsdice[0].name === M2, JSON.stringify((rld.json.ladder || {}).liarsdice));
-    // Two Truths and a Lie (2026-11-19): a rotating storyteller, structured
+    // Two Truths and a Lie: a rotating storyteller, structured
     // moves (statements + lie), sealed votes, the lie kept secret.
     const ttExpire = (id) => req('POST', '/api/test-hooks/game-expire', { owner: true, json: { room: roomOf2, id } });
     let rtt = await req('POST', R2 + '/games', { token: TP, json: { game: 'twotruths', from: 'Poc', players: ['Poc', 'Rex'] } });
@@ -1397,7 +1395,7 @@ async function waitUp() {
     check('a storyteller who runs out forfeits; the last round ends the game', ttR.forfeit === true && ttR.teller === T3 && rtt.json.game.status === 'finished' && rtt.json.game.winner === T1 && rtt.json.game.places[0] === T1 && rtt.json.game.players.find((p) => p.name === T1).score === 3, JSON.stringify(rtt.json.game).slice(0, 260));
     rtt = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Two Truths result', (rtt.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Two Truths and a Lie #' + tt.id + ' is over - ' + T1 + ' wins with 3 points.')), JSON.stringify((rtt.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 120)).slice(-2)));
-    // Exquisite Corpse (2026-11-20): each writer sees only the segment
+    // Exquisite Corpse: each writer sees only the segment
     // before theirs; the story is revealed at the end; favourite votes.
     let rco = await req('POST', R2 + '/games', { token: TP, json: { game: 'corpse', from: 'Poc', players: ['Poc', 'Rex'] } });
     check('exquisite corpse needs 3 to 6 -> 400', rco.status === 400 && /3 to 6/.test(rco.json.error), rco.status);
@@ -1435,7 +1433,7 @@ async function waitUp() {
     check('the honours go to the most-voted segment', rco.json.game.status === 'finished' && rco.json.game.winner === W3 && JSON.stringify(rco.json.game.honours) === '[2]' && rco.json.game.votes['2'] === 2 && rco.json.game.places[0] === W3, JSON.stringify(rco.json.game).slice(0, 260));
     rco = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Exquisite Corpse result', (rco.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Exquisite Corpse #' + ec.id + ' is finished - 2 segments by 2 writers') && x.text.includes('The honours go to ' + W3 + ' for segment 2 (2 votes)')), JSON.stringify((rco.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
-    // Twenty Questions (2026-11-20): a rotating answerer, a hidden secret,
+    // Twenty Questions: a rotating answerer, a hidden secret,
     // a public Q/A log, exact guesses right on their own.
     let rtq = await req('POST', R2 + '/games', { token: TP, json: { game: 'twenty', from: 'Poc', players: ['Poc'] } });
     check('twenty questions needs 2 to 6 -> 400', rtq.status === 400 && /2 to 6/.test(rtq.json.error), rtq.status);
@@ -1475,7 +1473,7 @@ async function waitUp() {
     check('three clocks with no question hand the round to the answerer', tqR.how === 'idle' && tqR.points[A2] === 10 && rtq.json.game.status === 'finished' && rtq.json.game.winner === A2 && rtq.json.game.players.find((p) => p.name === A2).score === 28, JSON.stringify(rtq.json.game).slice(0, 240));
     rtq = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Twenty Questions result', (rtq.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Twenty Questions #' + tq.id + ' is over - ' + A2 + ' wins with 28 points.') && x.text.includes('Quickest: "a lighthouse" named by ' + A2 + ' in 2.')), JSON.stringify((rtq.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
-    // Werewolf (2026-11-20): secret roles, silent nights, public days, the
+    // Werewolf: secret roles, silent nights, public days, the
     // in-game talk, team wins on the record.
     const invIvy = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Ivy', kind: 'agent' } });
     const invJax = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Jax', kind: 'agent' } });
@@ -1532,7 +1530,7 @@ async function waitUp() {
     check('a team win counts for everyone on the side', wwRec.find((x) => x.name === SE).w === 1 && wwRec.find((x) => x.name === VS[0]).w === 1 && wwRec.find((x) => x.name === WW).l === 1, JSON.stringify(wwRec));
     rww = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Werewolf result', (rww.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Werewolf #' + ww.id + ' is over - the village wins at day 1: the werewolf was ' + WW + '.')), JSON.stringify((rww.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
-    // Letter Grid (2026-11-20): a shared grid (laid by the test hook),
+    // Letter Grid: a shared grid (laid by the test hook),
     // words checked when sent, sealed until the round resolves, first
     // claims, the duplicate rule, a same-round contest, and the tiebreaks
     // down to the earlier final-round word.
@@ -1578,10 +1576,9 @@ async function waitUp() {
     check('a full tie goes to the earlier final-round word', lgG.status === 'finished' && lgG.winner === 'Rex' && JSON.stringify(lgG.places) === '["Rex","Poc","Rae"]' && lgG.players.find((p) => p.name === 'Rex').score === 14 && lgG.players.find((p) => p.name === 'Poc').score === 14 && lgG.players.find((p) => p.name === 'Poc').cells === 2 && Array.isArray(lgG.top_words) && lgG.top_words.length > 0, JSON.stringify(lgG).slice(0, 260));
     rlg = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Letter Grid result', (rlg.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Letter Grid match #' + lg.id + ' is over after 3 rounds - Rex wins with 14 points.')), JSON.stringify((rlg.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
-    // Trivia (2026-11-20, the owner's call: a rotating quizmaster asks
-    // their own questions): a sealed answer, wagers capped, lenient
-    // matching, the quizmaster's judging, the split bonus, a missed answer
-    // and a forfeit ask.
+    // Trivia: a rotating quizmaster asks their own questions. A sealed
+    // answer, wagers capped, lenient matching, the quizmaster's judging,
+    // the split bonus, a missed answer and a forfeit ask.
     let rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'trivia', from: 'Poc', players: ['Poc'] } });
     check('trivia needs 2 to 6 -> 400', rtv.status === 400 && /2 to 6/.test(rtv.json.error), rtv.status);
     rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'quiz', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rotations: 1 } });
@@ -1632,11 +1629,11 @@ async function waitUp() {
     check('a quizmaster who runs out forfeits; the last round ends the game', tvG.status === 'finished' && tvG.rounds[2].forfeit === true && tvG.winner === Q0 && JSON.stringify(tvG.places) === JSON.stringify([Q0, Q1, Q2]) && tvG.players.find((p) => p.name === Q0).balance === 135, JSON.stringify(tvG).slice(0, 240));
     rtv = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Trivia result', (rtv.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trivia #' + tv.id + ' is over - ' + Q0 + ' wins with 135 points.') && x.text.includes('Best quizmaster: ' + Q0 + ' (split the table 1 time).')), JSON.stringify((rtv.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
-    // Sketch & Guess (2026-11-20, the owner's calls: image moves; the
-    // Referee is Claude). The artist's secret prompt, an image move checked
-    // by its bytes and served at a signed URL, sealed guesses, the plain
-    // match, the Referee's verdict (the test hook stands in for Claude), the
-    // fallback when the Referee can't be reached, and a forfeit.
+    // Sketch & Guess: image moves, and the Referee is Claude. The
+    // artist's secret prompt, an image move checked by its bytes and
+    // served at a signed URL, sealed guesses, the plain match, the
+    // Referee's verdict (the test hook stands in for Claude), the fallback
+    // when the Referee can't be reached, and a forfeit.
     let rsg = await req('POST', R2 + '/games', { token: TP, json: { game: 'sketch', from: 'Poc', players: ['Poc', 'Rex'] } });
     check('sketch & guess needs 3 to 6 -> 400', rsg.status === 400 && /3 to 6/.test(rsg.json.error), rsg.status);
     rsg = await req('POST', R2 + '/games', { token: TP, json: { game: 'pictionary', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], rotations: 1 } });
@@ -1688,15 +1685,15 @@ async function waitUp() {
     check('the Referee posts the Sketch & Guess result', (rsg.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Sketch & Guess #' + sg.id + ' is over - ' + A1sg + ' wins with 2 points.')), JSON.stringify((rsg.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
     check('the ladder covers the other 2-player games too', !!(r.json.ladder || {}).frontlines && !!(r.json.ladder || {}).coderace && (r.json.ladder.frontlines || []).every((x) => typeof x.rating === 'number'), JSON.stringify(Object.keys(r.json.ladder || {})));
 
-    // Reserved name (2026-11-12): "Referee" is the games' official -
+    // Reserved name: "Referee" is the games' official -
     // it cannot be invited as a member, and it cannot be seated.
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Referee', kind: 'agent' } });
     check('inviting a member named Referee -> 400', r.status === 400 && String(r.json.error || '').toLowerCase().includes('reserved'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Referee', 'Poc'], best_of: 3 } });
     check('seating Referee in a game -> 400', r.status === 400 && String(r.json.error || '').toLowerCase().includes('reserved'), r.status + ' ' + JSON.stringify(r.json).slice(0, 140));
-    // Duel clock: the default round deadline is 180s (owner's call,
-    // 2026-11-12 - an agent's wake-to-act cycle runs 1-2 minutes, so
-    // the old 60s could end a duel before a woken player threw).
+    // Duel clock: the default round deadline is 180s. An agent's
+    // wake-to-act cycle runs 1-2 minutes, so a 60s round could end a
+    // duel before a woken player threw.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3 } });
     check('duel default round clock is 180', r.status === 201 && r.json.game.round_seconds === 180, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 140));
     const duelDef = r.json.game.id;
@@ -1824,7 +1821,7 @@ async function waitUp() {
     // A post re-checks the state; Poc's block doesn't change with it, so
     // nothing may be re-sent. Compared frame to frame, not counted: Poc's
     // other live matches in this room keep their turn clocks, and on a slow
-    // run one can run out here - a real change, rightly sent (2026-11-22).
+    // run one can run out here - a real change, rightly sent.
     const stateFrames = () => s.frames.filter(f => f.includes('event: state'));
     await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'state dedupe probe' } });
     await waitFor(() => s.frames.some(f => f.includes('event: message') && f.includes('state dedupe probe')), 4000);
@@ -1954,8 +1951,8 @@ async function waitUp() {
     check('mcp publish completes the upload', !!(r.json && r.json.result && !r.json.result.isError && r.json.result.structuredContent && r.json.result.structuredContent.id === up.message_id), JSON.stringify(r.json).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=10', { token: TRex });
     check('delegated upload is room-visible', (r.json.messages || []).some(x => x.id === up.message_id && x.image), JSON.stringify((r.json.messages || []).map(x => x.id)).slice(0, 120));
-    // Phase A on the MCP surface: during a simulated R2 outage, attach_media
-    // fails as a tool error carrying the storage message, and recovers after.
+    // On the MCP surface: during a simulated R2 outage, attach_media fails
+    // as a tool error carrying the storage message, and recovers after.
     await req('POST', '/api/test-hooks/r2-fail', { owner: true, json: { room: R2.slice('/api/rooms/'.length), on: true } });
     r = await mcp(R2, 'tools/call', { name: 'attach_media', arguments: { id: up.message_id, kind: 'image', base64: PNG.toString('base64') } }, { token: TP });
     check('mcp attach_media during outage -> tool error with the storage message', !!(r.json && r.json.result && r.json.result.isError && JSON.stringify(r.json.result).includes('Storage is unavailable right now. Nothing was saved; try again.')), JSON.stringify(r.json).slice(0, 220));
@@ -1963,7 +1960,7 @@ async function waitUp() {
     r = await mcp(R2, 'tools/call', { name: 'attach_media', arguments: { id: up.message_id, kind: 'image', base64: PNG.toString('base64') } }, { token: TP });
     check('mcp attach_media works again after the outage', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
 
-    // Phase C: upload tickets - lifecycle and failure semantics.
+    // Upload tickets: lifecycle and failure semantics.
     const room2Name = R2.slice('/api/rooms/'.length);
     const mintTicket = async (args) => {
       const rr = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: args || { kind: 'image', text: 'ticket probe' } }, { token: TP });
@@ -1987,7 +1984,7 @@ async function waitUp() {
     check('oversize on a ticket -> 413', r.status === 413, r.status);
     r = await putTicket(tk2.upload.url, PNG);
     check('the same ticket still works after a 413', r.status === 200, r.status);
-    // Ticket media on a draft stays private until publish (existing rule, new path).
+    // Ticket media on a draft stays private until publish, as on every other path.
     r = await req('GET', R2 + '/messages/' + tk2.message_id + '/image', { token: TRex });
     check('ticket-uploaded draft media is private before publish', r.status === 404, r.status);
     r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: tk2.message_id } }, { token: TP });
@@ -2146,7 +2143,7 @@ async function waitUp() {
     check('a link finish attaches and auto-publishes', r.status === 200 && !!(r.json && r.json.file && r.json.file.name === 'notes.txt' && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
     r = await req('PUT', '/api/uploads/' + room2Name + '/' + 'B'.repeat(43) + '/part?n=1', { body: NOTE });
     check('a garbled link -> 404', r.status === 404, r.status);
-    // Phase 2, direct uploads. The signer must match AWS's published SigV4
+    // Direct uploads. The signer must match AWS's published SigV4
     // presigned-URL example (its documented, non-secret example keys).
     r = await req('POST', '/api/test-hooks/sigv4', { owner: true, json: { method: 'GET', host: 'examplebucket.s3.amazonaws.com', path: '/test.txt', query: {}, accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', region: 'us-east-1', expires: 86400, date: '2013-05-24T00:00:00Z' } });
     check('sigv4 presign matches the AWS example signature', !!(r.json && /X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404$/.test(r.json.url) && r.json.url.includes('X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request')), JSON.stringify(r.json).slice(0, 200));
@@ -2241,7 +2238,7 @@ async function waitUp() {
     check('bundle cached for a year, immutable', !!ar && /max-age=31536000/.test(ar.headers.get('cache-control') || '') && /immutable/.test(ar.headers.get('cache-control') || ''), ar && ar.headers.get('cache-control'));
     const miss = await fetch(BASE + '/assets/no-such-file-' + SUF + '.js');
     check('an unknown asset is a 404', miss.status === 404, miss.status);
-    // The app icons (static files since 2026-11-22): the manifest's three
+    // The app icons (static files): the manifest's three
     // and the apple-touch-icon, PNGs with a day's cache.
     for (const ic of ['icon-192', 'icon-512', 'icon-512-maskable', 'icon-180']) {
       const ir = await fetch(BASE + '/icons/' + ic + '.png');

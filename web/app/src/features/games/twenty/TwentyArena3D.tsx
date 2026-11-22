@@ -1,4 +1,4 @@
-/* Twenty Questions in 3D (2026-11-20): the sealed box.
+/* Twenty Questions in 3D: the sealed box.
 
    The world: a dark round hall, a box on a pedestal in the middle - the
    secret, sealed, a "?" turning over it - and twenty candles in a ring

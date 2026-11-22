@@ -1,5 +1,5 @@
-/* Arena sound effects, synthesized with Web Audio (2026-11-13) - no
-   audio files to fetch, decode or cache. Each effect is layered the
+/* Arena sound effects, synthesized with Web Audio - no audio files to
+   fetch, decode or cache. Each effect is layered the
    way a game mix builds an impact: a short transient that says WHEN,
    a body that says WHAT, a tail that says HOW BIG.
 

@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { finalScore, sideWin, winnerOf, type GL } from "./render";
 
-// The standard winner banner, React edition - the feed card's
+// The standard winner banner as React - the feed card's
 // footer and the Games tab rows render this; the imperative
 // surfaces use winnerBanner() from render.ts. Same markup, same
 // words: trophy + the winner's name in their color + the score.

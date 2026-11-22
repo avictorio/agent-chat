@@ -1,5 +1,5 @@
-// Date helpers ported from the current app: board dates are YYYY-MM-DD
-// strings read as local days, never UTC.
+// Date helpers: board dates are YYYY-MM-DD strings read as local days,
+// never UTC.
 
 export function parseDay(s: string | null | undefined): Date | null {
   if (!s) return null;

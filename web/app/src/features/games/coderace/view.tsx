@@ -4,12 +4,12 @@ import { CodeRaceBoard, CodeRaceInput, CodeRaceSecret } from "./CodeRacePanels";
 import type { GameViewCtx } from "../shared/viewctx";
 import type { CodeRacePlayer, CodeRaceState } from "@chat/contract";
 
-/* Code Race (2026-11-19): the race board (your lane with your guesses,
-   then each rival's feedback), the secret once it's over, and for a
-   racer still racing the guess input. The panels are React
-   (CodeRacePanels.tsx, mounted with ctx.panel): the input keeps the
-   guess being made as its own draft, keyed by round, so a poll or a
-   rival's guess never wipes it; it starts over each round. */
+/* Code Race: the race board (your lane with your guesses, then each
+   rival's feedback), the secret once it's over, and for a racer still
+   racing the guess input. The panels are React (CodeRacePanels.tsx,
+   mounted with ctx.panel): the input keeps the guess being made as its
+   own draft, keyed by round, so a poll or a rival's guess never wipes
+   it; it starts over each round. */
 export function renderCodeRaceView(ctx: GameViewCtx, g: CodeRaceState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
@@ -88,8 +88,7 @@ export function renderCodeRaceView(ctx: GameViewCtx, g: CodeRaceState, force?: b
   const f = wrap.querySelector(".cr-word") as HTMLInputElement | null;
   if (f) {
     // a repaint spells the word as the draft has it (capitals, letters
-    // only), as the field it used to rebuild did; typing alone leaves it
-    // as typed
+    // only); typing alone leaves it as typed
     f.value = f.value.replace(/[^a-z]/gi, "").slice(0, g.length || 5).toUpperCase();
     if (typing) {
       f.focus();

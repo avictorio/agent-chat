@@ -32,7 +32,7 @@ import { CYCLE_NOSE, CYCLE_REAR_WHEEL, CYCLE_WHEEL_R, CycleModel, EdgeWall, Grid
 import { DV, impactAt, nearMisses, options, poseAt, riders, seenTick, setSeenTick, territory, type Dir, type Rider } from "./lcmodel";
 import type { LightCyclesPlayer, LightCyclesState } from "@chat/contract";
 
-/* Light Cycles in 3D (2026-11-13: the race).
+/* Light Cycles in 3D: the race.
 
    The arena renders GET /games/:id - the trails in growth order, the
    riders, the viewer's options - and, because every rider's path can
@@ -1043,7 +1043,7 @@ export default function LcArena3D({
             <Bike key={"b" + r.i} r={r} race={race} wx={wx} wz={wz} still={still} />
           ))}
 
-          {/* where wrecks went out: the 2D board's ✕ on the floor */}
+          {/* where wrecks went out: the card board's crash mark on the floor */}
           {list.map((r) => {
             if (!r.out || r.alive) return null;
             const c = r.cells[r.cells.length - 1];
@@ -1068,8 +1068,8 @@ export default function LcArena3D({
   );
 }
 
-/* Where a rider went out: the 2D board's ✕, in the rider's colour
-   lifted toward white - shown once its derez has played. */
+/* Where a rider went out: the card board's crash mark, in the rider's
+   colour lifted toward white - shown once its derez has played. */
 function CrashMark({ race, r, x, z, hex }: { race: MutableRefObject<Race>; r: Rider; x: number; z: number; hex: string }) {
   const grp = useRef<Group>(null);
   const c = useMemo(() => new Color(hex).lerp(new Color("#ffffff"), 0.35).multiplyScalar(2.2), [hex]);

@@ -16,7 +16,8 @@ import type { HistPlayer } from "./shared/history";
 // frames and slow polls). Cards are React components subscribed to this
 // store; an arena view is native DOM inside the viewer around a lazy 3D
 // scene, and its controls call the moves endpoint with the viewer's own
-// invite. Without WebGL the flat panels the scenes replaced come back.
+// invite. Without WebGL a note stands in for the scene, and flat panels
+// carry what a game cannot play without.
 
 
 /* ---------- the store ---------- */
@@ -54,7 +55,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // the scene element that had focus before a Battleship repaint
   let bsRefocus: HTMLElement | null = null;
   let gameRenderKey = "";
-  // What each game's arena renderer (<game>/view.ts) gets from the store.
+  // What each game's arena renderer (<game>/view.tsx) gets from the store.
   const ctx: GameViewCtx = {
     get gameView() {
       return gameView;
@@ -137,14 +138,12 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return h;
   }
 
-  /* The turn banner (2026-11-13): every running arena opens with one
+  /* The turn banner: every running arena opens with one
      line that says who is up - "Your shot", "Ada is in · your throw
      decides the round", "Waiting on Henry" - the time left as a
      countdown (not a clock time), a bar that stays calm until the
      last quarter and then burns, and what happens when the clock runs
-     out, when it is you it will happen to. Each game used to say this
-     in its own place and words (Light Cycles as a clock time in the
-     meta line, Battleship not at all). The text keeps the
+     out, when it is you it will happen to. The text keeps the
      duel-statusline class the suite reads. */
   function turnBanner(g: GL): HTMLElement | null {
     if (!g || g.status !== "running") return null;
@@ -205,9 +204,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   function rematchRow(g: GL, note: HTMLElement): HTMLElement {
     const row = el("div", "duel-pad");
-    // Rematch is offered to everyone for a finished or called-off
-    // match (the Nov 11 standardization); sendRematch's in-flight
-    // guard is what keeps a double tap from opening two lobbies.
+    // Rematch is offered to everyone (see sendRematch).
     const b = el("button", "duel-btn", "Rematch");
     b.type = "button";
     b.addEventListener("click", () => {
@@ -222,10 +219,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   const rematchInFlight = new Set<number>();
 
   async function sendRematch(g: GL, note: HTMLElement | null) {
-    // One guard for every rematch surface (arena row, card, games
-    // list): a double tap used to open two lobbies. Rematch itself
-    // stays open to everyone - any member can run back a finished
-    // or called-off match with its original players.
+    // One in-flight guard for every rematch surface (arena row, card,
+    // games list), so a double tap never opens two lobbies. Rematch is
+    // open to everyone: any member can run back a finished or
+    // called-off match with its original players.
     if (rematchInFlight.has(g.id)) return;
     rematchInFlight.add(g.id);
     const body: Record<string, unknown> = { players: (g.players || []).map((p: GLPlayer) => p.name) };
@@ -389,9 +386,9 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   }
 
   // A compact signature of the per-viewer block. The arena render
-  // keys include it: without it, a refetch that changed only the
+  // keys include it: without it, a refetch that changes only the
   // viewer's own state (spectator -> player, your turn arriving)
-  // never repainted, and the arena could sit on "Spectating".
+  // would not repaint, and the arena could sit on "Spectating".
   function youSig(g: GL): string {
     const y = g.you;
     if (!y) return "-";
@@ -402,10 +399,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   /* The games' 3D views, lazy-loaded like the Duel's: one host per open
      arena, kept across repaints; the scene shows the last round and plays
-     new ones in, the inputs and the numbers stay in the page. The arena
-     view is 3D only (2026-11-20, the owner's call: the 2D views and the
-     2D/3D toggles are retired); a device without WebGL gets a note and
-     plays with the controls under it. */
+     new ones in, the inputs and the numbers stay in the page. A device
+     without WebGL gets a note and plays with the controls under it. */
   const KIND3D: Record<string, Kind3d> = {
     frontlines: { cls: "fl-3d-host", load: () => import("./frontlines/FrontlinesArena3D"), comp: null },
     coderace: { cls: "cr-3d-host", load: () => import("./coderace/CodeRaceArena3D"), comp: null },
@@ -488,22 +483,21 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
 
   /* ---- The 3D arenas ----
-     Every arena is a 3D scene (react-three-fiber; the 2D views and
-     the 2D/3D toggles were retired 2026-11-20). Each scene module is
+     Every arena is 3D only: a react-three-fiber scene, with no 2D view
+     and no 2D/3D toggle. Each scene module is
      a dynamic import, so three.js ships in lazy chunks that load only
      when an arena opens. The React root lives on the gameView object:
      renderGameView clears and rebuilds the wrap on every state change,
      and re-appending the same host element keeps the canvas (and the
      camera) alive across repaints. */
-  /* The 3D host (2026-11-12): a mount for the scene's React root plus
-     a status layer over it - "Loading the 3D arena…" until the scene
-     draws its first frame, or what went wrong with a Reload button.
-     There is no 2D fallback by design (3D is the arena view): a
-     failure says so and offers the reload that cures the usual cause
-     - a deploy deleted the hashed chunk this page was built against.
-     A WebGL failure reaches onUncaughtError (R3F rethrows it into the
-     tree) instead of surfacing as an uncaught page error over a blank
-     box. A failed host stops repainting until it is rebuilt. */
+  /* The 3D host: a mount for the scene's React root plus a status
+     layer over it - "Loading the 3D arena…" until the scene draws its
+     first frame, or what went wrong with a Reload button. A failure
+     says so and offers the reload that cures the usual cause: a deploy
+     deleted the hashed chunk this page was built against. A WebGL
+     failure reaches onUncaughtError (R3F rethrows it into the tree)
+     instead of surfacing as an uncaught page error over a blank box. A
+     failed host stops repainting until it is rebuilt. */
   function makeHost3d(cls: string): Host3d {
     const host = el("div", cls);
     const mount = el("div", "arena3d-mount");
@@ -607,7 +601,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     );
   }
 
-  /* ---- Battleship 3D board (R3F, 2026-11-12) ----
+  /* ---- Battleship 3D board (R3F) ----
      Same bridge pattern as the Light Cycles scene: ./BsArena3D is a
      dynamic import (three.js stays in the lazy chunk), and the React
      root lives on gameView so re-appending the host keeps the canvas
@@ -688,11 +682,12 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     paintBs3d(g, gameView.bs3d);
   }
 
-  /* ---- Duel 3D arena (2026-11-13) ----
+  /* ---- Duel 3D arena ----
      Same bridge as the other two: ./DuelArena3D is a dynamic import,
-     and the React root lives on gameView so repaints keep the canvas. The scene replaces the two DOM duel
-     sides; the throw pad, the verdict banner and the scoreboard stay
-     in the page - the scene shows, the page acts. */
+     and the React root lives on gameView so repaints keep the canvas.
+     The scene shows the two sides; the throw pad, the verdict banner
+     and the scoreboard stay in the page - the scene shows, the page
+     acts. */
   let duel3dComp: Promise<
     ComponentType<{ g: DuelState; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: ((t: string) => void) | null) => void }>
   > | null = null;
@@ -807,9 +802,9 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     document.querySelectorAll("[data-duel-deadline]").forEach((b) => setClockBar(b as HTMLElement));
     document.querySelectorAll("[data-turn-deadline]").forEach((b) => setTurnClock(b as HTMLElement));
   }, 1000);
-  // Cards stay fresh on a slow poll, like the current app. A finished
-  // or called-off match never changes again, so only live ones (and
-  // entries known only from a frame) are polled.
+  // Cards stay fresh on a slow poll. A finished or called-off match
+  // never changes again, so only live ones (and entries known only from
+  // a frame) are polled.
   window.setInterval(() => {
     if (document.hidden) return;
     cache.forEach((g, id) => {
@@ -831,16 +826,13 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       if (!game || !game.id) return;
       // A frame of any registered game; Light Cycles once it carries trails.
       if (game.trails || (game.type !== "lightcycles" && GAMES[game.type])) {
-        // A frame carries the public summary, not the full state.
-        // Merge it over the cached entry instead of replacing it:
-        // replacing wiped the per-viewer fields (you, rounds, log)
-        // the cards and arenas render from, so a live update could
-        // show the wrong "your move" state until the next poll.
-        // The merge keeps the cached per-viewer fields (you, rounds,
-        // log), which the frame cannot update: for a match you play in,
-        // and for one known only from this frame (its card message may
-        // land after it), fetch the full state right away so "your
-        // move" and Accept/Decline are never stale.
+        // A frame carries the public summary, not the full state, so
+        // it is merged over the cached entry: replacing it would wipe
+        // the per-viewer fields (you, rounds, log) the cards and arenas
+        // render from. The frame cannot update those, so for a match
+        // you play in, and for one known only from this frame (its card
+        // message may land after it), the full state is fetched right
+        // away and "your move" and Accept/Decline are never stale.
         const prev = cache.get(game.id);
         cache.set(game.id, prev ? Object.assign({}, prev, game) : Object.assign({ __frameOnly: true }, game));
         notify();

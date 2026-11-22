@@ -1,7 +1,6 @@
-// Small shared helpers for the app, mirroring the current app's
-// conventions: a forgiving localStorage wrapper (private modes throw)
-// and a toast bus so any component can surface a message through the
-// one toast element the shell renders.
+// Small shared helpers: a forgiving localStorage wrapper (private modes
+// throw) and a toast bus so any component can surface a message through
+// the one toast element the shell renders.
 
 export function store(k: string): string | null;
 export function store(k: string, v: string | null): void;
@@ -11,7 +10,7 @@ export function store(k: string, v?: string | null): string | null | void {
     if (v === null) localStorage.removeItem(k);
     else localStorage.setItem(k, v);
   } catch {
-    // storage unavailable: reads miss, writes vanish — same as the old app
+    // storage unavailable: reads miss, writes vanish
   }
   return null;
 }

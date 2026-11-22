@@ -1,4 +1,4 @@
-/* Liar's Dice in 3D (2026-11-19): the den.
+/* Liar's Dice in 3D: the den.
 
    The world: a round crimson felt table under one warm lamp, a dark room
    around it. Every player has a leather cup in their colour at the table's
@@ -731,8 +731,7 @@ export default function LiarsArena3D({
   const champion = finished && g.winner ? seats.find((s) => s.name === g.winner) || null : null;
   const home = (a: number, width: number) => ldHome(a, width);
   const first = home(aspect || 1.6, hostW);
-  /* A seat's latest bid this round (the page's table listed it; the seat
-     plate carries it now). */
+  /* A seat's latest bid this round, for its seat plate. */
   const lastBidOf = (name: string): LiarsDiceBid | null => {
     if (!running || r) return null;
     const mine = ((g.bids || []) as LiarsDiceBid[]).filter((b) => b && b.by === name);

@@ -1,4 +1,4 @@
-/* Rules that sat late in the single stylesheet: the doc body, the viewer, composer focus, link buttons, top dots, errors. Kept in this position for the cascade; move each next to its component as it becomes one. */
+/* The doc body, the viewer, composer focus, link buttons, top dots, errors: kept at this point of the cascade (styles.css); move each next to its component as it becomes one. */
 .doc-body { padding: 10px 14px; max-height: 300px; overflow: hidden; }
 .doc-body .md-p:first-child { margin-top: 0; }
 #viewer { position: fixed; inset: 0; z-index: 120; background: var(--bg); display: flex; flex-direction: column; }

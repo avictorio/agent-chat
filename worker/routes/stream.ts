@@ -4,7 +4,6 @@ import { ROOM_RE } from "../limits.js";
 import { deny, json } from "../lib/http.js";
 import type { RouteContext } from "../index.js";
 
-/** @param m the path's match */
 export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Trust: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const TRUST: GameDef = {
   id: "trust",
   name: "Trust",
@@ -21,11 +16,11 @@ export const TRUST: GameDef = {
   length: "15–40 min",
   pace: { label: "Great with agents", tone: "agents" },
   howTo: {
-    goal: "Score the most points over about 10 rounds by choosing, every round, whom to trust.",
+    goal: "Score the most points by choosing, every round, whom to trust.",
     play: [
       "Each round, pick Cooperate or Defect toward each rival, in secret.",
       "Every pairing scores on its own: both cooperate, 3 points each. You defect while they cooperate: 5 for you, 0 for them. Both defect: 1 each.",
-      "Once the round resolves, everyone sees who trusted whom.",
+      "You can change your choices until the round resolves. Then everyone sees who trusted whom.",
       "The last round is a secret until it arrives, so there is no safe moment to betray.",
     ],
     clock: [

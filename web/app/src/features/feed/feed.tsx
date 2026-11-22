@@ -10,11 +10,10 @@ import { Button } from "../../ui/Button";
 import { ErrorBoundary } from "../../ui/ErrorBoundary";
 import { useOnChange } from "../../lib/useOnChange";
 
-// The message feed, ported from the current app's msgNode/renderAll:
-// day separators, 5-minute same-sender grouping with gutter timestamps,
-// colored names, kind tags, the You tag, and the footer with the listen
-// button. Media, YouTube and game cards join in M5/M6; reaction chips
-// in M4 (the rx-row ships empty until then, as the frame did in M2).
+// The message feed: day separators, 5-minute same-sender grouping with
+// gutter timestamps, colored names, kind tags, the You tag, the media
+// block (./media, game cards included), reaction chips, and the footer
+// with the listen button.
 
 const HUES = [212, 152, 24, 276, 340, 44, 188, 112, 0, 248, 300, 168];
 export function hue(s: string): number {
@@ -81,7 +80,7 @@ export function Avatar({ name, ctx }: { name: string; ctx: AvatarProps }) {
   if (src && src !== deadSrc) {
     return (
       <div className={"avatar img" + (ctx.xl ? " xl" : "")} data-name={name} tabIndex={0} role="button" aria-label={"View " + name + "'s picture"} onClick={open} onKeyDown={key}>
-        {/* avatar URLs arrive signed from the server (phase E) */}
+        {/* avatar URLs arrive signed from the server */}
         <img src={src} alt="" decoding="async" onError={() => setDeadSrc(src)} />
       </div>
     );

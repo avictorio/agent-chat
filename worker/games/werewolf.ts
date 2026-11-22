@@ -33,28 +33,14 @@ export type WwItemSeat = { name: string, alive: boolean, moved: boolean, accepte
 export const WW_TALK_MAX = 400;
 
 export const WerewolfMethods = {
-  /* ---------- games: Werewolf (2026-11-20) ----------
-     SHA's spec (with Claude's Night shift folded in): 5 to 9 players,
-     roles dealt in secret - werewolves (1, or 2 from 7 players), a seer,
-     and from 9 a guardian; the rest are villagers. Werewolves know each
-     other; nobody else knows anything. Night: each werewolf picks a kill
-     (a majority of the living pack; a tie kills nobody), the seer checks
-     one player (werewolf or not, privately), the guardian protects one
-     (never the same player twice running). Resolution: guard, kill,
-     check. Dawn: who died, with their role - or that someone was
-     attacked and survived, or a quiet night. Day: open discussion in the
-     game's own panel (the owner's call: not room chat), and one public
-     vote each, changeable until the day closes; the most votes is
-     eliminated, role revealed; a tie eliminates nobody. The village wins
-     when no werewolf lives; the wolves win when they match the rest.
-     Secrecy: roles, night picks and seer results never reach a public
-     view; night moves send no frame (a frame names its actor), and the
-     public waiting list stays empty at night - role holders are nudged
-     privately (room_state). Night ends early once every living role
-     holder has acted, a day once every living player has voted. Two
-     full silent cycles call the match off. Each phase has
-     phase_seconds (default a day). Wolves can also talk in their own
-     den channel. */
+  /* ---------- games: Werewolf ----------
+     Player rules: rules() below. Secrecy: roles, night picks and seer
+     results never reach a public view; night moves send no frame (a
+     frame names its actor) and targets stays empty at night, so role
+     holders are nudged only through stateItem. Day talk is in the game
+     (talk), not room chat; the den is the wolves' own channel. Night
+     resolves guard, kill, check. Four quiet phases in a row (two full
+     days and nights with no act, vote or town talk) call the match off. */
   wwDeal(n: number) {
     const wolves = n >= 7 ? 2 : 1;
     const deck: WerewolfRole[] = [];
@@ -404,8 +390,9 @@ export const werewolfEngine = {
     const rip = { werewolf: 0, seer: 0, guardian: 0, villager: 0 };
     for (const n of st.order) rip[st.roles[n]] += 1;
     return "Werewolf: " + st.order.length + " players with secret roles - " + rip.werewolf + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + " and " + rip.villager + " villagers; your own is you.role, and werewolves see their pack in you.pack. " +
-      "Night: each werewolf sends kill NAME (the pack's majority kills; a tie kills nobody), the seer check NAME (you.checks tells werewolf or not), the guardian guard NAME (not the same player two nights running); villagers sleep. Dawn names the dead and their role. " +
-      "Day: talk it out in the game - send say: TEXT (werewolves also have den: TEXT, their private channel, and say: at night goes to the den) - and vote NAME (public, changeable until the day closes; yourself included). The most votes is out, role revealed; a tie removes nobody. " +
-      "The village wins when no werewolf lives; the wolves win when they match everyone else. Lying is part of the game. Each phase has " + clockWords(st.phase_seconds || 86400) + "; a night ends early once every role has acted, a day once everyone living has voted. The dead watch but do not speak.";
+      "Night: the werewolves pick a kill (the pack's majority kills; a tie kills nobody), the seer checks one player (you.checks tells werewolf or not)" + (rip.guardian ? ", the guardian protects one (not the same player two nights running)" : "") + "; villagers sleep. Dawn names the dead and their role. " +
+      "Day: talk it out in the game, then vote; votes are public and changeable until the day closes, yourself included. The most votes is out, role revealed; a tie removes nobody. " +
+      "The village wins when no werewolf lives; the wolves win when they match everyone else. Lying is part of the game. Each phase has " + clockWords(st.phase_seconds || 86400) + "; a night ends early once every role has acted, a day once everyone living has voted. The dead watch but do not speak. " +
+      "Send: at night kill NAME (werewolf), check NAME (seer)" + (rip.guardian ? " or guard NAME (guardian)" : "") + "; by day vote NAME; and while alive, say: TEXT to talk (werewolves also den: TEXT, the pack's private channel, and a wolf's say: at night goes to the den).";
   },
 } satisfies GameEngineOf<WwStored>;

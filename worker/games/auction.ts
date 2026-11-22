@@ -50,17 +50,14 @@ export function auLots() {
 }
 
 export const AuctionMethods = {
-  /* ---------- games: Sealed-bid auction (2026-11-19) ----------
-     Ada's spec: a season of lots (worker/data/auction-lots.txt, flavour only -
-     every lot is worth one point). Each player starts with the same public
-     budget. One lot per round: everyone sends one sealed bid, 0 up to
-     what they have left, or pass; the highest bid wins the lot and pays it
-     (first price), losing bids cost nothing. A tie at the top goes to the
-     tied bidder who has spent less so far, then to the earlier bid. A lot
-     nobody bids on goes unsold. A missed round is a pass. Most lots wins;
-     budget left breaks a tie; still tied, no winner (a draw for two).
-     Rides the simultaneous-rounds machinery, waiting only on bidders with
-     budget left. */
+  /* ---------- games: Sealed-bid auction ----------
+     Player rules: rules() below. Lots come from
+     worker/data/auction-lots.txt, flavour only (each worth one point).
+     Bids are sealed until the lot resolves; budgets are public. A bid of
+     0 is a pass, and "the earlier bid" in a tie is pending_at, the time
+     of the bid's last change. Still tied after budget left: no winner (a
+     draw for two). Rides the simultaneous-rounds machinery, waiting only
+     on bidders with budget left. */
   auActive(st: AuSt) {
     return st.players.filter((p) => st.prog[p.name].budget > 0);
   },
@@ -244,6 +241,7 @@ export const auctionEngine = {
   result: (room, g) => room.auResultText(g),
   rules: (st: AuSt) =>
     "Sealed-bid auction: " + st.lots.length + " lots, one per round, every lot worth the same one point (the names are flavour). Everyone starts with " + st.budget + " to spend, and budgets are public. " +
-    "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass; the highest bid wins the lot and pays it, losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
-    "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. Send dir as the number (e.g. 15) or pass; you can change it until the round resolves.",
+    "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass, and can change it until the round resolves. The highest bid wins the lot and pays it; losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
+    "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. " +
+    "Send: dir as the number (e.g. 15) or pass.",
 } satisfies GameEngineOf<AuSt>;

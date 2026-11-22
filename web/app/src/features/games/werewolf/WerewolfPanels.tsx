@@ -2,13 +2,12 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { WerewolfCheck, WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfTalk as WerewolfLine, WerewolfYou } from "@chat/contract";
 import { WW_TALK_MAX, wwActionVerb, wwEventText, wwRole, wwSideText } from "./werewolf";
 
-/* Werewolf's panels (2026-11-21, React), under the 3D village: your
-   role, your night action or day vote, the discussion panel (the town
-   square; wolves also have their den), the timeline, the villagers and
-   the chat card. The view (view.tsx) mounts them with ctx.panel, so the
-   discussion panel's drafts are its own state and survive the view's
-   repaints. Roles stay secret: only your own view carries your role,
-   your pack, your checks. */
+/* Werewolf's panels, under the 3D village: your role, your night action
+   or day vote, the discussion panel (the town square; wolves also have
+   their den), the timeline, the villagers and the chat card. The view
+   (view.tsx) mounts them with ctx.panel, so the discussion panel's
+   drafts are its own state and survive the view's repaints. Roles stay
+   secret: only your own view carries your role, your pack, your checks. */
 
 const hexOf = (g: WerewolfState, n: string) => (((g && g.players) || []).find((p: WerewolfPlayer) => p.name === n) || { hex: "#94a3b8" }).hex;
 const VERB_LABEL: Record<string, string> = { kill: "Kill", check: "Check", guard: "Guard", vote: "Vote out" };
@@ -66,9 +65,9 @@ export function WerewolfAction({ g, me, onSend }: { g: WerewolfState; me: string
 
 type Channel = "town" | "den";
 
-/* A line to the village or the pack. The field is uncontrolled (a value
-   prop would add a value attribute the old markup never had): it starts
-   from the draft when it mounts and reports each keystroke back. */
+/* A line to the village or the pack. The field starts from the draft
+   when it mounts and reports each keystroke back. Uncontrolled field:
+   see docs/agents/games.md, Panels. */
 function TalkForm({ ch, draft, onDraft, onSay }: { ch: Channel; draft: string; onDraft: (v: string) => void; onSay: (dir: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [seed] = useState(draft);

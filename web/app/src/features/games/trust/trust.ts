@@ -1,10 +1,10 @@
 import { el } from "../../../lib/index";
 import type { TrustPlayer, TrustRound, TrustState } from "@chat/contract";
 
-/* Trust (2026-11-19): what the panels (TrustPanels.tsx) and the
-   history share. Every pairing scores on its own: both C 3 each, D
-   against C 5 to 0, both D 1 each. Pending choices are secret (the
-   server sends only your own); resolved rounds are public. */
+/* Trust: what the panels (TrustPanels.tsx) and the history share. Every
+   pairing scores on its own: both C 3 each, D against C 5 to 0, both D
+   1 each. Pending choices are secret (the server sends only your own);
+   resolved rounds are public. */
 
 export type TrDraft = Record<string, "C" | "D">;
 

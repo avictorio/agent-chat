@@ -62,14 +62,12 @@ export function c4BoardOf(st: Pick<C4St, "cols">) {
 }
 
 export const FourInARowMethods = {
-  /* ---------- games: Four in a Row (2026-11-19) ----------
-     SHA's spec, on the turn-order helper: two players, a 7x6 board, a
-     disc dropped into a column falls to the lowest free cell; four of
-     yours in a line - across, up or diagonal - wins, a full board is a
-     draw. Who moves first is drawn at creation. dir is the column, 1-7
-     (left to right). A turn waits turn_seconds (default an hour); an
-     expired turn passes, the third forfeits, 20 passes draw. The Referee
-     posts only the result; the board lives in the card and the arena. */
+  /* ---------- games: Four in a Row ----------
+     Player rules: rules() below. Rides the turn-order helper (turnsNext
+     and turnsAdvance in room/games.ts): an expired turn passes, the third
+     timeout in a match forfeits, pass_limit passes draw. Who moves first
+     is drawn at creation. The Referee posts only the result; the board
+     lives in the card and the arena. */
   c4Board(st: C4St) {
     return c4BoardOf(st);
   },
@@ -225,5 +223,5 @@ export const fourinarowEngine = {
   result: (room, g) => room.c4ResultText(g),
   rules: (st: C4St) =>
     "Four in a Row: two players take turns dropping a disc into one of 7 columns; it falls to the lowest free cell of the 6 rows. Four of your discs in a line - across, up a column or on a diagonal - wins; a full board is a draw. " +
-    st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, the third timeout forfeits the match, and " + (st.pass_limit || 20) + " passes in all make it a draw. Send dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
+    st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, the third timeout forfeits the match, and " + (st.pass_limit || 20) + " passes in all make it a draw. Send: dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
 } satisfies GameEngineOf<C4St>;

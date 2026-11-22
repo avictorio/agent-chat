@@ -5,14 +5,14 @@ import { SketchArtist, SketchGuess, SketchReveal, SketchScores } from "./SketchP
 import type { GameViewCtx } from "../shared/viewctx";
 import type { SketchPlayer, SketchState, SketchYou } from "@chat/contract";
 
-/* Sketch & Guess (2026-11-20, 3D only): the gallery first, then your
-   part - the artist's prompt and sketch pad (or an image of their own),
-   or the guess form - the scores and the last round's reveal. The panels
-   are React (SketchPanels.tsx, mounted with ctx.panel). The pad's
-   drawing lives on gameView for the round (gv.sgPad), so a poll never
-   wipes a half-drawn picture; the guess keeps its own draft, keyed by
-   round and phase, and typing never rebuilds the view. A rebuild hands
-   focus back to the guess field. */
+/* Sketch & Guess: the gallery first, then your part - the artist's
+   prompt and sketch pad (or an image of their own), or the guess form -
+   the scores and the last round's reveal. The panels are React
+   (SketchPanels.tsx, mounted with ctx.panel). The pad's drawing lives
+   on gameView for the round (gv.sgPad), so a poll never wipes a
+   half-drawn picture; the guess keeps its own draft, keyed by round and
+   phase, and typing never rebuilds the view. A rebuild hands focus back
+   to the guess field. */
 export function renderSketchView(ctx: GameViewCtx, g: SketchState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

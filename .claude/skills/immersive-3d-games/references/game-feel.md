@@ -12,7 +12,7 @@ here, not a published number for these games. Tune on a real phone.
 3. Juice techniques and their numbers
 4. Decisiveness gating and the event ladder
 5. Haptic design rules
-6. Anticipation, impact, aftermath per game
+6. Anticipation, impact, aftermath
 7. Overload limits: flashes, motion, legibility
 8. Settings model and reduced-motion substitutes
 
@@ -51,15 +51,17 @@ here, not a published number for these games. Tune on a real phone.
 The classic definition of game feel ("real-time control of virtual objects
 in a simulated space, with interactions emphasized by polish") excludes
 turn-based play ([Wikipedia: Game feel](https://en.wikipedia.org/wiki/Game_feel); [survey](https://arxiv.org/pdf/2011.09201)).
-Every game here is discrete-commit (the three oldest below; the round-based
-reveal games - Frontlines to Sketch & Guess - follow commit → sealed →
-the round's reveal):
+Every game here is discrete-commit; the round-based games follow commit →
+sealed → the round's reveal, and the three below show the range:
 
-| Game | Core loop | Server pacing (AGENTS.md) |
-|---|---|---|
-| Battleship | aim → commit → wait → reveal → consequence | turn-based; timestamped `shots` log |
-| Light Cycles | pick a direction → lock → wait for the tick → the tick plays out as motion → near-miss or crash | tick resolves when every living rider moved or the clock expires (default 120 s); a miss goes straight |
-| RPS Duel | choose → hidden lock → both locked → chant → simultaneous flip → verdict | resolves the moment both throws are in; 180 s anti-stall deadline |
+| Game | Core loop |
+|---|---|
+| Battleship | aim → commit → wait → reveal → consequence |
+| Light Cycles | pick a direction → lock → wait for the tick → the tick plays out as motion → near-miss or crash |
+| RPS Duel | choose → hidden lock → both locked → chant → simultaneous flip → verdict |
+
+What resolves a turn, tick or round and the clocks: SKILL.md, "Where feel
+lives in this app", and each game's section of `GET /api`.
 
 So feel concentrates in four places: the **commit acknowledgement**, the
 **anticipation** beat, the **reveal**, and the **aftermath**. The reveal is
@@ -103,10 +105,10 @@ stay), then "meaning (game over screen)" and slow motion
   within a second. Shake the 3D camera only; the HUD, the selected cell and
   the turn indicator never shake. A cell should never visually move more
   than a fraction of its own width.
-- Repo: `JuiceRig` in `web/app/src/features/games/three/juice.tsx` implements trauma²,
-  linear decay, value noise, applied through `CameraControls.setFocalOffset`
-  with amplitude scaled by camera distance (so it reads the same on every
-  board). Its constants live in that file; adjust there, not per arena.
+- Repo: `JuiceRig` (`three/juice.tsx`; contract in `primitives.md`)
+  implements trauma², linear decay and value noise through
+  `setFocalOffset`. Its constants live in that file; adjust there, not per
+  arena.
 
 ### Hit-stop (freeze frames)
 
@@ -131,35 +133,25 @@ Repetition fatigue is real: an effect that feels right occasionally
 "become[s] tiresome when it plays frequently" ([Apple HIG](https://developer.apple.com/design/human-interface-guidelines/playing-haptics));
 very frequent events get very subtle effects ([Android](https://developer.android.com/develop/ui/views/haptics/haptics-principles)).
 
-The ladder (derived starting values; the haptic column is refined in §5):
+The ladder (derived starting values; trauma feeds `Juice.hit`, hit-stop
+and slow motion act on the juice clock, haptics are `BUZZ` names (§5) and
+reach Android Chrome only):
 
 | Tier | Events | Trauma | Hit-stop | Slow motion | Haptic | Screen layer |
 |---|---|---|---|---|---|---|
 | Tick | hover, UI tap, aim | 0 | 0 | none | none (10–15 ms only if rare) | none |
-| Small | miss, own lock-in, RPS round won/lost | +0.15–0.25 | 0–60 ms | none | 20 ms | local flash at the cell |
-| Medium | hit, Light Cycles near-miss | +0.3–0.4 | 80–130 ms (≈ SFV 8F) | none | 30–40 ms | bloom pulse |
-| Large | ship sunk, rider derezzed | +0.6–0.8 | 200–270 ms (≈ SFV 12–16F) | none unless decisive | `[40,60,40]` | bloom pulse + ring + title card |
-| Decisive | last ship, last rider, match-winning throw | +0.8, once | 200–270 ms, then slow | 0.2–0.35× for 0.5–1 s | see §5 | one rate-limited flash, stinger |
+| Small | miss, own lock-in, RPS round won/lost | +0.15–0.25 | 0–60 ms | none | `commit` / `nearMiss` | local flash at the cell |
+| Medium | hit, Light Cycles near-miss | +0.3–0.4 | 80–130 ms (≈ SFV light) | none | `scored` (you hit) / `hitYou` (you were hit) | bloom pulse |
+| Large | ship sunk, rider derezzed | +0.6–0.8 | 200–270 ms (≈ SFV medium–heavy) | none unless decisive | `sankTheirs` / `lostOne` | bloom pulse + ring + title card |
+| Decisive | last ship, last rider, match-winning throw | +0.8, once | 200–270 ms, then slow | 0.2–0.35× for 0.5–1 s | `wonMatch` / `lostMatch` | one rate-limited flash, stinger |
 
-Rules that go with it:
-
-- **Fire sound, haptic and flash on the impact frame** (the start of
-  hit-stop), not on input and not after the animation.
-- Small and medium sequences finish in under a second. A match-end
-  sequence may run 2–4 s and must accept a tap to skip.
-- **Consistency is learnability.** The same event always produces the same
-  sound/visual/haptic signature, so a glance (or a buzz in a pocket) reads
-  the outcome. "You hit them" and "you were hit" get different signatures;
-  so do your ship sinking and theirs (Apple: never reuse a pattern for the
-  opposite outcome).
-- **Losses that happen to the viewer are clearly noticeable (owner's
-  direction).** The research default was a "dignified" muted defeat (a
-  desaturated side, a single soft 30 ms buzz). The owner wants the
-  opposite on the viewer's own losses: their ship sunk, their rider
-  killed, their duel lost must land with a buzz, a shake and a visible
-  animation. Keep the *brevity* (no long losing animation, skippable
-  end sequence), drop the muting. Spectators and the other side's
-  losses keep the neutral ladder.
+The rules that go with it (sound, haptic and flash on the impact frame;
+small and medium sequences under a second, a skippable 2–4 s match end;
+one signature per meaning, which Apple's HIG grounds: never reuse a
+pattern for the opposite outcome) are stated in SKILL.md. **Losses that
+happen to the viewer override this ladder** (the owner's call, replacing
+the research's muted "dignified" defeat): SKILL.md, "Losses that happen to
+the viewer must be clearly noticeable".
 
 ## 5. Haptic design rules
 
@@ -176,37 +168,40 @@ Platform guidance agrees ([Apple HIG](https://developer.apple.com/design/human-i
 - One meaning per pattern; never share a pattern between good and bad.
 - Always optional; the game must work without them. iOS web has none.
 
-Pattern vocabulary for `navigator.vibrate` (ms; arrays alternate
-vibrate/pause), as shipped in `BUZZ` (`sfx.ts`); use the names:
+The vocabulary is `BUZZ` in `sfx.ts` (values there: derived starting
+points, `navigator.vibrate` patterns in ms, arrays alternating
+vibrate/pause; tune on a real Android phone). Use the names, never inline
+arrays:
 
-| `BUZZ` name | Meaning | Pattern |
-|---|---|---|
-| (none; research) | rare selection tick - unused | 12 |
-| `commit` | your commit / lock-in | 18 |
-| `nearMiss` | a shot splashed near your fleet | 15 |
-| `scored` | you hit them / took the round | 25 |
-| `hitYou` | you were hit / lost the round (derived) | `[30, 40, 30]` |
-| `sankTheirs` | you sank or derezzed theirs | `[40, 60, 40]` |
-| `lostOne` | your ship sunk / your rider derezzed (derived, owner: noticeable) | `[90, 50, 50]` |
-| `wonMatch` | match won | `[60, 80, 120]` (rising) |
-| `lostMatch` | match lost (derived, replaces the research's soft 30 ms) | `[120, 80, 60]` (the win's contour reversed, equal weight) |
+| `BUZZ` name | Meaning |
+|---|---|
+| `commit` | your commit / lock-in: one short tick |
+| `nearMiss` | a shot splashed near your fleet |
+| `scored` | you hit them / took the round |
+| `hitYou` | you were hit / lost the round |
+| `sankTheirs` | you sank or derezzed theirs |
+| `lostOne` | your ship sunk / your rider derezzed: noticeable, never like a win |
+| `wonMatch` | match won: a rising contour |
+| `lostMatch` | match lost: the win's contour reversed at equal weight |
+
+A selection tick has no name: the ladder's Tick tier stays silent.
 
 Light Cycles turns are frequent: never buzz per turn; buzz for crashes and
 match end. Buzz spectators only for decisive moments, if at all (derived:
 haptics need a causal link to the viewer).
 
-## 6. Anticipation, impact, aftermath per game
+## 6. Anticipation, impact, aftermath
 
-| Game | Anticipation | Impact | Aftermath (permanence) |
-|---|---|---|---|
-| Battleship | reticle tightens; shell arc with a falling whistle, 300–600 ms | miss: splash. hit: flash, fire, hit-stop, shake | miss peg; scorch plus fire and smoke that keep burning; a sunk hull and its neighbours stay marked |
-| Light Cycles | lock pips per rider; the tick plays as motion; proximity glow near a wall | derez burst plus hit-stop | the dead rider's trail stays as a dim scar (the server keeps it as a wall; never collapse it); the survivor's trail flares |
-| RPS | four-beat chant, fist-pump squash per beat, quickening heartbeat | both throws flip on one frame and collide with squash/stretch and a flash | score pip and round chip fill and stay: the pattern record |
+Each arena's beats (the anticipation, the impact, what stays) are its
+playbook in `game-playbooks.md`. Light Cycles' dead trail stays as a dim
+scar (the server keeps it as a wall: never collapse it), and the Duel's
+round chips are the pattern record (§1).
 
 Permanence matters most in Battleship: the board is the game's record, so a
 scorch mark that stays is both juice and information. Reference: GamePigeon
 Sea Battle gives a haptic, a slight shake and smoke from the cell on a hit,
-and reveals a fully hit ship with the dots around it filled in
+and reveals a fully hit ship with the dots around it filled in (this app's
+Battleship does not auto-mark neighbours)
 ([allthings.how](https://allthings.how/how-to-play-sea-battle-on-imessage/)).
 
 ## 7. Overload limits: flashes, motion, legibility
@@ -256,9 +251,8 @@ Substitute, never delete:
 | fly-in entry | cross-fade with the same light and sound reveal |
 | scaling title card | fading title card (`.impact-title.calm`) |
 
-`Juice` with `still = true` currently drops shake, hit-stop, slow motion and
-the post pulse, softens flashes, and keeps titles, sound and buzz. That is a
-valid substitute set; if you add a reduced-motion freeze, keep it short.
-The research faulted the old Battleship behaviour of skipping the shot
-animation entirely under reduced motion: keep the colour change, the title
+`Juice` under `still` is the repo's substitute set (`primitives.md`,
+`three/juice.tsx`): motion drops, titles, sound and buzz stay. If you add a
+reduced-motion freeze, keep it short. Never skip an event under reduced
+motion: an arena that lands it at once keeps the colour change, the title
 and the sound.

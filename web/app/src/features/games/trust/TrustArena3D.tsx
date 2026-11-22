@@ -1,4 +1,4 @@
-/* Trust in 3D (2026-11-19): the round table.
+/* Trust in 3D: the round table.
 
    The world: a dark round table on an open plain under an aurora; each
    player sits at a glowing seat around it (you nearest the camera, a
@@ -127,7 +127,7 @@ function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: bo
     const breathe = still ? 0 : 0.15 * Math.sin(j.t * 2 + s.x);
     m.emissiveIntensity = s.out ? 0.1 : (lit ? 1.6 : 0.45 + breathe) + 1.2 * pulse;
   });
-  // the round on the table's points ride the plate (the page's grid had them)
+  // the round on the table's points ride the plate
   const sub = String(score) + (gain != null ? " (+" + gain + ")" : "") + (s.you ? " · you" : "") + (s.out ? " · out" : "");
   return (
     <group position={[s.x, 0, s.z]}>

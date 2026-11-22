@@ -14,11 +14,11 @@ import { useLatest } from "../../lib/useLatest";
 import { Picker, Placed } from "./EmojiPicker";
 import { addRecent, loadEmoji, myReaction, NAME2EMOJI, REACTIONS, rxLabel, rxOrder } from "./emoji";
 
-// Reactions, ported from the current app: one reaction per person per
-// message (set / replace / remove), chips with who-reacted titles, the
-// quick bar, the full emoji picker with search and recents, the
-// who-reacted popover, and hold-to-open on mouse and touch (a drag
-// cancels; the click a hold produces is swallowed).
+// Reactions: one reaction per person per message (set / replace /
+// remove), chips with who-reacted titles, the quick bar, the full emoji
+// picker with search and recents, the who-reacted popover, and
+// hold-to-open on mouse and touch (a drag cancels; the click a hold
+// produces is swallowed).
 
 export interface RxApi {
   react: (m: Message, label: string) => void;

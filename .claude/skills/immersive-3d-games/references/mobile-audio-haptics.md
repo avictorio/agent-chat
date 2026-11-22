@@ -3,10 +3,9 @@
 Read this when a change must hold up on phones: render cost, frame rate,
 heat, vibration, sound, fullscreen, touch, wake lock, or detecting
 low-power states. Target the **website only**: mobile web means Android
-Chrome and iOS Safari. The Android Capacitor app was removed from the repo
-on 2026-11-20 (AGENTS.md section 11); ignore the research's native-plugin
-route (`@capacitor/haptics`, SystemBars, a native
-PowerSave plugin) and anything that needs an APK.
+Chrome and iOS Safari. The Android app is retired (AGENTS.md section 8), so
+ignore the research's native-plugin route (`@capacitor/haptics`,
+SystemBars, a native PowerSave plugin) and anything that needs an APK.
 
 ## Contents
 
@@ -46,11 +45,11 @@ calls < 200 mobile / < 500 desktop; triangles < 500K / < 2M; 60 fps budget <
 
 | Budget item | Phone ("lite": `(pointer: coarse)`) | Desktop |
 |---|---|---|
-| DPR cap | 1.5, stepping to 1.25 then 1.0 under load (repo `[1, 1.5]`) | 1.75 (repo `[1, 1.75]`) |
+| DPR cap | 1.5, stepping to 1.25 then 1.0 under load | 1.75 (the repo's caps: `useQuality`) |
 | Draw calls | ≤ 100–200, instanced | ≤ 500 |
 | Visible triangles | ≤ 100–300K | ≤ 2M |
 | Composer | `multisampling={0}`, Bloom (`mipmapBlur`, levels 4–5) + one merged pass; no grain | may add SMAA (with `multisampling={0}`), grain |
-| Ambient render | Ticker 24 fps; 0 under reduced motion | 30 fps |
+| Ambient render | the Ticker at `useQuality`'s lite rate; 0 under reduced motion | the desktop rate |
 | Event animation | every frame while it runs | same |
 | Expensive materials | no reflector, no transmission | `MeshReflectorMaterial` at 256 |
 | Particles | hard cap on simultaneous count; small additive sprites, `depthWrite={false}` | higher caps, soft particles |
@@ -58,10 +57,9 @@ calls < 200 mobile / < 500 desktop; triangles < 500K / < 2M; 60 fps budget <
 
 ## 2. The repo's quality profile
 
-`useQuality(still)` in `web/app/src/features/games/three/arena3d.tsx` returns
-`{ lite, dpr, ambientFps, msaa }`: lite = `(pointer: coarse)`; dpr `[1, 1.5]`
-lite / `[1, 1.75]` otherwise; ambient 24 / 30 fps, 0 when `still` (reduced
-motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
+`useQuality(still)` in `three/arena3d.tsx` is the profile (lite = `(pointer:
+coarse)`; its DPR caps, ambient rates and MSAA are in the function;
+contract: `primitives.md`). Lite also skips the reflective floor and
 `ArenaPost` skips film grain on lite. Keep new expensive features behind
 `q.lite` the same way rather than inventing a second profile.
 
@@ -71,8 +69,8 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
   rendered frames every 250 ms over 10 iterations with `bounds` `[40, 60]`
   (`[60, 100]` above 100 Hz) and fires `onDecline` when > 75% of samples are
   below the lower bound (drei 10.7.9,
-  `web/node_modules/@react-three/drei/core/PerformanceMonitor.js`). With a
-  24 fps ticker it reads every scene as slow: it declines every ~2.5 s and
+  `web/node_modules/@react-three/drei/core/PerformanceMonitor.js`). At the
+  ambient ticker's rate (below 40 by design) it reads every scene as slow: it declines every ~2.5 s and
   walks `factor` from 0.5 to 0 in ~12.5 s regardless of the GPU. Either pass
   `bounds={() => [ticker * 0.8, ticker * 0.95]}` and measure only during
   bursts, or (better) measure the frame **time** of frames that do render
@@ -114,10 +112,10 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
 - Consequence: **haptics are an Android-only extra; every cue must also exist
   in light and sound** (and, because the iOS ringer switch mutes Web Audio,
   in light alone).
-- Repo: `buzz(pattern)` in `sfx.ts` checks the sound toggle,
-  `typeof navigator.vibrate`, and `navigator.userActivation.hasBeenActive`
-  before vibrating, all in try/catch. `Juice.hit({ buzz })` routes through
-  it. Pattern vocabulary and design rules: `game-feel.md` §5.
+- Repo: `buzz(pattern)` in `sfx.ts` checks the toggle, the API and sticky
+  activation before vibrating (`primitives.md`); `Juice.hit({ buzz })`
+  routes through it. Pattern vocabulary and design rules: `game-feel.md`
+  §5.
 - Keep pulses short (10–40 ms singles; patterns ≲ 300 ms total) and rare;
   long or frequent buzzing feels cheap and drains battery.
 
@@ -164,10 +162,11 @@ motion); MSAA 0 lite / 2 otherwise. Lite also skips the reflective floor, and
   try/catch. iOS has it since 16.4, but in Home Screen web apps only from
   18.4 ([Safari 18.4](https://developer.apple.com/documentation/safari-release-notes/safari-18_4-release-notes)).
   The repo already uses it during uploads (`web/app/src/features/composer/uploads.ts`).
-- **Safe areas:** AGENTS.md section 10 applies: fixed or full-height UI pads
-  with `env(safe-area-inset-*)`, top and bottom. The app shell is
-  `position: fixed; inset: 0`; never go back to `height: 100dvh` for the
-  shell itself.
+- **Safe areas:** fixed or full-height UI pads with
+  `env(safe-area-inset-*)`, top and bottom (docs/agents/testing.md section
+  10, "Safe areas"). The app shell is `position: fixed; inset: 0`; never go
+  back to `height: 100dvh` for it (why: docs/agents/web-app.md, "App shell
+  sizing").
 
 ## 7. Preferences and power saving
 

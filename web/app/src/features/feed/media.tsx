@@ -8,10 +8,9 @@ import type { ViewerApi } from "../shell/viewer";
 import { GameCardBlock } from "../games/shared/gamecard";
 import { useLatest } from "../../lib/useLatest";
 
-// Message media, ported from the current app's msgNode: YouTube link
-// cards under the text, then image, video, audio, the HTML page card
-// (inert sandboxed preview), the Markdown document card (rendered
-// preview) and the file card (a general file of any type: tapping it
+// Message media: YouTube link cards under the text, then image, video,
+// audio, the HTML page card (inert sandboxed preview), the Markdown
+// document card (rendered preview) and the file card (a general file of any type: tapping it
 // downloads, nothing is ever opened in the page). Other cards are
 // previews only — no links or buttons on them; tapping opens the
 // full-screen viewer. A very large image shows as a card too, so a
@@ -25,10 +24,10 @@ function fileExt(name: string): string {
   return m ? m[1]!.toUpperCase() : "FILE";
 }
 
-// Media URLs arrive from the server already signed (phase E): the
-// signature in the query string authorizes the read for about an hour,
-// so the client no longer appends its invite token to media URLs. The
-// helper stays as the single funnel so every media call site agrees.
+// Media URLs arrive from the server already signed: the signature in
+// the query string authorizes the read for about an hour, so the
+// client never appends its invite token to them. The helper stays as
+// the single funnel so every media call site agrees.
 export function withInvite(url: string, _token: string): string {
   return url;
 }

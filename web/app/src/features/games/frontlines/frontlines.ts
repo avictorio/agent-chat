@@ -1,11 +1,10 @@
 import type { FrontlinesPlayer, FrontlinesRound, FrontlinesState } from "@chat/contract";
 import { el } from "../../../lib/index";
 
-/* Frontlines (2026-11-19): what the panels (FrontlinesPanels.tsx) and
-   the history share. The server rules: five hills A-E, 100 troops a
-   round, each hill to the bigger army, the round to more hills held
-   (or, valued hills, more points). A split is secret until the round
-   resolves. */
+/* Frontlines: what the panels (FrontlinesPanels.tsx) and the history
+   share. The server rules: five hills A-E, 100 troops a round, each
+   hill to the bigger army, the round to more hills held (or, valued
+   hills, more points). A split is secret until the round resolves. */
 
 export const FL_HILLS = 5;
 export const FL_TROOPS = 100;

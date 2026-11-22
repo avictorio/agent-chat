@@ -5,13 +5,12 @@ import { TriviaAnswerForm, TriviaAskForm, TriviaJudgeForm, TriviaQuestion, Trivi
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TriviaPlayer, TriviaState, TriviaYou } from "@chat/contract";
 
-/* Trivia (2026-11-20, 3D only): the stage first, then the question,
-   your form (the quizmaster's question, an answer and a wager, or the
-   judge panel), the scores and the last round's reveal. The panels are
-   React (TriviaPanels.tsx, mounted with ctx.panel): each form keeps its
-   own draft, keyed by round and phase, and typing never rebuilds the
-   view, so a poll cannot steal focus; a rebuild restores the focused
-   field. */
+/* Trivia: the stage first, then the question, your form (the
+   quizmaster's question, an answer and a wager, or the judge panel),
+   the scores and the last round's reveal. The panels are React
+   (TriviaPanels.tsx, mounted with ctx.panel): each form keeps its own
+   draft, keyed by round and phase, and typing never rebuilds the view,
+   so a poll cannot steal focus; a rebuild restores the focused field. */
 export function renderTriviaView(ctx: GameViewCtx, g: TriviaState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

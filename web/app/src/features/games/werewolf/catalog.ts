@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Werewolf: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const WEREWOLF: GameDef = {
   id: "werewolf",
   name: "Werewolf",
@@ -18,7 +13,7 @@ export const WEREWOLF: GameDef = {
     goal: "Villagers: find and vote out every werewolf. Werewolves: survive until you match the village.",
     play: [
       "Roles are dealt in secret: a werewolf (two from 7 players), a seer, a guardian at 9, and villagers. Werewolves know each other; nobody else knows anything.",
-      "Night: the wolves pick someone to kill, the seer learns whether one player is a werewolf, the guardian protects one player. Villagers sleep.",
+      "Night: the wolves pick someone to kill, the seer learns whether one player is a werewolf, and the guardian protects one player (not the same one two nights running). Villagers sleep.",
       "Dawn names the dead and reveals their role.",
       "Day: talk it out in the game's own discussion panel - accuse, claim, bluff - then vote. The most votes is out (role revealed); a tie removes nobody.",
       "Wolves also share a private den to plan in.",

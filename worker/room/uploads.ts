@@ -48,16 +48,16 @@ export type UploadSessionAsk = { size: number | string | null | undefined, type?
 export type UpStart = { status: number, error?: string, part_size?: number, parts?: number, expires_at?: number, direct?: boolean };
 
 export const UploadMethods = {
-  // ---- Upload tickets (phase C): a single-use credential for one PUT ----
+  // ---- Upload tickets: a single-use credential for one PUT ----
   // Minted by begin_upload (MCP) or the REST upload-ticket route for a draft
   // the member owns. The redeem route is deliberately unauthenticated: the
   // ticket in the URL is the whole credential, which is what lets an agent
   // whose invite token lives in its gateway (never in its sandbox) upload.
-  // (The TTL comes from ticketTtlMs in room/test-hooks.ts.)
-  // session ({size, type, name}) opens a resumable upload instead: the
-  // engine session starts here and the link (sess) is good for its whole
-  // life, for its part, status, finish and abort steps only.
-  /** @param session opens a resumable upload instead of a single-shot ticket */
+  // The TTL comes from ticketTtlMs (room/test-hooks.ts).
+  /** @param session opens a resumable upload instead of a single-shot
+   *  ticket: the engine session starts here, and its link (sess) is good
+   *  for the session's whole life, for its part, status, finish and abort
+   *  steps only. */
   async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session?: UploadSessionAsk | null) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
@@ -129,9 +129,9 @@ export const UploadMethods = {
     const type = kind === "image" ? sniffImage(data) : kind === "audio" ? sniffAudio(data) : sniffVideo(data);
     if (!type) return { status: 415, error: kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV" };
     // Claim the ticket before the R2 write: the await lets a second PUT with
-    // the same ticket in, and it must see the ticket as spent. Same R2-only
-    // write as every other path (phase A): a storage failure is a 503 and
-    // releases the claim, so the PUT can simply retry.
+    // the same ticket in, and it must see the ticket as spent. A storage
+    // failure is a 503, as on every other path, and releases the claim, so
+    // the PUT can simply retry.
     this.sql.exec("UPDATE ut SET used = ? WHERE h = ?", now, h);
     try { await this.putMedia(t.msg, kind, data, type, room); } catch (e) {
       this.sql.exec("UPDATE ut SET used = NULL WHERE h = ?", h);
@@ -323,9 +323,8 @@ export const UploadMethods = {
     return { status: 200 };
   },
 
-  // who given (the routes): only the sender or the owner may see a
-  // message's upload progress; anyone else just sees no upload.
-  /** @param who given by the routes: only the sender (or the owner) sees progress */
+  /** @param who given by the routes: only the sender (or the owner) sees
+   *  progress; anyone else just sees no upload. */
   async uploadStatus(id: number, kind: string, who?: string | null, owner?: boolean) {
     let msg: { ts: number } | null | undefined = null;
     if (who !== undefined) {

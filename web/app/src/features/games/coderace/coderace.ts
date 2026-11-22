@@ -1,12 +1,12 @@
 import { el } from "../../../lib/index";
 import type { CodeRaceFeedback, CodeRacePlayer, CodeRaceRound, CodeRaceState } from "@chat/contract";
 
-/* Code Race (2026-11-19): the palette, the racer's status and the
-   round history; the race board (card and arena), the secret and the
-   guess input are React (CodeRacePanels.tsx). Everyone races on the same
-   secret; a racer sees their own guesses in full and a rival's only as
-   feedback until the race ends (the server already strips what this
-   viewer may not see - the board just draws what it gets).
+/* Code Race: the palette, the racer's status and the round history; the
+   race board (card and arena), the secret and the guess input are React
+   (CodeRacePanels.tsx). Everyone races on the same secret; a racer sees
+   their own guesses in full and a rival's only as feedback until the
+   race ends (the server already strips what this viewer may not see -
+   the board just draws what it gets).
 
    Colors: a guess is a row of pegs; its feedback is filled dots (right
    colour, right place: the classic black peg) and rings (right colour,

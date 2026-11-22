@@ -1,19 +1,16 @@
-/* Battleship 3D arena (2026-11-12, Direction C + A's ocean motion,
-   approved by Anthony from the mock-up page): a night tactical scene -
-   two glowing-grid ocean tiles on dark reflective water, procedural
-   steel warships with real silhouettes, bombs that visibly drop, and
-   damage that persists: hit cells burn, sunk ships stay on the board
-   as charred, listing, burning wreckage. A free-for-all (2026-11-20)
-   lays its 3-6 oceans out in rows (bsLayout); the shot's target is the
-   ocean picked.
+/* Battleship in 3D: a dusk sea, light-painted warships, lasting damage.
+   Glowing-grid ocean tiles on reflective water, procedural steel
+   warships with real silhouettes, bombs that visibly drop; hit cells
+   burn, and sunk ships stay on the board as charred, listing, burning
+   wreckage. A free-for-all lays its 3-6 oceans out in rows (bsLayout);
+   the shot's target is the ocean picked.
 
-   The scene is a pure function of the same per-viewer game state the
-   2D arena consumes (you.fleet / you.shots / you.sunk_ships for a
-   captain, g.boards for a spectator). The secrecy contract is the
-   server's: un-hit enemy hulls are never in the state, so they can
-   never render. Shot animations replay from last_move diffs and are
-   presentation only. Mounted by games.ts through a dynamic import so
-   three.js stays in the lazy chunk. */
+   The scene is a pure function of the per-viewer state (you.fleet /
+   you.shots / you.sunk_ships for a captain, g.boards for a spectator);
+   un-hit enemy hulls are never in it. That secrecy is the server's, so
+   they can never render. Shot animations replay from last_move diffs
+   and are presentation only. Mounted by games.ts through a dynamic
+   import so three.js stays in the lazy chunk. */
 import { createContext, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type RefObject } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
@@ -105,7 +102,7 @@ function shipCells(start: string, dir: string, size: number, w: number, h: numbe
   }
   return cells;
 }
-/* Fleet placement (2026-11-20): the hull being placed. */
+/* Fleet placement: the hull being placed. */
 export type Placing = {
   placed: { start: string; dir: string; size: number }[];
   orient: string;
@@ -114,7 +111,7 @@ export type Placing = {
   onRotate: () => void;
   onUndo: () => void;
 };
-/* The swell the ships ride (A's ocean motion, kept gentle so the board reads). */
+/* The swell the ships ride, kept gentle so the board reads. */
 function hash01(s: string): number {
   let n = 0;
   for (let i = 0; i < s.length; i++) n = (n * 31 + s.charCodeAt(i)) >>> 0;
@@ -173,14 +170,13 @@ function textScale(tex: CanvasTexture, height: number): [number, number, number]
   return [height * (img.width / img.height), height, 1];
 }
 
-/* ---------- batched effects (2026-11-13) ----------
-   A late game spent ~760 draw calls a frame, mostly on effects: every
-   fire was 3 flame sprites, smoke sprites and an ember cloud; every
-   miss two meshes; every glow pool and fleet footprint a mesh - and
-   the reflective sea draws the whole scene twice. Each kind is now ONE
-   instanced draw. Fire itself lives in fire.tsx (GPU particles: three
-   draws for every fire on the board); glows, misses and footprints are
-   instanced quads here. Reduced motion freezes all of it. */
+/* ---------- batched effects ----------
+   Each effect kind is ONE instanced draw: a mesh per fire, miss, glow
+   pool and footprint costs a late game ~760 draw calls a frame, and the
+   reflective sea draws the whole scene twice. Fire itself lives in
+   fire.tsx (GPU particles: three draws for every fire on the board);
+   glows, misses and footprints are instanced quads here. Reduced
+   motion freezes all of it. */
 
 type GlowSpec = { x: number; y: number; z: number; r: number; a: number };
 type Spot = { x: number; z: number; hex?: string };
@@ -628,8 +624,8 @@ function ShotFx({ anim, onImpact, onDone }: { anim: Anim; onImpact: () => void; 
 
 /* ---------- markers ---------- */
 
-/* The last shot's cell. White, like the 2D board's outline: an orange
-   ring vanished into the fire glow whenever the shot was a hit. */
+/* The last shot's cell. White, like the no-WebGL board's outline: an
+   orange ring vanishes into the fire glow whenever the shot is a hit. */
 function LastShotRing({ x, z }: { x: number; z: number }) {
   const r = useRef<Mesh>(null);
   const still = useContext(Still);
@@ -640,8 +636,8 @@ function LastShotRing({ x, z }: { x: number; z: number }) {
     r.current.scale.set(p, p, p);
     (r.current.material as Material & { opacity: number }).opacity = 0.85 + s * 0.12;
   });
-  // Drawn over everything: a hit lands on a ship, and the hull used to
-  // hide the ring at exactly the moment it mattered.
+  // Drawn over everything: a hit lands on a ship, and the hull would
+  // hide the ring at exactly the moment it matters.
   return (
     <mesh ref={r} position={[x, 0.09, z]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={8}>
       <ringGeometry args={[0.36, 0.47, 32]} />
@@ -677,7 +673,7 @@ function PendingMark({ x, z }: { x: number; z: number }) {
    cell of their last ship. In the scene it is a translucent cyan band
    across that row/column on the hunted tile, a bright sweep line
    travelling its length, and a floating label - presentation only,
-   the same public information the 2D arena prints as a text line. */
+   the same public information as the sonar line under the scene. */
 function SonarBand({ tile, w, h, sonar }: { tile: TileT; w: number; h: number; sonar: BattleshipSonar }) {
   const bandMat = useRef<MeshStandardMaterial>(null);
   const sweep = useRef<Group>(null);
@@ -788,11 +784,10 @@ type TileT = {
   own?: boolean;
 };
 
-/* Where each ocean sits (2026-11-20, the free-for-all scene): two side
-   by side as always; three or four in a 2x2 (three: two in front, one
-   centred behind), five or six in rows of three; the first ocean - a
-   captain's own waters - front left, the gaps wide enough for each
-   tile's row numbers and its title. */
+/* Where each ocean sits: two side by side; three or four in a 2x2
+   (three: two in front, one centred behind), five or six in rows of
+   three; the first ocean - a captain's own waters - front left, the
+   gaps wide enough for each tile's row numbers and its title. */
 const FFA_GAP_X = 4;
 const FFA_GAP_Z = 4;
 function bsLayout(n: number, w: number, h: number): { at: { cx: number; cz: number }[]; spanW: number; spanD: number } {
@@ -809,8 +804,8 @@ function bsLayout(n: number, w: number, h: number): { at: { cx: number; cz: numb
   return { at, spanW: cols * w + (cols - 1) * FFA_GAP_X, spanD: rows * h + (rows - 1) * FFA_GAP_Z };
 }
 
-/* Coordinate labels and titles draw over everything (no depth test):
-   a ship near the edge used to hide its row's number. */
+/* Coordinate labels and titles draw over everything (no depth test),
+   or a ship near the edge hides its row's number. */
 function Label({ text, color, position, height, wide }: { text: string; color: string; position: [number, number, number]; height: number; wide?: boolean }) {
   const tex = textTexture(text, color, wide);
   return (
@@ -965,14 +960,12 @@ function buildTiles(g: BattleshipState, me: string): TileT[] {
   );
 }
 
-/* Drifting patches of moonlight on the water - cheap ocean life. */
 /* ---------- the scene ---------- */
 
-/* The Battleship world (2026-11-13, dusk since the owner found the
-   night fleet too dark - lit from behind, the hulls read as
-   silhouettes): the sun just setting low on the far left horizon, the
-   sky peach at the horizon through lavender to deep blue overhead, the
-   first stars. The fog is the horizon's colour, so the far sea melts
+/* The Battleship world at dusk, not night (lit from behind, the hulls
+   read as silhouettes): the sun just setting low on the far left
+   horizon, the sky peach at the horizon through lavender to deep blue
+   overhead, the first stars. The fog is the horizon's colour, so the far sea melts
    into the sky; the water reflects the dusk (desktop: a mirror of the
    scene) with a golden glitter path toward the sun. */
 const BS_SUN: [number, number, number] = [-0.62, 0.11, -0.78];
@@ -1113,9 +1106,8 @@ function Scene({
   /* Fire heat by strike recency, from the ordered shot record: the
      latest hit on a board burns at full heat and each older hit steps
      down, so by endgame only the freshest few fires blaze and the rest
-     sit at embers - the board stays readable (room feedback, 2026-11-16:
-     Matheo and Jen could not see the squares through the fire). A cell
-     with no recorded shot keeps full heat. */
+     sit at embers, and the squares stay visible through the fire. A
+     cell with no recorded shot keeps full heat. */
   const heatAt = (() => {
     const m = new Map<string, number>();
     const shots = (g.shots || []) as BattleshipShot[];
@@ -1162,8 +1154,8 @@ function Scene({
   const seenLm = useRef<string | null>(null);
   const seenStatus = useRef<string | null>(null);
   // Every shot in flight gets its own ShotFx (keyed by shot): a salvo's
-  // next shell can land a second after the last, and sharing one
-  // instance carried the old shot's timeline over and lost an impact.
+  // next shell can land a second after the last, and a shared instance
+  // carries the old shot's timeline over and loses an impact.
   const [anims, setAnims] = useState<Anim[]>([]);
   const [sinks, setSinks] = useState<Sink[]>([]);
   const juice = useJuice();
@@ -1339,7 +1331,7 @@ function Scene({
                 /* A live ship is always the viewer's own (the server
                    never sends an un-sunk enemy hull): a faint footprint
                    in the captain's colour under each of its cells keeps
-                   the fleet findable, as the 2D board's tinted cells do. */
+                   the fleet findable, as the no-WebGL board's tinted cells do. */
                 s.cells.forEach((c) => {
                   const loc = cellLocal(c, w, h);
                   feet.push({ x: tile.cx + loc.x, z: tile.cz + loc.z, hex: tile.hex });
@@ -1427,8 +1419,8 @@ function Scene({
             <OceanCtx.Provider value={ocean}>
               <group userData={NOMIR}>
                 {/* a faint tint in the captain's colour under their own hulls
-                    (the lit rims on the ships carry identity now; a strong
-                    tint read as orange slabs under every hull) */}
+                    (the lit rims on the ships carry identity; a strong
+                    tint reads as orange slabs under every hull) */}
                 <FlatField spots={feet} y={0.045} geometry="cell" opacity={0.07} />
                 <GlowField glows={glows} />
                 <FlatField spots={misses} y={0.05} geometry="ring" color="#a9c6de" opacity={0.55} />
@@ -1538,9 +1530,9 @@ function Scene({
 
 /* Frame by host aspect, not by a portrait/landscape guess: the
    two-tile span fits the horizontal fov when the camera distance
-   scales as 1/aspect. About 10% further back than first shipped
-   (1.48 vs 1.34 per unit span): perspective makes the near edge the
-   widest, and the near rows' outer columns were cropped.
+   scales as 1/aspect, at 1.48 per unit span, not 1.34: perspective
+   makes the near edge the widest, and at 1.34 the near rows' outer
+   columns crop.
    A phone-width host shows ONE ocean (see BsArena3D), framed from a
    steeper angle and fitted to the tile with its labels, so cells are
    big enough to tap (about 30 px on a 390 px phone, against 8-12 px
@@ -1647,7 +1639,7 @@ export default function BsArena3D({
     if (lmK) {
       setLanding({ idx: lastShotIdx, shot: lmK });
       // a new shot ends a manual peek: the view goes where the shell lands
-      // (a spectator's choice used to stick for the rest of the view)
+      // (otherwise a spectator's pick sticks for the rest of the view)
       setManualIdx(null);
     }
   }
@@ -1869,8 +1861,8 @@ export default function BsArena3D({
   const overlay = (
     <>
       {single && tiles.length > 2 && shownTile ? (
-        /* 3-6 oceans: one compact cycler (a pill each ran under the
-           frame's tools on a phone) */
+        /* 3-6 oceans: one compact cycler (a pill per ocean runs under
+           the frame's tools on a phone) */
         <div className="arena3d-swap arena3d-cycle" role="group" aria-label="Which ocean to show">
           <button type="button" aria-label="Previous ocean" onClick={() => pickOcean((shownIdx - 1 + tiles.length) % tiles.length)}>
             ‹

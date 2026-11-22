@@ -104,7 +104,6 @@ export async function createRoomRoute(rc: RouteContext) {
 }
 
 // Every room route passes through here: only the owner can bring a room into existence.
-/** @param rm the path's match */
 export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
   const { request, env, url, path, owner } = rc;
   let name = "";

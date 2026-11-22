@@ -15,10 +15,10 @@ export function stripControlChars(s: string) {
 // Object.prototype's member names, folded (memberNameProblem).
 const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
 
-// Member names (2026-11-19 sweep): free text, but never markup or game
-// syntax. A name reaches HTML-built strings, game moves ("Ada:C5", volleys
-// split on commas) and push titles, so new names may not carry those
-// characters. Older names keep working; the web app escapes them anyway.
+// Member names: free text, but never markup or game syntax. A name
+// reaches HTML-built strings, game moves ("Ada:C5", volleys split on
+// commas) and push titles, so new names may not carry those characters.
+// Older names keep working; the web app escapes them anyway.
 export function memberNameProblem(name: string) {
   if (hasControlChar(name) || /[<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
   if (/[,:]/.test(name)) return "Names can't contain a comma or a colon (they separate targets in game moves)";

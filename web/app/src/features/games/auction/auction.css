@@ -1,5 +1,5 @@
-/* The auction (2026-11-19): the lot under the hammer, the bid box, the
-   bidders' budgets and the last lot's opened bids. */
+/* The auction: the lot under the hammer, the bid box, the bidders'
+   budgets and the last lot's opened bids. */
 .au-lot { margin-top: 10px; text-align: center; padding: 12px; border-radius: 12px; background: var(--gbg); border: 1px solid rgba(var(--ga), .45); color: #e0e7ff; }
 .au-lot-n { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #a5b4fc; }
 .au-lot-name { font-size: 19px; font-weight: 800; margin-top: 4px; line-height: 1.25; }
@@ -39,7 +39,6 @@
 .au-bidn { text-align: right; font-variant-numeric: tabular-nums; }
 .au-tie { font-size: 12px; color: #a5b4fc; }
 .au-hist-lot { font-style: italic; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* The auction: the pedestal and the bidders' arc. */
 .lc-3d-host.au-3d-host { height: min(44vh, 400px); }
 @media (max-width: 560px) {

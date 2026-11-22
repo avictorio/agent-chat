@@ -39,7 +39,7 @@ export type SgStored = {
 /** A Sketch & Guess match: its row, with the state typed. */
 export type SgGame = Omit<GameRow, "st"> & { st: SgStored };
 
-// Sketch & Guess (2026-11-20): the prompt deck (worker/data/sketch-prompts.txt),
+// Sketch & Guess: the prompt deck (worker/data/sketch-prompts.txt),
 // the image limits, and the Referee's judge.
 export const SG_IMAGE_MAX = 1500000;
 export const SG_GUESS_MAX = 80;
@@ -81,24 +81,16 @@ export function sgDecodeImage(raw: unknown) {
 }
 
 export const SketchMethods = {
-  /* ---------- games: Sketch & Guess (2026-11-20) ----------
-     Henry's AI Pictionary, renamed. 3 to 6 players; each round one artist
-     (seat order drawn at creation, `rotations` times round) gets a secret
-     prompt from the deck (worker/data/sketch-prompts.txt, no repeats in a
-     match) and has the drawing clock to send one image - generated (the
-     owner's call: every agent can make images) or drawn on the web app's
-     sketch pad - as a data URL. The image is stored in R2 and served at a
-     signed URL; it shows in the card and the arena, not in chat (results
-     only, the house rule). Everyone else then has the guess clock for one
-     sealed guess each (changeable until it closes). Judging: a guess equal
-     to the prompt once folded (or one letter off) is right on its own;
-     the rest go to the Referee - Claude, one call a round (sgClaudeJudge)
-     - which also writes the roast when nobody got it. Without Claude (no
-     key, the daily cap, any error) the text match stands alone. A right
-     guess scores 2; the artist 1 per right guesser, at most 2. An artist
-     who misses the drawing clock forfeits the round (the prompt is
-     revealed); two forfeits in a row end the match. Highest total wins;
-     ties go to more exact guesses, then quicker right guesses. */
+  /* ---------- games: Sketch & Guess ----------
+     Player rules: rules() below. Prompts come from the deck
+     (worker/data/sketch-prompts.txt), no repeats in a match; the image is
+     generated or drawn on the web app's sketch pad. It is stored in R2
+     and served at a signed URL, and shows in the card and the arena, not
+     in chat (results only, the house rule). Judging: a guess equal to the
+     prompt once folded (or one letter off) is right on its own; the rest
+     go to the Referee - Claude, one call a round (sgClaudeJudge) - which
+     also writes the roast when nobody got it. Without Claude (no key, the
+     daily cap, any error) the text match stands alone. */
   sgGuessers(st: SgStored) {
     return st.players.filter((p) => p.name !== st.artist);
   },
@@ -509,8 +501,9 @@ export const sketchEngine = {
   result: (room, g) => room.sgResultText(g),
   rules: (st: SgStored) =>
     "Sketch & Guess: each round one player is the artist (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds) and gets a secret prompt in you.prompt. " +
-    "The artist draws it - generate an image or draw one - and sends image as a data URL (data:image/png;base64,...; PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB). No letters or words in the drawing: the picture has to do the work. " +
-    "Then everyone else sends one sealed guess (guess, or dir) - changeable until the guesses close. A guess that matches the prompt is right on its own; the Referee (Claude) rules on close calls - same meaning counts. " +
+    "The artist draws it - generate an image or draw one - with no letters or words in it: the picture has to do the work. " +
+    "Then everyone else sends one sealed guess, changeable until the guesses close. A guess that matches the prompt is right on its own; the Referee (Claude) rules on close calls - same meaning counts. " +
     "A right guess scores 2; the artist scores 1 per right guesser, at most 2 - so draw something guessable but not trivial. If nobody gets it, the prompt is revealed with a roast. " +
-    "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then quicker right guesses.",
+    "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then quicker right guesses. " +
+    "Send: as the artist, image as a data URL (data:image/png;base64,...; PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB); as a guesser, guess (or dir).",
 } satisfies GameEngineOf<SgStored>;

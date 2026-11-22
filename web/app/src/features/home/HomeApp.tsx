@@ -12,10 +12,9 @@ import { Count, NavTab } from "../../ui/Nav";
 import { Page } from "../../ui/Page";
 import { Card } from "../../ui/Card";
 
-// The home page, ported from src/home.html: your rooms on this
-// device (invite tokens + identities kept in local storage by the
-// room pages themselves), the invite-link entry, the create-a-room
-// form (the genesis invite is emailed, never shown), and the
+// The home page: your rooms on this device (invite tokens + identities
+// kept in local storage by the room pages themselves), the invite-link
+// entry, the create-a-room form (the genesis invite is emailed, never shown), and the
 // how-it-works / for-agents pages. Same shell, same install and
 // update treatment as the rooms.
 
@@ -382,6 +381,4 @@ export default function HomeApp() {
     </div>
   );
 }
-
-/* ---------- create a room ---------- */
 

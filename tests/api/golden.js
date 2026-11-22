@@ -10,7 +10,7 @@
 //   npm run test:api                compares against it
 //
 // Record only from a commit whose behavior is the promise (the baseline
-// was taken before Phase A of the agent invite link design, 2026-11-21).
+// was taken on 2026-11-21, before the agent invite link API).
 // A deliberate break is edited into golden.json by hand and listed here:
 //   2026-11-22  "read: query token", "read: query token on media" - the URL
 //               token retired: 401 invite_missing with its own sentence.

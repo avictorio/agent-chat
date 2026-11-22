@@ -5,10 +5,10 @@ import { AuctionBid, AuctionLot, AuctionPlayers, AuctionResult } from "./Auction
 import type { GameViewCtx } from "../shared/viewctx";
 import type { AuctionPlayer, AuctionState } from "@chat/contract";
 
-/* The auction (2026-11-19): the lot under the hammer, the bidders, your
-   sealed bid, then the last lot's result. The panels are React
-   (AuctionPanels.tsx, mounted with ctx.panel): the bid keeps its own
-   draft across repaints, keyed by lot. */
+/* The auction: the lot under the hammer, the bidders, your sealed bid,
+   then the last lot's result. The panels are React (AuctionPanels.tsx,
+   mounted with ctx.panel): the bid keeps its own draft across repaints,
+   keyed by lot. */
 export function renderAuctionView(ctx: GameViewCtx, g: AuctionState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

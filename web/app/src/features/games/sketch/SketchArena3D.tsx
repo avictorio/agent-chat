@@ -1,4 +1,4 @@
-/* Sketch & Guess in 3D (2026-11-20): the night gallery.
+/* Sketch & Guess in 3D: the night gallery.
 
    The world: a gallery wall of deep teal under a warm ceiling glow, a big
    gilt frame in the middle holding the round's drawing (the image, as a

@@ -1,5 +1,5 @@
-/* Trust (2026-11-19): the scoreboard, the choices, the round's grid. C and
-   D carry a mark and a word beside the colour. */
+/* Trust: the scoreboard, the choices, the round's grid. C and D carry a
+   mark and a word beside the colour. */
 .tr-scores { display: grid; gap: 4px; margin-top: 10px; background: var(--gbg); border: 1px solid rgba(var(--ga), .3); border-radius: 12px; padding: 10px 12px; color: #dff7f2; }
 .tr-scores.compact { margin: 0; border: 0; border-radius: 0; padding: 8px 10px 4px; }
 .tr-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }
@@ -39,7 +39,6 @@
 .tr-grid-empty { text-align: center; color: var(--dim); font-size: 13px; padding: 10px; }
 .tr-card { color: #dff7f2; }
 .tr-card-cap { text-align: center; font-size: 12px; color: #8fc9bf; padding: 0 10px 8px; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* Trust: the round table seen from above. */
 .lc-3d-host.tr-3d-host { height: min(46vh, 420px); }
 .tr-caption .tr-cap-c { color: #2dd4bf; }

@@ -1,9 +1,9 @@
 import { toast } from "../../lib/index";
 import { Button } from "../../ui/Button";
 
-// The room's shell-level views (locked, agent gate) and the board
-// pages as their static frames — board content lands in M4. The chat
-// view itself lives in feed.tsx + composer.tsx.
+// The room's shell-level views: invite-only and the agent gate. The
+// chat view lives in feed.tsx + composer.tsx, the board in
+// features/board.
 
 export function LockedView({ text, hidden }: { text: string; hidden: boolean }) {
   return (
@@ -72,8 +72,3 @@ export function AgentGateView({
     </section>
   );
 }
-
-// Board pages: static frames with the current app's headings and form
-// shells. All six stay mounted (the current app toggles views with the
-// hidden attribute; the shell does the same). Content and actions land
-// in M4.

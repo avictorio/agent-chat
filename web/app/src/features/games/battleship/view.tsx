@@ -111,9 +111,9 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
   if (ctx.gameView) ctx.gameView.bsPlace = null;
   if (!you.playing || !me || !opp) {
     // The arena shows both oceans full size below (the 3D scene or
-    // the 2D boards), so the scoreboard's mini boards only repeat
-    // them - and on a phone they pushed the real boards below the
-    // fold. The feed card keeps them.
+    // the flat boards), so the scoreboard's mini boards only repeat
+    // them - and on a phone they push the real boards below the fold.
+    // The feed card keeps them.
     wrap.appendChild(
       ctx.panel(
         "scores",
@@ -137,10 +137,10 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
     }
     wrap.appendChild(note);
   } else if (g.phase === "setup" && !you.fleet) {
-    // Fleet placement (in 3D since 2026-11-20): your ocean in the
-    // scene, the next hull a hologram where it would lie - a click (a
-    // tap, then Place) lays it. The buttons stay in the page; without
-    // WebGL the grid below is the way to place.
+    // Fleet placement: your ocean in the scene, the next hull a
+    // hologram where it would lie - a click (a tap, then Place) lays
+    // it. The buttons stay in the page; without WebGL the grid below is
+    // the way to place.
     wrap.appendChild(
       ctx.panel(
         "scores",
@@ -212,11 +212,11 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
         : "Tap a cell to lay the next hull's bow there. Your fleet stays secret until the shooting starts.";
     wrap.appendChild(note);
   } else if (players.length > 2) {
-    // Free-for-all (2026-11-17; in 3D since 2026-11-20): your own
-    // waters plus one ocean per rival, each showing YOUR shots at
-    // that captain - the ocean you tap is the target, and the shot
-    // goes out as "Name:Cell". Eliminated captains are wreck charts
-    // (no fire). Without WebGL the 2D boards below are the aim.
+    // Free-for-all: your own waters plus one ocean per rival, each
+    // showing YOUR shots at that captain - the ocean you tap is the
+    // target, and the shot goes out as "Name:Cell". Eliminated
+    // captains are wreck charts (no fire). Without WebGL the flat
+    // boards below are the aim.
     const canFire = g.status === "running" && g.phase === "play" && you.your_turn && !you.eliminated;
     if (ctx.gameView) ctx.gameView.bsFire = canFire ? (label: string, target?: string) => { void ctx.sendMove(g.id, (target ? target + ":" : "") + label, note); } : null;
     if (g.last_move) wrap.appendChild(ctx.panel("banner", <BsBanner g={g} fresh={freshMove} />));
@@ -259,7 +259,7 @@ export function renderBattleshipView(ctx: GameViewCtx, g: BattleshipState, force
     if (g.last_move) wrap.appendChild(ctx.panel("banner", <BsBanner g={g} fresh={freshMove} />));
     if (ctx.gameView) ctx.gameView.bsFire = canFire ? (label: string) => { void ctx.sendMove(g.id, label, note); } : null;
     // In 3D the fleet strips (sizes still afloat) sit under the scene:
-    // the 2D boards that carry them are not built.
+    // the flat boards that carry them are not built.
     ctx.bsScene(
       g,
       wrap,

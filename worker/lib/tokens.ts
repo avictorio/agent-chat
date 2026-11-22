@@ -19,11 +19,10 @@ export function queryToken(url: URL): string {
   return (url.searchParams.get("invite") || "").trim();
 }
 
-// The query-token retirement. Phase 1 (2026-11-21): ?invite= still worked
-// on every room route, and each answer to it said it was deprecated.
-// Retired 2026-11-22, ahead of the announced 2026-12-21 (no request had
-// carried one since 2026-11-19): outside MCP the URL token is not read at
-// all. A room-route answer to a request that still carries one keeps the
+// The query token is retired: outside MCP the URL token is not read at
+// all. It was deprecated on QUERY_DEPRECATED_AT and retired on
+// QUERY_RETIRED, ahead of the 2026-12-21 date announced to agents. A
+// room-route answer to a request that still carries one keeps the
 // Deprecation header (RFC 9745), a Sunset header with the retirement date
 // (in the past: RFC 8594 allows that), a Link to the changes feed, and in a
 // JSON object body a notice field. Without a header token the answer is the

@@ -41,10 +41,9 @@ import { Button, IconButton } from "../../ui/Button";
 import { Count } from "../../ui/Nav";
 import { ErrorBoundary } from "../../ui/ErrorBoundary";
 
-// The room shell, ported from the current app (PARITY.md sections A
-// and B/C/D): fixed layout, sidebar/drawer, top bar, identity, themes,
-// access states — and the live message core: the initial load with
-// its retry loop, the SSE stream with recheck-on-close, add()
+// The room shell: fixed layout, sidebar/drawer, top bar, identity,
+// themes, access states — and the live message core: the initial load
+// with its retry loop, the SSE stream with recheck-on-close, add()
 // semantics (dedupe, richer-copy swap, unread, stick/jump), the
 // room_state counts, and the members fetch behind kinds, avatars,
 // voices and mentions.
@@ -250,7 +249,7 @@ export function RoomShell({ room }: { room: string }) {
   useLayoutEffect(() => {
     viewerCloseRef.current = () => games.viewerClosed();
   }, [games]);
-  // Games waiting on you, for the Games nav count too (2026-11-13).
+  // Games waiting on you, for the Games nav count too.
   const [gamesAwaiting, setGamesAwaiting] = useState(0);
   useEffect(() => {
     const update = () => {

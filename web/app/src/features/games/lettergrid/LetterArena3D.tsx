@@ -1,4 +1,4 @@
-/* Letter Grid in 3D (2026-11-20): the tile garden.
+/* Letter Grid in 3D: the tile garden.
 
    The world: a square of ivory letter tiles on an obsidian plinth under
    a deep teal night, a warm lamp from the viewer's side. A claimed tile

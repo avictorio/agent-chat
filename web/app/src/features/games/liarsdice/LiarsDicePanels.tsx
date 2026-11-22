@@ -2,14 +2,14 @@ import { useState } from "react";
 import type { LiarsDicePlayer, LiarsDiceRound, LiarsDiceState, LiarsDiceYou } from "@chat/contract";
 import { ldBidText, ldCounts, ldFaceWord } from "./liarsdice";
 
-/* Liar's Dice's panels (2026-11-21, React): dice drawn with pips, the
-   standing bid, your own cup, the bid builder (count, face, Bid or
-   Liar), the table (dice left per seat, whose turn), the last round with
-   every cup opened, and the chat card. The view (view.tsx) mounts them
-   with ctx.panel, so the bid builder's draft is its own state and
-   survives the view's repaints; the view keys it by turn, so it starts
-   over on each of your turns. Cups are secret: the server sends only
-   your own (you.dice) and the cups of closed rounds. */
+/* Liar's Dice's panels: dice drawn with pips, the standing bid, your
+   own cup, the bid builder (count, face, Bid or Liar), the table (dice
+   left per seat, whose turn), the last round with every cup opened, and
+   the chat card. The view (view.tsx) mounts them with ctx.panel, so the
+   bid builder's draft is its own state and survives the view's
+   repaints; the view keys it by turn, so it starts over on each of your
+   turns. Cups are secret: the server sends only your own (you.dice) and
+   the cups of closed rounds. */
 
 // pip positions per face on a 3x3 grid, [row, column]
 const PIPS: Record<number, [number, number][]> = {

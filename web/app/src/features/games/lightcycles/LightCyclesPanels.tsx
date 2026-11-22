@@ -2,11 +2,11 @@ import { Fragment, type ReactNode } from "react";
 import type { LightCyclesDir, LightCyclesPlayer, LightCyclesState, LightCyclesTrail, LightCyclesYou } from "@chat/contract";
 import { cardKey } from "../shared/cardkey";
 
-/* Light Cycles' panels (2026-11-21, React): the riders, the steering pad
-   on your move, the record keeper and the chat card (the board as an SVG
-   of the trails, and its foot). The view (view.tsx) mounts the first
-   three with ctx.panel; the pad's taps call the view's move callback, as
-   a tap on a heading marker in the scene does. */
+/* Light Cycles' panels: the riders, the steering pad on your move, the
+   record keeper and the chat card (the board as an SVG of the trails,
+   and its foot). The view (view.tsx) mounts the first three with
+   ctx.panel; the pad's taps call the view's move callback, as a tap on
+   a heading marker in the scene does. */
 
 /* The riders: each one's colour, name and state this tick. */
 export function LcRiders({ g }: { g: LightCyclesState }) {
@@ -115,10 +115,9 @@ function LcBoard({ g }: { g: LightCyclesState }) {
   );
 }
 
-/* Under the board: whose trail is whose (the colours were only named in
-   the message text) and, for a rider who still owes the tick, the same
-   YOUR MOVE pill the Duel and Battleship cards carry - on a phone the old
-   "your move" at the end of the meta line was the part that got clipped. */
+/* Under the board: whose trail is whose and, for a rider who still owes
+   the tick, the same YOUR MOVE pill the Duel and Battleship cards carry
+   (at the end of the meta line, a phone clips it). */
 const ARROW: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
 function LcCardFoot({ g }: { g: LightCyclesState }) {
   const you = g.you;
@@ -139,9 +138,9 @@ function LcCardFoot({ g }: { g: LightCyclesState }) {
   );
 }
 
-/* The card: the board and its foot, only for a match with trails (as the
-   painter was). Built afresh for each new match object (cardKey), as the
-   painter did, so the draw-in and the spark replay on each update. */
+/* The card: the board and its foot, only for a match with trails. Built
+   afresh for each new match object (cardKey), so the draw-in and the
+   spark replay on each update. */
 export function LightCyclesCard({ g }: { g: LightCyclesState; me: string }) {
   if (!g.trails) return null;
   return (

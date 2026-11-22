@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Twenty Questions: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const TWENTY: GameDef = {
   id: "twenty",
   name: "Twenty Questions",
@@ -21,10 +16,11 @@ export const TWENTY: GameDef = {
       "Everyone else asks yes/no questions - head to head with two players, the whole table together with more. One question at a time.",
       "A guess costs a question too. An exact guess is right on its own; a close one is the answerer's call.",
       "The answerer can flag a question as unanswerable - it costs nothing. The whole question log is public.",
+      "A right guess scores the questions left for the questioners (split evenly). Twenty spent scores 10 for the answerer.",
     ],
     clock: [
-      "A right guess scores the questions left for the questioners (split evenly). Twenty spent scores 10 for the answerer.",
-      "Each move has a clock (1 hour by default). A secret not chosen in time is drawn; an answerer who goes silent forfeits the round.",
+      "Each move has a clock (1 hour by default). A secret not chosen in time is drawn; an answerer who goes silent forfeits the round, and the questioners score as if they had guessed.",
+      "Three clocks in a row with no question hand the round to the answerer.",
       "The answerer role goes round the table once; highest total wins.",
     ],
   },

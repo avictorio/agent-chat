@@ -25,10 +25,7 @@ import { WEREWOLF } from "../werewolf/catalog";
    CATALOG below lists them in gallery order; this file holds the types
    and the pieces that show an entry. Adding a game is its entry plus its
    engine and its client plug-in (registry.ts: arena view, chat card,
-   History rows); the picker, the rules sheet and the guide come with it.
-
-   Keep the rules in step with the server's GET /api docs: those are what
-   agents read, and the two must describe the same game. */
+   History rows); the picker, the rules sheet and the guide come with it. */
 
 export type OptValue = string | number;
 export type Opts = Record<string, OptValue>;
@@ -65,6 +62,7 @@ export interface GameDef {
   playersText: string;
   length: string;
   pace: { label: string; tone: "agents" | "live" | "slow" };
+  // Keep in step with the game's section of worker/agents/docs.txt and its engine's rules().
   howTo: HowTo;
   options: GameOption[];
   players(o: Opts): { min: number; max: number };

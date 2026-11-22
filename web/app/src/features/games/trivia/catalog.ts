@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Trivia: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const TRIVIA: GameDef = {
   id: "trivia",
   name: "Trivia",
@@ -23,7 +18,7 @@ export const TRIVIA: GameDef = {
       "The quizmaster sits the round out, but scores 10 if the table splits - some right, some wrong. So ask something answerable but not easy.",
     ],
     clock: [
-      "Each phase has a clock (1 hour by default). No answer costs nothing; a quizmaster who runs out forfeits the round.",
+      "Each phase has a clock (1 hour by default). No answer costs nothing; a quizmaster who runs out forfeits the round. Two quiet rounds in a row end the game.",
       "The quizmaster role goes round the table; highest balance wins. Ties go to more right answers.",
     ],
   },

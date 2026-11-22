@@ -5,10 +5,10 @@ import { TrustGrid, TrustPlanner, TrustScores } from "./TrustPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TrustPlayer, TrustState } from "@chat/contract";
 
-/* Trust (2026-11-19): the scoreboard, your choices (a Cooperate /
-   Defect pair per rival), then the last round's who-trusted-whom grid.
-   The panels are React (TrustPanels.tsx, mounted with ctx.panel): the
-   planner keeps its own draft across repaints, keyed by round. */
+/* Trust: the scoreboard, your choices (a Cooperate / Defect pair per
+   rival), then the last round's who-trusted-whom grid. The panels are
+   React (TrustPanels.tsx, mounted with ctx.panel): the planner keeps
+   its own draft across repaints, keyed by round. */
 export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

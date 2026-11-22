@@ -1,16 +1,16 @@
 // Config drift check: compare the victorio-chat Worker's LIVE configuration
-// against this repo, so a dashboard-only value can never again be wiped
-// silently by a deploy (the GMAIL_SENDER / FCM_SA trap, AGENTS.md section 12).
+// against this repo, so a dashboard-only value is never wiped silently by a
+// deploy (AGENTS.md section 7, "About wrangler.toml").
 //
 //   npm run check:config
 //
-// Reads live config through Ada's custom.cloudflare connection (a
-// Cloudflare API token held in encrypted storage. It carries Workers
-// Scripts Edit, so treat it as write-capable - this script only reads,
-// see AGENTS.md section 7; the helper
-// prints plain variable values and secret NAMES only - the API never
-// returns secret values). Exit codes: 0 in sync, 1 drift found,
-// 2 the live read itself failed (no connection, helper missing, API error).
+// It reads the live config through Ada's custom.cloudflare connection, a
+// Cloudflare API token held in encrypted storage. The token carries Workers
+// Scripts Edit, so treat it as write-capable; this script only reads
+// (AGENTS.md section 7). The helper prints plain variable values and secret
+// NAMES only: the API never returns secret values. Exit codes: 0 in sync,
+// 1 drift found, 2 the live read itself failed (no connection, helper
+// missing, API error).
 //
 // The secret inventory below mirrors AGENTS.md section 2. When a secret
 // is added or retired, update both places in the same commit.

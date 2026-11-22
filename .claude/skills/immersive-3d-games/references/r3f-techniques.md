@@ -58,16 +58,11 @@ frames will come.
 
 The research recommended one shared mutable clock, updated first each frame,
 that clamps delta and owns hit-stop and slow motion. The repo's version is
-`Juice` + `JuiceRig` (`juice.tsx`):
-
-- `Juice.hit(impact)` adds trauma, extends a hit-stop (`stop`, ms), starts
-  slow motion (`slow`, s, at 0.25× easing back over the last 40%), kicks the
-  post pulse, flashes (rate-limited), buzzes, plays SFX and raises a title.
-- `JuiceRig` (inside the Canvas) advances `juice.t` by clamped real delta ×
-  `juice.scale` (0 in hit-stop, 0.25 in slow motion), decays trauma and
-  pulse, applies the shake, and invalidates while anything runs.
-- `useJuice()` gives Canvas children the store; `useJuiceStore(still)`
-  creates it per arena with the reduced-motion flag.
+`Juice` + `JuiceRig` (`juice.tsx`; the contract, `Impact`'s fields and the
+store hooks: `primitives.md`): `Juice.hit` starts the hit-stop and slow
+motion, and `JuiceRig` advances `juice.t` by clamped real delta ×
+`juice.scale` (0 in hit-stop, a slow factor in slow motion) and invalidates
+while anything runs.
 
 Which clock to read:
 
@@ -160,7 +155,7 @@ Reasoned from pass and texture-tap counts; no per-device timings exist.
 | moderate | Bloom with `mipmapBlur` (levels 4–5 on phones; level count barely matters with mipmapBlur) | all, or off on the lowest rung |
 | pass-splitting | ChromaticAberration (3 taps, convolution) | desktop; `ArenaPost` keeps a tiny fringe on all tiers today, so mind the merge rule |
 | heavy | SMAA (3 passes), DepthOfField, GodRays (60 samples), SSAO/N8AO, Outline, SelectiveBloom | desktop only, or never |
-| bandwidth trap | `multisampling` on HalfFloat targets | 0 on phones (repo: 0 lite, 2 otherwise) |
+| bandwidth trap | `multisampling` on HalfFloat targets | 0 on phones (repo: `useQuality().msaa`) |
 
 Plain `Bloom` beats `SelectiveBloom` on cost; select by material instead.
 Bundle: `EffectComposer + Bloom + Vignette` ≈ 28 KB gzip; adding CA, Noise,
@@ -205,20 +200,13 @@ Choreography with camera-controls:
 
 Intro recipe shape (research): snap to a high, far vista; one rAF; raise
 `smoothTime` (~1.1) for the fly-in; `fitToBox` the arena; `saveState()` as
-home. The repo's `Intro` does its own version: start low on the horizon
-(el 0.1 rad), 1.5× the home distance, swung 0.28 rad; hold ~0.9 s while
-the iris opens; then crane to the `Framer`-computed home with `smoothTime`
-0.7.
+home. The repo's `Intro` does its own version: it starts low and far on the
+horizon, swung round, holds while the iris opens, then cranes to the
+`Framer`-computed home with a raised `smoothTime` (pose and timings in
+`juice.tsx`).
 
-Framing in `arena3d.tsx`: `fitHome(spanW, spanD, elevDeg, vfovDeg, aspect,
-margin)` fits a board into the host aspect (perspective makes the near edge
-widest); `Framer` re-applies home when the host's shape changes by more than
-~8% (a phone rotating) but ignores small nudges; `goHome` returns the camera;
-`TouchControls`: outside Move mode touch never moves the camera (one finger
-scrolls the page or taps the board); the frame's **Move** button hands touch
-to the scene (one finger rotates, two dolly and truck, three truck) until
-**Done**; `ArenaFrame` lets the wheel scroll the page unless
-Ctrl/Cmd is held, and hosts Reset view and tool buttons.
+Framing (`fitHome`, `Framer`, `goHome`), touch (`TouchControls` and Move
+mode) and the wheel rule (`ArenaFrame`) are `arena3d.tsx`: `primitives.md`.
 
 ## 6. Particles and destruction
 
@@ -252,17 +240,10 @@ vFade = step(0.0001, t) * (1.0 - k);
 // frag: d = length(gl_PointCoord - 0.5); discard if d > 0.5; colour * vFade * (1 - 2d)
 ```
 
-Repo primitives (`atmos.tsx`, all on the juice clock, all one draw, all
-invalidate while alive and hide themselves at the end):
-
-- `Burst` — derez into glowing voxels (`at`, `hex`, `box`, `count` 70,
-  `power`, `piece`, `dur` 1.7 s, `rise`, `onDone`). CPU-integrated instanced
-  boxes; fine at its default counts.
-- `Shockwave` — a ring racing out over the floor (`radius`, `dur` 0.9 s,
-  cubic ease-out, fading).
-- `LightPillar` — a column of light where a rider fell or a duel was won.
-
-Mount them per event (keyed), and cap simultaneous instances on phones.
+Repo primitives: `atmos.tsx`'s `Burst` (CPU-integrated instanced voxels,
+fine at its default counts), `Shockwave` (a floor ring) and `LightPillar`,
+all on the juice clock, one draw each, mounted per event (keyed) and
+capped on phones; props and defaults in the file (`primitives.md`).
 
 Libraries only past these recipes: three.quarks (~35 KB gzip: emitters,
 flipbooks, soft particles; soft particles need a depth texture, desktop

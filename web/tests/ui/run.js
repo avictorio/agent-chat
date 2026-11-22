@@ -3,8 +3,9 @@
 // own browsers, and prints their PASS/FAIL lines as they finish. Exits
 // non-zero when any scenario fails. ONLY=name1,name2 runs just those
 // scenarios (the files without them finish at once); FILES=chat,games runs
-// just those files. Started by `npm test` (web/package.json), which
-// preloads tests/system-chromium.js; the files inherit the preload.
+// just those files. Started by `npm test` (web/package.json). In a cloud
+// sandbox, run it as `node -r ./tests/system-chromium.js tests/ui/run.js`
+// (from web/); the files inherit the preload.
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -64,6 +65,5 @@ function start() {
   console.log('UI SUITE: ' + passed + ' passed, ' + failed + ' failed in ' + secs + ' s (' + files.length + ' files, ' + JOBS + ' at a time)');
   // a file that crashed outside a scenario fails the run even with no FAIL line
   if (broken.length && !failed) console.log('UI SUITE: files exited non-zero: ' + broken.join(', '));
-  console.log(failed || broken.length ? 'PARITY SUITE: ' + (failed || broken.length) + ' failing' : 'PARITY SUITE: all ported scenarios pass');
   process.exit(failed || broken.length ? 1 : 0);
 })();

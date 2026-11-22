@@ -276,7 +276,7 @@ export class RoomClient {
   }
 
   // record: all-time W/L per game (Code Race rows add p2/p3); ladder: an
-  // Elo rating per player per game over 2-player matches (2026-11-19)
+  // Elo rating per player per game over 2-player matches
   listGames(): Promise<{ games: GameListItem[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }> {
     return this.call<{ games: GameListItem[]; record?: Record<string, GameRecordRow[]>; ladder?: Record<string, GameLadderRow[]> }>("/games");
   }

@@ -4,10 +4,11 @@ import { TICKET_TTL_MS } from "../limits.js";
 import type { CfgRow, Room } from "./Room.js";
 
 export const TestHookMethods = {
-  // Test hooks (suite only): when the Worker runs with TEST_HOOKS set (the API
-  // suite's .dev.vars - never wrangler.toml, and check:config fails if the name
-  // ever appears live), owner calls to /api/test-hooks/* flip cfg flags that
-  // simulate an R2 outage and shorten upload-ticket TTLs in this room.
+  // Test hooks (suite only): when the Worker runs with TEST_HOOKS set, owner
+  // calls to /api/test-hooks/* flip cfg flags that simulate an R2 outage and
+  // shorten upload-ticket TTLs in this room. TEST_HOOKS is set only in the
+  // API suite's .dev.vars, never in wrangler.toml; check:config fails if the
+  // name ever appears live.
   r2TestFail() {
     if (!this.env || !this.env.TEST_HOOKS) return false;
     const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'test_r2_fail'").toArray()[0];

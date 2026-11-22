@@ -1,5 +1,4 @@
-/* Battleship hulls (2026-11-13): warships built in code, no model
-   files.
+/* Battleship hulls: warships built in code, no model files.
 
    - The hull is lofted: stations along the length, each a section that
      is round in the bilge below the waterline and flares outward above

@@ -4,11 +4,11 @@
 const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
 
 (async () => {
-  // Frontlines (2026-11-19): the card shows the score and the last round
-  // on a compact field; without WebGL the arena shows the field (with
-  // WebGL its numbers are in the scene, see frontlines-3d) and the
-  // planner. Lock in stays off until the split adds up to 100; Even
-  // fills it; the commit sends the split and the planner reads as locked.
+  // Frontlines: the card shows the score and the last round on a compact
+  // field; without WebGL the arena shows the field (with WebGL its numbers
+  // are in the scene, see frontlines-3d) and the planner. Lock in stays off
+  // until the split adds up to 100; Even fills it; the commit sends the split
+  // and the planner reads as locked.
   for (const [label, o] of [['frontlines-arena', {}], ['frontlines-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { fl: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
@@ -51,11 +51,11 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Code Race (2026-11-19): the card shows each racer's latest feedback;
-  // without WebGL (with it the lanes are the vault's ledgers, see
-  // coderace-3d) the arena puts your lane first with your guesses, a rival's lane
-  // shows feedback only (pegs hidden); the palette fills the slots, Guess
-  // sends them in order, and the round's guess shows sealed in your lane.
+  // Code Race: the card shows each racer's latest feedback; without WebGL
+  // (with it the lanes are the vault's ledgers, see coderace-3d) the arena
+  // puts your lane first with your guesses, a rival's lane shows feedback
+  // only (pegs hidden); the palette fills the slots, Guess sends them in
+  // order, and the round's guess shows sealed in your lane.
   for (const [label, o] of [['coderace-arena', {}], ['coderace-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
@@ -160,11 +160,10 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Four in a Row (2026-11-19): the card shows the board; the arena puts
-  // the drop buttons under the scene on your turn; a drop lands (the
-  // scene counts it) and the turn passes; a finished match names the
-  // winner and the result line counts the moves (the board is the scene:
-  // the 2D grid was retired 2026-11-20).
+  // Four in a Row: the card shows the board; the arena puts the drop buttons
+  // under the scene on your turn; a drop lands (the scene counts it) and the
+  // turn passes; a finished match names the winner and the result line counts
+  // the moves (the board is the scene).
   for (const [label, o] of [['fourinarow-arena', {}], ['fourinarow-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -193,9 +192,9 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // A match that ends on the clock after its last drop (2026-11-21): the
-  // replay of that drop says the match was lost on timeouts, not "four in a
-  // row" - the drop decided nothing.
+  // A match that ends on the clock after its last drop: the replay of that
+  // drop says the match was lost on timeouts, not "four in a row" - the drop
+  // decided nothing.
   for (const [label, o] of [['fourinarow-forfeit', {}], ['fourinarow-forfeit-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     // the viewer last saw move 5, so opening the arena replays move 6
     await run(label, Object.assign({ state: { c4: true, c4Forfeit: true }, init: () => { try { localStorage.setItem('ac-c4-seen:/r/demo:16', '5'); } catch {} } }, o), async (page) => {
@@ -240,12 +239,11 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Sketch & Guess (2026-11-20, 3D only): the artist sees the secret
-  // prompt and a sketch pad; Send drawing refuses an empty page, then sends
-  // the pad as a PNG data URL (the status line never echoes it); a
-  // guesser's card shows the drawing; the arena puts the gallery first,
-  // then the guess form, the scores and the last round (the Referee's calls
-  // marked).
+  // Sketch & Guess: the artist sees the secret prompt and a sketch pad; Send
+  // drawing refuses an empty page, then sends the pad as a PNG data URL (the
+  // status line never echoes it); a guesser's card shows the drawing; the
+  // arena puts the gallery first, then the guess form, the scores and the
+  // last round (the Referee's calls marked).
   await run('sketch-draw', { state: { sg: true, sgDraw: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .sg-card', { timeout: 10000 });
@@ -350,11 +348,10 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Trivia (2026-11-20, 3D only, a rotating quizmaster): the card shows
-  // the question and the balances; the arena puts the stage first, then
-  // the question, your form, the scores and the last round's reveal. An
-  // answer goes out with its wager (quick stakes set the slider); typing
-  // keeps the field's focus.
+  // Trivia (a rotating quizmaster): the card shows the question and the
+  // balances; the arena puts the stage first, then the question, your form,
+  // the scores and the last round's reveal. An answer goes out with its wager
+  // (quick stakes set the slider); typing keeps the field's focus.
   for (const [label, o] of [['trivia-answer', {}], ['trivia-answer-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tv: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -434,12 +431,11 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
     if (!/"dir":"done"/.test(out.done)) throw new Error('Reveal ends the judging: ' + out.done);
     return out;
   });
-  // Letter Grid (2026-11-20, 3D only): the card shows a small grid with
-  // the claims; the arena puts the scene first, then the word panel, the
-  // scores, your words and the last round's words. Typing traces the
-  // path live (cells as chips, the score it would make); a word that
-  // can't be traced, or one you've played, can't be sent; Send carries the
-  // word with its cells.
+  // Letter Grid: the card shows a small grid with the claims; the arena puts
+  // the scene first, then the word panel, the scores, your words and the last
+  // round's words. Typing traces the path live (cells as chips, the score it
+  // would make); a word that can't be traced, or one you've played, can't be
+  // sent; Send carries the word with its cells.
   for (const [label, o] of [['lettergrid-arena', {}], ['lettergrid-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { lg: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -491,11 +487,10 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Werewolf (2026-11-20, 3D only): the village first, then your role,
-  // your move (a vote by day; a role's pick by night), the discussion
-  // panel (the town square; the den for wolves), the timeline and the
-  // villagers. Day: a villager talks and votes. Night: a wolf picks a
-  // kill and whispers in the den.
+  // Werewolf: the village first, then your role, your move (a vote by day; a
+  // role's pick by night), the discussion panel (the town square; the den for
+  // wolves), the timeline and the villagers. Day: a villager talks and votes.
+  // Night: a wolf picks a kill and whispers in the den.
   for (const [label, o] of [['werewolf-day', {}], ['werewolf-day-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -568,9 +563,9 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Twenty Questions (2026-11-20, 3D only): the box first, then the
-  // controls (ask or guess; or, as the answerer, answer with a note), the
-  // budget, the public Q/A log, the scores and the last reveal.
+  // Twenty Questions: the box first, then the controls (ask or guess; or, as
+  // the answerer, answer with a note), the budget, the public Q/A log, the
+  // scores and the last reveal.
   for (const [label, o] of [['twenty-ask', {}], ['twenty-ask-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tq: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -627,9 +622,9 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Exquisite Corpse (2026-11-20, 3D only): the desk first; on your turn
-  // the fold (only the segment before yours) and your segment, the turn
-  // strip, then - once revealed - the story with the favourite vote.
+  // Exquisite Corpse: the desk first; on your turn the fold (only the segment
+  // before yours) and your segment, the turn strip, then - once revealed -
+  // the story with the favourite vote.
   for (const [label, o] of [['corpse-write', {}], ['corpse-write-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ec: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -692,9 +687,8 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Two Truths and a Lie (2026-11-19, 3D only - no 2D view or toggle):
-  // the campfire first, then the statements to vote on (or the
-  // storyteller's form), the scores and the last round's reveal.
+  // Two Truths and a Lie: the campfire first, then the statements to vote on
+  // (or the storyteller's form), the scores and the last round's reveal.
   for (const [label, o] of [['twotruths-vote', {}], ['twotruths-vote-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tt: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -761,11 +755,11 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Liar's Dice (2026-11-19): the card shows the standing bid and the
-  // table; without WebGL the arena puts the bid first, then your cup, the
-  // bid builder (count, face, Bid or Liar!), the table and the last
-  // round's opened cups (with WebGL the cup and the seats are in the
-  // scene, see liarsdice-3d). Desktop raises; the phone calls liar.
+  // Liar's Dice: the card shows the standing bid and the table; without WebGL
+  // the arena puts the bid first, then your cup, the bid builder (count,
+  // face, Bid or Liar!), the table and the last round's opened cups (with
+  // WebGL the cup and the seats are in the scene, see liarsdice-3d). Desktop
+  // raises; the phone calls liar.
   for (const [label, o] of [['liarsdice-arena', {}], ['liarsdice-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark', liar: true }]]) {
     await run(label, Object.assign({ state: { ld: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
@@ -825,9 +819,9 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // The auction (2026-11-19): the card shows the lot and the bidders; the
-  // arena puts the lot first, then your sealed bid (steps, quick amounts),
-  // the bidders, and the last lot's opened bids.
+  // The auction: the card shows the lot and the bidders; the arena puts the
+  // lot first, then your sealed bid (steps, quick amounts), the bidders, and
+  // the last lot's opened bids.
   for (const [label, o] of [['auction-arena', {}], ['auction-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -869,11 +863,10 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       return out;
     });
   }
-  // Trust (2026-11-19): the card shows the scores; the arena puts the
-  // scoreboard first, then a Cooperate / Defect pair per rival (Lock in
-  // waits for both), then - without WebGL - the last round's
-  // who-trusted-whom grid (with WebGL the table's threads are the grid,
-  // see trust-3d).
+  // Trust: the card shows the scores; the arena puts the scoreboard first,
+  // then a Cooperate / Defect pair per rival (Lock in waits for both), then -
+  // without WebGL - the last round's who-trusted-whom grid (with WebGL the
+  // table's threads are the grid, see trust-3d).
   for (const [label, o] of [['trust-arena', {}], ['trust-arena-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tr: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};

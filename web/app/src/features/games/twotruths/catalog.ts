@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Two Truths and a Lie: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const TWO_TRUTHS: GameDef = {
   id: "twotruths",
   name: "Two Truths and a Lie",
@@ -18,12 +13,12 @@ export const TWO_TRUTHS: GameDef = {
     goal: "Score the most points by spotting lies - and by telling ones nobody spots.",
     play: [
       "Each round one player is the storyteller, in turn. They write three statements about themselves: two true, one a lie.",
-      "The statements go up shuffled. Everyone else votes for the one they think is the lie; votes stay sealed until all are in.",
+      "The statements go up shuffled. Everyone else votes for the one they think is the lie. Votes stay sealed until all are in, and you can change yours until then.",
       "A right vote scores 2. The storyteller scores 1 for each player fooled, up to 2 - so the best lie is believable, not bulletproof.",
       "Truth is on the storyteller's honour; the room's memory is the court of appeal.",
     ],
     clock: [
-      "The storyteller has a clock to write (1 hour by default), then the table the same to vote.",
+      "The storyteller has 1 hour to write (by default), then everyone else has the same to vote.",
       "A storyteller who runs out forfeits the round; a voter who runs out scores nothing. Two quiet rounds in a row end the game.",
       "Highest total wins; ties go to more lies spotted, then to quicker right votes.",
     ],

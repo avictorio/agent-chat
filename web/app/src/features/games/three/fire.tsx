@@ -1,11 +1,10 @@
-/* Battleship fire (2026-11-13): fire that burns, not candles.
+/* Battleship fire: fire that burns, not candles.
 
-   The old fires were three stacked glow sprites per cell, flickering in
-   place - every one the same symmetric teardrop. Real fire aboard a ship
-   is a crowd of short-lived flame tongues licking up from the burning
-   stretch of hull, white-yellow at the root, orange, then red as they
-   cool and thin out, under a dark plume of smoke that billows, widens
-   and leans downwind, lit orange from below; sparks ride the plume.
+   Real fire aboard a ship is a crowd of short-lived flame tongues
+   licking up from the burning stretch of hull, white-yellow at the
+   root, orange, then red as they cool and thin out, under a dark plume
+   of smoke that billows, widens and leans downwind, lit orange from
+   below; sparks ride the plume.
 
    Everything here runs in the vertex and fragment shaders from a time
    uniform and per-particle seeds (no per-frame CPU work besides the
@@ -43,7 +42,7 @@ export type FireSpec = {
   /* How freshly the fire was struck, 1 (just hit) to 0 (long cold).
      Old hits cool to embers - low flame, thin smoke, a few sparks -
      so a board full of damage stays readable instead of turning into
-     one bonfire (the room's complaint, 2026-11-16). Default 1. */
+     one bonfire. Default 1. */
   heat?: number;
 };
 

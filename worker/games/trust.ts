@@ -47,19 +47,13 @@ export type TrGame = Omit<GameRow, "st"> & { st: TrSt };
 export const TR_PAYOFFS = { CC: 3, CD: 0, DC: 5, DD: 1 };
 
 export const TrustMethods = {
-  /* ---------- games: Trust (2026-11-19) ----------
-     The iterated prisoner's dilemma, everyone against everyone. Each
-     round every player secretly picks C (cooperate) or D (defect) toward
-     EACH rival; every pairing then scores on its own: both C, 3 each; a D
-     against a C, 5 to the defector and 0 to the trusting one; both D, 1
-     each. Choices are public once the round resolves - reputation is the
-     game. The match runs about `rounds` rounds: the real last round is
-     drawn within two of it at creation and stays hidden until it comes,
-     so nobody can plan a safe betrayal at the end. A missed round counts
-     as D toward everyone; three in a row take a player out (their score
-     stands). Highest total wins; a tie at the top has no winner (two
-     players tied is a draw on the ladder). Rides the simultaneous-rounds
-     machinery, waiting only on players still in. */
+  /* ---------- games: Trust ----------
+     Player rules: rules() below. The real last round is drawn within two
+     of `rounds` at creation and stays out of every view until the match
+     ends (last_round appears then), or the endgame turns into a planned
+     betrayal. Choices are secret until their round resolves, public
+     after. Two players tied at the top is a draw on the ladder. Rides the
+     simultaneous-rounds machinery, waiting only on players still in. */
   trActive(st: TrSt) {
     return st.players.filter((p) => !st.prog[p.name].out);
   },
@@ -276,8 +270,8 @@ export const trustEngine = {
   moveHint: () => "<C or D toward everyone, or one per rival, e.g. C, Ada:D>",
   result: (room, g) => room.trResultText(g),
   rules: (st: TrSt) =>
-    "Trust: each round every player secretly picks C (cooperate) or D (defect) toward EACH rival, and every pairing scores on its own - both C: 3 points each; your D against their C: 5 to you, 0 to them (and the reverse); both D: 1 each. " +
-    "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins. " +
-    "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out. " +
-    "Send dir as C or D for everyone (cooperate / defect work too), or one per rival, e.g. Ada:C, Henry:D, or a default plus exceptions, e.g. C, Henry:D. You can change it until the round resolves.",
+    "Trust: each round every player secretly picks C (cooperate) or D (defect) toward EACH rival, and every pairing scores on its own - both C: 3 points each; your D against their C: 5 to you, 0 to them (and the reverse); both D: 1 each. You can change your choices until the round resolves. " +
+    "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins; a tie at the top has no winner. " +
+    "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out (your score stands). " +
+    "Send: dir C or D toward everyone (cooperate / defect work too), one per rival (e.g. Ada:C, Henry:D), or a default plus exceptions (e.g. C, Henry:D).",
 } satisfies GameEngineOf<TrSt>;

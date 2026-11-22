@@ -1,14 +1,10 @@
 // The UI suite's shared harness: the fake API (fresh state, setup), the
 // scenario runner (run) and the helpers the feature files use. Each
 // <feature>.test.js runs its own scenarios; run.js runs the files in
-// parallel. See the comment below for how a scenario is served.
-// The web app's UI suite. It began as the parity harness for the React
-// rewrite (web/PARITY.md, M1), ported from the pre-React suite (root
-// tests/ui.test.js, removed with the old pages on 2026-11-19; its fixtures
-// stay in the root tests/fixtures/). It serves the built app (app/dist)
-// through a fake API, and /api/build answers 'uitestbuild1' when current
-// (the served page is stamped the same). Exits non-zero when a scenario
-// fails; ONLY=name1,name2 runs just those.
+// parallel. It serves the built app (app/dist) through the fake API, and
+// /api/build answers 'uitestbuild1' when current (the served page is
+// stamped the same). Some fixtures live in the root tests/fixtures/. A file
+// exits non-zero when a scenario fails; ONLY=name1,name2 runs just those.
 const { chromium } = require('playwright');
 const path = require('path');
 // web/tests: the fixtures, the fake data's files and the screenshots are
@@ -152,9 +148,9 @@ function fresh(opts) {
       ],
       awaiting: ['Henry', 'Anthony'],
       you: { playing: true, alive: true, dir: 'down', queued: null, legal_moves: ['down', 'left', 'right'] } } : null,
-    // Frontlines (2026-11-19): a running match two rounds in - Ada took
-    // round 1 (3 hills to 2), round 2 was level - Ada has committed
-    // round 3, the viewer has not.
+    // Frontlines: a running match two rounds in - Ada took round 1 (3 hills
+    // to 2), round 2 was level - Ada has committed round 3, the viewer has
+    // not.
     fl: opts.fl ? { id: 12, type: 'frontlines', status: 'running', created_by: 'Ada', card_msg: 13, round: 3, best_of: 5, target: 3, round_seconds: 180, deadline: now + 150e3, variant: opts.flValued ? 'valued' : 'classic', values: opts.flValued ? [2, 1, 3, 1, 2] : null, hills: 5, troops: 100, winner: null,
       score: { Ada: 1, Anthony: 0 },
       players: [
@@ -628,7 +624,7 @@ let FAILURES = 0;
 // shaders compile on first draw, seconds under load) or its entry iris is
 // still opening (1.3 s once the scene is ready), wait - up to 30 s, then
 // take whatever is there. Title cards are not waited for: some shots are
-// of them. Until 2026-11-22, 28 shots in a run caught the loading line.
+// of them. Without this wait, shots under load catch the loading line.
 async function shot(page, f) {
   await page
     .waitForFunction(
@@ -681,32 +677,26 @@ async function run(name, o, fn) {
     if (process.env.UI_TIMES) console.log('TIME ' + ((Date.now() - tm.t0) / 1000).toFixed(1) + 's launch ' + tm.launch + 'ms load ' + tm.load + 'ms ' + name);
   }
 }
-/* No WebGL (2026-11-20, the 2D views are retired): the arena box
-   shrinks to one note and the game plays on with the controls under
-   it - Battleship's two-captain view gives their waters as a plain
-   aiming grid (the scene was the only way to fire), Four in a Row
-   keeps its drop buttons. No Reload button: a reload won't help. */
+/* No WebGL: the arena box shrinks to one note and the game plays on
+   with the controls under it - Battleship's two-captain view gives
+   their waters as a plain aiming grid (otherwise the scene is the only
+   way to fire), Four in a Row keeps its drop buttons. No Reload
+   button: a reload won't help. */
 /* The arena's sections in page order: its children, looking through the
    display: contents hosts of the games' React panels (ctx.panel). */
 const ARENA_KIDS = '#viewer .lc-arena > :not(.panel-host), #viewer .lc-arena > .panel-host > *';
 const noGl = () => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return /webgl/i.test(t) ? null : g.call(this, t, ...a); }; };
-// New game (2026-11-19 redesign): a gallery of the games from the
-// catalog, then the chosen game's setup - How to play (folded, one tap
-// opens it), players (you are picked by default), options, Start. A duel
-// needs exactly 2 players, Light Cycles 2-4; Back returns to the
-// gallery and keeps the picks (trimmed to the next game's maximum);
-// starting posts the create call and closes the dialog.
+// New game: a gallery of the games from the catalog, then the chosen game's
+// setup - How to play (folded, one tap opens it), players (you are picked
+// by default), options, Start. A duel needs exactly 2 players, Light Cycles
+// 2-4; Back returns to the gallery and keeps the picks (trimmed to the next
+// game's maximum); starting posts the create call and closes the dialog.
 const ngOpen = async (page) => {
   await page.click('.tab[data-tab="games"]');
   await page.waitForSelector('#view-games .gm-start-btn', { timeout: 4000 });
   await page.click('#view-games .gm-start-btn');
   await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
 };
-// The media shelf: the attachments listing as a filterable grid,
-// the full-screen viewer, and the jump back to the message.
-// Uploads (2026-11-20): any file through the paperclip goes up in
-// resumable parts under a draft, with byte progress, a retry on a failed
-// part, and the message posting only once the upload is done.
 const must = (c, msg) => { if (!c) throw new Error(msg); };
 // A scenario with its own harness (the home page) counts its failure here.
 function failed() {

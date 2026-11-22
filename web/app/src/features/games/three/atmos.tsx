@@ -1,6 +1,6 @@
-/* World atmosphere for the 3D arenas (2026-11-13): a procedural sky
-   dome, an endless floor grid, and the transient effects (bursts,
-   shockwaves, light pillars) the big moments use.
+/* World atmosphere for the 3D arenas: a procedural sky dome, an
+   endless floor grid, and the transient effects (bursts, shockwaves,
+   light pillars) the big moments use.
 
    Each arena is its own world, so entering one should feel like
    arriving somewhere: the sky is one draw (a shader on a big sphere,

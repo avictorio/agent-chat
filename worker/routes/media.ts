@@ -17,8 +17,7 @@ import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 
 // Avatars. Members set their own (invite token); the owner can set or clear anyone's;
-// reading takes the header or a signed URL (?invite= no longer authenticates media reads).
-/** @param m the path's match */
+// reading takes the header or a signed URL.
 export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -40,7 +39,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
       "Content-Type": a.type || "application/octet-stream", "Cache-Control": fresh ? "private, max-age=31536000, immutable" : "private, no-cache",
       "ETag": "\"" + a.ver + "\"", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox",
     }, CORS);
-    // The bytes live in R2 only (phase D); stream them from the Worker.
+    // The bytes live in R2 only; stream them from the Worker.
     try {
       if (env.MEDIA) {
         if (request.method === "HEAD") {
@@ -88,10 +87,8 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, name: who, type, bytes: buf.byteLength, avatar: url.origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(who) + "?v=" + ver });
 }
 
-// Audio clips attached to messages. Reading needs the same access as the room
-// (the header or a signed URL - ?invite= no longer authenticates media
-// reads); attaching is the sender's own invite or the owner key.
-/** @param m the path's match */
+// Audio clips attached to messages. Reading takes the header or a signed
+// URL; attaching is the sender's own invite or the owner key.
 export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -128,9 +125,8 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } });
 }
 
-// Images attached to messages. Reading takes the header or a signed URL
-// (?invite= no longer authenticates media reads); attaching is the sender's own invite or the owner key.
-/** @param m the path's match */
+// Images attached to messages. Reading takes the header or a signed URL;
+// attaching is the sender's own invite or the owner key.
 export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -167,8 +163,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
 }
 
 // Videos attached to messages. Same access as images; serving honours Range so
-// players can seek. The bytes live in R2 (see the media layer in the Room class).
-/** @param m the path's match */
+// players can seek. The bytes live in R2 (room/media.ts).
 export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -204,15 +199,13 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } });
 }
 
-// HTML artifacts and Markdown documents attached to messages. Reading needs
-// the same access as the room (the header or a signed URL; ?invite= no
-// longer authenticates media reads). The
-// bytes are attached inline at post time (fields html / doc on POST
-// /messages); these routes only serve. HTML is served with the artifact
-// CSP (see mediaCsp): an opaque origin, inline scripts allowed, no network.
+// HTML artifacts and Markdown documents attached to messages. Reading
+// takes the header or a signed URL. The bytes are attached inline at post
+// time (fields html / doc on POST /messages); these routes only serve.
+// HTML is served with the artifact CSP (see mediaCsp): an opaque origin,
+// inline scripts allowed, no network.
 // A general file (kind file) is read the same way and always served as
 // a download (mediaHeaders); its bytes arrive through the upload engine.
-/** @param m the path's match */
 export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

@@ -2,10 +2,8 @@
 // (web/app/index.html; the build copies its inline scripts as they are):
 //  1. Every inline <script> parses (node --check).
 //  2. No literal \uXXXX escapes in the static markup - they render as raw
-//     text there (the Your voice dialog shipped them to users on
-//     2026-11-07). Escapes inside <script> are fine and ignored.
-// The pre-React pages (src/chat.html, src/home.html) this used to check
-// were retired on 2026-11-19, one release cycle after the 2026-11-09 cutover.
+//     text there, in front of users. Escapes inside <script> are fine and
+//     ignored.
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 const os = require('os');

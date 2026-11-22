@@ -12,8 +12,8 @@
 .game-card .art-kind { color: rgb(var(--ga)); border-color: rgba(var(--ga), .5); }
 .game-card .art-go { color: #8fb8c9; }
 /* The card header wraps: name, live dot and chevron on the first line,
-   the status line below it in full. On one line, a phone squeezed the
-   name away and clipped the status mid-word. */
+   the status line below it in full. On one line, a phone squeezes the
+   name away and clips the status mid-word. */
 .game-card .art-head { flex-wrap: wrap; row-gap: 3px; }
 .game-card .art-size { order: 10; flex-basis: 100%; white-space: normal; font-size: 12px; line-height: 1.35; }
 /* The turn banner (games.ts turnBanner): who's up, the time left, a bar
@@ -44,7 +44,7 @@
 .arena3d-tools { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 6px; }
 .arena3d-reset { border: 1px solid rgba(var(--ga), .35); background: rgba(4, 8, 14, .72); color: #a5d8ea; font: inherit; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor: pointer; }
 .arena3d-reset:hover { color: #e0faff; border-color: rgba(var(--ga), .7); }
-/* The impact layer (games/juice.tsx): flash, title cards, the entry
+/* The impact layer (games/three/juice.tsx): flash, title cards, the entry
    iris and the sound toggle, over the 3D canvas. Pointer-transparent. */
 .impact-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
 .impact-flash { position: absolute; inset: 0; opacity: 0; mix-blend-mode: screen; }
@@ -74,10 +74,9 @@
 .arena3d-sound[aria-pressed="false"] { opacity: .7; }
 .arena3d-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; color: #9fb7c9; font-size: 13.5px; pointer-events: none; }
 .arena3d-status button { pointer-events: auto; }
-/* No WebGL on this device (2026-11-20, the 2D views are retired): the
-   arena box shrinks to one line and the game plays on with the controls
-   under it. The [class] makes it outrank every per-game height, phone
-   sizes included. */
+/* No WebGL on this device: the arena box shrinks to one line and the
+   game plays on with the controls under it. The [class] makes it
+   outrank every per-game height, phone sizes included. */
 .lc-3d-host.no-3d[class] { height: auto; min-height: 0; }
 .lc-3d-host.no-3d .arena3d-mount { display: none; }
 .lc-3d-host.no-3d .arena3d-status { position: static; padding: 12px 14px; color: #c7d8e4; }
@@ -113,9 +112,8 @@
 .arena3d-cycle-n { color: #8fb8c9; font-weight: 500; font-size: 11.5px; }
 .arena3d-fire { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); min-height: 44px; padding: 0 22px; border-radius: 999px; border: 1px solid #ff8a6b; background: #c2361c; color: #fff; font: inherit; font-size: 15px; font-weight: 700; box-shadow: 0 4px 18px rgba(255, 90, 60, .35); cursor: pointer; }
 .arena3d-fire:active { transform: translateX(-50%) scale(.97); }
-/* A caption in the frame (2026-11-20): what a flat panel under the scene
-   used to say - a round's result, a table's state. Top left, clear of
-   the tools; it wraps on a phone. */
+/* A caption in the frame: a round's result, a table's state. Top left,
+   clear of the tools; it wraps on a phone. */
 .arena3d-caption { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 190px); padding: 5px 11px; border-radius: 12px; background: rgba(4, 8, 14, .74); border: 1px solid rgba(var(--ga), .3); color: #dbeafe; font-size: 12px; font-weight: 600; line-height: 1.35; pointer-events: none; }
 .arena3d-tip { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: rgba(4, 8, 14, .72); color: #a5d8ea; font-size: 12.5px; pointer-events: none; white-space: nowrap; }
 .lc-meta { color: var(--dim); font-size: 13px; margin: 8px 0 2px; }
@@ -180,8 +178,8 @@
 .gm-due.hot .turn-left { color: #fda4af; }
 .gm-you { font-size: 11.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: #03121a; background: rgb(var(--ga)); border-radius: 999px; padding: 3px 9px; }
 .gm-wait { color: #8fb8c9; }
-/* Desktop: the list runs in two columns (one narrow column in a wide
-   page wasted it); headings and the record span both. */
+/* Desktop: the list runs in two columns (one narrow column wastes a
+   wide page); headings and the record span both. */
 @media (min-width: 1100px) {
   .gm-wrap { max-width: 1040px; }
   .gm-panel-live { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; align-content: start; }
@@ -201,7 +199,7 @@
 .gm-guide-body { padding: 4px 14px 14px 64px; }
 .gm-guide-body .btn { margin-top: 12px; }
 @media (max-width: 520px) { .gm-guide-body { padding-left: 14px; } }
-/* The Games tab's tabs (2026-11-19): Live · History · Standings as a
+/* The Games tab's tabs: Live · History · Standings · Guide as a
    segmented control that stays in view while the list scrolls; Live
    carries a badge with the matches waiting on you. */
 .gm-tabbar { position: sticky; top: -16px; z-index: 3; background: var(--bg); margin: 0 -14px; padding: 12px 14px 8px; }

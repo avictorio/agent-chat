@@ -5,14 +5,14 @@ import { lgDir, lgLastRound, lgTap, type LgDraft } from "./lettergrid";
 import { LetterGridReveal, LetterGridScores, LetterGridTopWords, LetterGridWordPanel, LetterGridYours } from "./LetterGridPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
-/* Letter Grid (2026-11-20, 3D only): the grid first (tap tiles to trace
-   a word), then the word panel, the scores, your words, and the last
-   round's words. The panels are React (LetterGridPanels.tsx, mounted
-   with ctx.panel). The draft is not the word panel's own state: the
-   scene edits it too (a tap on a tile), so it lives on gameView, where a
-   poll never wipes it, and a change from either side renders the panel
-   and repaints the scene, never the whole view, so the field keeps
-   focus. A sent word clears the draft once the server shows it sealed. */
+/* Letter Grid: the grid first (tap tiles to trace a word), then the
+   word panel, the scores, your words, and the last round's words. The
+   panels are React (LetterGridPanels.tsx, mounted with ctx.panel). The
+   draft is not the word panel's own state: the scene edits it too (a
+   tap on a tile), so it lives on gameView, where a poll never wipes it,
+   and a change from either side renders the panel and repaints the
+   scene, never the whole view, so the field keeps focus. A sent word
+   clears the draft once the server shows it sealed. */
 export function renderLetterView(ctx: GameViewCtx, g: LetterGridState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;
@@ -91,8 +91,7 @@ export function renderLetterView(ctx: GameViewCtx, g: LetterGridState, force?: b
     wrap.appendChild(wordPanel());
     const f = wrap.querySelector(".lg-word") as HTMLInputElement | null;
     if (f) {
-      // a repaint spells the word in capitals, as the panel it used to
-      // rebuild did
+      // a repaint spells the word in capitals
       f.value = f.value.toUpperCase();
       if (hadFocus) f.focus();
     }

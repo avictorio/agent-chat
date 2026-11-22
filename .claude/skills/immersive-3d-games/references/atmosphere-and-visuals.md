@@ -39,8 +39,8 @@ load has none of them.
 | Time | Visual | Audio | In this repo |
 |---|---|---|---|
 | 0–0.3 s | the DOM cover fades from the scene's fog/background colour, never white | the tap that opened the arena has unlocked audio | `FirstFrame` (`arena3d.tsx`) runs `compileAsync` and reports ready only after shaders are built; `ImpactLayer`'s iris holds the world colour until then |
-| 0.3–2.5 s | the camera starts low on the horizon, holds while the iris opens, then cranes up to the play camera; fog eases from thick to normal | target: a swell on the ambient bed (today only Werewolf plays `sfx("enter")`, at nightfall) | `Intro` (`juice.tsx`): low (el 0.1 rad), 1.5× the home distance, swung 0.28 rad, a ~0.9 s hold, then `setLookAt(..., true)` with `smoothTime` 0.7 |
-| 1.0–2.5 s | emissive light lines power on outward from the focal point | swell peaks as the camera settles | ramp a shared `uPower`-style uniform on grid/trim materials and light intensities |
+| 0.3–2.5 s | the camera starts low on the horizon, holds while the iris opens, then cranes up to the play camera; fog eases from thick to normal | a target: a swell on the ambient bed (`sfx("enter")` plays today only at Werewolf's dawn) | `Intro` (`juice.tsx`): low and far on the horizon, swung round, a short hold, then a damped crane to the `Framer` home (pose and timings in the function) |
+| 1.0–2.5 s | emissive light lines power on outward from the focal point | swell peaks as the camera settles | a target: ramp a shared `uPower`-style uniform on grid/trim materials and light intensities |
 | 2.5–4 s | arena name card, then the HUD slides in and input unlocks | short sting | DOM title card via `ImpactLayer` (the iris already raises the world's name) |
 | any time | a tap skips to the end; repeat entries in a session skip the intro (a ~1 s version is a target); reduced motion gets a cross-fade with the same light and sound reveal | | `useFirstVisit` (`juice.tsx`, sessionStorage `ac-intro:<key>:<id>`) decides "first open this page session" |
 
@@ -49,13 +49,8 @@ no note verified that the `ToneMapping` effect honours
 `renderer.toneMappingExposure`. Ramp uniforms, lights and fog you own rather
 than exposure.
 
-Per-arena arrival ideas (all arenas share `Intro` today): Battleship could
-rise from the waterline as the sun breaks through the dusk haze, then the
-grid is painted on the sea (the night version with a moon and searchlights
-was rejected). Light Cycles draws the grid outward from the vanishing point, then
-the walls, then the cycles fill from wireframe to solid under a rising synth
-drone. The Duel snaps overhead spotlights on one by one with a heavy "clunk",
-ending on two pools of light, then goes straight into the Present beat.
+Every arena shares `Intro` today; per-arena arrival ideas are the Arrival
+rows in `game-playbooks.md`.
 
 ## 2. Idle: breathing, reactive beats, permanence
 
@@ -81,9 +76,9 @@ cost nothing while nothing happens, which suits `frameloop="demand"`.
 dim trail scars and a tally built into the arena let a spectator who joins
 halfway read the match from the scene alone.
 
-Pacing ceiling: the repo's `Ticker` invalidates at 30 fps (24 on touch, 0
-under reduced motion). That is the right rate for the breathing layer; event
-animations request every frame while they run. `SkyDome` and `HorizonGrid`
+Pacing ceiling: the repo's `Ticker` invalidates at `useQuality`'s ambient
+rate (lower on touch, 0 under reduced motion). That is the right rate for
+the breathing layer; event animations request every frame while they run. `SkyDome` and `HorizonGrid`
 (`atmos.tsx`) advance on the juice clock and freeze under reduced motion.
 
 Hard ceilings on idle motion: nothing flashes above 3 Hz; no full-bright or
@@ -142,17 +137,10 @@ sunset orange, **#FF4FA3** grid pink, horizon ~70% down the frame
 ([SlideSpeak](https://slidespeak.co/slide-design-prompts/prompts/outrun)); a
 horizontally striped yellow-to-red sun on the horizon.
 
-`SkyDome` (`atmos.tsx`) takes a `SkySpec`: `top`, `mid`, `horizon`, `ground`,
-`glow`/`glowAmt`, `stars` (0..~0.12), `aurora` with `auroraA/B`, `swirl`
-(nebula), an optional striped synthwave `sun {size, az, el, a, b}` and an
-optional soft `moon {dir, size, color}` disc with a halo (Battleship's
-setting sun). One
-draw, no textures. `HorizonGrid` adds an endless additive grid that fades to
-the horizon with a slow outward pulse, leaving a `hole` over the board.
-
-Per-arena looks: see SKILL.md ("Arenas") and `game-playbooks.md`.
-Battleship is dusk at sea with light-painted hulls; Light Cycles is Tron:
-Legacy on a black mirror floor; the Duel is a glass stage in a nebula.
+These map onto `SkyDome`'s `SkySpec` (gradient stops, glow, stars, aurora,
+nebula swirl, a striped synthwave sun, a soft moon disc) and `HorizonGrid`:
+`primitives.md`, `atmos.tsx`. Per-arena looks: `game-playbooks.md` (SKILL.md's
+arenas table maps them).
 
 ## 5. Glow, fog and lighting in practice
 
@@ -161,10 +149,9 @@ Legacy on a black mirror floor; the Duel is a glass stage in a nebula.
   above 1 with `toneMapped={false}`)
   ([RPP bloom docs](https://github.com/pmndrs/react-postprocessing/blob/master/docs/effects/bloom.mdx);
   [three.js forum](https://discourse.threejs.org/t/what-does-the-threshold-in-unrealbloompass-means-and-how-to-make-a-color-just-pass-that-threshold-a-bit-how-to-calculate-the-threshold-for-a-color/60984)).
-  Light Cycles uses threshold 1, the Duel 0.9 and most arenas 0.95;
-  Battleship still uses 0.72 with smoothing 0.3, so any bright lit surface
-  (pegs, specular) blooms whether or not anyone chose it. `ArenaPost` takes
-  `threshold` per arena: prefer ~1.
+  A low threshold blooms any bright lit surface (pegs, specular) whether
+  or not anyone chose it. `ArenaPost` takes `threshold` per arena (each
+  arena's value: its props): prefer ~1.
 - With `<ToneMapping>` last in the composer, HDR highlights compress; expect
   to retune emissive intensities after adding it. The atmos effects multiply
   team colours by ~1.8–2.6 so bloom catches them.
@@ -202,10 +189,8 @@ Practice that shapes the SFX layer:
   pulses) on the next 8th/16th of a 100–120 BPM clock from
   `ctx.currentTime`, pitched to a pentatonic scale. The input-acknowledgement
   click stays immediate.
-- **Synthesize instead of downloading** (recipes; `sfx.ts` already has
-  `boom`, `bigboom`, `splash`, `whistle`, `ping`, `derez`, `lock`, `charge`,
-  `clash`, `shatter`, `win`, `lose`, `enter`, `beat`, `shoot`, `snip`,
-  `tear`, `wrap`, `smash`, `buzzer`, `whoosh`, `zap`):
+- **Synthesize instead of downloading** (recipes below; the names `sfx.ts`
+  already has are its `SfxName` type, listed in `primitives.md`):
 
 | Sound | Recipe |
 |---|---|
@@ -217,10 +202,8 @@ Practice that shapes the SFX layer:
 | derez | noise burst plus a falling arpeggio |
 | RPS throws | rock a low drum, paper a filtered swoosh, scissors a bright stab |
 
-- **Ambient beds:** Battleship: ocean wash (noise with a slow LFO on cutoff)
-  and a foghorn or bell every 20–40 s. Light Cycles: sub drone, slow arpeggio
-  pad, electrical hum. Duel: room tone and a heartbeat pulse that quickens
-  through the countdown.
+- **Ambient beds** (none is built yet): per arena in `game-playbooks.md`,
+  the Idle and Waiting rows.
 - **Spatial:** `PannerNode` with `panningModel = "HRTF"` on desktop,
   `equalpower` or `StereoPannerNode` on phones, for off-screen events; tie
   the listener to the camera, keep roll-off gentle
@@ -253,5 +236,5 @@ rounds Count and Release only, rematches skip Present. Ceremony doubles as
 information for late-joining spectators.
 
 When the viewer is the loser, Reflect still dims their side, but the defeat
-itself has already landed loudly (see `game-feel.md` §4): buzz, shake, a
-"bad"-tone title card, then straight to the result card and Rematch.
+itself has already landed (SKILL.md, "Losses that happen to the viewer"),
+then it goes straight to the result card and Rematch.

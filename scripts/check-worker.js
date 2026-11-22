@@ -7,8 +7,8 @@
 //
 // It also refuses an empty catch that does not say why it is empty: log the
 // failure with warn() (worker/lib/log.ts), or write catch { /* reason */ }.
-// There is no exception (the schema migrations check columns instead of
-// letting an ALTER fail, since 2026-11-22).
+// There is no exception: the schema steps check columns instead of letting
+// an ALTER fail.
 "use strict";
 
 const fs = require("fs");

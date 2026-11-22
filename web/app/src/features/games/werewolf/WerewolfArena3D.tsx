@@ -1,4 +1,4 @@
-/* Werewolf in 3D (2026-11-20): the village square.
+/* Werewolf in 3D: the village square.
 
    The world: a ring of cottages round a square with a bonfire, under a
    big moon by night (blue, cold, quiet) and a warm sky by day. Every

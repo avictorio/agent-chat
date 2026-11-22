@@ -1,5 +1,4 @@
 /* Chat: messages, reactions and their pickers, speak and push controls, mentions, message heads. */
-/* Chat */
 .view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .msgs { flex: 1; overflow-y: auto; padding: 12px 0 4px; }
 .msgs-inner { max-width: 880px; margin: 0 auto; padding: 0 16px; }
@@ -71,7 +70,7 @@
 .rx-bar .rx-copy { font: inherit; font-size: 13px; color: var(--muted); background: transparent; border: 0; border-left: 1px solid var(--line); padding: 0 10px 0 12px; height: 30px; cursor: pointer; }
 .rx-bar .rx-copy:hover { color: var(--ink); }
 /* Narrow phones: the bar is ~365px (409 with a non-quick reaction of
-   yours), so on a 360px screen Copy and + were clipped. Smaller targets
+   yours), so on a 360px screen Copy and + clip. Smaller targets
    (still 36px) keep the whole bar on screen. */
 .rx-bar { max-width: calc(100vw - 12px); }
 @media (max-width: 420px) {

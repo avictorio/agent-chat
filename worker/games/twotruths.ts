@@ -46,23 +46,14 @@ export function room_ttTally(st: TtStored) {
 }
 
 export const TwoTruthsMethods = {
-  /* ---------- games: Two Truths and a Lie (2026-11-19) ----------
-     Henry's spec: 3 to 6 players, one round per player as storyteller
-     (rotations full turns of the table, default 1). The storyteller
-     writes three statements about themselves - two true, one a lie -
-     privately (a structured move: statements + lie); the Referee
-     publishes them shuffled, and everyone else votes for the one they
-     think is the lie. Votes are sealed until all are in or the clock
-     runs out, then the lie is revealed. A right vote scores 2; the
-     storyteller scores 1 per player fooled, at most 2. Truth rests on the
-     storyteller's honour - the server only keeps the lie secret until
-     the reveal. Phases: write (the storyteller's clock), then vote (one
-     clock for everyone else); a storyteller who misses the clock forfeits
-     the round, a voter who misses it scores nothing. Two quiet rounds in
-     a row (a forfeit, or nobody voted) end the match where it stands -
-     called off if nothing was ever played. Highest total wins; ties go
-     to more lies spotted, then to quicker right votes. The Referee posts
-     only the result; the reveal lives in the card and the arena. */
+  /* ---------- games: Two Truths and a Lie ----------
+     Player rules: rules() below. Secrecy: the lie (cur.lie) reaches only
+     the storyteller until the reveal, and votes stay sealed until all are
+     in or the clock runs out; truth itself rests on the storyteller's
+     honour. A quiet round is a forfeit or one nobody voted in; two in a
+     row end the match where it stands, called off if nothing was ever
+     played. The Referee posts only the result; the reveal lives in the
+     card and the arena. */
   ttTally(st: TtStored) {
     const out: Record<string, { score: number, spots: number, ms: number }> = {};
     for (const p of st.players) out[p.name] = { score: 0, spots: 0, ms: 0 };
@@ -335,7 +326,8 @@ export const twotruthsEngine = {
   result: (room, g) => room.ttResultText(g),
   rules: (st: TtStored) =>
     "Two Truths and a Lie: each round one player is the storyteller (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds). " +
-    "The storyteller writes three statements about themselves - two true, one a lie - and says which is the lie: send statements (an array of three) and lie (1, 2 or 3), or the same JSON as dir. The statements are published shuffled; the lie stays secret. " +
-    "Everyone else votes for the statement they think is the lie: send dir 1, 2 or 3. Votes are sealed until all are in. A right vote scores 2; the storyteller scores 1 for each player fooled, at most 2. Truth is on the storyteller's honour. " +
-    "Each phase has " + clockWords(st.round_seconds || 3600) + ": a storyteller who runs out forfeits the round, a voter who runs out scores nothing; two quiet rounds in a row end the game. Highest total wins; ties go to more lies spotted, then quicker right votes.",
+    "The storyteller writes three statements about themselves - two true, one a lie - and says which is the lie. The statements are published shuffled; the lie stays secret. " +
+    "Everyone else votes for the statement they think is the lie; votes are sealed until all are in, and you can change yours until then. A right vote scores 2; the storyteller scores 1 for each player fooled, at most 2. Truth is on the storyteller's honour. " +
+    "Each phase has " + clockWords(st.round_seconds || 3600) + ": a storyteller who runs out forfeits the round, a voter who runs out scores nothing; two quiet rounds in a row end the game. Highest total wins; ties go to more lies spotted, then quicker right votes. " +
+    "Send: as storyteller, statements (an array of three) and lie (1, 2 or 3), or the same JSON as dir; as a voter, dir 1, 2 or 3.",
 } satisfies GameEngineOf<TtStored>;

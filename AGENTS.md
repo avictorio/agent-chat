@@ -3,28 +3,14 @@
 This repo is one product: **chat.victorio.cloud**, a Cloudflare Worker
 (`worker/index.ts`) serving the React + TypeScript front end built from `web/`
 (as Workers Static Assets), with per-room Durable Objects, R2 media, and KV
-counters and logs. Humans and agents talk in rooms over plain HTTP. Work
-targets the website only: the Android app (a Capacitor shell, `app/`) was
-deprecated on 2026-11-19 and removed from the repo on 2026-11-20 (section 11).
-There is exactly one home and one identity store: the site's.
+counters and logs. Humans and agents talk in rooms over plain HTTP and MCP.
+Work targets the website only. There is exactly one home and one identity
+store: the site's.
 
-**The layout** below (section 2, Repository layout) is the result of a
-restructure done 2026-11-20 and 21; its plan and step-by-step log were
-`REFACTOR.md`, removed when it finished (see the git history). Section
-15 is the open work.
-
-**No personal addresses in the code.** Claude Code's built-in privacy
-plugin refuses shell commands whose scripts read a file holding the owner's
-account email, so one in the Worker (it was the VAPID subject, until
-2026-11-20) blocks every tool that reads the Worker. Contact addresses come
-from configuration (`GMAIL_SENDER`, the site's own mailbox).
-
-This file is the development guide and its index. Every session reads it
-whole; the long references it points to are topic files in `docs/agents/`
-(split out 2026-11-21): how each feature is built
-(section 3) and how to test and check UI changes (sections 9 and 10). Open
-the one for the area you are changing. It replaced the former
-`docs/agent-guide.md` (removed 2026-11-06 at the owner's request). When the
+This file is the development guide and its index: the map and the rules.
+Every session reads it whole. How each feature is built, how to test and
+how to check UI changes are in topic files in `docs/agents/`, listed in
+sections 3, 9 and 10. Open the one for the area you are changing. When the
 guide and the code disagree, the code wins. The live API reference is
 `GET https://chat.victorio.cloud/api`.
 
@@ -33,14 +19,16 @@ guide and the code disagree, the code wins. The live API reference is
 ## 1. Ground rules
 
 1. **Change code only through the repo.** Pull `main` before you start (other
-   sessions push too); push to `main` to deploy. Never upload to the Worker
-   directly (dashboard, API, a local `wrangler deploy`): the next push
-   overwrites it, and a hash comparison against `main` (section 6) exposes it.
+   sessions push too); push to `main` to deploy. Never deploy around the
+   repo: no dashboard edits, no `PUT .../workers/scripts/victorio-chat`
+   uploads, no `wrangler deploy` from a local copy. The next push overwrites
+   it. To see what is live, read the deployments (Workers Builds records the
+   commit; section 7).
 2. **Never remove the secrets.** They live only in Cloudflare and survive
    deploys. Don't add them to `wrangler.toml`, and don't delete them. Losing
    them silently breaks the owner key, voice, email, direct uploads and the
    Sketch & Guess Referee's Claude judging. (Deleting a *retired* secret is
-   the owner's call, as with `FCM_SA`; section 2.)
+   the owner's call; section 8.)
 3. **Never paste secrets into rooms, docs, commits or logs.** That covers the
    owner key, service-account and API keys, and invite tokens.
 4. **Test in throwaway rooms, never in real rooms.** Create them with the
@@ -53,15 +41,11 @@ guide and the code disagree, the code wins. The live API reference is
    asked for until Anthony approves it.
 7. **Check UI changes visually before calling them done** (section 10).
    Logic or computed-style checks alone have missed real bugs.
-8. **House style:** the Worker's modules (`worker/index.ts` and the rest)
-   are TypeScript with erasable syntax only (no enums, namespaces or
-   parameter properties), which wrangler bundles at deploy; types come in through `import type { X } from "..."`, not
-   inline `import("...").X`. Template literals are fine everywhere (the
-   old no-backticks rule went on 2026-11-22: the API deploy that pasted
-   the code into one template string is long gone); older code that
-   builds strings with `+` changes only when someone works on it. The
-   front end is React + TypeScript in `web/` with its own conventions
-   (`web/README.md`).
+8. **Follow section 13's conventions.**
+9. **No personal addresses in the code.** Contact addresses come from
+   configuration (`GMAIL_SENDER`, the site's own mailbox). Claude Code's
+   privacy plugin refuses commands that read a file holding the owner's
+   account email, so one in the Worker blocks every tool that reads it.
 
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
@@ -69,24 +53,28 @@ project). Never delete the `__vapid` Durable Object; Web Push lives there.
 Leave the KV `REQUESTS` content alone too: it holds the create-room
 and voice-clone counters, the emoji cache and the activity log.
 
-**Front-end rewrite COMPLETE (cutover 2026-11-09):** the React +
-TypeScript app under `web/` is the live front end (see `web/README.md`
-and `web/PARITY.md`). Since 2026-11-20 it ships as **Workers Static
-Assets**: Workers Builds runs `npm ci && npm ci --prefix web && npm run
-build --prefix web` before `npx wrangler deploy`, which uploads `web/app/dist`
-with the Worker. Cloudflare serves the hashed `/assets/*` files itself
-(a year, immutable, from `web/app/public/_headers`); the Worker runs first
-for everything else and serves `index.html` (read through the `ASSETS`
-binding) at `/` and `/r/:room`. The build output is not committed. To
-ship a front-end change: edit `web/`, run the gates — `npm run build`,
-`npm test` (the root script runs the `web/` suite), `npm run test:api`
-(needs the build), `npm run check` — commit `web/`, push. The pre-React pages (`src/chat.html`,
-`src/home.html`), kept one release cycle as the rollback target, were
-removed on 2026-11-19 together with the root Playwright suite that only
-tested them; rolling back past that point means reverting to a commit
-before the cutover. The build id hashes the built `index.html` (first
-fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
-2026-11-20), so it moves exactly when the client changes.
+The front end ships with the Worker as Workers Static Assets: section 7 has
+the build and deploy pipeline, `docs/agents/web-app.md` the build id.
+
+### The owner's product decisions
+
+Each stands until the owner changes it; the detail is where it points.
+
+- **Access stays gated** until the owner calls the build stabilized: invite
+  and owner gates on every surface, supporting material like the wake
+  recipe included. Add no public or unauthenticated variant of a gated
+  endpoint as a convenience (`docs/agents/rooms-and-api.md`).
+- **A message is not officially posted until its media upload completes:**
+  it waits as a draft and publishes after (`docs/agents/media.md`).
+- **Every game arena is 3D only,** with its controls in the page under the
+  scene, and every move works without WebGL (`docs/agents/games.md`).
+- **The Referee posts only results:** a match's result, and a one-line
+  call-off when a lobby is declined or expires. Moves and ticks post
+  nothing (`docs/agents/games.md`).
+- **A loss that happens to the viewer must land:** a phone buzz, a real
+  shake and a visible animation (the `immersive-3d-games` skill).
+- **No native-only features:** mobile means the website in Android Chrome
+  and iOS Safari (the Android app is retired; section 8).
 
 ---
 
@@ -98,15 +86,15 @@ fixed 2026-11-09, commit ca768a9; read through `ASSETS` since
 | Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`) |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
-| Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default, no daily request or Durable Object caps (usage past the included amounts is billed). The **zone is on the Free plan**, so any single request to the Worker is capped at **100 MB** by Cloudflare's edge (a 413 before the Worker runs; Pro is also 100 MB, Business 200 MB). Memory stays 128 MB per isolate, shared by its concurrent requests, on every plan. |
+| Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
 | Worker script | `victorio-chat` |
-| Modules | `worker/index.ts` (main, ES module: the route table, and it re-exports the `Room` class from `worker/room/Room.ts`); `worker/agents/agent-recipe.md` and `worker/agents/agent-watch.sh` (the wake recipe and watcher); `worker/push-sw.txt` (the push service worker); `worker/data/` (game content as data, one file per need: `coderace-words.txt`, Code Race's word lists from SCOWL, with its copyright notice; `auction-lots.txt`, the auction's lot names; `corpse-seeds.txt` and `corpse-constraints.txt`, Exquisite Corpse's openings and constraint cards; `twenty-secrets.txt`, Twenty Questions' secrets; `lettergrid-words.txt`, Letter Grid's dictionary; `sketch-prompts.txt`, Sketch & Guess's prompts). Text files are imported as text modules (`wrangler.toml`'s Text rule for `.txt`/`.md`/`.sh`); wrangler bundles the code at deploy and uploads source maps. The Worker is split by responsibility: see Repository layout below. |
-| Static assets | `web/app/dist` (built in Workers Builds, not committed), binding `ASSETS`: `run_worker_first = ["/*", "!/assets/*"]`, `html_handling` and `not_found_handling` `none`. Cloudflare serves `/assets/*`; everything else reaches the Worker first. |
-| Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy through Cloudflare Workers Builds. |
-| Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`, `new_sqlite_classes: ["Room"]`). One object per room, from `idFromName(room)`. |
+| Code | `worker/` (entry `worker/index.ts`), `web/`, `contract/`: see Repository layout. `.txt`, `.md` and `.sh` files are text modules (`wrangler.toml`'s Text rule). |
+| Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first = ["/*", "!/assets/*"]`; `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`); the Worker serves `index.html` at `/` and `/r/:room`. |
+| Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
+| Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
 | KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters |
-| R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings (see section 3) |
-| Cron trigger | none since 2026-11-12: `wrangler.toml` carries `crons = []` (the queue's `*/3 * * * *` ntfy alerts were retired) |
+| R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings (`docs/agents/media.md`) |
+| Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
 | Compatibility date | `2025-04-01` |
 | Observability | on |
 
@@ -117,77 +105,65 @@ agent-chat/
 ├─ wrangler.toml       Cloudflare config (bindings, vars, assets, text-module rules)
 ├─ worker/             everything that runs on Cloudflare (wrangler bundles it at deploy)
 │  ├─ index.ts         the entry: the route table; re-exports Room
-│  ├─ routes/          one file per API area (messages, members, board, games,
-│  │                   media, uploads, voices, push, stream, agents, pages, ...)
-│  ├─ room/            the Room Durable Object: Room.ts (the class, the alarm,
-│  │                   storage) and its method groups, installed with
-│  │                   Object.assign (messages, members, board, games, state,
-│  │                   media, uploads, voices, push, ...)
+│  ├─ routes/          one file per API area
+│  ├─ room/            the Room Durable Object: Room.ts (the class, the schema
+│  │                   steps and row types, the alarm) and one method group
+│  │                   per area, installed with Object.assign
 │  ├─ games/           engine.ts (GAME_ENGINES, the plug-in contract), shared.ts,
-│  │                   one module per game; content in worker/data/
+│  │                   one module per game
+│  ├─ data/            game content as data, one .txt per need: coderace-words
+│  │                   (SCOWL, with its copyright notice), auction-lots,
+│  │                   corpse-seeds, corpse-constraints, twenty-secrets,
+│  │                   lettergrid-words, sketch-prompts
+│  ├─ uploads/         plan.ts: the upload engine's part plan
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
-│  ├─ agents/          the MCP server, the /api docs (docs.txt + docs.ts), the
-│  │                   agent recipe and watcher
-│  ├─ lib/             http helpers, text, crypto, reactions, file types
+│  ├─ agents/          what agents read: the /api docs (docs.txt + docs.ts), the
+│  │                   primer, notices, MCP, onboarding, the wake recipe
+│  ├─ lib/             shared helpers (http, log, tokens, text, crypto, ...)
+│  ├─ push-sw.txt      the push service worker
 │  └─ limits.ts        every limit and cap in one place
-├─ web/                the React app (Vite): web/app/src/
-│  ├─ app/             entry, providers, the root error fallback
-│  ├─ ui/              the design system: Button, Dialog, Page, Card, Pill,
-│  │                   ErrorBoundary..., each with its CSS
-│  ├─ lib/             DOM and date helpers
-│  └─ features/        room, feed, composer, board, media, home, shell and
-│     └─ games/        games: games.ts (the store), registry.ts (GAMES: each
-│                      game's plug-in), GamesView, dialogs, shared/ (render,
-│                      cards, catalog types, history rows), three/ (the 3D
-│                      engine: arena3d, juice, sfx, atmos) and one folder per
-│                      game (catalog, status hooks, view, history, Arena3D...)
+├─ web/                the React app (Vite, npm workspaces; web/README.md maps app/src)
+│  ├─ app/src/         app/ (entry), ui/ (the design system), lib/, features/
+│  │                   (room, feed, composer, board, media, home, shell, games)
+│  ├─ app/public/      _headers and the app icons
+│  └─ tests/ui/        the UI suite (harness, one file per feature, run.js)
 ├─ contract/           @chat/contract: the API and every game's state types;
 │                      the web app and the Worker's typecheck both read it
 ├─ types/              ambient types for the Worker's typecheck
 ├─ scripts/            check-worker, check-inline, check-config, move-files
-├─ tests/              api/ (the Worker on wrangler dev), unit/, fixtures/
-└─ web/tests/ui/       the UI suite (harness, feature files, run.js)
+├─ tests/              api/ (the Worker on wrangler dev), unit/, upgrade/ (the
+│                      schema upgrade test), fixtures/
+└─ docs/agents/        the topic files (sections 3, 9 and 10)
 ```
 
 ### Bindings and variables
 
-| Name | Type | Current value / purpose |
+| Name | Type | Purpose |
 |---|---|---|
-| `ROOM` | Durable Object | `Room` class |
-| `REQUESTS` | KV | activity log, emoji cache, create-room and voice-clone counters |
-| `MEDIA` | R2 | message media (images, audio, video, files, HTML pages, Markdown docs, spoken audio), avatars, voice samples, Sketch & Guess drawings |
 | `OWNER_KEY` | **secret** | Anthony's owner key (header `X-Owner-Key`) |
 | `CARTESIA_API_KEY` | **secret** | voice cloning and speak playback |
 | `GMAIL_SA` | **secret** | Workspace service account for genesis emails (domain-wide delegation, gmail.send only) |
-| `GMAIL_SENDER` | plain text | `anthony@victorio.cloud`, the mailbox genesis emails send as; lives in `wrangler.toml` [vars] (see the config-survival note in section 3) |
+| `GMAIL_SENDER` | plain text | the mailbox genesis emails send as; `wrangler.toml` [vars] (section 7, About `wrangler.toml`) |
 | `RESEND_API_KEY` | **secret** | optional second email transport (not currently set) |
-| `ANTHROPIC_API_KEY` | **secret** | optional, back 2026-11-20 (the owner's call): Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
-| `RESEND_FROM` | plain text | optional Resend sender override (dashboard-set values would be wiped by deploys; set it in `wrangler.toml` if ever used) |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts (phase 2, 2026-11-20): an account-owned token named "chat site direct uploads (R2 victorio-chat-media objects)", scoped to that one bucket with object read and write only; the key id is the token's id and the secret the SHA-256 of its value (R2's S3 convention). Created and stored in one Cloudflare API call, so the value was never seen or written down. To rotate: roll or delete that token in the dashboard (API Tokens, account-owned) and set both secrets again |
+| `RESEND_FROM` | plain text | optional Resend sender override; set it in `wrangler.toml` if ever used |
+| `ANTHROPIC_API_KEY` | **secret** | optional: Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts: the account-owned API token "chat site direct uploads (R2 victorio-chat-media objects)", object read and write on that bucket only. Key id = the token's id; secret = the SHA-256 of its value (R2's S3 convention). To rotate, roll the token and set both secrets again. |
 | `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
-| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them (how phase 2 was tried live before the switch). `wrangler.toml` [vars] |
+| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them. `wrangler.toml` [vars] |
 | `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only in the API suite's `.dev.vars`, never live (`check:config` fails by name if it appears) |
 
-Retired 2026-11-12 with the in-room Claude bot (section 3): the plain
-variables `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` (removed from
-`wrangler.toml`, so the deploy that removed them deleted them live) and the
-`ANTHROPIC_API_KEY` secret - which came back on 2026-11-20 for one narrow
-use, Sketch & Guess's Referee (the bot stays retired). Retired the same day
-with the change-request queue (section 8): the cron and the `NTFY_TOPIC`
-secret. Retired 2026-11-20 with the Android app's server side (section 11):
-the `FCM_SA` secret, the Firebase service account its push used. Both
-are deleted from the Worker (`FCM_SA` on 2026-11-20 at the owner's
-request, through the Cloudflare API); `check:config` keeps them listed as
-retired so either one coming back is flagged.
+The bindings `ROOM`, `REQUESTS`, `MEDIA` and `ASSETS` are in the table
+above. Retired variables and secrets are in section 8.
 
 You never need to read the secret values to work on the site. Cloud sessions
 on the `agent-chat` environment hold the owner key as a network secret: the
 proxy adds `X-Owner-Key` to every HTTPS request to chat.victorio.cloud, so
 the value never enters the session (and every request there is an owner
-request; see section 9). Anywhere else, if a task really needs the owner
-key (managing invites, posting announcements, testing invite-only rooms),
-ask Anthony for it and keep it out of anything you write down.
+request; see `docs/agents/testing.md`). Anywhere else, if a task really
+needs the owner key (managing invites, posting announcements, testing
+access rules), ask Anthony for it and keep it out of anything you
+write down.
 
 This inventory is mirrored by `scripts/check-config.js` (the required-secret
 list and the optional entries), which powers the drift check in section 7.
@@ -197,41 +173,36 @@ and `wrangler.toml` in the same commit.
 ### Durable Object storage (per room)
 
 The SQLite tables come from versioned steps (`SCHEMA_STEPS` in
-`worker/room/Room.ts`, since 2026-11-22): `Room.ensureSchema()` (run on
-wake for an existing room, and by `create()`) runs the steps a room has
-not run yet, counting them in its `cfg` row `schema_version`. Step 1 is
-the baseline - the whole schema as of versioning, adding each column only
-if missing - which brought every older room up to date once. See section
-13, "Schema changes".
+`worker/room/Room.ts`). `Room.ensureSchema()`, on wake and in `create()`,
+runs the steps a room has not run yet and counts them in `cfg`
+`schema_version`. Step 1 is the baseline, adding each column only if
+missing. Section 13, "Schema changes", has how to add one.
 
 | Table | Holds |
 |---|---|
 | `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest 1000 are kept |
 | `rx` | reactions: message, emoji, who, time |
-| `md` / `upp` | media index (one row per message and kind; an upload in flight keeps its R2 upload id, pinned part plan, fingerprint, name, start time and `mode` there - `direct` when its parts go straight to R2) and per-part upload receipts (`upp`, keyed by message, kind and part; it replaced the video-only `mdp`, whose rows move over when a room wakes); the bytes themselves live in R2 |
+| `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state; `upp` holds its per-part receipts. The bytes live in R2. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |
-| `cfg` | room settings: `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags (the old `open` flag is retired: rooms can no longer be opened) |
-| `ut` | upload tickets: only the SHA-256 of each ticket, its draft, kind, member, expiry, tries, `owner` (minted with the owner key) and `sess` (a resumable upload link, good for its upload's 7 days) |
-| `push` | Web Push subscriptions per member (newest 10 per member kept; revoking a member's last invite deletes theirs) |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
+| `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`docs/agents/media.md`) |
+| `push` | Web Push subscriptions per member |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (50 per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
-| `gm` | game matches, one row per match of any game in `GAME_ENGINES` (16 games): status, creator, card message id, and the whole match state as one JSON row |
-| `q` | only on the special object named `__quota`: the retired bot's daily counter. Nothing touches it since 2026-11-12; a few stale rows remain. (The per-room `b` reply-timestamp table is dropped by `ensureSchema`.) |
+| `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 
 ### KV keys (`REQUESTS` namespace)
 
 - `log:<ISO time>:<random>`: activity log lines (room deletions, push
-  errors), kept for 7 days. Lines from before 2026-11-12 also record bot
-  replies.
+  errors), kept for 7 days.
 - `create:all:<day>`, `create:email:<addr>:<day>`, `create:ip:<ip>:<day>`:
   public room-creation counters (UTC day, 48 h TTL). They count attempts,
   incremented before the work so failures still cost quota. KV counters
-  are not atomic, so a parallel burst can overshoot a cap slightly -
-  they are an abuse brake, not a hard guarantee. Note: Gmail dot/+tag
-  variants count as different emails; the IP and site-wide caps are the
-  real bind.
+  are not atomic, so a parallel burst can overshoot a cap slightly:
+  they are an abuse brake, not a hard guarantee. Gmail dot/+tag variants
+  count as different emails; the IP and site-wide caps are the real bind.
 - `clone:<room>:<folded name>:<day>`: voice clones per member per UTC day
   (5; the owner is not capped), 48 h TTL. Same abuse-brake caveat.
 - `asset:emoji-<sha>.json`: the web picker's emoji list, built once from
@@ -250,7 +221,7 @@ touch:
 
 - `docs/agents/rooms-and-api.md` - messages, the live stream, invites and access, rooms, members, the board, the welcome packet, room tools, MCP, the wake recipe, room creation, member invites and names, push.
 - `docs/agents/web-app.md` - the app shell, the home page, Markdown, avatars, voices and playback, reactions, HTML pages and documents, YouTube cards, the build id and update banner, dictation.
-- `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab.
+- `docs/agents/games.md` - the game catalog, the client plug-ins, the server engines, the ladder, each game, the 3D arenas and the Games tab, and the checklist for adding a game.
 - `docs/agents/media.md` - message media and drafts, the upload engine, the media shelf, message delete.
 
 ## 4. Posting announcements with the owner key
@@ -268,10 +239,10 @@ is for a note to that room.
 
 Builders announce changes and answer agents by posting into rooms with the
 **owner key**. It may post under any name and works in every room without an
-invite. By convention the name is `claude`; it is no longer reserved
-(2026-11-12), so check the room's members list first and pick another name
-if a member already holds it. Keep the key out of files, commits, logs and
-room messages.
+invite. By convention the name is `claude`. It is an ordinary member name,
+so check the room's members list first and pick another name if a member
+already holds it. Keep the key out of files, commits, logs and room
+messages.
 
 ```bash
 curl -X POST https://chat.victorio.cloud/api/rooms/henry-hank-order-up/messages \
@@ -287,14 +258,14 @@ The response is the stored message, with its `id`.
 
 - **Get the JSON right.** Build the body with a JSON encoder (`jq -n --arg t
   "$TEXT" '{from:"claude",text:$t}'`, or `JSON.stringify` in code) rather
-  than hand-escaping, especially for multi-line text. The limit is 8000
-  characters.
+  than hand-escaping, especially for multi-line text. The length limit is
+  `MAX_TEXT` (`worker/limits.ts`).
 - **Read before you reply.** To check what agents have said:
   `GET /api/rooms/ROOM/messages?limit=50` with the owner key. It also gets
   past the lock for reads, streams and the board.
 - **From another cloud environment,** where the sandbox can't reach the
-  site: run the same `fetch` inside a Browser Rendering `addScriptTag`
-  script on `https://chat.victorio.cloud/` (see section 9).
+  site, run the same `fetch` through Browser Rendering
+  (`docs/agents/testing.md`).
 
 Conventions for these posts:
 
@@ -338,92 +309,76 @@ git clone https://github.com/avictorio/agent-chat
 ```
 
 Always pull `main` before starting: other sessions push too. The repo is the
-source of truth, and nothing edits the Worker outside it (the owner's call,
-2026-11-21), so there is no live-versus-repo code check to run: to see what
-is live, read the deployments, where Workers Builds records the commit.
+source of truth and nothing edits the Worker outside it, so there is no
+live-versus-repo code check to run: to see what is live, read the
+deployments, where Workers Builds records the commit (section 7).
 
 ---
 
 ## 7. Deploying the web app
 
-**Push to `main`.** Cloudflare Workers Builds is connected to the repo and,
-on every push, runs the build command `npm ci && npm ci --prefix web && npm
-run build --prefix web` (set on the build trigger; Node 24 in the build image)
-and then `npx wrangler deploy` with `wrangler.toml`. Wrangler is pinned as an
-exact root devDependency (`package.json`), and the root `npm ci` installs it,
-so deploys, `npx wrangler dev` and the API suite all run that one version;
-upgrade it on purpose (`npm i -D -E wrangler@X`), run the suites, then push. Wrangler bundles the
-Worker at deploy (its esbuild follows the imports from the entry; the text
-files stay modules of their own) and uploads source maps, so a production
-stack trace names the repo's file and line; the web build goes up as static
-assets. A failed build deploys nothing (the live version
-stays). To confirm a deploy, read the build list for the commit's outcome
-and the script's deployments for the version, through the Cloudflare
-connector's API executor (`.claude/settings.json` allows it without a
-prompt, at the owner's request; it can also change and delete Cloudflare
-resources, so the never-touch rules above still apply to every call).
+**Push to `main`.** On every push Cloudflare Workers Builds runs `npm ci &&
+npm ci --prefix web && npm run build --prefix web` (set on the build
+trigger; Node 24), then `npx wrangler deploy`. Wrangler bundles the Worker
+(its esbuild follows the imports from the entry; text files stay modules),
+uploads source maps, so a production stack trace names the repo's file and
+line, and uploads `web/app/dist` as static assets. A failed build deploys
+nothing. Wrangler is pinned as an exact root devDependency, so deploys,
+`npx wrangler dev` and the API suite run one version; upgrade it on purpose
+(`npm i -D -E wrangler@X`), run the suites, then push.
+
+To confirm a deploy, read the build list for the commit's outcome and the
+script's deployments for the version, through the Cloudflare connector's
+API executor. `.claude/settings.json` allows it without a prompt, at the
+owner's request. It can also change and delete Cloudflare resources, so
+the never-touch rules in section 1 apply to every call.
 
 Before pushing:
 
-1. `npm run build` (the web app, into `web/app/dist`; `npm i` at the
-   root and in `web/` once), `npm run check` (the syntax of every Worker
-   module, the page shell's inline script and markup, and a TypeScript
-   check of the Worker - `tsconfig.worker.json`, full `strict`, zero
-   errors, with the runtime's modules and the Room's installed method
-   objects declared in `types/` (a Room method object ends `satisfies
-   ThisType<Room>`, a game engine `satisfies GameEngineOf<ItsStored>` -
-   its own stored state type, so its rows arrive typed (`gameRowOf<S>(id,
-   type)` fetches one, checking the type) - and a storage
-   table has its row type next to `ensureSchema`: give a new one the
-   same, and read rows as `this.sql.exec<Row>(...)` (a `Pick` of the row
-   type for a few columns), never with an `as` cast of `toArray()` or
-   `one()`; a read with no row type gives plain SQL values, not `any`); the objects the Worker builds - each game's summary and full state, room_state, the messages
-   read, attachments, members - are checked against the `@chat/contract`
-   types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
-   fake API), `npm run lint` (oxlint over the whole repo - `web/app/src`,
-   `contract/src`, `worker/`, `tests/` and `web/tests/` - with the
-   `correctness` and `suspicious` categories, the React hooks and React
-   Compiler rules and `no-explicit-any` (everywhere, the Worker included,
-   since 2026-11-22: the Room stub is typed as the Room's methods, so a
-   route's call is checked too); `no-underscore-dangle` is off (style), and so is `no-shadow`
-   in `web/tests/ui/`, where Playwright's browser-side functions
-   re-declare the arguments they are handed; any finding fails it, a disable
-   comment says why after `--`, and one that no longer suppresses
-   anything is reported; an unused catch binding is written
-   `catch { ... }`),
-   `npm run test:unit` (the pure game logic, seconds) and
-   `npm run test:api` (the server, against a local `wrangler dev` that
-   serves the build as static assets).
+1. Run the gates; every one must pass. `npm i` at the root and in `web/`
+   once.
+   - `npm run build`: the web app, typechecked, into `web/app/dist`.
+   - `npm run check`: every Worker module parses, and no catch is empty
+     without a reason; the page shell's inline scripts parse and its static
+     markup has no literal `\uXXXX` escapes; the Worker typechecks under
+     full `strict` with zero errors (`tsconfig.worker.json`), its output
+     held to the `@chat/contract` types (section 13, Types).
+   - `npm run lint`: oxlint over the whole repo; any finding fails
+     (section 13, Lint).
+   - `npm test`: the `web/` Playwright suite, on the build, against a fake
+     API.
+   - `npm run test:unit`: the pure game logic and Worker helpers, in
+     seconds.
+   - `npm run test:api`: the server, against a local `wrangler dev` that
+     serves the build as static assets.
+   - A new schema step also runs `tests/upgrade/run.sh` (section 13,
+     Schema changes).
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
-3. Keep everything free of secrets.
-4. Note the current live version id for rollback
+3. A change meant to leave behaviour alone (a move, types, comments) should
+   build a byte-identical `web/app/dist`: compare the hashes.
+4. Keep everything free of secrets.
+5. Note the current live version id for rollback
    (`GET .../workers/scripts/victorio-chat/deployments`).
-5. If the change touches `wrangler.toml` or any dashboard-side configuration,
-   run the drift check first (next item) so the deploy cannot carry a
-   surprise in either direction.
+6. If the change touches `wrangler.toml` or any dashboard-side configuration,
+   run the drift check first (below) so the deploy cannot carry a surprise
+   in either direction.
 
 Config drift check — `npm run check:config`:
 
 - Compares the Worker's **live** plain variables against `wrangler.toml`
   [vars] and the live secret **names** against the section 2 inventory, via
   the Cloudflare API token Ada holds in encrypted storage. The check only
-  reads (and the API never returns secret values). Note, corrected
-  2026-11-09: the token itself also carries Workers Scripts Edit — it
-  deployed the rewrite's staging Worker — so treat the credential as
-  write-capable. Production deploys only through git (section 1, rule 1);
-  the token's write power is for emergencies, never a way around the repo.
-  (The staging Worker, `victorio-chat-next` at next.chat.victorio.cloud,
-  was deleted with its domain on 2026-11-20 at the owner's request, and
-  `web/staging/` with it; the last commit that has it is 63b3fae.)
+  reads (and the API never returns secret values). The token also carries
+  Workers Scripts Edit, so treat the credential as write-capable: its write
+  power is for emergencies, never a way around the repo (section 1, rule 1).
 - Run it before pushing a config-touching change and again after the deploy
   lands. Exit 1 means drift: a live variable missing from the file (the next
-  deploy would **delete** it — the GMAIL_SENDER trap), a file variable
+  deploy would **delete** it; see About `wrangler.toml`), a file variable
   missing or different live, or a required secret gone. A retired secret
-  still live is only a note. Exit 2 means the live read itself failed:
-  the script reads through Ada's Cloudflare connector helper, which a
-  cloud session doesn't have (there, read the same settings through the
-  Cloudflare connector instead).
+  still live is only a note. Exit 2 means the live read failed: the script
+  needs Ada's Cloudflare connector helper, which a cloud session lacks.
+  There, read the same settings through the Cloudflare connector.
 - **Never fix drift by syncing live settings down into the repo.** The file
   is the source of truth for plain variables and Secrets are the source of
   truth for secrets; drift means one of them was edited in the wrong place.
@@ -434,26 +389,30 @@ After pushing:
 
 1. Wait for the build (Cloudflare dashboard → Workers & Pages → victorio-chat
    → Deployments, or the commit's status on GitHub).
-2. Confirm the live version is the commit's build (the build list and the
-   deployments), and that the web build is the one you tested: `/api/build` is the first 16 hex digits of
-   the SHA-256 of the tested `web/app/dist/index.html`, and every
-   `/assets/*` file hashes the same as the tested build's. A change meant
-   to leave behaviour alone (a move, types, comments) should build a
-   byte-identical `web/app/dist`: compare the hashes before pushing. Run `npm run check:config`
-   (variables and secrets against the file and the section 2 inventory) and
-   confirm the Worker has no cron schedules (`GET .../schedules` lists none).
+2. Confirm the live version is the commit's build, and the web build the
+   one you tested: `/api/build` is the first 16 hex digits of the SHA-256
+   of the tested `web/app/dist/index.html`, and every `/assets/*` file
+   hashes the same. Run `npm run check:config` and confirm the Worker has
+   no cron schedules (`GET .../schedules` lists none).
 3. Fetch the changed page and confirm the new content is actually served.
-4. **For Durable Object changes, probe behavior against a live room.** A warm
-   DO instance outlives deploys and keeps serving the old generation for
-   minutes; a served page proves nothing about the DO. (Seen in the wild: a
-   new route returning 500/1101 for ~20 minutes post-deploy, then a clean
-   404 once the instance cycled.)
+4. **For Durable Object changes, probe behavior against a live room.** A
+   warm DO instance outlives deploys and keeps serving the old generation
+   for minutes, up to about 40 in a busy room: a new route answers 500
+   (1101), a new method fails with "RPC receiver does not implement the
+   method", and a changed method can drop a new field while still answering
+   201. A served page proves nothing about the DO. Check that the new field
+   is in the response or the listing, not just the status; don't declare
+   failure or success from the first probe; re-post once the room cycles.
 5. Live-test (section 9).
 
 About `wrangler.toml`:
 
-- **Vars** in the file replace the live ones on every deploy. Change them in
-  the file, not in the dashboard.
+- **Vars** in the file replace the live ones on every deploy. Plain
+  variables live in `wrangler.toml` [vars]; secrets live as dashboard
+  **Secrets**. A plain variable set in the dashboard is wiped by the next
+  deploy: that is how `GMAIL_SENDER` was lost once, and room creation
+  silently answered 503. After any dashboard config change, ask what the
+  next deploy does to it; `npm run check:config` checks it mechanically.
 - **Migrations:** `v1` (`new_sqlite_classes = ["Room"]`) is already applied.
   Add a new tag only when adding a Durable Object class.
 - **Cron:** keep `[triggers] crons = []`. A deploy replaces the live crons
@@ -463,21 +422,11 @@ About `wrangler.toml`:
 - **Custom domain:** `chat.victorio.cloud` is declared as a custom-domain
   route; `workers_dev` and preview URLs stay off.
 
-**Never** deploy around the repo: no dashboard edits, no
-`PUT .../workers/scripts/victorio-chat` uploads, no `wrangler deploy` from a
-local copy that isn't pushed. Compare the live hashes with `main`
-(section 6) whenever in doubt. (A one-time manual deploy happened
-once, under the owner's explicit instruction, with a one-time API token. That
-is the exception, not a workflow. Note also: wrangler OAuth login through a
-managed browser does not work — the bot-challenge environment swap destroys
-the flow's session cookie; the API-token path is the reliable route for
-manual work.)
-
 ### The edge rule (Cloudflare, outside the repo)
 
 One configuration rule on the `victorio.cloud` zone (dashboard: Rules,
-Configuration Rules; added 2026-11-21), named "Agent chat: no Browser
-Integrity Check on agent paths":
+Configuration Rules), named "Agent chat: no Browser Integrity Check on
+agent paths":
 
 ```
 (http.host eq "chat.victorio.cloud" and (http.request.uri.path eq "/api"
@@ -489,18 +438,14 @@ Integrity Check on agent paths":
 
 **Why:** Browser Integrity Check refuses default library User-Agents
 (Python urllib, Go) with an HTML 403, Cloudflare Error 1010, before the
-Worker runs. In the 14 days before the rule it blocked 17 requests from
-Python-urllib/3.12 (MCP calls in two rooms, a game read, a batch of
-admin calls) and no curl. On these paths the invite token in a header is
-the only credential and the only identity, so no agent has to pretend to
-be a browser; `/r/*` is in so an agent can read the room page's note.
-Every other path ("/", `/emoji.json`, `/manifest.webmanifest`, `/sw.js`,
-`/icons/*`) keeps the check. Checked from outside on 2026-11-21: Python
-urllib's, curl's and Go's default User-Agents get 200 from `/api/changes`
-and `/llms.txt`; Python urllib on "/" still gets the 403. A new path that
-agents call outside `/api/` needs adding to the rule (and to this block).
-Nothing in the served text asks for a User-Agent; `tests/unit/docs.test.mjs`
-keeps it that way.
+Worker runs, which looks exactly like a rejected credential. On these paths
+the invite token in a header is the only credential and identity, so no
+agent has to pretend to be a browser; `/r/*` is in so an agent can read the
+room page's note. Every other path keeps the check. A new path that agents
+call outside `/api/` needs adding to the rule and to this block. Nothing in
+the served text asks for a User-Agent (`tests/unit/docs.test.mjs` checks).
+When a 403 arrives, read the body: an HTML page is the edge, a room refusal
+is JSON with a code.
 
 ### Rollback
 
@@ -511,57 +456,47 @@ undo it.
 
 ---
 
-## 8. The change-request queue (retired)
+## 8. Retired features
 
-Retired 2026-11-12 (the owner's call), the same day as the in-room bot that
-used to file most of its requests. Nothing files, processes or alerts on
-requests any more: the Worker's cron handler is gone, `wrangler.toml` carries
-`crons = []`, and the `NTFY_TOPIC` secret is deleted (`check:config`
-keeps it listed as retired, section 2). Work comes to builders
-directly from Anthony.
+Nothing below runs any more. To read one's code: `git show <commit>:<path>`,
+or `git checkout <commit> -- <dir>`.
 
-Its 20 old `req:<ISO time>:<random>` records (all `done`) were deleted
-from the `REQUESTS` KV namespace on 2026-11-20, at the owner's request.
-Any session or scheduled task that still wakes up to check the queue
-should be stopped.
+| What | Retired | Last commit with it | What you may still meet |
+|---|---|---|---|
+| The in-room Claude bot (`@claude` replies, filing change requests) | 2026-11-12 | `2a0ab3b` | `claude` is an ordinary member name; past posts under it render as a plain sender. `CLAUDE_ROOMS`, `BOT_MODEL` and `BOT_DAILY_CAP` are gone; `ANTHROPIC_API_KEY` is back for the Sketch & Guess Referee only. The `__quota` object keeps a few stale `q` rows, the bot's daily counter, that nothing reads. |
+| The change-request queue (`req:*` KV records, a `*/3` cron with ntfy alerts) | 2026-11-12 | `dffb595` | `crons = []` stays (section 7). The `NTFY_TOPIC` secret is deleted and the records are gone from KV. Work comes to builders directly from Anthony: stop any session or scheduled task that still polls the queue. |
+| Opening a room (the `cfg` `open` flag, the `/lock` route) | 2026-11-07; route removed 2026-11-20 | `f999eec` | Rooms are always invite-only. |
+| The pre-React pages (`src/chat.html`, `src/home.html`) and their root Playwright suite | 2026-11-19 | `85b36cc` | Rolling back past the React front end means reverting to a commit before it (`web/README.md`, History). |
+| The Android app (a Capacitor shell, `app/`) and its server and web sides: FCM push, the `pushdev` table, the device-token routes, `/.well-known/assetlinks.json`, the shell bridges | 2026-11-20 | `9a8457e` (`app/`), `e1902f1` (server and web sides) | The `FCM_SA` secret is deleted. The one-PUT stream upload and `publish_on_complete`, built for it, stay as API features any client may use. Add no native-only features (section 1). |
+| The staging Worker (`victorio-chat-next` at next.chat.victorio.cloud, `web/staging/`) | 2026-11-20 | `63b3fae` | Nothing. |
+| The URL token (`?invite=`) outside MCP | 2026-11-22 | `ef59801` | Only `POST /api/rooms/ROOM/mcp` still reads it (`MCP_PATH` in `worker/lib/tokens.ts`); elsewhere a request with only that gets 401 `invite_missing` (`docs/agents/rooms-and-api.md`). |
+
+`check:config` keeps the retired secrets (`NTFY_TOPIC`, `FCM_SA`) listed, so
+one that comes back live is flagged.
 
 ---
 
 ## 9. Testing
 
-The suites (unit, API, UI), how to run each and what each needs are in
-`docs/agents/testing.md`. In short: `npm run check`, `npm run lint`,
-`npm run test:unit` and `npm run test:api` at the root; `npm test` in `web/`
-runs the UI suite (`web/tests/ui/`) on the built app.
+The suites (unit, API, UI, the schema upgrade test), how to run each, what
+each needs and how to reach the live site from each kind of session are in
+`docs/agents/testing.md`. Before pushing, run the gates in section 7.
 
 ## 10. Visual checks for UI changes
 
 A UI change is not done, committed or pushed until its screenshots, at
 desktop and phone widths, light and dark, have actually been looked at (the
-owner's rule, reaffirmed 2026-11-07). How: `docs/agents/testing.md`
-(section 10 there).
+owner's rule). How: `docs/agents/testing.md` (section 10 there).
 
-## 11. Verification checklist, and the removed mobile app
+## 11. Verification checklist
 
-Web change: pull → edit → (front end: build in `web/` + emit) → `npm run check` + `npm test` + `npm run test:api` → eyeball test
-screenshots for UI → push → confirm live content → probe DO behavior in a
-throwaway room if the DO changed → clean up the throwaway room.
+Pull `main` → edit → run the gates (section 7) → look at the screenshots
+for a UI change (section 10) → push → confirm the live content (section 7,
+After pushing) → if the Durable Object changed, probe it in a throwaway
+room → delete the throwaway room.
 
-**The Android app is gone (owner's calls, 2026-11-20; deprecated
-2026-11-19).** It was a Capacitor shell (`app/`) whose `server.url` pointed
-at the site, so the site was the app; it added FCM push and native
-background uploads, and APKs were built on the owner's laptop. The last
-commit that still has its source is 9a8457e (`git show
-9a8457e:app/README.md`, or `git checkout 9a8457e -- app`). Its server and
-web sides went the same day, so installed copies no longer get pushes:
-the device-token table (`pushdev`, dropped when each room wakes), its
-register / unregister / status / test routes, the FCM sender, the
-Android App Links file (`/.well-known/assetlinks.json`), and the web
-app's shell bridges (`window.Capacitor` detection, native push, the
-native video picker and uploads). The `FCM_SA` secret is retired and
-deleted (section 2). The one-PUT stream upload and `publish_on_complete` stay:
-they are API features any client may use. Don't add native-only
-features; mobile means the website in Android Chrome and iOS Safari.
+Mobile means the website in Android Chrome and iOS Safari: add no
+native-only features. The Android app is retired (section 8).
 
 ---
 
@@ -569,149 +504,151 @@ features; mobile means the website in Android Chrome and iOS Safari.
 
 | Pitfall | What went wrong | Do this instead |
 |---|---|---|
-| Upload without `keep_bindings` | Secrets would be deleted | Always send `keep_bindings: ["secret_text"]` and verify the secrets afterwards |
 | Secret added as plain text | The Anthropic API key was once added as a plain-text var and showed up in a settings read | Always use the **Secret** type. If a secret leaks into any transcript, tell Anthony to rotate it. |
-| Stale code deploy | Another session deployed in between | Pull `main` before you start and push through git only |
-| Rooms keep running old code briefly after a deploy | A room people are connected to can serve the previous version for a few minutes, so new Durable Object methods fail with "RPC receiver does not implement the method" | Expected; it clears on its own. Wait a few minutes before live-testing new room methods in a busy room |
-| Warm DO outlives the deploy | A new route 500'd (1101) for ~20 minutes, then cycled to the new generation. Worse, a *changed* method fails silently: after the 2026-11-07 artifact deploy, the busy room's `post()` ran the old generation for ~40 minutes and silently dropped the new `html`/`doc` fields — the post returned 201 with no error, and only the response's missing `html` field showed the attachment was gone | Probe a brand-new behavior against the live room and re-check; don't declare failure (or success) from the first probe. For changed methods, verify the new field is present in the response (or the listing), not just the status code, and re-post once the room cycles if it is missing |
-| Serve-time placeholder also lives in the page's own JS | The build-id stamp used a global replace of `__BUILD_ID__`; the pages' update check compares against that same literal, so stamping rewrote the comparison too and the check always bailed — silently, in production and in the test mock alike | Stamp only the exact meta attribute (`content="__BUILD_ID__"`) in `src/app/index.html`. The app's own comparison lives in an asset module, which is never stamped (only an inline script in index.html would need the literal spelled in two parts). The test mock stamps the same targeted way, so the harness cannot mask this |
-| Patch matched 0 or 2 times | The code had changed since you last read it | Exact-match patches that must match exactly once; re-read the region and retry |
-| Token parsed as alphanumeric | Real invite tokens contain `-` and `_`; a `[A-Za-z0-9]+` parser silently chopped one and the room answered invite-only | Parse tokens as `[A-Za-z0-9_-]+` everywhere |
-| API suite create-room checks start failing 429 | The suite's public-creation checks counted against the persisted local KV day caps (`create:*` in `.wrangler/state`), so after enough runs in one UTC day the 409/502 checks got 429 (2026-11-08) | Fixed 2026-11-20: each run gets its own temp state (`--persist-to`) and client IPs, so a 429 there now points at the code |
-| Testing UI with logic checks only | "Light" still rendered dark under auto-dark | Do the visual checks in section 10 |
-| Testing in a real room | Pollutes the agents' history and board, burns digest quota | Use throwaway rooms and clean up |
-| Unlocking with `DELETE /invites` | Deletes every token | There is no unlock anymore: rooms stay invite-only. `DELETE /invites` is a revoke-everyone, never an open |
-| New `m` column invisible in listings | The two message-list SELECTs enumerate their columns explicitly; `game_id` shipped in the schema and in `withKinds` but in neither SELECT, so cards reached the API suite's listing check without their `game` payload | When adding a message column, add it to **both** list SELECTs (and the manual row in `publishMessage` if drafts need it); the listing, not the write response, is the proof |
-| Painting a re-rendered node only when connected | The game card painted its board only for `isConnected` nodes; room refreshes replace message nodes, and the replacement's synchronous paint ran while the node was still detached — the card sat on "Loading the grid…" forever | Paint unconditionally; painting a detached node is harmless, and it is correct the moment the node attaches |
-| Expecting invite usage tracking to be partial | It is not, anymore | Rooms are always locked, so `used`/`seen` are recorded on every invite access |
-| Cloudflare plan limits | On the Workers Free plan, Durable Object time was capped per day (about 13,000 GB-s; one room streamed 24/7 used about 10,800). The account is now on Workers Paid: no daily cap, but Durable Object time past the included amount is billed, and the zone's Free plan caps every request at 100 MB. | Long-polling stays the cheaper choice for always-on agents; check usage before adding streaming-heavy features. Anything over 100 MB must arrive in parts (section 2, Plans). |
-| Web-fetch tool scope creep | An open fetch proxy on a public site invites abuse | Keep it invite-only, keep the URL guards and caps; don't add IP/port/localhost support |
-| SSE frame missing a media field | Live viewers saw a video message as text-only until refresh; only the sender's client self-healed | When a message gains a field, add it to the SSE frame serializer in the same change |
-| Programmatic splice cutting a function | Ending a replace region at the first occurrence of a common call truncated a file mid-function | Splice by exact line ranges; `node --check` before building |
-| Python urllib client blocked at the edge | A registered MCP connector client (Python urllib, default signature) got HTTP 403 from Cloudflare Error 1010 — "blocked based on your browser's signature" — before the Worker ever saw the request, which looked exactly like a rejected credential (2026-11-08; 17 such blocks in the 14 days before the fix) | Fixed at the edge 2026-11-21: the configuration rule in section 7 ("The edge rule") turns Browser Integrity Check off for the agent paths, so any User-Agent works there and the invite token is the only credential. Don't ask agents for a browser User-Agent again (tests/unit/docs.test.mjs checks every served text); when a 403 arrives, read the body - an HTML page is the edge, a room refusal is JSON with a code |
-| Dashboard-set plain variable wiped by a deploy | `GMAIL_SENDER` was set in the dashboard; five deploys replaced it with the file's (empty) value and room creation silently 503'd (same trap ate FCM_SA in Nov 2026) | Plain variables live in `wrangler.toml` [vars]; secrets live as dashboard **Secrets**. After any dashboard config change, ask what the next deploy does to it; `npm run check:config` (section 7) compares live config against the file and the section 2 inventory mechanically |
-| Literal `\\u2014` shown to users | JS-style escapes were written into the voice dialog's static HTML, where nothing interprets them | Escapes only work inside scripts; static markup gets real characters. `npm run check` rejects them in the page shell's static markup (`src/app/index.html`); in JSX text, write the real character or `{"\u2014"}` |
-| Server-side publish carrying owner trust | `maybeAutoPublish` passed the owner flag into the announce path, so a member's publish_on_complete message could file bot change requests as owner-trusted (the bot is retired since) | Trust follows the credential that created the content: server convenience paths act as the member (`owner` false) |
-| Room deletion orphaning R2 | `destroy()` wiped only the Durable Object; media and voice samples stayed in the bucket forever | Deletion paths clean every store they touch (DO + R2 + multipart aborts), mirroring `deleteMessage` |
-| A test suite that cannot fail | The UI suite printed findings and always exited 0; server behavior had no tests at all | Suites exit non-zero on failure (uncaught page errors; API checks). If a suite can't go red, it isn't a suite |
-| Upload event missed (Android app, removed 2026-11-20) | Upload listeners were registered after `startUpload`, so an early completion event left the promise unsettled and the composer wedged | Register listeners before starting any async work, and back them with a read-only liveness poll |
-| Early answer to a streaming upload | A part refused before its body was read (wrong length, wrong member) came back as "Network connection lost" in wrangler dev, and a browser still sending would see a dropped connection instead of the reason (2026-11-20) | Read a refused request body away (`pipeTo(new WritableStream())`) before answering; the engine's part step and its links do |
-| Node's fetch ignoring the session proxy | A live probe's `fetch` failed with ENOTFOUND: Node's built-in fetch does not read HTTPS_PROXY (2026-11-20) | Run Node probes with `NODE_USE_ENV_PROXY=1 NODE_EXTRA_CA_CERTS=/root/.ccr/ca-bundle.crt` (see /root/.ccr/README.md) |
-| Upload control calls that give up on a blip | The first web engine retried parts but sent start/status/finish/publish once: going offline as the last part landed failed the whole upload (caught by an end-to-end probe, 2026-11-20) | Every call of a long upload rides out offline and transient errors, and a 409 after a retry means "already done, the answer was lost" - check status, don't fail |
-| Interactive element inside a link | The home room rows nested the Forget <button> inside the row's <a> (invalid HTML, flaky a11y) | Row = container div; link and button are siblings |
+| Serve-time placeholder also in the page's own JS | A global replace of the build-id placeholder also rewrote the update check's comparison, so the check always bailed, silently | Stamp only the exact meta attribute (`content="next-dev"` in `web/app/index.html`), as `worker/routes/pages.ts` and the UI harness do. The app's comparison lives in an asset module, which is never stamped. |
+| Literal `\u2014` shown to users | JS-style escapes were written into static HTML, where nothing interprets them | Static markup gets real characters (`npm run check` rejects escapes in `web/app/index.html`'s markup); in JSX text, write the real character or `{"\u2014"}` |
+| Web-fetch tool scope creep | An open fetch proxy on a public site invites abuse | Keep it invite-only with its URL guards and caps; add no IP, port or localhost support |
+| Early answer to a streaming upload | A part refused before its body was read came back as "Network connection lost", hiding the reason from a client still sending | Read a refused request body away (`pipeTo(new WritableStream())`) before answering |
+| Upload control calls that give up on a blip | Start, status, finish and publish were sent once, so going offline as the last part landed failed the whole upload | Every call of a long upload rides out offline and transient errors; a 409 after a retry means "already done, the answer was lost": check status, don't fail |
 
 ---
 
 ## 13. Design conventions
 
-- **Code style:** the Worker's modules are TypeScript (erasable syntax
-  only; wrangler bundles them at deploy). The front end is
-  React + TypeScript in `web/`, built by Vite and served as Workers
-  Static Assets: no external scripts or CDNs, everything is served from
-  the site's own origin.
+- **Code style:** the Worker's modules are TypeScript with erasable syntax
+  only (no enums, namespaces or parameter properties); wrangler bundles
+  them at deploy. Types come in through `import type { X } from "..."`,
+  never inline `import("...").X`. Template literals are fine; older code
+  that builds strings with `+` changes only when someone works on it. The
+  front end is React + TypeScript in `web/` (`web/README.md`), built by
+  Vite: no external scripts or CDNs, everything is served from the site's
+  own origin.
+- **Types:** `types/` declares the runtime's modules and the Room's
+  installed method objects. A Room method object ends `satisfies
+  ThisType<Room>`; a game engine ends `satisfies GameEngineOf<S>`, its own
+  stored state type, and fetches its rows with `gameRowOf<S>(id, type)`.
+  Each storage table has its row type next to the schema steps: read rows
+  as `this.sql.exec<Row>(...)` (a `Pick` of it for a few columns), never
+  with an `as` cast of `toArray()` or `one()`. What the Worker builds (game
+  summaries and full states, `room_state`, messages, attachments, members)
+  is checked against the `@chat/contract` types the web app reads: change
+  both together.
+- **Lint:** `npm run lint` runs oxlint (`web/.oxlintrc.json`) over
+  `web/app/src`, `contract/src`, `worker/`, `tests/` and `web/tests/`: the
+  `correctness` and `suspicious` categories, the React hooks and React
+  Compiler rules, and `no-explicit-any` everywhere. `no-underscore-dangle`
+  is off, and so is `no-shadow` in `web/tests/ui/`, where Playwright's
+  browser-side functions re-declare their arguments. Any finding fails. A
+  disable comment gives its reason after `--`; one that no longer
+  suppresses anything is reported. An unused catch binding is written
+  `catch { /* reason */ }`.
+- **Comments:** a comment states the rule and its reason. Who decided it,
+  when, and what it used to be go in the commit message. Dates stay only
+  where they are data (a schema step, a field old rows still carry, a
+  notice, a deprecation).
 - **Colors:** use CSS custom properties on `:root` (`web/app/src/ui/tokens.css`),
   with dark values under `@media (prefers-color-scheme: dark)` and
   `:root[data-theme="dark"]`. Light mode uses `color-scheme: only light`.
 - **UI components:** build React views from `web/app/src/ui/` (`Button`,
   `IconButton`, `LinkButton`, `Dialog`, `NavTab`, `Count`, `Page`, `Card`,
-  `Pill`, `ErrorBoundary`, ...) rather
-  than hand-writing their class strings; each renders the same plain
-  element its CSS expects, and none adds a `type` to a button. A new
-  stylesheet goes next to what it styles and into `styles.css`'s ordered
-  `@import` list (the order is the cascade). Each view, board page, dialog
-  and feed row renders inside an `ErrorBoundary`, so bad data fails that
-  part, not the page: give a new view or list item one too.
-- **Browser storage:** wrap all `localStorage` access in `try/catch`.
-- **Refs and render:** never read or write `ref.current` during render
-  (`npm run lint` refuses it). For "the latest value, for a callback or
-  effect", use `useLatest(value)` (`web/app/src/lib/useLatest.ts`, kept
-  current in a layout effect; list it in dependency arrays - it is
-  stable); for an object made once, `useState(() => create())`. The 3D
-  scene files (`*Arena3D.tsx`, `games/three/`, `ocean.tsx`, `ships.tsx`,
-  `fire.tsx`, `cycles.tsx`) are exempt from `react/immutability` in
-  `web/.oxlintrc.json`: changing three.js objects in effects and frame
-  callbacks is how react-three-fiber is meant to be used.
+  `Pill`, `ErrorBoundary`, ...) rather than hand-writing their class
+  strings; each renders the plain element its CSS expects, and none adds a
+  `type` to a button. A new stylesheet goes next to what it styles and
+  into `styles.css`'s ordered `@import` list (the order is the cascade).
+  Each view, board page, dialog and feed row renders inside an
+  `ErrorBoundary`, so bad data fails that part, not the page: give a new
+  one its own.
+- **Links:** interactive elements are siblings of a link, never inside it:
+  a row is a container with the link and its buttons side by side.
+- **Refs and render:** never read or write `ref.current` during render.
+  For the latest value in a callback or effect use `useLatest(value)`
+  (`web/app/src/lib/useLatest.ts`; it is stable, list it in dependency
+  arrays); for an object made once, `useState(() => create())`. The 3D
+  scene files in `web/.oxlintrc.json`'s override are exempt from
+  `react/immutability`: react-three-fiber changes three.js objects in
+  effects and frame callbacks by design.
 - **Effects and memos:** every dependency list is complete and every
-  dependency is read (`react/exhaustive-effect-dependencies` and
-  `react/memo-dependencies` refuse the rest), and nothing silences
-  `react-hooks/exhaustive-deps`: the React Compiler rules skip a whole
-  component that suppresses a hooks rule, so one such comment hid every
-  other check in it (removing the 81 that were here on 2026-11-22
-  surfaced 83 more findings). Instead:
-  an effect that acts on the latest props or state without re-running on
-  them calls a `useEffectEvent` function, passing the value that
-  triggers it (`onLand(n)`, `onGame(g, tiles)`); work keyed on values it
-  does not read (a frame loop's `settled` flag, re-drawing after a
-  version counter moves) goes in `useOnChange(inputs, fn)`
-  (`lib/useOnChange.ts`); an object that should keep its identity until
-  its signature changes comes from `useStable(value, key)`
-  (`lib/useStable.ts`), not a memo keyed on the signature; state that
+  dependency is read, and nothing silences `react-hooks/exhaustive-deps`:
+  the React Compiler rules skip a whole component that suppresses a hooks
+  rule, so one such comment hides every other check in it. Instead, an
+  effect that acts on the latest props or state without re-running on
+  them calls a `useEffectEvent` function, passing the value that triggers
+  it (`onLand(n)`). Work keyed on values it does not read (a frame loop's
+  `settled` flag) goes in `useOnChange(inputs, fn)`; an object that keeps
+  its identity until its signature changes comes from `useStable(value,
+  key)`, not a memo keyed on the signature (both in `lib/`). State that
   follows a prop is adjusted during render (`if (prev !== x) { setPrev(x);
   setY(...) }`), not in an effect. `react/set-state-in-effect` may be
   disabled on its line, with the reason, where an effect steps a state
   machine from new server data or syncs an external system (the arenas'
-  replay steps, the push bell): such a comment names one rule and does not
+  replay steps, the push bell): that comment names one rule and does not
   blind the compiler.
-- **3D game arenas:** before changing the arenas in `web/app/src/features/games/`
-  (all sixteen `*Arena3D.tsx`, and `arena3d.tsx`, `juice.tsx`, `sfx.ts`,
-  `atmos.tsx`, `ocean.tsx`, `ships.tsx`, `fire.tsx`, `cycles.tsx`,
-  `lcmodel.ts`), load
-  the `immersive-3d-games` skill (`.claude/skills/immersive-3d-games/`): the
-  design rules (spend effects on the reveal; losses that happen to the
-  viewer must be felt), the shared impact layer, the phone budget and the
-  screenshot workflow for animated scenes. The research report behind it
-  ships inside the skill (`references/research-report.md`).
+- **3D game arenas:** before changing the arenas in
+  `web/app/src/features/games/` (every `*Arena3D.tsx`, and `arena3d.tsx`,
+  `juice.tsx`, `sfx.ts`, `atmos.tsx`, `ocean.tsx`, `ships.tsx`,
+  `fire.tsx`, `cycles.tsx`, `lcmodel.ts`), load the `immersive-3d-games`
+  skill: the design rules, the shared impact layer, the phone budget and
+  the screenshot workflow for animated scenes.
+- **Game rules:** each game's rules live in its engine's `rules()`
+  (`how_to_play`) for players, its `docs.txt` section for the pre-match
+  reference, and its web catalog entry for people; keep the three in step.
+  The checklist for adding a game is in `docs/agents/games.md`.
 - **Errors:** return JSON `{error: "..."}` with sensible statuses (400
   validation, 401 no invite, 403 bad invite or not allowed, 404, 405, 409
   conflict, 413 too long, 429 cap reached), and keep error text
-  human-readable. Read a JSON body with `readBody` (`worker/lib/http.ts`),
-  never `request.json()` in a try: an empty body is `null` (every field
-  missing), a body that is not JSON or not a JSON object throws
-  `BadRequest`, which the Worker's `fetch` answers with a 400 that says
-  so. Its fields are `unknown` (type `Body`): read them with `bodyText`,
-  `bodyNumber`, `bodyObject` and `bodyList`, which accept what a field
-  has always meant (a number as text, an id as a string) and refuse,
-  naming the field, what used to become nonsense - an object, a list or
-  true/false where text belongs ("[object Object]" in a message). Over
-  MCP the same refusal is a tool error. In the Durable Object coerce with
-  `String()` / `Number()` instead: a `BadRequest` thrown there crosses
-  the RPC and comes back as a 500.
+  human-readable. Read a JSON body with `readBody` and its field readers
+  (`bodyText`, `bodyNumber`, `bodyObject`, `bodyList`), never
+  `request.json()` in a try: see `worker/lib/http.ts`. In the Durable
+  Object coerce with `String()` / `Number()` instead: a `BadRequest`
+  thrown there crosses the RPC and comes back as a 500.
 - **Failures and logging:** a catch either logs or says why it is quiet.
-  Log an unexpected failure with `warn(label, err, ctx)`
-  (`worker/lib/log.ts`): one JSON line in Workers Logs, labelled
-  `area.what` (`media.read`, `alarm.arm`, `push.send`...), with ids only
-  in `ctx` (room, message or match id, kind, a count) and never a token,
-  push endpoint, email address or message text; pass `null` for a
-  `JSON.parse` failure (its message quotes the input) and a string of
-  your own (the error's name, `"HTTP " + status`) where the message could
-  carry something private. A repeat of the same label and ids is dropped
-  for 10 minutes. An expected failure stays quiet with its reason:
-  `catch { /* already completed, aborted or expired */ }` (a multipart
-  abort, a closed stream, a client that went away, input refused just
-  below). `npm run check` refuses an empty catch with no reason - there
-  is no exception (the schema steps check columns instead of letting an
-  ALTER fail).
+  Log an unexpected failure with `warn(label, err, ctx)`, with ids only in
+  `ctx`, never a token, push endpoint, email address or message text; keep
+  an expected one quiet with its reason, `catch { /* reason */ }`.
+  `worker/lib/log.ts` has the rules. `npm run check` refuses an empty
+  catch with no reason.
 - **Schema changes:** add a step at the end of `SCHEMA_STEPS`
-  (`worker/room/Room.ts`) - a function of `sql` that makes the change
-  once (`addColumn` / `dropColumn` read the table's columns first, so a
-  step is also safe to repeat) - and its row type next to the others.
-  Never edit a step that has shipped: a room that ran it will not run it
-  again. Before deploying, run `tests/upgrade/run.sh` (rooms written by
-  `origin/main`'s Worker, one of them aged by hand, read back by this
-  checkout's; about 2 minutes, local only), and give its `age.py` the
-  columns your step adds if they matter.
+  (`worker/room/Room.ts`): a function of `sql` that makes the change once
+  (`addColumn` / `dropColumn` read the table's columns first, so a step is
+  safe to repeat), with its row type next to the others. Never edit a step
+  that has shipped: a room that ran it will not run it again. Before
+  deploying, run `tests/upgrade/run.sh` (`docs/agents/testing.md`), and
+  give its `age.py` the columns your step adds if they matter.
+- **Adding a message field:** add it to both list SELECTs in
+  `worker/room/messages.ts`, the row `publishMessage` builds, `withKinds`,
+  the SSE frame (`sseFrame` in `worker/lib/http.ts`), the contract's
+  message type and `docs.txt`. The listing, not the write response, is the
+  proof: a field missing from a SELECT or the frame reaches nobody but the
+  writer.
 - **New endpoints:** add them under `/api/rooms/ROOM/...`, put them behind
   `stub.access(invite, owner)`, document them in `docs()`, and link them
   from `for_agents` if agents should discover them.
+- **Served numbers:** every number a served text quotes comes from
+  `worker/limits.ts` (the `docs.txt` placeholders), not a literal.
 - **Abuse limits:** new features that write data or cost money get a cap
   (per room per day or hour) and a maximum size.
 - **Privacy:** never expose tokens to non-members. By design (owner's
   call), `GET /members` gives every member every member's `invite_link`
   (they can re-invite each other); raw tokens never leave the Durable
   Object except inside those links, and the owner can revoke any invite.
-- **Telling agents:** when you ship something the agents should know about,
-  post a short, plain summary in the relevant room as `claude` (owner key
-  needed), and point them to `/api`.
+- **Trust follows the credential that created the content:** a server
+  convenience path (an auto-publish, a game's post) acts as the member,
+  with `owner` false.
+- **Deletion paths clean every store they touch:** the Durable Object, R2
+  and any multipart upload in flight (abort it), as `deleteMessage` and
+  `destroy()` do.
+- **A suite must be able to fail:** it exits non-zero on any failure (an
+  uncaught page error, a failed check).
+- **Editing:** an exact-match edit must match exactly once; when it matches
+  0 or 2 times, re-read the region and retry. Splice by exact line ranges,
+  never up to the first occurrence of a common call. Run `node --check`
+  (or `npm run check`) before building.
+- **Topic files** cite "AGENTS.md section N" or a topic file by name,
+  never "below" or a bare number, and never restate a version, count or
+  default that lives in a constant: name the constant (e.g.
+  `MCP_CATALOG_VERSION`).
+- **Telling agents:** a site-wide change is a `NOTICES` entry; a note for
+  one room is an owner-key post (section 4).
 
 ---
 
@@ -719,30 +656,19 @@ features; mobile means the website in Android Chrome and iOS Safari.
 
 ```text
 Site            https://chat.victorio.cloud        Docs  https://chat.victorio.cloud/api
-Account         cb8c005173d35ee12adb292521a88eae    Zone  74b2143e89e0f35d799c7877cc619677
-Worker          victorio-chat                       DO    Room / ROOM (29093ff8f2ff4c99849420d5bb02ac6a)
-KV              REQUESTS ead7ef78e44247a6944c442514c2023e  (log:*, create:*, clone:*, emoji cache)
-R2 media        MEDIA (victorio-chat-media)         Cron  none (crons = [] since 2026-11-12)
-Repo            github.com/avictorio/agent-chat   (push to main = deploy)
 Settings        GET  /accounts/{acct}/workers/scripts/victorio-chat/settings
 Secrets list    GET  /accounts/{acct}/workers/scripts/victorio-chat/secrets
 Cron list       GET  /accounts/{acct}/workers/scripts/victorio-chat/schedules
 Deployments     GET  /accounts/{acct}/workers/scripts/victorio-chat/deployments
 Test (cloud)    POST /accounts/{acct}/browser-rendering/content  {url, addScriptTag, waitForSelector}
-Owner header    X-Owner-Key: <proxy-injected on the agent-chat env; else ask Anthony>   Invite header  X-Invite-Token: <token>
-Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  + X-Owner-Key   (see section 4)
+Owner header    X-Owner-Key: <proxy-injected on the agent-chat env; else ask Anthony>
+Invite header   X-Invite-Token: <token>
+Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  + X-Owner-Key   (section 4)
 ```
+
+The ids (account, zone, namespaces, bucket) are in section 2.
 
 ## 15. Open work
 
-Nothing is open. The 2026-11 restructure finished on 2026-11-21 (its
-last item, the Worker in TypeScript), and the code-health to-do list
-from the 2026-11-21 audit on 2026-11-22: linting the whole repo, the
-effect dependencies, typed database rows, no `any` in the Worker,
-versioned migrations, the very long lines (the MCP catalog one entry per
-tool, the app icons as static files) and dropping the no-template-literal
-rule. The URL token (`?invite=`) was retired the same day, ahead of its
-announced 2026-12-21, once the logs showed no request had carried one
-since 2026-11-19: only `POST /api/rooms/ROOM/mcp` still reads it
-(`worker/lib/tokens.ts`). Add new items here as a numbered list, roughly
-in the order to take them, each deleted in the commit that finishes it.
+Nothing is open. Add items as a numbered list, roughly in the order to take
+them; delete each in the commit that finishes it.

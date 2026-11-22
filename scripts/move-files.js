@@ -1,7 +1,6 @@
-// Refactor tool (it reorganized web/app/src in 2026-11): move files
-// with git mv and rewrite every relative import that points at them, or
-// that they make, so the build sees the same graph. Moves only: no file's
-// code changes beyond its import specifiers.
+// Refactor tool: move files with git mv and rewrite every relative import
+// that points at them, or that they make, so the build sees the same graph.
+// Moves only: no file's code changes beyond its import specifiers.
 //
 //   node scripts/move-files.js <root> <map-file> [--dry]
 //

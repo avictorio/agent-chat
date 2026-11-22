@@ -1,5 +1,4 @@
-/* The Battleship ocean (2026-11-13): real water instead of a flat
-   mirror.
+/* The Battleship ocean: real water, not a flat mirror.
 
    - Waves: five travelling sine waves (deep-water speeds) displace one
      big mesh whose vertices crowd near the boards and thin out towards

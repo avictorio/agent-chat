@@ -4,10 +4,10 @@
 const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
 
 (async () => {
-  // Trust in 3D (the default): the table loads first, then the scores and
-  // the choices - the grid is the table's threads, with the colour key in
-  // the frame's caption and each seat's round points on its plate; a
-  // lock-in still sends per-rival choices.
+  // Trust in 3D: the table loads first, then the scores and the choices - the
+  // grid is the table's threads, with the colour key in the frame's caption
+  // and each seat's round points on its plate; a lock-in still sends
+  // per-rival choices.
   for (const [label, o] of [['trust-3d', {}], ['trust-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { tr: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -30,9 +30,9 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
-  // Liar's Dice in 3D (the default): the table loads first, then the
-  // standing bid, your cup, the bid builder, the table and the last round;
-  // Liar! still sends the call.
+  // Liar's Dice in 3D: the table loads first, then the standing bid, your
+  // cup, the bid builder, the table and the last round; Liar! still sends the
+  // call.
   for (const [label, o] of [['liarsdice-3d', {}], ['liarsdice-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ld: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -54,8 +54,8 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
-  // The auction in 3D (the default): the hall loads first, then the lot,
-  // your bid and the bidders; a bid still sends the number.
+  // The auction in 3D: the hall loads first, then the lot, your bid and the
+  // bidders; a bid still sends the number.
   for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { au: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -76,9 +76,9 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
-  // Four in a Row in 3D (the default): the board scene loads first, the
-  // seats and the 1-7 drop buttons follow it (no 2D grid), a drop still
-  // sends the column, and there is no 2D view to switch to.
+  // Four in a Row in 3D: the board scene loads first, the seats and the 1-7
+  // drop buttons follow it (no 2D grid), a drop still sends the column, and
+  // there is no 2D view to switch to.
   for (const [label, o] of [['fourinarow-3d', {}], ['fourinarow-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -102,11 +102,11 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
-  // Code Race in 3D (the default): the vault loads above the guess input,
-  // its label reads the race from the viewer's seat and every racer's
-  // rounds (yours with your guesses, a rival's feedback only); your
-  // guesses with their feedback are a board in the frame - the lanes are
-  // the no-WebGL view; a guess still goes out; no 2D view to switch to.
+  // Code Race in 3D: the vault loads above the guess input, its label reads
+  // the race from the viewer's seat and every racer's rounds (yours with your
+  // guesses, a rival's feedback only); your guesses with their feedback are a
+  // board in the frame - the lanes are the no-WebGL view; a guess still goes
+  // out; no 2D view to switch to.
   for (const [label, o] of [['coderace-3d', {}], ['coderace-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { cr: true } }, o), async (page, S, calls) => {
       const out = {};
@@ -132,10 +132,10 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
-  // Frontlines in 3D (the default): the scene loads above the score and
-  // the planner; the round's numbers are in the scene (on the hills, and
-  // the result in the frame's caption - no flat field under it); a
-  // lock-in still sends the split; there is no 2D view to switch to.
+  // Frontlines in 3D: the scene loads above the score and the planner; the
+  // round's numbers are in the scene (on the hills, and the result in the
+  // frame's caption - no flat field under it); a lock-in still sends the
+  // split; there is no 2D view to switch to.
   for (const [label, o] of [['frontlines-3d', {}], ['frontlines-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { fl: true } }, o), async (page, S, calls) => {
       const out = {};

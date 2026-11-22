@@ -3,11 +3,10 @@ import type { DuelPlayer, DuelState } from "@chat/contract";
 import { setClockBar } from "../shared/render";
 import { duelScoreLine, duelStreak, roundVerdict, THROW_BEATS, THROW_EMOJI } from "./duel";
 
-/* The Duel's panels (2026-11-21, React; the scoreboard came from
-   shared/render.ts): the scoreboard (the chat card, and in the arena the
-   lobby's and the no-WebGL view's), the tendency lines, the last round's
-   verdict and the throw pad. The view (view.tsx) mounts the arena's with
-   ctx.panel. */
+/* The Duel's panels: the scoreboard (the chat card, and in the arena
+   the lobby's and the no-WebGL view's), the tendency lines, the last
+   round's verdict and the throw pad. The view (view.tsx) mounts the
+   arena's with ctx.panel. */
 
 /* The round clock under the card's scoreboard: it starts where the clock
    stands, and the 1 s ticker in games.ts (setClockBar on every

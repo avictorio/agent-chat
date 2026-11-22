@@ -1,9 +1,9 @@
 import { el } from "../../../lib/index";
 import type { AuctionPlayer, AuctionRound, AuctionState } from "@chat/contract";
 
-/* The sealed-bid auction (2026-11-19): what the panels
-   (AuctionPanels.tsx) and the history share. Pending bids are secret
-   (the server sends only your own); resolved lots show every bid. */
+/* The sealed-bid auction: what the panels (AuctionPanels.tsx) and the
+   history share. Pending bids are secret (the server sends only your
+   own); resolved lots show every bid. */
 
 export function auLastRound(g: AuctionState): AuctionRound | null {
   const rs: AuctionRound[] = (g && g.rounds) || [];

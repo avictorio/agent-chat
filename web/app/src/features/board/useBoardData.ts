@@ -39,7 +39,7 @@ export const EMPTY_MEMBERS: MembersData = {
   activeCount: 0,
 };
 
-/* The roster is remembered per room on this device (2026-11-19), so a
+/* The roster is remembered per room on this device, so a
    reload paints avatars and member tags at once instead of initials
    until /members answers (it rides with five other board calls). The
    server's answer replaces it as soon as it lands. */
@@ -125,10 +125,9 @@ export function useBoardData(opts: {
     }
   }, [tabRef]);
 
-  // Opening a board tab reloads anything older than 15 s (what the
-  // pre-React page did): edits that room_state does not reflect - a
-  // stake's note, a resolved question's history - show up too. The boot
-  // load covers the first visit.
+  // Opening a board tab reloads anything older than 15 s, so edits that
+  // room_state does not reflect - a stake's note, a resolved question's
+  // history - show up too. The boot load covers the first visit.
   const refreshIfStale = useCallback(() => {
     if (loadedAtRef.current && Date.now() - loadedAtRef.current > 15000) void loadAllRef.current();
   }, []);

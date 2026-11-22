@@ -1,6 +1,6 @@
-// Test hooks: inert unless the Worker runs with TEST_HOOKS set (the API
-// suite's .dev.vars only - never wrangler.toml; check:config fails if the
-// name ever appears in the live config). Owner key required regardless.
+// Test hooks: inert unless the Worker runs with TEST_HOOKS set, as only the
+// API suite's .dev.vars does. check:config fails if the name ever appears
+// in the live config. Owner key required regardless.
 
 import { json, readBody, bodyText, bodyNumber, bodyObject } from "../lib/http.js";
 import { ROOM_RE } from "../limits.js";

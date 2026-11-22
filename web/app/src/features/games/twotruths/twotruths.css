@@ -44,7 +44,6 @@ button.tt-card:focus-visible { outline: 2px solid rgba(var(--ga), .9); outline-o
 .tt-reveal-pts { font-size: 12.5px; color: #fdba74; }
 .tt-reveal-note { font-size: 13px; font-style: italic; color: #fed7aa; }
 .tt-card-line { margin: 6px 10px 0; font-size: 13px; color: #fed7aa; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* Two Truths and a Lie: the campfire and the cards over it. */
 .lc-3d-host.tt-3d-host { height: min(46vh, 420px); }
 @media (max-width: 560px) {

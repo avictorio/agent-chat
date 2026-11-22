@@ -1,4 +1,4 @@
-// The game engine table: one plug-in object per game (see each games/<game>.js), the spellings createGame accepts, and the structured-move fields.
+// The game engine table: one plug-in object per game (each in worker/games/<game>.ts), the spellings createGame accepts, and the structured-move fields.
 
 import { lightcyclesEngine } from "./lightcycles.js";
 import { duelEngine } from "./duel.js";
@@ -39,72 +39,70 @@ export type GameReply = { status?: number, error?: string, game?: unknown, legal
 /** A match row whose state is one game's own stored type. */
 export type GameRowOf<S extends StoredBase> = Omit<GameRow, "st"> & { st: S };
 /**
- * A game's plug-in: one entry of GAME_ENGINES, as described below, over
- * that game's own stored state S (each module ends its engine with
- * `satisfies GameEngineOf<ItsSt>`). The machinery holds them all as
- * GameEngine (S = StoredBase) and hands each engine only its own matches
- * - gameEngine() picks it by the state's type - which is what lets an
- * engine take a GameRow as its own GameRowOf<S>: the methods below are
- * method signatures, so their parameters compare both ways.
+ * A game's plug-in: one entry of GAME_ENGINES, over that game's own stored
+ * state S (each module ends its engine with `satisfies GameEngineOf<ItsSt>`).
+ * The machinery holds them all as GameEngine (S = StoredBase) and hands
+ * each engine only its own matches - gameEngine() picks it by the state's
+ * type - which is what lets an engine take a GameRow as its own
+ * GameRowOf<S>: the methods below are method signatures, so their
+ * parameters compare both ways.
  */
 export type GameEngineOf<S extends StoredBase> = {
+  /** The game's name in posts and logs ("Light Cycles"). */
   name: string,
+  /** The clock step in logs: tick, round, turn or phase. */
   turnWord: string,
+  /** The current step number (tick, round, turn). */
   logTick(st: S): number,
+  /** The first deadline's length once the lobby fills. */
   clockSeconds(st: S): number,
+  /** Validate the options, store the match in its lobby, post its card. */
   create(room: Room, creator: string, players: unknown[], opts: Body, roomName: string): GameReply | Promise<GameReply>,
+  /** The public state: what frames, cards and lists carry. */
   summary(room: Room, g: GameRowOf<S>): GamePub,
+  /** The state as one viewer may see it (their own secrets, their legal moves). */
   full(room: Room, g: GameRowOf<S>, who: string | null | undefined): GamePub,
+  /** Apply one move: dir as sent, plus fields, a structured move's parts (moveFields). */
   move(room: Room, g: GameRowOf<S>, who: string, dir: unknown, roomName: string, fields?: Record<string, unknown> | null): GameReply | Promise<GameReply>,
+  /** Settle what the clock owes once a deadline has passed. */
   advance(room: Room, g: GameRowOf<S>, roomName: string): void,
+  /** The same, for a game whose settling awaits (Sketch & Guess's judge). */
   advanceAsync?(room: Room, g: GameRowOf<S>, roomName: string): Promise<void>,
+  /** Who a running match waits on, read from its summary. */
   targets(pub: GamePub): string[],
+  /** The light reference a match's chat card carries. */
   card(g: GameRowOf<S>): object,
+  /** The match as room_state sees it: id, type, status, its turn field and the seats. */
   stateItem(r: { id: number, status: string }, st: S): GameStateItem,
+  /** That item's turn signature: a new value is a new decision. */
   turnOf(item: GameStateItem): number | string,
+  /** The dir placeholder in an awaiting_you call. */
   moveHint(item: GameStateItem, me: string): string,
+  /** The Referee's result post. */
   result(room: Room, g: GameRowOf<S>): string,
+  /** how_to_play: this match's rules with its settings, the move format last.
+   *  Every full state carries it and agents play from it alone, so keep it
+   *  in step with the game's section of worker/agents/docs.txt and its web
+   *  catalog entry's howTo. */
   rules(st: S): string,
+  /** Simultaneous-rounds games (roundsCommit/roundsAdvance): settle one round. */
   resolveRound?(room: Room, g: GameRowOf<S>): void,
+  /** The same games: the winner if the match ends where it stands, or null. */
   standing?(room: Room, st: S): string | null,
+  /** The same games: the players a round waits on, when not everyone. */
   active?(room: Room, st: S): Array<{ name: string }>,
 };
 /** An engine as the machinery holds it: over any match. */
 export type GameEngine = GameEngineOf<StoredBase>;
 
-/* ---------- game engines (groundwork, 2026-11-19) ----------
-   Every game the Room plays is one entry here. The shared machinery -
+/* Every game the Room plays is one entry here. The shared machinery -
    lobby and accept, clocks and the alarm, stream frames, room_state
    nudges, chat cards, result posts, cancel, standings - asks the match's
-   engine instead of branching on its type. Each game lives in its own
-   games/<game>.js: its constants and data, its Room methods (an object
-   installed on the class at the end of worker/room/Room.ts) and its
-   engine entry, which is listed in GAME_ENGINES here. To add a game:
-   write that module, install its methods and list its entry, then the
-   docs section, the MCP descriptions and the web catalog
-   (web/app/src/games/shared/catalog.tsx) and a folder for its web side
-   (web/app/src/games/<game>/).
-
-   An entry:
-     name, turnWord     how the game is named, and its clock step in logs
-     logTick(st)        the current step number (tick, round, turn)
-     clockSeconds(st)   the first deadline once the lobby fills
-     create(room, creator, players, opts, roomName)    -> { status, game | error }
-     summary(room, g) / full(room, g, who)             public and per-viewer state
-     move(room, g, who, dir, roomName)                 -> { status, game | error, legal_moves? }
-     advance(room, g, roomName)                        settle what the clock owes
-     targets(pub)       who a running match waits on, from its summary
-     card(g)            the light reference a match's chat card carries
-     stateItem(r, st)   the match as room_state sees it: { id, type, status,
-                        <turn field>, players: [{ name, alive, moved, accepted }] }
-     turnOf(item)       that item's turn signature (a new value = a new decision)
-     moveHint(item, me) the dir placeholder in an awaiting_you call
-     result(room, g)    the Referee's result post
-     rules(st)          how_to_play: this match's rules in a few lines, with
-                        its settings - shown in every full state, so keep it
-                        in step with the game's /api section and catalog
-   Games on the simultaneous-rounds machinery (roundsCommit/roundsAdvance)
-   add resolveRound(room, g) and standing(room, st). */
+   engine (GameEngineOf above) instead of branching on its type. Each game
+   is one module, worker/games/<game>.ts: its constants and data, its Room
+   methods (installed on the class at the end of worker/room/Room.ts) and
+   its engine entry, listed here. Adding a game: the checklist in
+   docs/agents/games.md. */
 export const GAME_ENGINES = {
   lightcycles: lightcyclesEngine,
   duel: duelEngine,

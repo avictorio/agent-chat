@@ -5,12 +5,12 @@ import { flLastRound } from "./frontlines";
 import { FrontlinesField, FrontlinesPlanner, FrontlinesScore } from "./FrontlinesPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
-/* Frontlines (2026-11-19): the field (the last resolved round, or the
-   open field), the turn banner, and for a commander the planner. The
-   panels are React (FrontlinesPanels.tsx, mounted with ctx.panel): the
-   planner keeps its own draft, so a poll or the rival's commit never
-   wipes a half-made plan; it is keyed by round, so it resets when a new
-   round opens. */
+/* Frontlines: the field (the last resolved round, or the open field),
+   the turn banner, and for a commander the planner. The panels are
+   React (FrontlinesPanels.tsx, mounted with ctx.panel): the planner
+   keeps its own draft, so a poll or the rival's commit never wipes a
+   half-made plan; it is keyed by round, so it resets when a new round
+   opens. */
 export function renderFrontlinesView(ctx: GameViewCtx, g: FrontlinesState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

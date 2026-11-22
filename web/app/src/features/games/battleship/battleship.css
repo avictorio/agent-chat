@@ -1,6 +1,5 @@
 /* Battleship: the card's mini boards, the no-WebGL grids and fleets,
-   the strips under the scene, the warnings and sonar. Split from
-   games.css 2026-11-21, in its order. */
+   the strips under the scene, the warnings and sonar. */
 .bs-mini-svg .bs-mini-new { animation: bsMiniFlash 1.2s ease-out; }
 @keyframes bsMiniFlash { 0% { fill: #fca5a5; } 55% { fill: #ef4444; } 100% { fill: #991b1b; } }
 @media (prefers-reduced-motion: reduce) { .bs-mini-svg .bs-mini-new { animation: none; } }

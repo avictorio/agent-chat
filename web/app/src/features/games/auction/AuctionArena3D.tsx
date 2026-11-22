@@ -1,4 +1,4 @@
-/* The auction in 3D (2026-11-19): the auction house.
+/* The auction in 3D: the auction house.
 
    The world: a dark hall in indigo and gold; in the middle a pedestal
    under a spotlight holds the lot - a slowly turning gem, its name

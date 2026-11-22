@@ -1,9 +1,9 @@
 // A markup snapshot of every game's chat card and arena, for refactors
-// that must not change the DOM (the 2D panels' move to React): for each
-// fixture state, with and without WebGL, at desktop and phone width, it
-// records the card board and the arena's Game and History tabs as a
-// normalised tree (attributes sorted; the turn banner, clock bars and 3D
-// scene left out, since they move with the clock). Writes one JSON file;
+// that must not change the DOM: for each fixture state, with and without
+// WebGL, at desktop and phone width, it records the card board and the
+// arena's Game and History tabs as a normalised tree (attributes sorted;
+// the turn banner, clock bars and 3D scene left out, since they move with
+// the clock). Writes one JSON file;
 // compare two runs with `node tests/ui/panelsnap.js diff a.json b.json`
 // (it compares the snapshots both files have). ONLY_GAMES=tr,au snapshots
 // just the states of those fixtures (the first key of each state).

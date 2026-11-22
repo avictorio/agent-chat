@@ -1,6 +1,6 @@
-/* Frontlines (2026-11-19): the field - a column per hill, both armies as
-   bars once a round resolves, the hill tinted by who took it - and the
-   planner a commander fills in. Game surfaces are dark in both themes. */
+/* Frontlines: the field - a column per hill, both armies as bars once a
+   round resolves, the hill tinted by who took it - and the planner a
+   commander fills in. Game surfaces are dark in both themes. */
 .fl-field { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; background: var(--gbg); border: 1px solid rgba(var(--ga), .25); border-radius: 12px; padding: 10px; color: #e2f4fd; }
 .fl-field.compact { gap: 4px; padding: 8px; border: 0; border-radius: 0; }
 .fl-hill { display: grid; gap: 5px; align-content: start; border: 1px solid rgba(148, 163, 184, .2); border-radius: 9px; padding: 7px 6px; background: rgba(255, 255, 255, .02); min-width: 0; }
@@ -53,7 +53,6 @@
 .fl-card { padding: 8px 10px 10px; color: #e2f4fd; }
 .fl-card-score { text-align: center; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
 .fl-card-cap { text-align: center; font-size: 12px; color: #94a3b8; margin-top: 2px; }
-/* From games.css (2026-11-21): this game's 3D host and frame pieces. */
 /* Frontlines: a wide, shallow field - a lower host than the boards. */
 .lc-3d-host.fl-3d-host { height: min(44vh, 360px); }
 @media (max-width: 560px) {

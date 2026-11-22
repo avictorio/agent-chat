@@ -1,9 +1,9 @@
 import { el } from "../../../lib/index";
 import type { CorpseBeat, CorpsePlayer, CorpseSegment, CorpseState } from "@chat/contract";
 
-/* Exquisite Corpse (2026-11-20): what the panels (CorpsePanels.tsx) and
-   the history share. Nothing of the text is shown before the reveal
-   except a writer's own tail. */
+/* Exquisite Corpse: what the panels (CorpsePanels.tsx) and the history
+   share. Nothing of the text is shown before the reveal except a
+   writer's own tail. */
 
 export const EC_MAX = 400;
 

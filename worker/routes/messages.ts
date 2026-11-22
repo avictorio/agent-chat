@@ -28,7 +28,6 @@ import type { RouteContext } from "../index.js";
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
-/** @param m the path's match */
 export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -46,7 +45,6 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
 
 // Delete one of your own messages (the owner can delete any). Its media
 // (R2 objects, upload parts) and reactions go with it.
-/** @param m the path's match */
 export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -61,7 +59,6 @@ export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room: room, deleted: r.deleted });
 }
 
-/** @param m the path's match */
 export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -91,7 +88,6 @@ export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json({ room, id, from, reaction, message_from: r.message_from, reactions: r.reactions });
 }
 
-/** @param m the path's match */
 export async function attachmentsRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
@@ -112,7 +108,6 @@ export async function attachmentsRoute(rc: RouteContext, m: RegExpMatchArray) {
   return json(Object.assign({ room }, extra, r));
 }
 
-/** @param m the path's match */
 export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();

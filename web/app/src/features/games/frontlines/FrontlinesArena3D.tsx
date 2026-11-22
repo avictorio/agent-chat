@@ -1,4 +1,4 @@
-/* Frontlines in 3D (2026-11-19): troops over hills at dusk.
+/* Frontlines in 3D: troops over hills at dusk.
 
    The world: five low hills in a shallow arc on a dark field under a warm
    dusk horizon. Each commander's army stands on their side of every hill
@@ -128,9 +128,8 @@ function labelTex(letter: string, val: number | null): CanvasTexture {
   return t;
 }
 
-/* The round in numbers on each hill (2026-11-20, the page's field
-   folded into the scene): each side's troops in its colour, the hill's
-   winner bright, a level hill's both dim. */
+/* The round in numbers on each hill: each side's troops in its colour,
+   the hill's winner bright, a level hill's both dim. */
 type Count = { n: number; hex: string; won: boolean };
 const countCache = new Map<string, CanvasTexture>();
 function countTex(counts: Count[]): CanvasTexture {
@@ -792,8 +791,8 @@ export default function FrontlinesArena3D({
     "Frontlines arena, 3D view: " +
     sides.map((s) => s.name + (s.you ? " (you)" : "") + " " + s.wins + (running ? (s.committed ? ", committed" : ", planning") : "")).join(" versus ") +
     (round ? ". On the field: round " + round.n + "." : ". The field is empty.");
-  /* What the page's field said under the scene, now in the frame: the
-     round shown and how it went, or the round being planned. */
+  /* The frame's caption: the round shown and how it went, or the round
+     being planned. */
   const caption = (() => {
     if (round && round.hills) {
       const tally = sides

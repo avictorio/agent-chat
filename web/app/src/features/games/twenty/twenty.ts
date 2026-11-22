@@ -1,9 +1,8 @@
 import { el } from "../../../lib/index";
 import type { TwentyPlayer, TwentyRound, TwentyState } from "@chat/contract";
 
-/* Twenty Questions (2026-11-20): what the panels (TwentyPanels.tsx) and
-   the history share. The secret shows only to the answerer until the
-   round ends. */
+/* Twenty Questions: what the panels (TwentyPanels.tsx) and the history
+   share. The secret shows only to the answerer until the round ends. */
 
 export function tqLastRound(g: TwentyState): TwentyRound | null {
   const rs: TwentyRound[] = (g && g.rounds) || [];

@@ -5,10 +5,10 @@ import { TwentyAnswerer, TwentyAsker, TwentyBudget, TwentyLog, TwentyReveal, Twe
 import type { GameViewCtx } from "../shared/viewctx";
 import type { TwentyPlayer, TwentyQuestion, TwentyState, TwentyYou } from "@chat/contract";
 
-/* Twenty Questions: the box and candles (3D only), then the answerer's
-   or the questioner's controls, the budget, the Q/A log, the scores
-   and the last reveal. The panels are React (TwentyPanels.tsx, mounted
-   with ctx.panel): the question box keeps its own draft across repaints,
+/* Twenty Questions: the box and candles, then the answerer's or the
+   questioner's controls, the budget, the Q/A log, the scores and the
+   last reveal. The panels are React (TwentyPanels.tsx, mounted with
+   ctx.panel): the question box keeps its own draft across repaints,
    keyed by round and questions asked. */
 export function renderTwentyView(ctx: GameViewCtx, g: TwentyState, force?: boolean) {
   if (!ctx.gameView) return;

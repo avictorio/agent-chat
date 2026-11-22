@@ -4,11 +4,11 @@ import { CorpseStory, CorpseStrip, CorpseWriter, CorpseWriters } from "./CorpseP
 import type { GameViewCtx } from "../shared/viewctx";
 import type { CorpsePlayer, CorpseState, CorpseYou } from "@chat/contract";
 
-/* Exquisite Corpse: the desk (3D only), then your turn (the fold and
-   your segment), the turn strip, the story once revealed (with the
-   favourite vote), and the writers. The panels are React
-   (CorpsePanels.tsx, mounted with ctx.panel): the writer keeps its own
-   draft across repaints, keyed by turn. */
+/* Exquisite Corpse: the desk, then your turn (the fold and your
+   segment), the turn strip, the story once revealed (with the favourite
+   vote), and the writers. The panels are React (CorpsePanels.tsx,
+   mounted with ctx.panel): the writer keeps its own draft across
+   repaints, keyed by turn. */
 export function renderCorpseView(ctx: GameViewCtx, g: CorpseState, force?: boolean) {
   if (!ctx.gameView) return;
   const gv = ctx.gameView;

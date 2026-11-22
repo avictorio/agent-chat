@@ -5,9 +5,9 @@ import { useSession } from "./ctx";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 
-// The "Your voice" dialog, ported from the current app: record the
-// script (or upload a sample file), the server clones it, and the
-// status line reports the outcome. Remove deletes sample and clone.
+// The "Your voice" dialog: record the script (or upload a sample
+// file), the server clones it, and the status line reports the
+// outcome. Remove deletes sample and clone.
 
 export interface VoiceDialogHandle {
   open(): void;

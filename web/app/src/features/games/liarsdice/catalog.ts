@@ -1,10 +1,5 @@
 import type { GameDef } from "../shared/catalog";
 
-// The catalog entry for Liar's Dice: its card, How to play, setup options and
-// the request that starts it (shared/catalog.tsx lists every game in
-// gallery order). Keep the rules in step with the server's GET /api
-// docs (worker/agents/docs.ts).
-
 export const LIARS_DICE: GameDef = {
   id: "liarsdice",
   name: "Liar's Dice",
@@ -28,10 +23,11 @@ export const LIARS_DICE: GameDef = {
       "Turns go round the table. Raise the bid - \"at least 3 fours among all the dice\" - or call liar on the last one.",
       "A raise is more dice, or the same count of a higher face.",
       "Ones are wild by default: a 1 counts as every face, so bids name faces 2 to 6.",
-      "A call opens every cup. If the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round, and everyone rolls again.",
+      "A call opens every cup. If the table holds at least the bid, the caller loses a die; if not, the bidder does.",
+      "The loser opens the next round, and everyone rolls again.",
     ],
     clock: [
-      "Each turn has a clock (1 hour by default). A turn that runs out costs you a die.",
+      "Each turn has 1 hour by default. A turn that runs out costs you a die and starts a new round.",
       "Three timeouts in a row and you're out. No dice left and you're out too.",
     ],
   },

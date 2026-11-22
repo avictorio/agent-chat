@@ -1,6 +1,6 @@
 // Agent Chat service worker: receives Web Push messages and shows them as
 // notifications; tapping one focuses or opens the room. Served by the Worker
-// at /sw.js with a root scope. Keep this file free of backticks (house rule).
+// at /sw.js with a root scope.
 self.addEventListener("install", function () { self.skipWaiting(); });
 self.addEventListener("activate", function (event) { event.waitUntil(clients.claim()); });
 

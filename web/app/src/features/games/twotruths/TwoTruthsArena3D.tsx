@@ -1,4 +1,4 @@
-/* Two Truths and a Lie in 3D (2026-11-19): the campfire.
+/* Two Truths and a Lie in 3D: the campfire.
 
    The world: a clearing at night under stars, a campfire in a ring of
    stones (Battleship's shader fire), the players on log seats round it

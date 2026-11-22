@@ -2,14 +2,14 @@ import { Fragment, type CSSProperties, type ReactElement } from "react";
 import type { FourInARowPlayer, FourInARowState } from "@chat/contract";
 import { C4_COLS, C4_ROWS } from "./fourinarow";
 
-/* Four in a Row's panels (2026-11-21, React): who plays which disc, the
-   1-7 drop buttons under the scene on your turn, and the chat card's
-   small board. The view (view.tsx) mounts the first two with ctx.panel.
-   The server's board is 6 strings, top row first: X (the first seat),
-   O (the second) or . for empty; `line` is the winning cells as
-   [col, row], 1-based from the bottom left. Discs carry the player's
-   colour plus a second channel - X discs are solid, O discs are ringed -
-   so the board reads without colour too. */
+/* Four in a Row's panels: who plays which disc, the 1-7 drop buttons
+   under the scene on your turn, and the chat card's small board. The
+   view (view.tsx) mounts the first two with ctx.panel. The server's
+   board is 6 strings, top row first: X (the first seat), O (the second)
+   or . for empty; `line` is the winning cells as [col, row], 1-based
+   from the bottom left. Discs carry the player's colour plus a second
+   channel - X discs are solid, O discs are ringed - so the board reads
+   without colour too. */
 
 function seatHex(g: FourInARowState, piece: string): string {
   const p = ((g && g.players) || []).find((x: FourInARowPlayer) => x.piece === piece);

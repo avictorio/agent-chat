@@ -1,4 +1,4 @@
-/* Code Race in 3D (2026-11-19): the vault.
+/* Code Race in 3D: the vault.
 
    The world: a violet grid floor running to a striped synthwave sun, and
    at its centre the vault - a cryptex of rings, one per peg (or letter),
@@ -136,13 +136,12 @@ function labelTex(name: string, sub: string, hex: string): CanvasTexture {
 }
 
 /* ---------- the ledger: your rounds, in the frame ----------
-   (2026-11-20, the page's lanes folded into the arena) The rounds you
-   guessed, oldest at the top: each guess (pegs with their key letter,
-   or the word's tiles) and its feedback, your sealed guess last and
-   dimmed. A panel beside each pillar was tried first and read at 60 px
-   on a desktop, so it is a compact board in the frame's top-left (the
-   in-frame slot the other games use for their caption), hidden while a
-   round replays. A rival's latest feedback is on their tumblers and
+   The rounds you guessed, oldest at the top: each guess (pegs with
+   their key letter, or the word's tiles) and its feedback, your sealed
+   guess last and dimmed. It is a compact board in the frame's top-left
+   (the in-frame slot the other games use for their caption), not a
+   panel beside each pillar, which reads at 60 px on a desktop; hidden
+   while a round replays. A rival's latest feedback is on their tumblers and
    their history in the History tab; the canvas label reads every
    racer's rounds. Rows follow the settled rounds, so a replay never
    spoils its round. */
