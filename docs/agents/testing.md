@@ -42,9 +42,10 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   way wrangler's Text rule does, and its TypeScript with the types
   stripped (a `./x.js` import finds `x.ts`, as wrangler's bundler does).
   Add a test there with any new pure helper.
-- **The API suite:** `npm run test:api` boots `wrangler dev` (port 8798,
-  its own temp state per run through `--persist-to`) against the build,
-  so run `npm run build` first. What it covers is listed in the header of
+- **The API suite:** `npm run test:api` boots `wrangler dev` through
+  `tests/api/server.js` (port 8798 unless `API_PORT` says otherwise, its
+  own temp state per run through `--persist-to`) against the build, so
+  run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
   `tests/api/api.test.js`. Run it after Worker changes. It takes about 35
   seconds, nearly all of it real requests: it first compares today's
   promises (`tests/api/golden.js`: statuses, error sentences, fields), and
@@ -52,8 +53,18 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   `POST /api/test-hooks/game-expire {room, id}` (the next read advances
   it as the deadline would); to check the alarm path,
   `POST /api/test-hooks/alarm {room, id}` runs the room's alarm and
-  reports the match as stored, with no read. The hooks are armed only by
-  `TEST_HOOKS` in the suite's `.dev.vars`, never live. Keep new real-time
+  reports the match as stored, with no read. To reproduce a race,
+  `POST /api/test-hooks/r2-delay {room, ms}` holds every R2 call in that
+  room open for `ms`, so a second request can be sent into the await
+  (`ms: 0` turns it off). The hooks are armed only by `TEST_HOOKS`, which
+  `server.js` passes with `--var` and nothing live sets; under it no mail
+  is sent either (an address starting `sent-` counts as accepted, any
+  other as refused).
+- **A one-off script against its own local server** (a bug repro, a
+  probe): `node tests/api/server.js run path/to/script.js` starts a
+  server on a free port, runs the script with `BASE` and `OWNER` (the
+  test owner key) in its environment, and stops the server. Several can
+  run side by side. Keep new real-time
   sleeps to a second or two (stream settling; one 6 s lobby expiry stays
   on the real clock): long waits add up to minutes across the suite.
 - **The upgrade test:** `tests/upgrade/run.sh [OLD_REF]` (default
@@ -115,6 +126,8 @@ sizes have actually been looked at.
 
 1. **Use the real build: the UI suite** in `web/tests/ui/` serves the
    built app (`web/app/dist`) through a fake API, scenario by scenario.
+   The test browsers block service workers, so nothing reaches the real
+   site (the app registers `/sw.js`, which `page.route` does not cover).
    - **Run:** `npm test` in `web/` (`run.js` runs the feature files in
      parallel). The fake API and the runner are `harness.js`; the
      scenarios are split by feature, one `<feature>.test.js` each. One

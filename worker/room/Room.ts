@@ -33,7 +33,7 @@ import { BoardMethods } from "./board.js";
 import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
-import { TestHookMethods } from "./test-hooks.js";
+import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
 import { warn } from "../lib/log.js";
@@ -255,9 +255,12 @@ export class Room extends DurableObject {
   /** when sweepDrafts last ran */
   declare _sweptAt?: number;
   declare roomName?: string;
+  /** test hook: how long each R2 call waits first (withR2Delay) */
+  declare testR2DelayMs?: number;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    if (env.TEST_HOOKS) this.env = withR2Delay(env, () => this.testR2DelayMs || 0);
     this.sql = ctx.storage.sql;
     this.waiters = new Set();
     this.clients = new Set();

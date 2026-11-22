@@ -30,6 +30,10 @@ export async function sendGenesisEmail(env: Env, to: string, room: string, name:
     + "<p><a href=\"" + linkUrl + "\">Open " + escHtml(room) + "</a></p>"
     + "<p>Open it once and your device remembers the room. Treat the link like a password: anyone who opens it joins the room as you. From inside, you can invite other people and agents, each under their own name.</p>"
     + "<p>- Agent Chat</p>";
+  // Tests reach no mail provider: an address whose local part starts
+  // "sent-" counts as accepted, any other as refused (TEST_HOOKS is never
+  // set live; check:config fails on it).
+  if (env.TEST_HOOKS) return /^sent-/.test(to);
   if (env.GMAIL_SA && env.GMAIL_SENDER) return await sendViaGmail(env, to, subject, text, html);
   if (!env.RESEND_API_KEY) return false;
   try {

@@ -10,28 +10,21 @@
 //                      its assets come from web/app/dist)
 //   npm run test:api
 //
-// Uses port 8798 and a throwaway .dev.vars (backed up and restored).
-// Hermetic: each run gets its own local state directory (wrangler dev
-// --persist-to, removed afterwards). The create-room caps count in KV and
-// one of them is room-wide (30 a day), so shared state would fail a later
-// same-day run's create checks as 429s. Room names, emails and client IPs
-// stay unique per run as well.
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+// Hermetic (tests/api/server.js): each run gets its own port (8798 unless
+// API_PORT says otherwise), its own local state directory, removed
+// afterwards, and reaches nothing outside this machine. The create-room caps
+// count in KV and one of them is room-wide (30 a day), so shared state would
+// fail a later same-day run's create checks as 429s. Room names, emails and
+// client IPs stay unique per run as well.
+const { start, OWNER } = require('./server.js');
 
-const ROOT = path.join(__dirname, '..', '..');
-const PORT = 8798;
-const BASE = 'http://localhost:' + PORT;
-const OWNER = 'api-test-owner-key';
+let BASE = '';
 const SUF = Date.now().toString(36);
 // Client IPs for the create-room checks: the creation caps count attempts
 // per IP, so each check sends its own address, under a per-run prefix.
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
-const DEV_VARS = path.join(ROOT, '.dev.vars');
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
-const STATE_DIR = fs.mkdtempSync(path.join(require('os').tmpdir(), 'apitest-state-'));
 
 let failures = 0;
 function check(name, cond, extra) {
@@ -61,27 +54,17 @@ function mp4() {
   return b;
 }
 
-async function waitUp() {
-  for (let i = 0; i < 90; i++) {
-    try { const r = await fetch(BASE + '/api'); if (r.status) return true; } catch {}
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  return false;
-}
-
 (async () => {
-  // wrangler serves the web build as static assets: without it there is no
-  // page shell to stamp (and wrangler dev refuses a missing directory).
-  if (!fs.existsSync(path.join(ROOT, 'web', 'app', 'dist', 'index.html'))) {
-    console.error('test:api needs the web build: run `npm run build` first');
+  let server;
+  try {
+    server = await start({ port: Number(process.env.API_PORT) || 8798 });
+  } catch (e) {
+    console.error('test:api: ' + ((e && e.message) || e));
     process.exit(2);
   }
-  const hadVars = fs.existsSync(DEV_VARS);
-  const backup = hadVars ? fs.readFileSync(DEV_VARS) : null;
-  fs.writeFileSync(DEV_VARS, 'OWNER_KEY=' + OWNER + '\nRESEND_API_KEY=re_fake_for_tests\nTEST_HOOKS=1\n');
-  const child = spawn('npx', ['wrangler', 'dev', '--port', String(PORT), '--persist-to', STATE_DIR], { cwd: ROOT, detached: true, stdio: 'ignore' });
+  BASE = server.base;
   try {
-    check('wrangler dev comes up', await waitUp());
+    check('wrangler dev comes up', true);
     // Today's promises first (tests/api/golden.js): every case keeps its
     // status, error sentence and fields, whatever this commit adds.
     await golden({ req, BASE, OWNER, SUF, IPO }, check);
@@ -316,8 +299,15 @@ async function waitUp() {
     // as an upload, which has no practical size limit.
     r = await req('PUT', R + '/messages/' + did + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: Buffer.alloc(5000001, 7) });
     check('an inline image over the cap -> 413 naming the upload route', r.status === 413 && /sent inline/.test(r.json && r.json.error) && /\/image\/start/.test(r.json && r.json.error) && /TB/.test(r.json && r.json.error), r.status + ' ' + JSON.stringify(r.json));
+    // The storage-delay hook holds every R2 call in the room open, so a test
+    // can race a second request into an await (the concurrency checks use it).
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: RNAME, ms: 400 } });
+    const tDelay = Date.now();
     r = await req('PUT', R + '/messages/' + did + '/image', { token: TA, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    const tookMs = Date.now() - tDelay;
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: RNAME, ms: 0 } });
     check('attach image to draft', r.status === 200, r.status);
+    check('test hook: r2-delay holds a storage call open', tookMs >= 380, tookMs + ' ms');
     r = await req('GET', R + '/messages/' + did + '/image', { token: TB });
     check('other member cannot read draft media', r.status === 404, r.status);
     r = await req('GET', R + '/messages/' + did + '/image', { token: TA });
@@ -440,6 +430,14 @@ async function waitUp() {
     check('send failure -> 502', r.status === 502, r.status);
     r = await req('GET', '/api/rooms/apitest-rb-' + SUF + '/members', { owner: true });
     check('rolled-back room is gone', r.status === 404, r.status);
+    // The success path (the test mail stub accepts "sent-..." addresses):
+    // the room stays, with the creator's genesis invite waiting unopened.
+    r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '4' }, json: { room: 'apitest-ok-' + SUF, name: 'Founder', email: 'sent-' + SUF + '@example.com' } });
+    check('create-room with the email accepted -> 201, no token in the reply', r.status === 201 && !/token|#invite=/.test(r.text), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', '/api/rooms/apitest-ok-' + SUF + '/members', { owner: true });
+    check('the created room has its genesis invite, unused', r.status === 200 && (r.json.members || []).length === 1 && r.json.members[0].name === 'Founder' && r.json.members[0].status === 'unused', JSON.stringify(r.json).slice(0, 160));
+    await req('DELETE', '/api/rooms/apitest-ok-' + SUF + '/invites', { owner: true });
+    await req('DELETE', '/api/rooms/apitest-ok-' + SUF + '?confirm=apitest-ok-' + SUF, { owner: true });
 
     // invite_only invariants.
     r = await req('GET', R + '/members', { owner: true });
@@ -2331,9 +2329,7 @@ async function waitUp() {
     // Clean up room one.
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });
   } finally {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
-    if (backup) fs.writeFileSync(DEV_VARS, backup); else try { fs.unlinkSync(DEV_VARS); } catch {}
-    try { fs.rmSync(STATE_DIR, { recursive: true, force: true }); } catch {}
+    server.stop();
   }
   console.log(failures ? 'API SUITE: ' + failures + ' failure(s)' : 'API SUITE: all checks passed');
   process.exit(failures ? 1 : 0);

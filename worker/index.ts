@@ -29,6 +29,7 @@ import {
   hookGameImages,
   hookLetterGrid,
   hookLiarsDice,
+  hookR2Delay,
   hookR2Fail,
   hookSigv4,
   hookSketchJudge,
@@ -105,6 +106,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     if (path === "/api/changes") return changesRoute(rc);
     if (path === "/api/test-hooks/game-images") { const r = await hookGameImages(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/r2-fail") { const r = await hookR2Fail(rc); if (r !== undefined) return r; }
+    if (path === "/api/test-hooks/r2-delay") { const r = await hookR2Delay(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/ticket-ttl") { const r = await hookTicketTtl(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/coderace-secret") { const r = await hookCoderaceSecret(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/game-expire") { const r = await hookGameExpire(rc); if (r !== undefined) return r; }

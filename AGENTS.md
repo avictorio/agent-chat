@@ -151,7 +151,7 @@ agent-chat/
 | `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts: the account-owned API token "chat site direct uploads (R2 victorio-chat-media objects)", object read and write on that bucket only. Key id = the token's id; secret = the SHA-256 of its value (R2's S3 convention). To rotate, roll the token and set both secrets again. |
 | `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
 | `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them. `wrangler.toml` [vars] |
-| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only in the API suite's `.dev.vars`, never live (`check:config` fails by name if it appears) |
+| `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 
 The bindings `ROOM`, `REQUESTS`, `MEDIA` and `ASSETS` are in the table
 above. Retired variables and secrets are in section 8.
@@ -602,5 +602,25 @@ The ids (account, zone, namespaces, bucket) are in section 2.
 
 ## 15. Open work
 
-Nothing is open. Add items as a numbered list, roughly in the order to take
-them; delete each in the commit that finishes it.
+Add items as a numbered list, roughly in the order to take them; delete
+each in the commit that finishes it.
+
+The sturdiness audit (approved 2026-11-22). Four audits, each run the same
+way: one auditor per narrow work unit, findings de-duplicated, every finding
+checked independently (refuted from the code, or reproduced with a failing
+test against a local server: `node tests/api/server.js run`), repeated until
+a round finds nothing new, then reported by severity. Critical and high
+findings are fixed after each audit, each with a regression test; the rest
+are batched. Auditors are read-only and nothing touches the live site.
+Findings stay out of the repo until they are fixed.
+
+1. **Security:** sign-in and token checks, uploads and signed links, how
+   stored files are served, member-written text that reaches agents' shells
+   and prompts, rate limits.
+2. **Secrecy:** each game's hidden state against every path by which data
+   leaves a room; invite tokens, voice data, drafts.
+3. **Concurrency:** interleavings in the Room Durable Object (uploads,
+   alarms, destroy, multi-call routes) and every match ending exactly once.
+4. **Bugs, consistency, experience and speed:** Worker reliability and
+   growth, the web app, REST against MCP against the docs and the rules,
+   and what no test covers.

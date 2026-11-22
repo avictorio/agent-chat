@@ -3,11 +3,34 @@
 import { TICKET_TTL_MS } from "../limits.js";
 import type { CfgRow, Room } from "./Room.js";
 
+type AnyFn = (...args: unknown[]) => unknown;
+/** Under TEST_HOOKS only: the room's bindings with an R2 bucket whose every
+ *  call first waits the room's test delay. A test sets the delay, starts a
+ *  call that awaits storage, and sends a second request into that open
+ *  window - the interleavings a Durable Object allows at any external await,
+ *  made reproducible. The multipart handles (create / resume) wait too.
+ *  @param delayMs the room's current delay, read at each call */
+export function withR2Delay(env: Env, delayMs: () => number): Env {
+  const wait = async () => { const ms = delayMs(); if (ms > 0) await new Promise((r) => setTimeout(r, ms)); };
+  const slow = <T extends object>(target: T, wrap?: (key: string | symbol, result: unknown) => unknown): T => new Proxy(target, {
+    get(t, k) {
+      const v: unknown = Reflect.get(t, k);
+      if (typeof v !== "function") return v;
+      const fn = v as AnyFn;
+      // resumeMultipartUpload answers at once with a handle: slow the handle
+      if (k === "resumeMultipartUpload") return (...a: unknown[]) => slow(fn.apply(t, a) as object);
+      return async (...a: unknown[]) => { await wait(); const r = await fn.apply(t, a); return wrap ? wrap(k, r) : r; };
+    },
+  });
+  const media = slow(env.MEDIA, (k, r) => (k === "createMultipartUpload" && r ? slow(r as object) : r));
+  return new Proxy(env, { get: (t, k) => (k === "MEDIA" ? media : Reflect.get(t, k)) });
+}
+
 export const TestHookMethods = {
   // Test hooks (suite only): when the Worker runs with TEST_HOOKS set, owner
   // calls to /api/test-hooks/* flip cfg flags that simulate an R2 outage and
   // shorten upload-ticket TTLs in this room. TEST_HOOKS is set only in the
-  // API suite's .dev.vars, never in wrangler.toml; check:config fails if the
+  // API suite's local server (--var), never in wrangler.toml; check:config fails if the
   // name ever appears live.
   r2TestFail() {
     if (!this.env || !this.env.TEST_HOOKS) return false;
@@ -37,6 +60,14 @@ export const TestHookMethods = {
     const g = this.gameRow(id);
     if (!g || !g.st) return { error: "No game with that id" };
     return { ran: true, armed_before: before, armed_after: await this.ctx.storage.getAlarm(), status: g.status, tick: g.st.tick === undefined ? null : g.st.tick, deadline: g.st.deadline || null };
+  },
+
+  // Hold every R2 call in this room open for ms (0 turns it off). Memory
+  // only: an evicted room forgets it, and production never sets it.
+  setTestR2Delay(ms: unknown) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    this.testR2DelayMs = Math.max(0, Math.min(10000, Math.floor(Number(ms) || 0)));
+    return { test_r2_delay_ms: this.testR2DelayMs };
   },
 
   setTestR2Fail(on: unknown) {

@@ -1,5 +1,5 @@
 // Test hooks: inert unless the Worker runs with TEST_HOOKS set, as only the
-// API suite's .dev.vars does. check:config fails if the name ever appears
+// API suite's local server does (--var). check:config fails if the name ever appears
 // in the live config. Owner key required regardless.
 
 import { json, readBody, bodyText, bodyNumber, bodyObject } from "../lib/http.js";
@@ -29,6 +29,18 @@ export async function hookR2Fail(rc: RouteContext) {
   if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
   const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
   return json(await tstub.setTestR2Fail(!!(tb && tb.on)));
+}
+
+export async function hookR2Delay(rc: RouteContext) {
+  const { request, env, owner } = rc;
+  if (!env.TEST_HOOKS) return json({ error: "Not found" }, 404);
+  if (!owner) return json({ error: "The owner key is required" }, 403);
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const tb = await readBody(request);
+  const troom = bodyText(tb?.room, "room").toLowerCase();
+  if (!ROOM_RE.test(troom)) return json({ error: "A valid room is required" }, 400);
+  const tstub = env.ROOM.get(env.ROOM.idFromName(troom));
+  return json(await tstub.setTestR2Delay(tb && tb.ms));
 }
 
 export async function hookTicketTtl(rc: RouteContext) {

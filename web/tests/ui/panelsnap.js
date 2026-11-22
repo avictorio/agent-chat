@@ -91,7 +91,7 @@ function serialise(styles) {
 }
 
 async function snapOne(browser, state, mode) {
-  const ctx = await browser.newContext({ viewport: { width: mode.w, height: mode.h }, hasTouch: !!mode.touch, isMobile: !!mode.touch, timezoneId: 'UTC', locale: 'en-US', colorScheme: 'dark' });
+  const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: mode.w, height: mode.h }, hasTouch: !!mode.touch, isMobile: !!mode.touch, timezoneId: 'UTC', locale: 'en-US', colorScheme: 'dark' });
   const page = await ctx.newPage();
   const out = {};
   try {

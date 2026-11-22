@@ -684,7 +684,10 @@ async function run(name, o, fn) {
   const tm = { t0: Date.now(), launch: 0, load: 0 };
   const b = await chromium.launch({ args: o.args || [] });
   tm.launch = Date.now() - tm.t0;
-  const ctx = await b.newContext({ reducedMotion: process.env.UI_REDUCED_MOTION ? 'reduce' : (o.reducedMotion || 'no-preference'), colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch, timezoneId: 'UTC', locale: 'en-US' });
+  // serviceWorkers: 'block' - the app registers /sw.js, and page.route does
+  // not cover a worker script's own fetch: unblocked, every scenario fetched
+  // /sw.js from the real site.
+  const ctx = await b.newContext({ serviceWorkers: 'block', reducedMotion: process.env.UI_REDUCED_MOTION ? 'reduce' : (o.reducedMotion || 'no-preference'), colorScheme: o.scheme || 'light', viewport: { width: o.w || 1280, height: o.h || 860 }, userAgent: o.ua, hasTouch: !!o.touch, isMobile: !!o.touch, timezoneId: 'UTC', locale: 'en-US' });
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
   const S = fresh(o.state); const calls = [];

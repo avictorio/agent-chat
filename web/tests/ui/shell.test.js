@@ -264,7 +264,7 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
   async function runHome() {
     const name = 'home-page';
     const b = await chromium.launch({});
-    const ctx = await b.newContext({ viewport: { width: 1280, height: 860 }, timezoneId: 'UTC', locale: 'en-US' });
+    const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 860 }, timezoneId: 'UTC', locale: 'en-US' });
     const page = await ctx.newPage();
     await installClock(page);
     const errs = [];
