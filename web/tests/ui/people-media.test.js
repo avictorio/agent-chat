@@ -192,7 +192,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /cancelled/i.test(t.textContent || ''); }, null, { timeout: 3000 });
     await settle(page);
     const aborted = calls.some((c) => /^POST .*\/messages\/101\/file\/abort/.test(c));
-    const deleted = calls.some((c) => /^DELETE .*\/messages\/101$/.test(c));
+    const deleted = calls.some((c) => /^DELETE .*\/messages\/101\?draft_only=1$/.test(c));
     const published = calls.some((c) => /\/publish/.test(c));
     must(aborted && deleted && !published, 'cancel aborts the upload and deletes the draft: ' + JSON.stringify({ aborted, deleted, published }));
     must(await page.locator('#fileChip').isVisible(), 'the file stays armed after a cancel');
@@ -210,10 +210,56 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await shot(page, 'upload-interrupted-phone.png');
     await page.click('#uplDiscard');
     await note.waitFor({ state: 'detached', timeout: 3000 });
-    must(calls.some((c) => /^POST .*\/messages\/77\/video\/abort/.test(c)) && calls.some((c) => /^DELETE .*\/messages\/77$/.test(c)), 'discard aborts and deletes the draft');
+    must(calls.some((c) => /^POST .*\/messages\/77\/video\/abort/.test(c)) && calls.some((c) => /^DELETE .*\/messages\/77\?draft_only=1$/.test(c)), 'discard aborts and deletes the draft, and only a draft');
     const stored = await page.evaluate(() => localStorage.getItem('chat-upl:demo'));
     must(stored === null, 'discard forgets the note: ' + stored);
     return { ok: true };
+  });
+  await run('upload-discard-posted', {
+    // the note is this browser's, but another device picked the draft up
+    // by fingerprint and published it: Discard must not delete it
+    hash: '#invite=tok_Anthony',
+    init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },
+  }, async (page, S, calls) => {
+    S.msgs.push({ id: 77, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Anthony', text: 'from the laptop' });
+    const note = page.locator('#uplResume');
+    await note.waitFor({ timeout: 4000 });
+    await page.click('#uplDiscard');
+    await note.waitFor({ state: 'detached', timeout: 3000 });
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /already posted/.test(t.textContent || ''); }, null, { timeout: 3000 });
+    const toastText = await page.$eval('#toast', (t) => t.textContent || '');
+    must(calls.some((c) => /^DELETE .*\/messages\/77\?draft_only=1$/.test(c)), 'discard asks for a draft-only delete');
+    must(S.msgs.some((x) => x.id === 77), 'the live message is still in the room');
+    must(/holiday\.mp4 was already posted/.test(toastText), 'the person is told it was posted: ' + toastText);
+    const stored = await page.evaluate(() => localStorage.getItem('chat-upl:demo'));
+    must(stored === null, 'the note is forgotten: ' + stored);
+    await shot(page, 'upload-discard-posted.png');
+    return { toastText };
+  });
+  await run('upload-cancel-after-publish', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // the publish lands but its answer is lost: the engine retries, and a
+    // Cancel then must not delete what is already live
+    S.publishLost = true;
+    await page.setInputFiles('#anyFile', { name: 'notes.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100000, 2) });
+    await page.fill('#text', 'the notes');
+    await page.click('#send');
+    await page.waitForFunction(() => /Connection trouble/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 10000 });
+    await page.click('#uplCancel');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 5000 });
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /already posted/.test(t.textContent || ''); }, null, { timeout: 3000 });
+    await settle(page);
+    const out = {};
+    out.toast = await page.$eval('#toast', (t) => t.textContent || '');
+    out.live = S.msgs.some((x) => x.id === 101);
+    out.draftOnly = calls.some((c) => /^DELETE .*\/messages\/101\?draft_only=1$/.test(c));
+    out.chipGone = await page.$eval('#fileChip', (e) => e.hidden);
+    out.textCleared = (await page.inputValue('#text')) === '';
+    out.note = await page.locator('#uplResume').count();
+    must(out.live && out.draftOnly, 'the live message stays: ' + JSON.stringify(out));
+    must(!/nothing was posted/.test(out.toast), 'no claim that nothing was posted: ' + out.toast);
+    must(out.chipGone && out.textCleared && out.note === 0, 'what was posted leaves the composer: ' + JSON.stringify(out));
+    await shot(page, 'upload-cancel-after-publish.png');
+    return out;
   });
   await run('upload-route-phone', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page) => {
     // a photo through the paperclip lands in the image slot

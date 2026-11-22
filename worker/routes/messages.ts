@@ -47,9 +47,10 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
 }
 
 // Delete one of your own messages (the owner can delete any). Its media
-// (R2 objects, upload parts) and reactions go with it.
+// (R2 objects, upload parts) and reactions go with it. ?draft_only=1
+// deletes it only while it is still a draft.
 export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, owner, invite } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
@@ -57,7 +58,7 @@ export async function messageRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
-  const r = await stub.deleteMessage(id, acc.name || "", owner);
+  const r = await stub.deleteMessage(id, acc.name || "", owner, url.searchParams.get("draft_only") === "1");
   if (refused(r)) return json({ error: r.error }, r.status);
   return json({ room: room, deleted: r.deleted });
 }

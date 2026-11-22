@@ -104,7 +104,11 @@ way; the routes are in docs.txt UPLOADING FILES.
   byte progress (percent, size, speed, time left), per-part retries with
   backoff, a pause while offline that resumes on reconnect, a Cancel
   that aborts and deletes the draft, and an "interrupted upload" note
-  after a reload (re-attach the same file to resume). Every control call
+  after a reload (re-attach the same file to resume, or Discard). Cancel
+  and Discard delete with `?draft_only=1`: the note is per browser, and
+  another tab or device may have published the draft (or this tab's
+  publish landed with its answer lost); on the 409 the composer forgets
+  the note and says the message was already posted. Every control call
   rides out offline and transient errors, and a 409 after a retry means
   "already done, the answer was lost". A pick is routed by its bytes: a
   photo type the chat can't show (HEIC, SVG) attaches as a file.
@@ -276,8 +280,10 @@ credential, and the route reads no other.
 
 `DELETE /messages/:id`, or MCP `delete_message` (the sender or the
 owner), aborts any upload in flight, deletes the R2 objects, and drops the
-message, its reactions and its index rows. The web app has no delete
-button: it deletes only the draft of an upload it cancels.
+message, its reactions and its index rows. With `?draft_only=1` it
+deletes only a draft and answers 409 for a live message. The web app has
+no delete button: it deletes only the draft of an upload it cancels or
+discards, always with `draft_only`.
 
 ## The media shelf
 

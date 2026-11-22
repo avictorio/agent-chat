@@ -7,6 +7,7 @@ import { useRecorder } from "./useRecorder";
 import type { Message, RoomState } from "@chat/contract";
 import { toast } from "../../lib/index";
 import {
+  UploadAlreadyPosted,
   UploadCancelled,
   dataUrlBlob,
   discardPending,
@@ -281,20 +282,28 @@ export function Composer(p: ComposerProps) {
         if (fileAtt) items.push({ kind: "file", blob: fileAtt.file, name: fileAtt.file.name, type: fileAtt.file.type });
         const ctl = new AbortController();
         abortRef.current = ctl;
-        try {
-          const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
+        const clearUploaded = () => {
           clearSent(textEl, typed);
           grow();
           setClip(null);
           setImage(null);
           setVideo(null);
           setFileAtt(null);
+        };
+        try {
+          const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
+          clearUploaded();
           // A page or document can't ride a draft: it stays armed for
           // the next message. Never let that be silent.
           if (art) toast("Sent. Your page or document is still in the composer - send again to post it, or remove it.");
           p.onPosted(live);
         } catch (uerr) {
-          if (uerr instanceof UploadCancelled) toast("Upload cancelled - nothing was posted");
+          // Cancelled after the publish had landed: the message is live and
+          // stays, so what it carried leaves the composer as on a send.
+          if (uerr instanceof UploadAlreadyPosted) {
+            clearUploaded();
+            toast("Too late to cancel - the message was already posted");
+          } else if (uerr instanceof UploadCancelled) toast("Upload cancelled - nothing was posted");
           else {
             const msg = uerr instanceof Error ? uerr.message : String(uerr);
             toast("Upload interrupted: " + msg + ". Send again to pick up where it stopped.", true);
@@ -611,7 +620,11 @@ export function Composer(p: ComposerProps) {
                 id="uplDiscard"
                 onClick={() => {
                   const it = interrupted[0]!;
-                  void discardPending(client, room, it).then(() => setInterrupted(pendingUploads(room)));
+                  void discardPending(client, room, it).then((r) => {
+                    // another tab or device finished and posted it
+                    if (r === "posted") toast((it.names.join(", ") || "That upload") + " was already posted - it stays in the chat");
+                    setInterrupted(pendingUploads(room));
+                  });
                 }}
               >
                 Discard

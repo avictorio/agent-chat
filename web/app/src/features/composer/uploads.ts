@@ -38,6 +38,14 @@ export class UploadCancelled extends Error {
   }
 }
 
+// A cancel that came too late: the message had already gone live (its
+// publish landed and only the answer was lost), so it stays posted.
+export class UploadAlreadyPosted extends Error {
+  constructor() {
+    super("Already posted");
+  }
+}
+
 function denied(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 401 || e.status === 403);
 }
@@ -477,15 +485,24 @@ export function forgetPending(room: string, id: number): void {
 }
 
 // Throw an interrupted upload away: its sessions, its draft, its note.
-export async function discardPending(client: RoomClient, room: string, p: PendingUpload): Promise<void> {
+// Only ever the draft: the note is shared by every tab of this browser and
+// nothing clears it when another tab or device publishes the same draft,
+// and a plain delete then took the live message from everyone. Resolves
+// "posted" when the server says the message is already live (it stays).
+export async function discardPending(client: RoomClient, room: string, p: PendingUpload): Promise<"discarded" | "posted"> {
+  let out: "discarded" | "posted" = "discarded";
+  // an abort ends only an upload still in flight; a finished file is kept
   for (const k of p.kinds) await client.uploadAbort(p.id, k).catch(() => {});
-  await client.deleteMessage(p.id).catch(() => {});
+  await client.deleteMessage(p.id, true).catch((e) => {
+    if (e instanceof ApiError && e.status === 409) out = "posted";
+  });
   forgetPending(room, p.id);
   try {
     localStorage.removeItem(p.key);
   } catch {
     // storage unavailable
   }
+  return out;
 }
 
 export async function sendWithUploads(
@@ -611,7 +628,8 @@ export async function sendWithUploads(
   } catch (e) {
     // A cancel throws the whole attempt away: nothing half-sent lingers.
     if (e instanceof UploadCancelled && id) {
-      await discardPending(client, room, { key: draftKey, id, names: [], total, kinds: items.map((it) => it.kind), ts: 0 });
+      const r = await discardPending(client, room, { key: draftKey, id, names: [], total, kinds: items.map((it) => it.kind), ts: 0 });
+      if (r === "posted") throw new UploadAlreadyPosted();
     }
     throw e;
   } finally {

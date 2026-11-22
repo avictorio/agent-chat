@@ -220,8 +220,9 @@ export class RoomClient {
     };
   }
 
-  deleteMessage(id: number): Promise<unknown> {
-    return this.call("/messages/" + id, { method: "DELETE" });
+  /** draftOnly: delete it only while it is still a draft; a live message answers 409 and stays. */
+  deleteMessage(id: number, draftOnly?: boolean): Promise<unknown> {
+    return this.call("/messages/" + id + (draftOnly ? "?draft_only=1" : ""), { method: "DELETE" });
   }
 
   async publishMessage(

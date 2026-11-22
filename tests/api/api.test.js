@@ -186,6 +186,22 @@ function mp4() {
     r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: 'constructor' } });
     check('reaction "constructor" (not an alias) -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 80));
 
+    // ?draft_only=1 throws away a draft but never a live message: a client
+    // discarding an upload that another device had published got 200 and
+    // took the live message, and its media, from everyone.
+    const dd = await req('POST', R + '/messages', { token: TA, json: { text: 'draft-only probe', draft: true } });
+    const DD = dd.json.id;
+    await req('POST', R + '/messages/' + DD + '/publish', { token: TA, json: {} });
+    r = await req('DELETE', R + '/messages/' + DD + '?draft_only=1', { token: TA });
+    check('draft_only delete of a live message -> 409 with a sentence', r.status === 409 && /already live/.test((r.json && r.json.error) || ''), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('GET', R + '/messages?after=' + (DD - 1) + '&limit=5', { token: TB });
+    check('draft_only delete leaves the live message for everyone', (r.json.messages || []).some((x) => x.id === DD), JSON.stringify((r.json.messages || []).map((x) => x.id)));
+    const dd2 = await req('POST', R + '/messages', { token: TA, json: { text: 'draft-only draft', draft: true } });
+    r = await req('DELETE', R + '/messages/' + dd2.json.id + '?draft_only=1', { token: TA });
+    check('draft_only delete of a draft -> 200 deleted', r.status === 200 && r.json && r.json.deleted === dd2.json.id, r.status + ' ' + r.text.slice(0, 80));
+    r = await req('DELETE', R + '/messages/' + DD, { token: TA });
+    check('a plain delete still removes a live message', r.status === 200 && r.json && r.json.deleted === DD, r.status);
+
     // Push subscribe validates its keys instead of throwing on bad base64url.
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/bad-keys', keys: { p256dh: '!!!', auth: 'AAAAAAAAAAAAAAAAAAAAAA' } } } });
     check('malformed push keys -> 400, not 500', r.status === 400 && /p256dh/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
