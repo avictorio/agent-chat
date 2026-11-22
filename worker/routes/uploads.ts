@@ -128,6 +128,9 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     if (refused(t)) return json({ error: t.error }, t.status);
     // no address leaves unless storage has shown what one can do (r2-direct-check.ts)
     if (!r2DirectConfigured(env) || !(await directUploadsProven(env))) return json({ error: "Direct uploads are paused for the moment: ask again in a few minutes, or send each part through the site instead (PUT its /part?n=N) if the parts are " + Math.floor(UP_PART_MAX / MIB) + " MiB or less" }, 503);
+    // the check above can take a while: whoever asked must still be welcome before an address (good for an hour) leaves
+    const gone = still ? await still() : null;
+    if (gone) return deny(gone);
     const now = new Date();
     /** each part's address */
     const urls = await r2PartAddresses(env, t.key, t.upload_id, t.parts, UP_SIGN_TTL, now);

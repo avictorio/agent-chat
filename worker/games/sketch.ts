@@ -44,6 +44,8 @@ export type SgGame = Omit<GameRow, "st"> & { st: SgStored };
 // the image limits, and the Referee's judge.
 export const SG_IMAGE_MAX = 1500000;
 export const SG_GUESS_MAX = 80;
+/** How long the draw clock holds off while a drawing that arrived in time is being stored. */
+export const SG_STORE_GRACE_MS = 30000;
 export const SG_JUDGE_DAILY = 200;
 export const SG_ROASTS = [
   "The prompt was \"{p}\". The drawing has entered witness protection.",
@@ -226,6 +228,13 @@ export const SketchMethods = {
       const rnd = Array.from(crypto.getRandomValues(new Uint8Array(6))).map((b) => ("0" + b.toString(16)).slice(-2)).join("");
       // img.error is unset, so img is the decoded image (every error has a message)
       const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + (img.type as string).split("/")[1];
+      // The drawing is here, in time: the clock must not run out while it
+      // is being stored. It used to, and a drawing sent seconds before
+      // the deadline was forfeited (two in a row call the match off).
+      if (st.deadline && st.deadline - Date.now() < SG_STORE_GRACE_MS) {
+        st.deadline = Date.now() + SG_STORE_GRACE_MS;
+        this.saveGame(g);
+      }
       try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
       // the state may have moved while the image was stored
       const g2 = this.gameRowOf<SgStored>(g.id, "sketch");

@@ -66,15 +66,24 @@ export const MediaMethods = {
     const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength);
+    this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, at) VALUES (?, ?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength, Date.now());
     return key;
   },
 
+  // Media exists only with its message: a deleted message has none, even
+  // if a row or an object outlived it. (A write that was already under
+  // way when the message was deleted - a stream, an upload start, a post
+  // still storing its picture - used to finish afterwards, and the file
+  // was then served for a message nobody could see or delete. The draft
+  // sweep collects such leftovers.) A draft's media is its sender's alone.
+  mediaShown(id: number, viewer?: MediaViewer) {
+    const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!m) return false;
+    return !(viewer && !viewer.owner && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase());
+  },
+
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
-    if (viewer && !viewer.owner) {
-      const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-      if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
-    }
+    if (!this.mediaShown(id, viewer)) return null;
     // An upload still in flight has no object yet.
     const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
     return row ? { type: row.type, r2key: row.r2key, size: row.size, name: row.name || null } : null;
@@ -82,10 +91,7 @@ export const MediaMethods = {
 
   /** @param range the request's Range header */
   async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<MediaBytes | null> {
-    if (viewer && !viewer.owner) {
-      const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-      if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
-    }
+    if (!this.mediaShown(id, viewer)) return null;
     const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
       try {

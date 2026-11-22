@@ -470,6 +470,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error(pageTooBig("Documents", DOC_MAX)); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
       const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
+      if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
@@ -553,6 +554,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const sess = uploadSessionWanted(kind, A);
       if (sess && sess.error !== undefined) throw new Error(sess.error);
       const msg = await stub.post(from, bodyText(A.text, "text"), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
+      if (!msg) throw new Error("The draft could not be created"); // only a post storing media can come back empty
       if (sess) {
         const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess, token);
         if (refused(st)) { await stub.deleteMessage(msg.id, from, owner); throw st.code ? codedError(st.error, st.code) : new Error(st.error); }

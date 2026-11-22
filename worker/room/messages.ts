@@ -72,7 +72,14 @@ export const MessageMethods = {
     await this.sweepDrafts();
     this.roomName = room;
     const ts = Date.now();
-    const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
+    // A post with media inside it is stored as a draft until every file
+    // is in storage, then goes live in one step. Stored live from the
+    // start it could be read before it was announced - without its media,
+    // and even when the post then failed and "nothing was saved" - and a
+    // reader who took a later message's id as their cursor meanwhile
+    // never got it.
+    const held = !draft && !!(audio || image || video || html || doc);
+    const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft || held ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
     // Inline media is all or nothing: every put lands in R2 before the
     // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
@@ -108,13 +115,19 @@ export const MessageMethods = {
       }
       throw e;
     }
-    if (id > KEEP) {
-      // Drafts are exempt from the trim: a long upload can sit on an old id
-      // in a busy room, and trimming it would kill the upload mid-flight.
-      const staleKeys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray().map((r) => r.r2key);
-      this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM upp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
-      if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch((e) => warn("media.delete", e, { room: this.roomName })));
+    // The message was deleted while its media was being stored (its
+    // sender, or the owner, got there first): nothing is announced, and
+    // what this call stored goes with it.
+    if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) {
+      const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
+      this.sql.exec("DELETE FROM md WHERE msg = ?", id);
+      if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
+      return null;
     }
+    // held back until here: now it is live, and it went live now (a
+    // reader whose cursor passed its id meanwhile is still owed it)
+    if (held) this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
+    this.trimHistory();
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const row: MsgListRow = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
@@ -128,6 +141,28 @@ export const MessageMethods = {
     // finish before the message officially posts.
     if (!draft) this.announce(msg, room);
     return msg;
+  },
+
+  // The room keeps its newest KEEP live messages - newest by when they
+  // went live, not by id. A draft keeps the id it was created with, so one
+  // published after KEEP newer messages was "older than the window" by
+  // id, and the next post deleted it, media and all, moments after it
+  // appeared. Drafts are never trimmed: their upload may still be running.
+  // Every writer of m calls this, the Referee's posts and match cards
+  // included (only post() used to, so a room that only played games kept
+  // every message ever posted).
+  trimHistory() {
+    const cut = this.sql.exec<{ t: number, id: number }>("SELECT COALESCE(pub_ts, ts) AS t, id FROM m WHERE draft IS NULL OR draft = 0 ORDER BY t DESC, id DESC LIMIT 1 OFFSET ?", KEEP).toArray()[0];
+    if (!cut) return;
+    const old = "SELECT id FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))";
+    const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE r2key IS NOT NULL AND msg IN (" + old + ")", cut.t, cut.t, cut.id).toArray().map((r) => r.r2key);
+    for (const table of ["rx", "md", "upp"]) this.sql.exec("DELETE FROM " + table + " WHERE msg IN (" + old + ")", cut.t, cut.t, cut.id);
+    this.sql.exec("DELETE FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))", cut.t, cut.t, cut.id);
+    if (!keys.length || !this.env || !this.env.MEDIA) return;
+    // storage takes at most 1000 keys a call
+    for (let i = 0; i < keys.length; i += 1000) {
+      this.ctx.waitUntil(this.env.MEDIA.delete(keys.slice(i, i + 1000)).catch((e) => warn("media.delete", e, { room: this.roomName })));
+    }
   },
 
   announce(msg: ApiMessage, room: string | null) {
@@ -165,6 +200,7 @@ export const MessageMethods = {
   postSystem(text: string, room: string) {
     const ts = Date.now();
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, "Referee", text, ts).one().id;
+    this.trimHistory();
     const msg = this.withKinds([{ id: id, ts: ts, from: "Referee", text: text }])[0];
     this.announce(msg, room);
     return msg;
@@ -205,6 +241,15 @@ export const MessageMethods = {
     return res && res.status === 200 ? res.msg : null;
   },
 
+  /** Ends the uploads and deletes the objects that media rows pointed at (the rows are the caller's to delete, first). */
+  async dropStored(media: Array<Pick<MdRow, "r2key" | "upload_id">>) {
+    if (!this.env || !this.env.MEDIA) return;
+    for (const md of media) {
+      if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+      if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+    }
+  },
+
   // Delete one of your own messages (the owner can delete any). Removes the
   // row, its reactions, and any media: in-flight multipart uploads are
   // aborted and R2 objects deleted.
@@ -212,16 +257,15 @@ export const MessageMethods = {
     const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
-    if (this.env && this.env.MEDIA) {
-      for (const md of this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray()) {
-        if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-        if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
-      }
-    }
+    // The rows go first, in this one step, and storage after: with the
+    // storage calls first, whatever happened to the message while they ran
+    // (a publish, a new attachment) was deleted unseen along with it.
+    const media = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray();
     this.sql.exec("DELETE FROM upp WHERE msg = ?", id);
     this.sql.exec("DELETE FROM md WHERE msg = ?", id);
     this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
     this.sql.exec("DELETE FROM m WHERE id = ?", id);
+    await this.dropStored(media);
     return { status: 200, deleted: id };
   },
 

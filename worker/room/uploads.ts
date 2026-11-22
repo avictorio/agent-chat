@@ -193,19 +193,29 @@ export const UploadMethods = {
     // A draft lives a day - or, while an upload for it is in flight, as
     // long as that upload can (UP_SESSION_MS from its start: R2 drops an
     // unfinished multipart upload after 7 days).
-    const stale = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - 86400000, now - UP_SESSION_MS).toArray();
+    // ... and a day from the last file that finished: a long upload can
+    // end when the draft is already older than that, and the sweep used to
+    // take the draft and the finished file the moment it did - before the
+    // publish, or before the message's second file could start.
+    const stale = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND ((md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?) OR md.at > ?))", now - 86400000, now - UP_SESSION_MS, now - 86400000).toArray();
     for (const d of stale) {
-      if (this.env && this.env.MEDIA) {
-        for (const md of this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray()) {
-          if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
-          if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
-        }
-      }
+      // rows first, storage after (see deleteMessage)
+      const media = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray();
       this.sql.exec("DELETE FROM upp WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM md WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM rx WHERE msg = ?", d.id);
       this.sql.exec("DELETE FROM m WHERE id = ?", d.id);
+      await this.dropStored(media);
     }
+    // Media whose message is gone: a write that was under way when the
+    // message was deleted finishes after it (mediaShown never serves
+    // these). A few at a time; the next sweep takes the rest.
+    const orphans = this.sql.exec<Pick<MdRow, "msg" | "kind" | "r2key" | "upload_id">>("SELECT msg, kind, r2key, upload_id FROM md WHERE msg NOT IN (SELECT id FROM m) LIMIT 50").toArray();
+    for (const o of orphans) {
+      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", o.msg, o.kind);
+      this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ?", o.msg, o.kind);
+    }
+    await this.dropStored(orphans);
   },
 
   // ---- The upload engine (UP_KINDS): one resumable flow for every kind ----
@@ -289,7 +299,9 @@ export const UploadMethods = {
    */
   async uploadStart(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string, size: number | string | null | undefined, type: unknown, name: unknown, fp: unknown, direct: unknown) {
     if (UP_KINDS.indexOf(kind) < 0) return { status: 400, error: "kind must be one of: " + UP_KINDS.join(", ") };
-    const a = this.upAuth(id, who, owner, kind);
+    // the sweep runs before the message is looked at, never between the look and the write
+    await this.sweepDrafts();
+    let a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     size = Math.floor(Number(size));
@@ -303,7 +315,9 @@ export const UploadMethods = {
       return { status: 413, error: "Uploads through the site can be up to " + UP_MAX_TEXT + hint };
     }
     fp = fp ? String(fp).slice(0, 200) : null;
-    await this.sweepDrafts();
+    // the direct check above can wait on storage: the message is looked at again
+    a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
     const prev = this.upSession(id, kind);
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has " + upNoun(kind) };
     if (prev && prev.upload_id && prev.size === size && (!fp || !prev.fp || prev.fp === fp) && !this.upExpired(prev, a.msg)) {
@@ -323,6 +337,11 @@ export const UploadMethods = {
     let up;
     try { up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
     catch { return { status: 503, error: STORE_MSG }; }
+    // the message may have been deleted while storage answered: no session for a message that is gone
+    if (this.upAuth(id, who, owner, kind).status !== 200) {
+      try { await up.abort(); } catch { /* nothing to end */ }
+      return { status: 404, error: "No message with that id" };
+    }
     const plan = useDirect ? uploadPlanDirect(size) : uploadPlan(size);
     const now = Date.now();
     const fname = name ? cleanFileName(stripControlChars(String(name)), "") : "";
@@ -460,7 +479,7 @@ export const UploadMethods = {
         return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
       }
       this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-      this.sql.exec("UPDATE md SET type = ?, upload_id = NULL WHERE msg = ? AND kind = ?", type, id, kind);
+      this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ?", type, Date.now(), id, kind);
       const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
       if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
       if (kind === "audio") {
@@ -482,8 +501,13 @@ export const UploadMethods = {
     const row = this.upSession(id, kind);
     if (!row || !row.upload_id) return { status: 200, aborted: false };
     if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
+    // A new upload may have started on this message while storage
+    // answered: its row is not this abort's to delete (deleting it left the
+    // new upload in storage with no row, and every part of it refused).
+    const now = this.upSession(id, kind);
+    if (!now || now.upload_id !== row.upload_id) return { status: 200, aborted: true };
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
+    this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, row.upload_id);
     return { status: 200, aborted: true };
   },
 
@@ -520,6 +544,11 @@ export const UploadMethods = {
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     const up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: type } });
+    // as in uploadStart: the message may be gone by now
+    if (!this.sql.exec("SELECT id FROM m WHERE id = ?", id).toArray().length) {
+      try { await up.abort(); } catch { /* nothing to end */ }
+      return { status: 404, error: "No message with that id" };
+    }
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, fp, part_size, began) VALUES (?, 'video', ?, ?, ?, ?, NULL, ?, ?)", id, type, key, size, up.uploadId, STREAM_PART, Date.now());
     return { status: 200, key: key, uploadId: up.uploadId };
   },
@@ -531,7 +560,7 @@ export const UploadMethods = {
     const row = this.sql.exec<Pick<MdRow, "size" | "upload_id">>("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 409, error: "This upload was replaced by a newer one for the same message" };
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-    this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
+    this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video'", sniffed, size, Date.now(), id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
     const published = room ? await this.maybeAutoPublish(id, room) : null;
     return { status: 200, type: sniffed, bytes: size, published: published };

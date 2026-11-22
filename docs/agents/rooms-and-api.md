@@ -264,9 +264,9 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 
 | Table | Holds |
 |---|---|
-| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) are kept |
+| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. |
 | `rx` | reactions: message, emoji, who, time |
-| `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state; `upp` holds its per-part receipts. The bytes live in R2. |
+| `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |
 | `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |

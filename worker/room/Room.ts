@@ -82,7 +82,7 @@ export type TfRow = { ts: number, url: string | null };
 /** md: one message's media of one kind - an R2 object, or an upload in
  *  flight while upload_id is set (part_size, fp, began and mode belong to
  *  the upload engine's sessions). */
-export type MdRow = { msg: number, kind: string, type: string, r2key: string, size: number, upload_id: string | null, parts: string | null, fp: string | null,
+export type MdRow = { msg: number, kind: string, type: string, r2key: string, size: number, at: number | null, upload_id: string | null, parts: string | null, fp: string | null,
   part_size: number | null, name: string | null, began: number | null, mode: string | null };
 /** upp: a part R2 has acknowledged, for an upload in flight. */
 export type UppRow = { msg: number, kind: string, n: number, etag: string };
@@ -237,8 +237,18 @@ function schemaBaseline(sql: SqlStorage): void {
   if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
 }
 
+// Step 2. md.at: when a media row was last written (an attach, a
+// finished upload) - the draft sweep counts a draft's day from it. And an
+// index for the live-match lookup that every room_state build and alarm
+// re-arm makes: without it each one read the whole match table, which is
+// never trimmed.
+function schemaMediaStampAndLiveMatches(sql: SqlStorage) {
+  addColumn(sql, "md", "at", "INTEGER");
+  sql.exec("CREATE INDEX IF NOT EXISTS gm_status ON gm (status)");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods

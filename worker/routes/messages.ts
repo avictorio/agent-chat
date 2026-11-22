@@ -215,6 +215,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     let msg;
     try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
     catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }
+    if (!msg) return json({ error: "That message was deleted while its attachment was being stored; nothing was posted" }, 409);
     return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
   }
 

@@ -245,8 +245,24 @@ credential, and the route reads no other.
   visible only to its sender and the owner.
 - An abandoned draft is swept after 24 hours, or, while an upload for it
   is in flight, `UP_SESSION_MS` after that upload's start (`sweepDrafts`,
-  run on post and on upload start, throttled per instance). Drafts are
-  exempt from the message trim.
+  run on post and on upload start, throttled per instance). The day also
+  counts from the last file that finished (`md.at`): a long upload can
+  end when the draft is already more than a day old, and the sweep once
+  took the draft and the finished file right then, before the publish or
+  before the message's second file could start. Drafts are exempt from
+  the message trim, and a published one counts as new from its publish.
+- **A post with media inside it is a draft until every file is stored**
+  (`post()`, `held`), then goes live in one step. Stored live from the
+  start it could be read before it was announced - without its media,
+  and even when the post then failed - and a reader whose cursor passed
+  its id meanwhile never got it.
+- **Rows first, storage after.** `deleteMessage` and the sweep delete
+  the rows in one step and only then call R2, so nothing can change the
+  message between the look and the delete. A write that was under way
+  when its message was deleted (a stream, an upload start, a post
+  storing its file) checks for the message again once storage answers;
+  whatever still slips through is never served (`mediaShown`) and is
+  collected by the sweep.
 - `publish_on_complete: true` (the `m.pubauto` column) has the server
   publish the draft the moment its upload verifies (the stream endpoint,
   or the engine's finish), for uploads that finish with no client alive

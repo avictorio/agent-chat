@@ -315,6 +315,7 @@ export const GameMachineryMethods = {
   async postGameCard(sender: string, text: string, gameId: number, room: string) {
     const ts = Date.now();
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one().id;
+    this.trimHistory();
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room);

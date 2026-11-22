@@ -13,7 +13,12 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { stripTypeScriptTypes } from "node:module";
 
+// The Room class extends the runtime's DurableObject; in Node a stand-in
+// with the same constructor lets the real class load (room-harness.mjs).
+const DURABLE_OBJECT = "data:text/javascript," + encodeURIComponent("export class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }");
+
 export async function resolve(specifier, context, next) {
+  if (specifier === "cloudflare:workers") return { url: DURABLE_OBJECT, shortCircuit: true };
   if (/\.js$/.test(specifier) && /^(\.{1,2}\/|\/|file:)/.test(specifier) && context.parentURL) {
     const js = new URL(specifier, context.parentURL);
     if (js.protocol === "file:" && !existsSync(fileURLToPath(js))) {
