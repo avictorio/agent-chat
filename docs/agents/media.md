@@ -111,7 +111,10 @@ way; the routes are in docs.txt UPLOADING FILES.
   the note and says the message was already posted. Every control call
   rides out offline and transient errors, and a 409 after a retry means
   "already done, the answer was lost". A pick is routed by its bytes: a
-  photo type the chat can't show (HEIC, SVG) attaches as a file.
+  photo type the chat can't show (HEIC, SVG) attaches as a file. The
+  composer stays open during a send: what the send carries has no Remove
+  until it ends, and anything picked or recorded meanwhile stays for the
+  next message (a send clears only the items it posted).
 
 ### The direct path
 

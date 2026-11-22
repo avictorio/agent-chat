@@ -261,6 +261,62 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await shot(page, 'upload-cancel-after-publish.png');
     return out;
   });
+  await run('upload-pick-during-send', { hash: '#invite=tok_Anthony' }, async (page, S) => {
+    // A photo and a second file picked while a send uploads are for the
+    // next message: the send must not wipe them when it finishes, and the
+    // file being uploaded is not "replaced".
+    S.partDelay = 400;
+    await page.setInputFiles('#anyFile', { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300000, 7) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    await page.fill('#text', 'the report');
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    const out = {};
+    out.fileRemoveHidden = await page.$eval('#fileRemove', (e) => e.hidden);
+    await page.setInputFiles('#imgFile', FIXTURES + 'photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.setInputFiles('#anyFile', { name: 'next.txt', mimeType: 'text/plain', buffer: Buffer.from('for later') });
+    await page.waitForFunction(() => /next\.txt/.test((document.querySelector('#fileName') || {}).textContent || ''), null, { timeout: 3000 });
+    out.toast = await page.$eval('#toast', (t) => t.textContent || '');
+    out.nextFileRemove = await page.$eval('#fileRemove', (e) => !e.hidden);
+    await shot(page, 'upload-pick-during-send.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 30000 });
+    await page.locator('.file-card', { hasText: 'report.pdf' }).waitFor({ timeout: 4000 });
+    await settle(page);
+    const last = S.msgs[S.msgs.length - 1];
+    out.posted = { text: last.text, file: last.file && last.file.name, image: !!last.image };
+    out.imgKept = !(await page.$eval('#attachRow', (e) => e.hidden));
+    out.fileKept = await page.textContent('#fileName');
+    must(out.fileRemoveHidden, 'the uploading file has no Remove: ' + JSON.stringify(out));
+    must(/next\.txt attaches to your next message - report\.pdf is still uploading/.test(out.toast), 'no false "replaces": ' + out.toast);
+    must(out.posted.file === 'report.pdf' && !out.posted.image, 'the send posted what it was sent with: ' + JSON.stringify(out.posted));
+    must(out.imgKept && /next\.txt/.test(out.fileKept), 'what was picked meanwhile stays for the next message: ' + JSON.stringify(out));
+    must(out.nextFileRemove, 'the next file can be removed');
+    return out;
+  });
+  await run('upload-remove-during-send', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page, S) => {
+    // What a send is carrying can't be removed mid-send: Remove hid the
+    // chip while the send posted the image anyway.
+    S.partDelay = 400;
+    await page.setInputFiles('#imgFile', FIXTURES + 'photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.setInputFiles('#anyFile', { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300000, 7) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    const out = {};
+    out.imgRemoveVisible = await page.locator('#imgRemove').isVisible();
+    out.fileRemoveVisible = await page.locator('#fileRemove').isVisible();
+    await shot(page, 'upload-remove-during-send-phone.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 30000 });
+    await settle(page);
+    const last = S.msgs[S.msgs.length - 1];
+    out.posted = !!(last && last.image && last.file);
+    out.cleared = await page.$eval('#attachRow', (e) => e.hidden) && await page.$eval('#fileChip', (e) => e.hidden);
+    must(!out.imgRemoveVisible && !out.fileRemoveVisible, 'no Remove on what is being sent: ' + JSON.stringify(out));
+    must(out.posted && out.cleared, 'both posted, both cleared after: ' + JSON.stringify(out));
+    return out;
+  });
   await run('upload-route-phone', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page) => {
     // a photo through the paperclip lands in the image slot
     await page.setInputFiles('#anyFile', require('path').join(TESTS, '../../tests/fixtures/photo.png'));

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
 import { useDictation } from "./useDictation";
-import { useAttachments } from "./useAttachments";
+import { useAttachments, type PendingArt, type PendingClip, type PendingFile, type PendingImage, type PendingVideo } from "./useAttachments";
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
 import type { Message, RoomState } from "@chat/contract";
@@ -40,6 +40,14 @@ export interface ComposerProps {
 
 function escHTML(t: string): string {
   return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+interface InFlight {
+  clip: PendingClip | null;
+  image: PendingImage | null;
+  video: PendingVideo | null;
+  fileAtt: PendingFile | null;
+  art: PendingArt | null;
 }
 
 export function Composer(p: ComposerProps) {
@@ -175,7 +183,14 @@ export function Composer(p: ComposerProps) {
     textEl.focus();
   };
 
-  const att = useAttachments();
+  // What the send under way carries. A send can take minutes (a big
+  // upload), and the composer stays open for the next message meanwhile:
+  // a slot cleared after the send only if it still holds what was sent,
+  // and its Remove hidden only while that is so. Clearing every slot
+  // wiped a photo or recording picked for the next message, unsent, and
+  // a Remove during the upload hid an item the send then posted anyway.
+  const [inFlight, setInFlight] = useState<InFlight | null>(null);
+  const att = useAttachments(inFlight ? inFlight.fileAtt : null);
   const {
     clip, clipRef, setClip, image, setImage, art, setArt, video, setVideo, fileAtt, setFileAtt,
     imgFileRef, clipFileRef, artFileRef, vidFileRef, anyFileRef,
@@ -257,6 +272,19 @@ export function Composer(p: ComposerProps) {
     sendingRef.current = true;
     setSending(true);
     setErr(null);
+    const viaUploads = !!(fileAtt || (image && image.big) || (clip && !clip.data) || (video && video.big));
+    // a page or document can't ride a draft: an upload send leaves it be
+    const sent: InFlight = { clip, image, video, fileAtt, art: viaUploads ? null : art };
+    setInFlight(sent);
+    // only what this send carried: a slot picked again meanwhile keeps
+    // its new item for the next message
+    const clearSlots = () => {
+      setClip((c) => (c === sent.clip ? null : c));
+      setImage((c) => (c === sent.image ? null : c));
+      setVideo((c) => (c === sent.video ? null : c));
+      setFileAtt((c) => (c === sent.fileAtt ? null : c));
+      setArt((c) => (c && c === sent.art ? null : c));
+    };
     try {
       // Anything past the inline caps, and any general file, goes up
       // first under a draft: the message does not officially post until
@@ -265,7 +293,7 @@ export function Composer(p: ComposerProps) {
       // engine. Nothing is cleared up front: if an upload fails, the
       // caption and every attachment stay armed, and sending again
       // resumes where it stopped (the parts already sent are kept).
-      if (fileAtt || (image && image.big) || (clip && !clip.data) || (video && video.big)) {
+      if (viaUploads) {
         const items: UpItem[] = [];
         if (image) {
           const b = image.file || dataUrlBlob(image.data || "", "image/png");
@@ -285,10 +313,7 @@ export function Composer(p: ComposerProps) {
         const clearUploaded = () => {
           clearSent(textEl, typed);
           grow();
-          setClip(null);
-          setImage(null);
-          setVideo(null);
-          setFileAtt(null);
+          clearSlots();
         };
         try {
           const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
@@ -331,15 +356,13 @@ export function Composer(p: ComposerProps) {
       const d = await client.postPayload(payload);
       clearSent(textEl, typed);
       grow();
-      setClip(null);
-      setImage(null);
-      setVideo(null);
-      setArt(null);
+      clearSlots();
       p.onPosted(d);
     } catch (sendErr) {
       setErr("Couldn't send: " + (sendErr instanceof Error ? sendErr.message : String(sendErr)));
     } finally {
       sendingRef.current = false;
+      setInFlight(null);
       if (!p.denied) {
         setSending(false);
         textRef.current?.focus();
@@ -401,7 +424,7 @@ export function Composer(p: ComposerProps) {
               <span id="imgChip" className="clip-chip">
                 <img id="imgThumb" className="img-thumb" alt="" src={image ? image.thumb : undefined} />
                 <span id="imgName">{image ? image.name : ""}</span>{" "}
-                <LinkButton type="button" id="imgRemove" onClick={() => setImage(null)}>
+                <LinkButton type="button" id="imgRemove" hidden={!!image && !!inFlight && image === inFlight.image} onClick={() => setImage(null)}>
                   Remove
                 </LinkButton>
               </span>
@@ -589,6 +612,7 @@ export function Composer(p: ComposerProps) {
               type="button"
              
               id="clipRemove"
+              hidden={!recActive && !!clip && !!inFlight && clip === inFlight.clip}
               onClick={() => {
                 if (rec.discardIfRecording()) return;
                 setClip(null);
@@ -599,13 +623,13 @@ export function Composer(p: ComposerProps) {
           </span>
           <span id="vidChip" className="clip-chip" hidden={!video}>
             <span id="vidName">{video ? video.name : ""}</span>{" "}
-            <LinkButton type="button" id="vidRemove" hidden={!!up} onClick={() => setVideo(null)}>
+            <LinkButton type="button" id="vidRemove" hidden={!!video && !!inFlight && video === inFlight.video} onClick={() => setVideo(null)}>
               Remove
             </LinkButton>
           </span>
           <span id="fileChip" className="clip-chip" hidden={!fileAtt}>
             <span id="fileName">{fileAtt ? fileAtt.label : ""}</span>{" "}
-            <LinkButton type="button" id="fileRemove" hidden={!!up} onClick={() => setFileAtt(null)}>
+            <LinkButton type="button" id="fileRemove" hidden={!!fileAtt && !!inFlight && fileAtt === inFlight.fileAtt} onClick={() => setFileAtt(null)}>
               Remove
             </LinkButton>
           </span>
@@ -633,7 +657,7 @@ export function Composer(p: ComposerProps) {
           ) : null}
           <span id="artChip" className="clip-chip" hidden={!art}>
             <span id="artName">{art ? art.label : ""}</span>{" "}
-            <LinkButton type="button" id="artRemove" onClick={() => setArt(null)}>
+            <LinkButton type="button" id="artRemove" hidden={!!art && !!inFlight && art === inFlight.art} onClick={() => setArt(null)}>
               Remove
             </LinkButton>
           </span>
