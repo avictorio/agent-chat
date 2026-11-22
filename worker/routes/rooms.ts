@@ -1,6 +1,6 @@
 // Rooms: creation (the genesis email) and existence.
 
-import { MAX_NAME, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
+import { cleanName, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
 import { CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
@@ -69,7 +69,7 @@ export async function createRoomRoute(rc: RouteContext) {
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
   const cbody = await readBody(request);
   const croom = bodyText(cbody?.room, "room").trim().toLowerCase();
-  const cname = bodyText(cbody?.name, "name").trim().slice(0, MAX_NAME);
+  const cname = cleanName(bodyText(cbody?.name, "name"));
   const cemail = bodyText(cbody?.email, "email").trim().slice(0, 254);
   if (!ROOM_RE.test(croom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (croom === "create" || croom === "api") return json({ error: "That room name is reserved" }, 400);

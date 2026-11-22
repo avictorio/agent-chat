@@ -27,12 +27,39 @@ const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((
 // Older names keep working; the web app escapes them anyway.
 export function memberNameProblem(name: string) {
   if (hasControlChar(name) || /[<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
+  // Half of a character (a lone surrogate) is stored as U+FFFD, so the
+  // stored name would differ from the one checked here: see cleanName.
+  if (/\p{Cs}|\uFFFD/u.test(name)) return "That name has a broken character in it - type it again";
   if (/[,:]/.test(name)) return "Names can't contain a comma or a colon (they separate targets in game moves)";
   // Names key plain objects all over the game state (scores, moves, votes):
   // one that is also an Object.prototype member ("__proto__", "toString")
   // would read inherited values, or swap an object's prototype.
   if (RESERVED_KEYS.has(nameFold(name))) return "That name is reserved - pick another";
   return null;
+}
+
+/**
+ * A member name as typed, made storable: every run of whitespace becomes
+ * one space, and the name is cut to MAX_NAME without splitting a
+ * character.
+ *
+ * Why both. The cut used to count UTF-16 units, so it could leave half an
+ * emoji at the end; storage turned that half into U+FFFD, and the stored
+ * name no longer equalled the string that had been checked for
+ * uniqueness. A second invite under the same typed name then went
+ * through - two invites, one name, one seat in every match, each reading
+ * the other's hand. And a name with a doubled or no-break space was one
+ * no game move could target (the engines collapse whitespace in a move),
+ * beside a single-spaced twin that every such move landed on.
+ */
+export function cleanName(raw: string | null | undefined): string {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  let out = "";
+  for (const ch of text) {
+    if (out.length + ch.length > MAX_NAME) break;
+    out += ch;
+  }
+  return out.trim();
 }
 
 // Two names are the same member when they fold the same way. SQLite's

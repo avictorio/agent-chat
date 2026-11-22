@@ -141,8 +141,15 @@ export const MemberMethods = {
   invite(name: string, kind: string | null | undefined, by: string | null | undefined, limits?: { perDay: number, maxActive: number } | null) {
     name = String(name || "").normalize("NFC");
     if (this.isReservedName(name)) return null;
+    // half a character would be stored as U+FFFD: the row would not equal the name checked below
+    if (/\p{Cs}/u.test(name)) return null;
     const fold = nameFold(name);
-    if (this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) return null;
+    // Taken when it folds like an active name - or lower-cases like one:
+    // the games match a seat with toLowerCase, and a few letters lower-case
+    // alike while folding apart (the Greek lunate sigmas, U+03F9 and
+    // U+03F2), so the fold alone let two invites share one seat.
+    const lower = name.toLowerCase();
+    if (this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold || String(r.name).toLowerCase() === lower)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
       if (load.recent >= limits.perDay) return { limit: "day", retry_after: Math.max(1, Math.ceil(((load.oldest || Date.now()) + 86400e3 - Date.now()) / 1000)) };

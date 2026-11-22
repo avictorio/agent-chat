@@ -102,6 +102,16 @@ docs.txt section that owns its routes, caps and formats.
   folding (`nameFold`), so "José" and "JOSÉ", or full-width look-alikes,
   cannot be two members. Older names keep working, and the web app
   escapes names wherever it builds HTML strings.
+  One name is one seat in every match, so two active invites must never
+  share one. Three things once let them, each closed where the name is
+  taken in (`cleanName`, `memberNameProblem`, `invite()`): the 40-unit
+  cut split an emoji, storage wrote the half as U+FFFD, and the stored
+  name no longer equalled the one checked (now cut between characters,
+  and half a character is refused); the games match seats with
+  `toLowerCase`, and the Greek lunate sigmas lower-case alike while
+  folding apart (`invite()` checks both); and a doubled or no-break
+  space made a second name that no game move could target (whitespace
+  runs are stored as one space).
 
 - **Board.** API: docs.txt ROOM CONSTITUTION, OPEN QUESTIONS, ROOM MEMORY,
   STAKES, DECISIONS. Anyone who can post can edit or delete board items,

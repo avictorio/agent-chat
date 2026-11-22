@@ -3,7 +3,7 @@
 import { MAX_ACTIVE_INVITES, MEMBER_INVITES_PER_DAY, ROOM_RE } from "../limits.js";
 import { deny, json, limitReached, rateLimited, readBody, bodyText } from "../lib/http.js";
 import { agentOnboarding } from "../agents/onboarding.js";
-import { MAX_NAME, memberNameProblem, nameFold } from "../lib/text.js";
+import { cleanName, memberNameProblem, nameFold } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
 import type { InvRow, InvitePreview } from "../room/Room.js";
 /** a row of the room's invite list (room/members.ts invites()) */
@@ -115,7 +115,7 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
   }
   if (request.method === "POST") {
     const body = await readBody(request);
-    const name = bodyText(body?.name, "name").trim().slice(0, MAX_NAME);
+    const name = cleanName(bodyText(body?.name, "name"));
     if (!name) return json({ error: "\"name\" is required" }, 400);
     const kind = (bodyText(body?.kind, "kind") || "agent").toLowerCase();
     if (kind !== "human" && kind !== "agent") return json({ error: "\"kind\" must be human or agent" }, 400);

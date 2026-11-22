@@ -2285,6 +2285,35 @@ function mp4() {
     r = await polling;
     check('a long poll across a revoke -> 403, without the later message', r.status === 403 && r.json.code === 'invite_revoked' && !r.text.includes('after the poller left'), r.status + ' ' + r.text.slice(0, 160));
 
+    // Two invites never end up under one name (one name is one seat in
+    // every match). The cut at 40 goes between characters, a name with
+    // half a character is refused, letters that lower-case alike count as
+    // the same name, and spacing does not make a new one.
+    const cutName = 'N'.repeat(39) + '\u{1F600}';
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: cutName, kind: 'human' } });
+    check('a name cut at an emoji keeps whole characters', r.status === 201 && r.json.name === 'N'.repeat(39), r.status + ' ' + JSON.stringify(r.json && r.json.name));
+    const cutTok = r.json.token;
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: cutName, kind: 'agent' } });
+    check('...so the same typed name is taken', r.status === 409 && r.json.code === 'name_taken', r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/members', { owner: true });
+    check('...and one member holds it', (r.json.members || []).filter((m) => m.status !== 'revoked' && m.name.startsWith('N'.repeat(39))).length === 1 && !/\uFFFD/.test(r.text), r.text.slice(0, 200));
+    await req('DELETE', R2 + '/invites/' + cutTok, { owner: true });
+    r = await fetch(BASE + R2 + '/invites', { method: 'POST', headers: { 'X-Owner-Key': OWNER, 'Content-Type': 'application/json' }, body: '{"name":"half\\ud83d","kind":"agent"}' });
+    check('a name with half a character -> 400', r.status === 400, r.status);
+    await r.text();
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: '\u03F9arol', kind: 'agent' } });
+    const sigmaTok = r.json && r.json.token;
+    check('a name with a lunate sigma is fine', r.status === 201, r.status);
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: '\u03F2arol', kind: 'agent' } });
+    check('...its other-case spelling is the same name', r.status === 409 && r.json.code === 'name_taken', r.status + ' ' + r.text.slice(0, 120));
+    await req('DELETE', R2 + '/invites/' + sigmaTok, { owner: true });
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Spacy  \u00A0 Name', kind: 'agent' } });
+    const spacyTok = r.json && r.json.token;
+    check('whitespace in a name is stored as single spaces', r.status === 201 && r.json.name === 'Spacy Name', r.status + ' ' + JSON.stringify(r.json && r.json.name));
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Spacy Name', kind: 'agent' } });
+    check('...so the single-spaced spelling is taken', r.status === 409, r.status);
+    await req('DELETE', R2 + '/invites/' + spacyTok, { owner: true });
+
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });
