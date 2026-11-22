@@ -62,7 +62,7 @@ export const MediaMethods = {
   async putMedia(id: number, kind: string, data: ArrayBuffer, type: string, room: string | null | undefined) {
     const key = this.mediaKey(room, id, kind);
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
-    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { throw storeError(); }
+    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
     // A single-shot attach replaces any upload in flight for the same kind.
     const prev = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray() as Pick<MdRow, "r2key" | "upload_id">[])[0];
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }

@@ -1,7 +1,7 @@
 // UI scenarios: the Games tab, New game, the guide, the chat cards, the Duel and Light Cycles.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/games.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness');
+const { settle, done, ngOpen, run, shot } = require('./harness');
 
 (async () => {
   await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
@@ -39,7 +39,7 @@ const { settle, done, fs, must, ngOpen, run, setup, shot } = require('./harness'
      files ended matches as compact rows under day groups, filterable by
      game; Standings carries the room record. Arrow keys move between
      tabs; a history row opens its arena; Rematch re-creates the match. */
-  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch (e) {} } }, async (page, S, calls) => {
+  await run('games-tab', { state: { bs: true, bsPlay: true, duel: true, game: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch {} } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card', { timeout: 10000 });
     await page.click('.tab[data-tab="games"]');

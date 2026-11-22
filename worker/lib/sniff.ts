@@ -47,7 +47,7 @@ export function decodeTextPayload(v: unknown) {
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch (e) { return null; }
+    } catch { return null; }
   }
   if (/^data:/i.test(s)) return s.replace(/^data:[^,]*,/i, "");
   return s;

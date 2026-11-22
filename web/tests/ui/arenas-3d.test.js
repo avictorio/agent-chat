@@ -1,7 +1,7 @@
 // UI scenarios: the 3D arenas of the rounds games (Trust, Liar's Dice, Auction, Four in a Row, Code Race, Frontlines).
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas-3d.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { ARENA_KIDS, settle, done, now, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
 
 (async () => {
   // Trust in 3D (the default): the table loads first, then the scores and

@@ -39,7 +39,7 @@ export const coderaceStatus: GameStatus<CodeRaceState> = {
     return ps.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name);
   },
 
-  youLabel(g: CodeRaceState): string {
+  youLabel(): string {
     return "Your guess";
   },
 
@@ -76,7 +76,7 @@ export const coderaceStatus: GameStatus<CodeRaceState> = {
     return g.round_seconds || 3600;
   },
 
-  awaiting(g: CodeRaceState, mine: CodeRacePlayer, me: string): boolean {
+  awaiting(g: CodeRaceState, mine: CodeRacePlayer): boolean {
     return !mine.committed && !mine.solved && !mine.out;
   },
 

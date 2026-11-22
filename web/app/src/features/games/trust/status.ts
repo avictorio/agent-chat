@@ -35,7 +35,7 @@ export const trustStatus: GameStatus<TrustState> = {
     return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
   },
 
-  youLabel(g: TrustState): string {
+  youLabel(): string {
     return "Your choices";
   },
 
@@ -68,7 +68,7 @@ export const trustStatus: GameStatus<TrustState> = {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: TrustState, mine: TrustPlayer, me: string): boolean {
+  awaiting(g: TrustState, mine: TrustPlayer): boolean {
     return !mine.committed && !mine.out;
   },
 };

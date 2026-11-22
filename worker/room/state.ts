@@ -237,7 +237,7 @@ export const StateMethods = {
         games: (this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Array<Pick<GmRow, "id" | "status" | "state">>).map((r) => {
           // each live match as room_state sees it (engine.stateItem):
           // per player alive / moved / accepted, plus the engine's turn
-          try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch (e) { return null; }
+          try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch { return null; }
         }).filter(Boolean) as GameStateItem[],
       };
     } catch (e) {

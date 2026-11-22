@@ -2,6 +2,16 @@
 
 export const MAX_NAME = 40;
 
+// C0 control characters and DEL: names and file names never carry them.
+// oxlint-disable-next-line no-control-regex -- matching control characters is the point
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+export function hasControlChar(s: string) {
+  return CONTROL_CHARS.test(s);
+}
+export function stripControlChars(s: string) {
+  return s.replace(new RegExp(CONTROL_CHARS.source, "g"), "");
+}
+
 // Object.prototype's member names, folded (memberNameProblem).
 const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
 
@@ -10,7 +20,7 @@ const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((
 // split on commas) and push titles, so new names may not carry those
 // characters. Older names keep working; the web app escapes them anyway.
 export function memberNameProblem(name: string) {
-  if (/[\u0000-\u001f\u007f<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
+  if (hasControlChar(name) || /[<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
   if (/[,:]/.test(name)) return "Names can't contain a comma or a colon (they separate targets in game moves)";
   // Names key plain objects all over the game state (scores, moves, votes):
   // one that is also an Object.prototype member ("__proto__", "toString")

@@ -1,7 +1,7 @@
 // UI scenarios: the room shell: error boundaries, the agent gate, layout, update banner, pull to refresh, the bell, access, unread, and the home page.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/shell.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, fs, must, path, run, setup, shot } = require('./harness');
+const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
 (async () => {
   // M1 smoke scenario (not a parity item): proves the harness discriminates
@@ -39,7 +39,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     const out = {};
     await page.waitForSelector('.msg', { timeout: 10000 });
     out.msgs = await page.$$eval('.msg', els => els.length);
-    out.stored = await page.evaluate(() => { try { return localStorage.getItem('chat-invite:demo'); } catch (e) { return null; } });
+    out.stored = await page.evaluate(() => { try { return localStorage.getItem('chat-invite:demo'); } catch { return null; } });
     out.hashAfter = await page.evaluate(() => location.hash);
     if (out.msgs < 5) throw new Error('skeleton should render the fixture messages, got ' + out.msgs);
     if (out.stored !== 'tok_Anthony') throw new Error('invite not stored under chat-invite:demo: ' + out.stored);
@@ -216,7 +216,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     if (out.fullHint !== 'Release to refresh') throw new Error('full drag hint wrong: ' + out.fullHint);
     return out;
   });
-  await run('push-bell', { init: () => { try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch (e) {} } }, async (page) => {
+  await run('push-bell', { init: () => { try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch {} } }, async (page) => {
     // Soak defect S2 (2026-11-09): on the owner's phone (Chrome,
     // permission undecided) the staging app showed no bell at all.
     // Two causes stacked: staging served /sw.js as HTML, so
@@ -238,10 +238,10 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
   await run('agent-gate-dark', { state: { agentYou: true }, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await shot(page, 'agent-gate-dark.png'); return { ok: true }; });
   await run('agent-gate-mobile', { state: { agentYou: true }, w: 390, h: 844, touch: true }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile.png'); return { ok: true }; });
   await run('agent-gate-mobile-dark', { state: { agentYou: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => { await page.waitForSelector('#view-agent:not([hidden])', { timeout: 10000 }); await settle(page); await shot(page, 'agent-gate-mobile-dark.png'); return { ok: true }; });
-  await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch (e) {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
+  await run('forced-dark-light', { args: ['--blink-settings=forceDarkModeEnabled=true'], init: () => { try { localStorage.setItem('chat-theme', 'light'); } catch {} } }, async (page) => { await shot(page, 'forcedark-light.png'); });
 
   // --- M3 message-core scenarios (ported verbatim from tests/ui.test.js) ---
-  await run('unread', {}, async (page, S) => {
+  await run('unread', {}, async (page) => {
     await page.click('.tab[data-tab="stakes"]'); await settle(page);
     await page.evaluate(() => {});
     return null;
@@ -270,7 +270,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
     const b = await chromium.launch({});
     const ctx = await b.newContext({ viewport: { width: 1280, height: 860 }, timezoneId: 'UTC', locale: 'en-US' });
     const page = await ctx.newPage();
-    await useClock(page);
+    await installClock(page);
     const errs = [];
     page.on('pageerror', (e) => errs.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
@@ -282,7 +282,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
       if (pth === '/api/build') return J({ build: 'uitestbuild2' });
       if (pth.endsWith('/messages')) return J({ messages: [], you: 'Tester' });
       if (pth.endsWith('/members')) return J({ room: 'demo', invite_only: true, members: [] });
-      if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch (e) { return route.fulfill({ status: 404, body: 'nf' }); } }
+      if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
       if (pth.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
       errs.push('unhandled: ' + route.request().method() + ' ' + pth);
       return route.fulfill({ status: 404, body: 'nf' });
@@ -291,7 +291,7 @@ const { settle, useClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done,
       try {
         localStorage.setItem('chat-invite:demo-room', 'tok_demo');
         localStorage.setItem('chat-invite:second-room', 'tok_second');
-      } catch (e) {}
+      } catch {}
     });
     const out = {};
     try {

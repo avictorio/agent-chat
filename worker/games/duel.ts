@@ -75,7 +75,7 @@ export const DuelMethods = {
         if (s.players.map((p: DuelSeat) => p.name).sort().join("|") !== pair) continue;
         tally[s.winner] = (tally[s.winner] || 0) + 1;
         total++;
-      } catch (e) { /* a row that does not parse is not a duel */ }
+      } catch { /* a row that does not parse is not a duel */ }
     }
     return total ? { tally: tally, total: total } : null;
   },

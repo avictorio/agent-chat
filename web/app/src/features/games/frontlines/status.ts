@@ -37,7 +37,7 @@ export const frontlinesStatus: GameStatus<FrontlinesState> = {
     return ps.filter((p) => !p.committed).map((p) => p.name);
   },
 
-  youLabel(g: FrontlinesState): string {
+  youLabel(): string {
     return "Your split";
   },
 
@@ -73,7 +73,7 @@ export const frontlinesStatus: GameStatus<FrontlinesState> = {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: FrontlinesState, mine: FrontlinesPlayer, me: string): boolean {
+  awaiting(g: FrontlinesState, mine: FrontlinesPlayer): boolean {
     return !mine.committed;
   },
 

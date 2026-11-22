@@ -116,7 +116,7 @@ export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
   }
   const rstub = env.ROOM.get(env.ROOM.idFromName(name));
   const exists = await roomExists(rstub);
-  if (/^\/api\/rooms\/[^\/]+\/?$/.test(path)) {
+  if (/^\/api\/rooms\/[^/]+\/?$/.test(path)) {
     if (request.method !== "POST" && request.method !== "DELETE") return json({ error: "Method not allowed" }, 405);
     if (!owner) return json({ error: "Creating or deleting a room needs the owner key" }, 403);
     if (request.method === "POST") {

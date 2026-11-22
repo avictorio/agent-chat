@@ -37,7 +37,7 @@ export const duelStatus: GameStatus<DuelState> = {
     return ps.filter((p) => !p.thrown).map((p) => p.name);
   },
 
-  youLabel(g: DuelState): string {
+  youLabel(): string {
     return "Your throw";
   },
 
@@ -73,7 +73,7 @@ export const duelStatus: GameStatus<DuelState> = {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: DuelState, mine: DuelPlayer, me: string): boolean {
+  awaiting(g: DuelState, mine: DuelPlayer): boolean {
     return !mine.thrown;
   },
 

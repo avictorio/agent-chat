@@ -50,7 +50,7 @@ async function req(method, p, opts) {
   const r = await fetch(BASE + p, { method, headers, body });
   const text = await r.text();
   let json = null;
-  try { json = JSON.parse(text); } catch (e) {}
+  try { json = JSON.parse(text); } catch {}
   return { status: r.status, json, text, headers: r.headers };
 }
 
@@ -64,7 +64,7 @@ function mp4() {
 
 async function waitUp() {
   for (let i = 0; i < 90; i++) {
-    try { const r = await fetch(BASE + '/api'); if (r.status) return true; } catch (e) {}
+    try { const r = await fetch(BASE + '/api'); if (r.status) return true; } catch {}
     await new Promise(r => setTimeout(r, 1000));
   }
   return false;
@@ -1776,9 +1776,9 @@ async function waitUp() {
             let i;
             while ((i = buf.indexOf('\n\n')) >= 0) { frames.push(buf.slice(0, i)); buf = buf.slice(i + 2); }
           }
-        } catch (e) {}
+        } catch {}
       })();
-      return { status: resp.status, frames, close: () => { try { ctl.abort(); } catch (e) {} } };
+      return { status: resp.status, frames, close: () => { try { ctl.abort(); } catch {} } };
     }
     async function waitFor(fn, ms) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise(res => setTimeout(res, 100)); } return fn(); }
     let s = await openStream(R2 + '/stream?after=0', TP);
@@ -1834,7 +1834,7 @@ async function waitUp() {
     s.close();
     // Envelope: every frame kind carries from + kind + targets, and
     // message objects carry targets on reads and post responses too.
-    function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch (e) { return null; } }
+    function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch { return null; } }
     s = await openStream(R2 + '/stream?events=all,state&after=latest', TP);
     check('envelope: state snapshot has a null actor', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'state' && d.from === null && d.kind === null && Array.isArray(d.targets); }), 4000), JSON.stringify(s.frames).slice(0, 200));
     r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: '@Rex envelope probe' } });
@@ -2241,9 +2241,9 @@ async function waitUp() {
     // Clean up room one.
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });
   } finally {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch (e) {}
-    if (backup) fs.writeFileSync(DEV_VARS, backup); else try { fs.unlinkSync(DEV_VARS); } catch (e) {}
-    try { fs.rmSync(STATE_DIR, { recursive: true, force: true }); } catch (e) {}
+    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    if (backup) fs.writeFileSync(DEV_VARS, backup); else try { fs.unlinkSync(DEV_VARS); } catch {}
+    try { fs.rmSync(STATE_DIR, { recursive: true, force: true }); } catch {}
   }
   console.log(failures ? 'API SUITE: ' + failures + ' failure(s)' : 'API SUITE: all checks passed');
   process.exit(failures ? 1 : 0);

@@ -24,7 +24,7 @@ const QUERY_IGNORED = "The ?invite= token in the URL was ignored: the token in y
 export async function queryTokenNotice(request: Request, res: Response): Promise<Response> {
   const url = new URL(request.url);
   if (!(url.searchParams.get("invite") || "").trim()) return res;
-  if (!/^\/api\/rooms\//.test(url.pathname) || /^\/api\/rooms\/[^\/]+\/mcp\/?$/.test(url.pathname)) return res;
+  if (!/^\/api\/rooms\//.test(url.pathname) || /^\/api\/rooms\/[^/]+\/mcp\/?$/.test(url.pathname)) return res;
   const notice = headerToken(request) ? QUERY_IGNORED : QUERY_NOTICE;
   const headers = new Headers(res.headers);
   headers.set("Deprecation", "@" + Math.floor(QUERY_DEPRECATED_AT / 1000));

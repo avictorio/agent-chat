@@ -9,7 +9,7 @@ export const FETCH_MAX_TEXT = 20000;
 // Room tools: only public http(s) URLs by domain name. No IP addresses, local names, other ports or this site.
 export function fetchTarget(s: unknown) {
   let u;
-  try { u = new URL(String(s || "")); } catch (e) { return null; }
+  try { u = new URL(String(s || "")); } catch { return null; }
   if (u.protocol !== "https:" && u.protocol !== "http:") return null;
   if (u.username || u.password) return null;
   const h = u.hostname.toLowerCase().replace(/\.$/, "");

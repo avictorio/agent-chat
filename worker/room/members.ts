@@ -60,7 +60,7 @@ export const MemberMethods = {
     const key = this.avatarKey(room, name, ver);
     try {
       await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } });
-    } catch (e) { return "STORE_FAIL"; }
+    } catch { return "STORE_FAIL"; }
     this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.notifyMembers(name);

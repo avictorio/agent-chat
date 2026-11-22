@@ -1,7 +1,7 @@
 // UI scenarios: each game's arena: its controls, its moves and its finished state, desktop and phone.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
 
 (async () => {
   // Frontlines (2026-11-19): the card shows the score and the last round
@@ -198,7 +198,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
   // row" - the drop decided nothing.
   for (const [label, o] of [['fourinarow-forfeit', {}], ['fourinarow-forfeit-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     // the viewer last saw move 5, so opening the arena replays move 6
-    await run(label, Object.assign({ state: { c4: true, c4Forfeit: true }, init: () => { try { localStorage.setItem('ac-c4-seen:/r/demo:16', '5'); } catch (e) {} } }, o), async (page) => {
+    await run(label, Object.assign({ state: { c4: true, c4Forfeit: true }, init: () => { try { localStorage.setItem('ac-c4-seen:/r/demo:16', '5'); } catch {} } }, o), async (page) => {
       const out = {};
       await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
       await page.click('.game-card.kind-fourinarow');
@@ -293,7 +293,7 @@ const { ARENA_KIDS, settle, D, done, must, noGl, now, path, run, shot } = requir
     if (!/"dir":"data:image\/png;base64,/.test(out.call)) throw new Error('the pad goes out as a PNG data URL: ' + out.call);
     return { banner: out.banner, ink: out.ink, kept: out.kept, sending: out.sending };
   });
-  await run('sketch-draw-mobile', { state: { sg: true, sgDraw: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page, S, calls) => {
+  await run('sketch-draw-mobile', { state: { sg: true, sgDraw: true }, w: 390, h: 844, touch: true, scheme: 'dark' }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .sg-card', { timeout: 10000 });
     await page.click('.game-card.kind-sketch');

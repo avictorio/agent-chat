@@ -8,7 +8,7 @@ import { wwVerb } from "./werewolf";
 // optional; a game without one gets the default where the hook is called.
 
 export const werewolfStatus: GameStatus<WerewolfState> = {
-  finalScore(g: WerewolfState): string {
+  finalScore(): string {
     return "";
   },
 
@@ -79,7 +79,7 @@ export const werewolfStatus: GameStatus<WerewolfState> = {
     return g.phase_seconds || 86400;
   },
 
-  awaiting(g: WerewolfState, mine: WerewolfPlayer, me: string): boolean {
+  awaiting(g: WerewolfState, mine: WerewolfPlayer): boolean {
     const y: Partial<WerewolfYou> = g.you || {};
     return mine.alive && (g.phase === "day" ? !mine.voted : !!wwVerb(y.role) && !y.act);
   },

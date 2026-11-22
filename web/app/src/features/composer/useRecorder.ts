@@ -196,7 +196,7 @@ export function useRecorder(opts: {
     } catch {
       try {
         recorder = new MR!(stream);
-      } catch (e2) {
+      } catch {
         recStartingRef.current = false;
         toast("Recording isn't available in this browser", true);
         recReset();

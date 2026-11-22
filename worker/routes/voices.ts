@@ -55,7 +55,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
       const body = await readBody(request);
       const s64 = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-      try { buf = Uint8Array.from(atob(s64), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+      try { buf = Uint8Array.from(atob(s64), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
     } else {
       buf = await request.arrayBuffer();
     }

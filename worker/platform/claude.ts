@@ -64,7 +64,7 @@ export async function sgClaudeJudge(env: Env, prompt: string, guesses: Array<{ n
     if (data.stop_reason === "max_tokens") return { error: "max_tokens" };
     const text = (data.content || []).filter((c) => c && c.type === "text").map((c) => c.text).join("");
     let out;
-    try { out = JSON.parse(text); } catch (e) { return { error: "bad_json" }; }
+    try { out = JSON.parse(text); } catch { return { error: "bad_json" }; }
     if (!out || !Array.isArray(out.verdicts)) return { error: "bad_shape" };
     /** the players judged right */
     const right: Record<string, boolean> = {};

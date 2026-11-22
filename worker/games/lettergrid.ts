@@ -174,7 +174,7 @@ export const LetterGridMethods = {
   /** @param raw the path as sent (request JSON, or text) */
   lgParsePath(st: LgStored, raw: unknown): { error: string } | LetterGridCell[] {
     const n = st.size;
-    const items = typeof raw === "string" ? raw.trim().split(/[\s,;>\-]+/).filter(Boolean) : raw;
+    const items = typeof raw === "string" ? raw.trim().split(/[\s,;>-]+/).filter(Boolean) : raw;
     if (!Array.isArray(items) || !items.length) return { error: "path is a list of cells, e.g. [\"A1\", \"B2\", \"C2\"] or [[0, 0], [1, 1], [1, 2]]" };
     const out: LetterGridCell[] = [];
     for (const it of items) {
@@ -202,7 +202,7 @@ export const LetterGridMethods = {
       if (s[0] === "{") {
         /** JSON that opens with { parses to an object */
         let o: Record<string, unknown>;
-        try { o = JSON.parse(s); } catch (e) { return { error: "dir looks like JSON but does not parse - send {\"word\": \"stone\"} or just the word" }; }
+        try { o = JSON.parse(s); } catch { return { error: "dir looks like JSON but does not parse - send {\"word\": \"stone\"} or just the word" }; }
         word = String((o && o.word) || "");
         if (o && o.path !== undefined) pathIn = o.path;
       } else {

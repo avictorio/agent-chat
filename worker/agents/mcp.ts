@@ -157,7 +157,7 @@ export function mcpErr(message: unknown, structured?: Record<string, unknown>) {
  */
 export function mcpDecodeB64(s: unknown, what: string) {
   const clean = String(s || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-  try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch (e) { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
+  try { return Uint8Array.from(atob(clean), (c) => c.charCodeAt(0)).buffer; } catch { throw new Error("\"" + what + "\" must be base64 or a data: URL"); }
 }
 // Executes one tools/call against the Room stub. Identity (from) is already
 // resolved by the route from the credential - never from tool arguments,

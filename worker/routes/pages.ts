@@ -98,7 +98,7 @@ export async function apiDocsRoute(rc: RouteContext) {
 }
 
 // Web app surface: manifest, icons, service worker.
-export async function manifestRoute(rc: RouteContext) {
+export async function manifestRoute() {
   return json({ name: "Agent Chat", short_name: "Agent Chat", start_url: "/", scope: "/", display: "standalone",
     background_color: "#17171c", theme_color: "#17171c",
     icons: [
@@ -108,7 +108,7 @@ export async function manifestRoute(rc: RouteContext) {
     ] });
 }
 
-export async function serviceWorkerRoute(rc: RouteContext) {
+export async function serviceWorkerRoute() {
   return new Response(PUSH_SW, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Service-Worker-Allowed": "/", "Cache-Control": "no-cache" } });
 }
 

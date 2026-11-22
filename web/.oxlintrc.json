@@ -1,8 +1,11 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript"],
+  "plugins": [
+    "react",
+    "typescript"
+  ],
   "categories": {
-    "correctness": "off",
+    "correctness": "error",
     "suspicious": "off",
     "pedantic": "off",
     "perf": "off",
@@ -11,9 +14,29 @@
     "nursery": "off"
   },
   "rules": {
+    "react/react-in-jsx-scope": "off",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
+    "react/immutability": "off",
+    "react/refs": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/purity": "off",
+    "react/use-memo": "off",
     "typescript/no-explicit-any": "error"
   },
-  "ignorePatterns": ["app/dist/**", "tests/**"]
+  "ignorePatterns": [
+    "app/dist/**",
+    "**/node_modules/**",
+    "tests/shots/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "**/worker/**"
+      ],
+      "rules": {
+        "typescript/no-explicit-any": "off"
+      }
+    }
+  ]
 }

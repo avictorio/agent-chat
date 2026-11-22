@@ -1,7 +1,7 @@
 // UI scenarios: invites, avatars, uploads and the media shelf.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/people-media.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harness');
+const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
 
 (async () => {
   await run('invites', {}, async (page, S, calls) => {
@@ -201,7 +201,7 @@ const { settle, FIXTURES, TESTS, done, must, path, run, shot } = require('./harn
   });
   await run('upload-interrupted', {
     hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
-    init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch (e) {} },
+    init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },
   }, async (page, S, calls) => {
     const note = page.locator('#uplResume');
     await note.waitFor({ timeout: 4000 });

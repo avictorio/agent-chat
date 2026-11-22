@@ -13,7 +13,7 @@
 // STYLES=1 adds a hash of each element's full computed style, for CSS
 // moves that must not change how anything looks (the games.css split).
 // Not part of the suite: run it before and after a change.
-const { chromium, fresh, setup, useClock, settle, noGl, now } = require('./harness');
+const { chromium, fresh, setup, installClock, settle, noGl, now } = require('./harness');
 const fs = require('fs');
 
 const STATES = [['game'], ['duel'], ['duelLobby'], ['duel', 'duelDone'], ['bs'], ['bs', 'bsSetup'], ['bs', 'bsPlay'], ['bs', 'bsFfa'], ['fl'], ['fl', 'flValued'], ['cr'], ['cr', 'crWords'], ['cr', 'crDone'], ['c4'], ['c4', 'c4Done'], ['c4', 'c4Done', 'c4Forfeit'], ['tr'], ['au'], ['ld'], ['tt'], ['tt', 'ttWrite'], ['ec'], ['ec', 'ecVote'], ['tq'], ['tq', 'tqAnswer'], ['ww'], ['ww', 'wwWolf'], ['lg'], ['tv'], ['tv', 'tvAsk'], ['tv', 'tvJudge'], ['sg'], ['sg', 'sgDraw'],
@@ -99,7 +99,7 @@ async function snapOne(browser, state, mode) {
     state.forEach((k) => VARIANTS[k] && VARIANTS[k](S));
     const pick = state.filter((k) => CARD[k]).pop();
     const cardSel = pick ? '.game-card[aria-label="Open ' + CARD[pick] + '"]' : '.game-card';
-    await useClock(page);
+    await installClock(page);
     await setup(page, S, []);
     if (!mode.gl) await page.addInitScript(noGl);
     await page.goto('https://chat.victorio.cloud/r/demo');
@@ -107,7 +107,7 @@ async function snapOne(browser, state, mode) {
     const card = await page.waitForSelector(cardSel + ' .game-board > *:not(.md-p)', { timeout: 10000 }).catch(() => null);
     // computed styles mid-animation differ run to run: in STYLES mode
     // finish every finite animation and park infinite ones at their start
-    const still = () => process.env.STYLES ? page.evaluate(() => document.getAnimations().forEach((an) => { try { if (isFinite(an.effect.getComputedTiming().endTime)) an.finish(); else { an.pause(); an.currentTime = 0; } } catch (e) {} })) : null;
+    const still = () => process.env.STYLES ? page.evaluate(() => document.getAnimations().forEach((an) => { try { if (isFinite(an.effect.getComputedTiming().endTime)) an.finish(); else { an.pause(); an.currentTime = 0; } } catch {} })) : null;
     const snap = async (sel) => { await still(); return snap0(sel); };
     const snap0 = (sel) => page.evaluate(([sel, fn, styles]) => { const walk = new Function('return ' + fn)()(styles); const el = document.querySelector(sel); return el ? walk(el) : null; }, [sel, serialise.toString(), process.env.STYLES === 'full' ? 'full' : !!process.env.STYLES]);
     if (card) {

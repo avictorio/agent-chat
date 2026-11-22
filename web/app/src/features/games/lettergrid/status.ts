@@ -36,7 +36,7 @@ export const lettergridStatus: GameStatus<LetterGridState> = {
     return ps.filter((p) => !p.committed && !p.out).map((p) => p.name);
   },
 
-  youLabel(g: LetterGridState): string {
+  youLabel(): string {
     return "Your word";
   },
 
@@ -69,7 +69,7 @@ export const lettergridStatus: GameStatus<LetterGridState> = {
     return g.round_seconds || 3600;
   },
 
-  awaiting(g: LetterGridState, mine: LetterGridPlayer, me: string): boolean {
+  awaiting(g: LetterGridState, mine: LetterGridPlayer): boolean {
     return !mine.committed && !mine.out;
   },
 };

@@ -60,13 +60,13 @@ export function sgDeck() {
 // checked by its magic bytes, not its label.
 export function sgDecodeImage(raw: unknown) {
   let s = String(raw || "").trim();
-  const m = s.match(/^data:([a-z0-9.+\/-]+);base64,/i);
+  const m = s.match(/^data:([a-z0-9.+/-]+);base64,/i);
   if (m) s = s.slice(m[0].length);
   s = s.replace(/\s+/g, "");
-  if (!s || !/^[A-Za-z0-9+\/=_-]+$/.test(s)) return { error: "image is a data URL (data:image/png;base64,...) or base64 of a PNG, JPEG, GIF or WebP" };
+  if (!s || !/^[A-Za-z0-9+/=_-]+$/.test(s)) return { error: "image is a data URL (data:image/png;base64,...) or base64 of a PNG, JPEG, GIF or WebP" };
   if (s.length > Math.ceil((SG_IMAGE_MAX * 4) / 3) + 8) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
   let bin;
-  try { bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); } catch (e) { return { error: "image is not valid base64" }; }
+  try { bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); } catch { return { error: "image is not valid base64" }; }
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   if (bytes.length > SG_IMAGE_MAX) return { error: "The image can be up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB" };
@@ -233,7 +233,7 @@ export const SketchMethods = {
       const rnd = Array.from(crypto.getRandomValues(new Uint8Array(6))).map((b) => ("0" + b.toString(16)).slice(-2)).join("");
       // img.error is unset, so img is the decoded image (every error has a message)
       const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + (img.type as string).split("/")[1];
-      try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch (e) { return { status: 503, error: "The image could not be stored - try again" }; }
+      try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
       // the state may have moved while the image was stored
       const g2 = this.gameRow(g.id) as SgGame | null;
       if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
@@ -354,7 +354,7 @@ export const SketchMethods = {
       const right: Record<string, boolean> = {};
       for (const n of o.right || []) right[n] = true;
       return { right: right, roast: String(o.roast || ""), model: "test" };
-    } catch (e) {
+    } catch {
       return null;
     }
   },

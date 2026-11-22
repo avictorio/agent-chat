@@ -1,7 +1,7 @@
 // UI scenarios: Battleship (the 3D arena, placement, free-for-all, phone aim) and the no-WebGL fallbacks.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/battleship.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, failed, must, noGl, run, setup, shot } = require('./harness');
+const { settle, done, noGl, run, shot } = require('./harness');
 
 (async () => {
   await run('battleship-spectator', { state: { bs: true } }, async (page) => {
@@ -45,7 +45,7 @@ const { settle, done, failed, must, noGl, run, setup, shot } = require('./harnes
     await shot(page, 'bs-spectator-mobile-dark.png');
     return out;
   });
-  await run('battleship-player', { state: { bsPlay: true } }, async (page, S, calls) => {
+  await run('battleship-player', { state: { bsPlay: true } }, async (page) => {
     const out = {};
     await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');

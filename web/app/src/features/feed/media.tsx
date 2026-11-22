@@ -47,7 +47,7 @@ export function ytId(u: string): string | null {
 export function ytLinks(text: string): { id: string; url: string }[] {
   const out: { id: string; url: string }[] = [];
   const seen = new Set<string>();
-  const urls = String(text || "").match(/https?:\/\/[^\s<>\[\]()]+/g) || [];
+  const urls = String(text || "").match(/https?:\/\/[^\s<>[\]()]+/g) || [];
   for (let i = 0; i < urls.length && out.length < 2; i++) {
     const id = ytId(urls[i]!.replace(/[.,;:!?]+$/, ""));
     if (id && !seen.has(id)) {

@@ -35,7 +35,7 @@ export const auctionStatus: GameStatus<AuctionState> = {
     return ps.filter((p) => !p.committed && (p.budget || 0) > 0).map((p) => p.name);
   },
 
-  youLabel(g: AuctionState): string {
+  youLabel(): string {
     return "Your bid";
   },
 
@@ -68,7 +68,7 @@ export const auctionStatus: GameStatus<AuctionState> = {
     return g.round_seconds || 180;
   },
 
-  awaiting(g: AuctionState, mine: AuctionPlayer, me: string): boolean {
+  awaiting(g: AuctionState, mine: AuctionPlayer): boolean {
     return !mine.committed && (mine.budget || 0) > 0;
   },
 

@@ -370,10 +370,13 @@ Before pushing:
    same); the objects the Worker builds - each game's summary and full state, room_state, the messages
    read, attachments, members - are checked against the `@chat/contract`
    types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
-   fake API), `npm run lint` (oxlint over `web/` and `contract/`: the
-   React hooks rules and `no-explicit-any`; any finding fails it, a
-   disable comment says why after `--`, and one that no longer
-   suppresses anything is reported),
+   fake API), `npm run lint` (oxlint over the whole repo - `web/app/src`,
+   `contract/src`, `worker/`, `tests/` and `web/tests/` - with the
+   `correctness` category, the React hooks rules and `no-explicit-any`
+   (not yet in `worker/`, to-do item 4); any finding fails it, a disable
+   comment says why after `--`, and one that no longer suppresses
+   anything is reported; an unused catch binding is written
+   `catch { ... }`),
    `npm run test:unit` (the pure game logic, seconds) and
    `npm run test:api` (the server, against a local `wrangler dev` that
    serves the build as static assets).
@@ -680,17 +683,18 @@ to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
 deleting it here in the commit that finishes it.
 
-1. **Lint the whole repo.** `web/.oxlintrc.json` has every category off
-   and only three rules on (rules-of-hooks, exhaustive-deps,
-   no-explicit-any), and `npm run lint` covers `web/app/src` and
-   `contract/src` only, not `worker/` or `tests/`. With `correctness`
-   on and `suspicious` as warnings (and `react-in-jsx-scope` off: the
-   JSX transform needs no React import), about 220 findings: 59 unused
-   variables, 45 useless escapes, ~80 React rule hits (immutability,
-   refs read in render, effect dependencies), 7 rethrows that drop the
-   original error (`preserve-caught-error`), a few shadowed names and
-   loop conditions that never change. Turn `correctness` on and fix,
-   then `suspicious`; add `worker/` and `tests/` to the lint run.
+1. **Lint the whole repo.** Done so far (2026-11-22): `correctness` is
+   on and `npm run lint` covers the whole repo (unused variables, catch
+   bindings and parameters, useless escapes and the rest fixed). Left:
+   - the React Compiler rules `react/immutability` (33), `react/refs`
+     (29), `react/preserve-manual-memoization`, `react/purity` and
+     `react/use-memo` (4), switched off in `web/.oxlintrc.json` until
+     each finding is fixed (some may be real bugs: props or state
+     changed in place, refs read during render);
+   - `suspicious`: 29 shadowed names, 7 rethrows that drop the original
+     error (`preserve-caught-error`), 6 loop conditions that never
+     change, 10 needless ternaries; `no-underscore-dangle` (52) is
+     style and stays off; its 12 effect-dependency hits go with item 2.
 2. **Effect dependencies.** 81 `eslint-disable` comments for
    `react-hooks/exhaustive-deps` in `web/app/src`. React 19.3 has
    `useEffectEvent` (unused so far), the standard fix for an effect

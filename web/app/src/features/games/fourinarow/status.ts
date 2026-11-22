@@ -34,7 +34,7 @@ export const fourinarowStatus: GameStatus<FourInARowState> = {
     return g.turn_of ? [g.turn_of] : [];
   },
 
-  youLabel(g: FourInARowState): string {
+  youLabel(): string {
     return "Your move";
   },
 
@@ -46,7 +46,7 @@ export const fourinarowStatus: GameStatus<FourInARowState> = {
     return ["c4", g.status, g.turn || 0, (g.board || []).join("")].join("|");
   },
 
-  turnLine(g: FourInARowState, me: string): TurnLine {
+  turnLine(g: FourInARowState): TurnLine {
     const you: Partial<FourInARowYou> = g.you || {};
     let text = "";
     let sub = "";

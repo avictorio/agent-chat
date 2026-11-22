@@ -1,7 +1,7 @@
 // UI scenarios: the chat: markdown, voice and dictation, message actions, artifacts and reactions.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/chat.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, H, done, must, path, run, shot, ymd } = require('./harness');
+const { settle, done, run, shot, ymd } = require('./harness');
 
 (async () => {
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {

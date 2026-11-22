@@ -39,7 +39,7 @@ function shape(r) {
     if (j.result && typeof j.result === 'object') {
       out.resultKeys = Object.keys(j.result).sort();
       const c = j.result.content && j.result.content[0];
-      if (c && typeof c.text === 'string') { try { const p = JSON.parse(c.text); if (p && typeof p === 'object' && !Array.isArray(p)) out.toolKeys = Object.keys(p).sort(); } catch (e) {} }
+      if (c && typeof c.text === 'string') { try { const p = JSON.parse(c.text); if (p && typeof p === 'object' && !Array.isArray(p)) out.toolKeys = Object.keys(p).sort(); } catch {} }
       if (Array.isArray(j.result.tools) && j.result.tools[0]) out.firstTool = Object.keys(j.result.tools[0]).sort();
     }
     for (const k of LISTS) if (Array.isArray(j[k]) && j[k][0] && typeof j[k][0] === 'object') (out.rows = out.rows || {})[k] = Object.keys(j[k][0]).sort();
@@ -73,7 +73,7 @@ async function runCases(ctx) {
     const r = await fetch(ctx.BASE + p, opts || {});
     const ct = r.headers.get('content-type') || '';
     let json = null;
-    if (/json/.test(ct)) { try { json = JSON.parse(await r.text()); } catch (e) {} } else { try { if (r.body) await r.body.cancel(); } catch (e) {} }
+    if (/json/.test(ct)) { try { json = JSON.parse(await r.text()); } catch {} } else { try { if (r.body) await r.body.cancel(); } catch {} }
     return rec(name, { status: r.status, json, headers: r.headers });
   };
   const rpc = (token, body) => req('POST', R + '/mcp', { token, json: body });

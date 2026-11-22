@@ -108,114 +108,114 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     if (path === "/api/test-hooks/lettergrid") { const r = await hookLetterGrid(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/sigv4") { const r = await hookSigv4(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/liarsdice") { const r = await hookLiarsDice(rc); if (r !== undefined) return r; }
-    const usm = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/(part|sign|status|finish|abort)\/?$/);
+    const usm = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/(part|sign|status|finish|abort)\/?$/);
     if (usm) { const r = await uploadLinkStepRoute(rc, usm); if (r !== undefined) return r; }
-    const um = path.match(/^\/api\/uploads\/([^\/]+)\/([^\/]+)\/?$/);
+    const um = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/?$/);
     if (um) { const r = await uploadLinkRoute(rc, um); if (r !== undefined) return r; }
     if (path === "/emoji.json") { const r = await emojiRoute(rc); if (r !== undefined) return r; }
     if (path === "/api" || path === "/api/" || path === "/api/docs" || path === "/api.txt" || path === "/llms.txt") { const r = await apiDocsRoute(rc); if (r !== undefined) return r; }
 
     if (path === "/api/create-room") { const r = await createRoomRoute(rc); if (r !== undefined) return r; }
 
-    const rm = path.match(/^\/(?:r|api\/rooms)\/([^\/]+)/);
+    const rm = path.match(/^\/(?:r|api\/rooms)\/([^/]+)/);
     if (rm) { const r = await roomRoute(rc, rm); if (r !== undefined) return r; }
 
-    if (path === "/manifest.webmanifest" && request.method === "GET") { const r = await manifestRoute(rc); if (r !== undefined) return r; }
-    if (path === "/sw.js" && request.method === "GET") { const r = await serviceWorkerRoute(rc); if (r !== undefined) return r; }
+    if (path === "/manifest.webmanifest" && request.method === "GET") { const r = await manifestRoute(); if (r !== undefined) return r; }
+    if (path === "/sw.js" && request.method === "GET") { const r = await serviceWorkerRoute(); if (r !== undefined) return r; }
     const iconMatch = path.match(/^\/icons\/icon-(192|512|512-maskable|180)\.png$/);
     if (iconMatch && request.method === "GET") { const r = await iconRoute(rc, iconMatch); if (r !== undefined) return r; }
     if (path === "/api/push/key" && request.method === "GET") { const r = await pushKeyRoute(rc); if (r !== undefined) return r; }
 
-    let m = path.match(/^\/r\/([^\/]+)\/?$/);
+    let m = path.match(/^\/r\/([^/]+)\/?$/);
     if (m) { const r = await roomPageRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/stream\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/stream\/?$/);
     if (m) { const r = await streamRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/agent-recipe(?:\/(script))?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/agent-recipe(?:\/(script))?\/?$/);
     if (m) { const r = await recipeRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/tools(?:\/([a-z]+))?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/tools(?:\/([a-z]+))?\/?$/);
     if (m) { const r = await toolsRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/mcp\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/mcp\/?$/);
     if (m) { const r = await mcpRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/(?:avatar|members\/([^\/]+)\/avatar|avatars\/([^\/]+))\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/(?:avatar|members\/([^/]+)\/avatar|avatars\/([^/]+))\/?$/);
     if (m) { const r = await avatarRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/(?:voice(?:\/(sample|reclone))?|members\/([^\/]+)\/voice(?:\/(sample|reclone))?)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/(?:voice(?:\/(sample|reclone))?|members\/([^/]+)\/voice(?:\/(sample|reclone))?)\/?$/);
     if (m) { const r = await voiceRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/members\/([^\/]+)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/members\/([^/]+)\/?$/);
     if (m) { const r = await memberRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/me\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/me\/?$/);
     if (m) { const r = await meRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/invite\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/invite\/?$/);
     if (m) { const r = await invitePreviewRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/invites(?:\/([^\/]+))?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/invites(?:\/([^/]+))?\/?$/);
     if (m) { const r = await invitesRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/constitution\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/constitution\/?$/);
     if (m) { const r = await constitutionRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/questions(?:\/(\d+))?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/questions(?:\/(\d+))?\/?$/);
     if (m) { const r = await questionsRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/games\/(\d+)\/sketch\/(\d+)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/games\/(\d+)\/sketch\/(\d+)\/?$/);
     if (m) { const r = await sketchImageRoute(rc, m); if (r !== undefined) return r; }
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/games(?:\/(\d+)(?:\/(moves|cancel|accept|decline))?)?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/games(?:\/(\d+)(?:\/(moves|cancel|accept|decline))?)?\/?$/);
     if (m) { const r = await gamesRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/(welcome|members|digests|stakes|decisions)(?:\/(\d+))?\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/(welcome|members|digests|stakes|decisions)(?:\/(\d+))?\/?$/);
     if (m) { const r = await boardRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/push\/(subscribe|unsubscribe|status)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/push\/(subscribe|unsubscribe|status)\/?$/);
     if (m) { const r = await pushRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/speak\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/speak\/?$/);
     if (m) { const r = await speakRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/audio\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/audio\/?$/);
     if (m) { const r = await audioRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/image\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/image\/?$/);
     if (m) { const r = await imageRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/video\/?$/);
     if (m) { const r = await videoRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(html|doc|file)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/(html|doc|file)\/?$/);
     if (m) { const r = await artifactRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/video\/stream\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/video\/stream\/?$/);
     if (m) { const r = await videoStreamRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|finish|abort|status)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|finish|abort|status)\/?$/);
     if (m) { const r = await uploadRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/publish\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/publish\/?$/);
     if (m) { const r = await publishRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/upload-ticket\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/upload-ticket\/?$/);
     if (m) { const r = await uploadTicketRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/?$/);
     if (m) { const r = await messageRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/(upload|video)\/resume\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/(upload|video)\/resume\/?$/);
     if (m) { const r = await uploadResumeRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/(\d+)\/reactions\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/reactions\/?$/);
     if (m) { const r = await reactionsRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/attachments\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/attachments\/?$/);
     if (m) { const r = await attachmentsRoute(rc, m); if (r !== undefined) return r; }
 
-    m = path.match(/^\/api\/rooms\/([^\/]+)\/messages\/?$/);
+    m = path.match(/^\/api\/rooms\/([^/]+)\/messages\/?$/);
     if (m) { const r = await messagesRoute(rc, m); if (r !== undefined) return r; }
 
     return new Response("Not found", { status: 404 });

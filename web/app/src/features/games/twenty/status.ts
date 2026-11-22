@@ -46,7 +46,7 @@ export const twentyStatus: GameStatus<TwentyState> = {
     return ["tq", g.status, g.round || 0, g.phase || "", g.asked || 0].join("|");
   },
 
-  turnLine(g: TwentyState, me: string): TurnLine {
+  turnLine(g: TwentyState): TurnLine {
     const you: Partial<TwentyYou> = g.you || {};
     let text = "";
     let sub = "";

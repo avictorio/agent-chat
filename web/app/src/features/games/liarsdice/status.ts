@@ -35,7 +35,7 @@ export const liarsdiceStatus: GameStatus<LiarsDiceState> = {
     return g.turn_of ? [g.turn_of] : [];
   },
 
-  youLabel(g: LiarsDiceState): string {
+  youLabel(): string {
     return "Your bid";
   },
 
@@ -47,7 +47,7 @@ export const liarsdiceStatus: GameStatus<LiarsDiceState> = {
     return ["ld", g.status, g.turn || 0, g.round || 0, g.bid ? g.bid.qty + "x" + g.bid.face : ""].join("|");
   },
 
-  turnLine(g: LiarsDiceState, me: string): TurnLine {
+  turnLine(g: LiarsDiceState): TurnLine {
     const you: Partial<LiarsDiceYou> = g.you || {};
     let text = "";
     let sub = "";

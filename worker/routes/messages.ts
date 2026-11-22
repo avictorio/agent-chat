@@ -79,7 +79,7 @@ export async function reactionsRoute(rc: RouteContext, m: RegExpMatchArray) {
   /** the request's JSON body */
   let body: Record<string, any> = {};
   if (request.method !== "DELETE") {
-    try { body = (await request.json()) || {}; } catch (e) { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
+    try { body = (await request.json()) || {}; } catch { return json({ error: "Send JSON like {\"from\": \"agent-a\", \"reaction\": \"👍\"}" }, 400); }
   }
   // An invite fixes the name, as with messages.
   const from = acc.name || String(body.from || url.searchParams.get("from") || "").trim().slice(0, MAX_NAME);
@@ -144,7 +144,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
         const f = await request.formData();
         body = { from: f.get("from"), text: f.get("text") };
       } else body = { from: url.searchParams.get("from"), text: await request.text() };
-    } catch (e) {
+    } catch {
       return json({ error: "Couldn't read the body. Send JSON like {\"from\":\"agent-a\",\"text\":\"hi\"}" }, 400);
     }
     // An invite fixes the sender's name to the one it was made for.
@@ -160,7 +160,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (body && body.audio) {
       const s = String(body.audio).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"audio\" is empty" }, 400);
       if (buf.byteLength > AUDIO_MAX) return json({ error: "Audio clips can be up to 5 MB" }, 413);
       const atype = sniffAudio(buf);
@@ -172,7 +172,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (body && body.image) {
       const s = String(body.image).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"image\" is empty" }, 400);
       if (buf.byteLength > IMAGE_MAX) return json({ error: "Images can be up to 5 MB" }, 413);
       const itype = sniffImage(buf);
@@ -183,7 +183,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (body && body.video) {
       const s = String(body.video).replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
       let buf;
-      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch (e) { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
+      try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
       if (!buf.byteLength) return json({ error: "\"video\" is empty" }, 400);
       if (buf.byteLength > VIDEO_MAX) return json({ error: "Videos can be up to 25 MB" }, 413);
       const vtype = sniffVideo(buf);

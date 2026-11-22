@@ -498,7 +498,7 @@ export const GameMachineryMethods = {
           const table = byType[type] || (byType[type] = {});
           const row = table[r.name] || (table[r.name] = { name: r.name, hex: r.hex || null, w: 0, l: 0 });
           let ws: string[] | null = null;
-          if (r.ws) { try { ws = JSON.parse(r.ws); } catch (e) { ws = null; } }
+          if (r.ws) { try { ws = JSON.parse(r.ws); } catch { ws = null; } }
           if (ws ? ws.indexOf(r.name) >= 0 : r.name === r.w) row.w++;
           else row.l++;
           if (r.places) { try { placed(row, JSON.parse(r.places), r.name); } catch { warn("standings.places", null, { room: this.roomName }); } }
@@ -531,14 +531,14 @@ export const GameMachineryMethods = {
     let rows: Array<{ id: number, t: string | null, w: string | null, d: number | null, ps: string | null }> = [];
     try {
       rows = this.sql.exec("SELECT id, json_extract(state, '$.type') AS t, json_extract(state, '$.winner') AS w, json_extract(state, '$.draw') AS d, json_extract(state, '$.players') AS ps FROM gm WHERE status = 'finished' ORDER BY id").toArray();
-    } catch (e) {
+    } catch {
       return {};
     }
     for (const r of rows) {
       let ps;
       try {
         ps = JSON.parse(r.ps || "[]");
-      } catch (e) {
+      } catch {
         continue;
       }
       if (!Array.isArray(ps) || ps.length !== 2) continue;

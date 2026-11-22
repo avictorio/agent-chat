@@ -120,7 +120,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: Record<string, any> | null = null;
-  try { rpcBody = await request.json(); } catch (e) { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
+  try { rpcBody = await request.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
   const handleRpc = async (/** one JSON-RPC request, as sent */ req: Record<string, any> | null | undefined) => {
     if (!req || typeof req !== "object" || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
     const isNotification = !("id" in req) || req.id === null && req.method.indexOf("notifications/") === 0;

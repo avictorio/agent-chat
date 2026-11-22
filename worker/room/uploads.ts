@@ -35,6 +35,7 @@ import {
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
+import { stripControlChars } from "../lib/text.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
@@ -263,10 +264,10 @@ export const UploadMethods = {
     const declared = cleanMediaType(type);
     let up;
     try { up = await this.env.MEDIA.createMultipartUpload(key, { httpMetadata: { contentType: kind === "file" ? "application/octet-stream" : (declared || "application/octet-stream") } }); }
-    catch (e) { return { status: 503, error: STORE_MSG }; }
+    catch { return { status: 503, error: STORE_MSG }; }
     const plan = useDirect ? uploadPlanDirect(size) : uploadPlan(size);
     const now = Date.now();
-    const fname = name ? cleanFileName(String(name).replace(/[\u0000-\u001f\u007f]/g, ""), "") : "";
+    const fname = name ? cleanFileName(stripControlChars(String(name)), "") : "";
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size, upload_id, parts, fp, part_size, name, began, mode) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
       id, kind, declared || "application/octet-stream", key, size, up.uploadId, fp, plan.part_size, kind === "file" ? (fname || "file") : (fname || null), now, useDirect ? "direct" : null);
     return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: false, received: [], expires_at: now + UP_SESSION_MS, direct: useDirect };

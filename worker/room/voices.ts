@@ -48,7 +48,7 @@ export const VoiceMethods = {
     // Storage failure is its own answer (phase A): the route turns STORE_FAIL
     // into a 503, distinct from the no-such-member null.
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
-    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch (e) { return "STORE_FAIL"; }
+    try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { return "STORE_FAIL"; }
     const prev = this.voiceRow(name);
     if (prev && prev.sample_key && prev.sample_key !== key) { try { await this.env.MEDIA.delete(prev.sample_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -64,7 +64,7 @@ export const VoiceMethods = {
       const obj = await this.env.MEDIA.get(r.sample_key);
       if (!obj) return null;
       return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg" };
-    } catch (e) { return null; }
+    } catch { return null; }
   },
 
   async setVoiceId(name: string, provider: string, voiceId: string) {
