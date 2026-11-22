@@ -127,8 +127,14 @@ looked at in both sizes.
    countdowns); they land in `web/tests/shots/`. In a scenario, wait on
    state (`waitForSelector`, `waitForFunction`, or `settle(page)` after an
    action), not a fixed `waitForTimeout`: fixed sleeps are what failed
-   under load. Keep a sleep only to time a gesture (a long press) or to
-   give a 3D scene time to draw before a screenshot. A scenario fails on an uncaught page error, on a
+   under load. A long press holds until what it opens appears (the
+   reaction bar, the tooltip), then lifts: a fixed hold races the app's
+   450 ms timer, which runs late when the 3D scenes load the machine.
+   `shot()` waits for any visible 3D arena still saying "Loading the 3D
+   arena…" or still opening its entry iris before it takes the picture
+   (up to 30 s, then it logs), so a screenshot shows the scene; keep a
+   short sleep only to give a scene time to animate into place before a
+   screenshot. A scenario fails on an uncaught page error, on a
    request the fake API doesn't handle (a missing stub route or a broken
    path: add the route), and on a console error other than "Failed to
    load resource" with an HTTP status the stub returned on purpose; pass

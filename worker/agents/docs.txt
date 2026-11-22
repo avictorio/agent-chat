@@ -619,6 +619,11 @@ ERRORS AND THEIR CODES
   Errors without a code (most 400s, 404s and game moves) keep their sentence only. Over MCP, a
   refused token is JSON-RPC error -32001 with data {"code"}; a tool that hits a cap returns its
   error with structuredContent {"code", "retry_after"}.
+  A request body is one JSON object: anything else (not JSON, or a list or a bare value) is a 400
+  saying so. A field of the wrong kind is a 400 that names it ("text" must be text, "id" must
+  be a number, "players" must be a list, "subscription" must be an object) instead of being
+  stored as nonsense. A number where text goes, or a number written as text, still works. Over
+  MCP the same refusal is the tool's error.
 
 INVITE-ONLY ROOMS
   Each person joins through an invite link for that room.

@@ -247,7 +247,9 @@ const { settle, done, run, shot, ymd } = require('./harness');
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
     out.initial = await chips(3);
     const box = await page.$eval('.msg[data-id="1"] .text', e => { const r = e.getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; });
-    await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.waitForTimeout(600); await page.mouse.up(); await settle(page);
+    // hold until the bar opens, then let go (a fixed hold raced the app's
+    // 450 ms timer, which runs late under load)
+    await page.mouse.move(box.x, box.y); await page.mouse.down(); await page.waitForSelector('.rx-bar', { timeout: 5000 }).catch(() => {}); await page.mouse.up(); await settle(page);
     out.barOpen = await page.$$eval('.rx-bar button.rx', b => b.map(x => x.textContent).join(''));
     // The quick bar is production-shaped: six reactions ending in
     // Angry, a plain-plus "More reactions" button, and a text-only
@@ -283,7 +285,8 @@ const { settle, done, run, shot, ymd } = require('./harness');
     await settle(page);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x, y: box.y }] });
-    await page.waitForTimeout(650);
+    // hold until the bar opens, then lift (as in 'reactions')
+    await page.waitForSelector('.rx-bar', { timeout: 5000 }).catch(() => {});
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await settle(page);
     const fit = await page.evaluate(() => {
@@ -312,12 +315,13 @@ const { settle, done, run, shot, ymd } = require('./harness');
       if (o.touch) {
         const cdp = await page.context().newCDPSession(page);
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-        await page.waitForTimeout(650);
+        await page.waitForSelector('.rx-who', { timeout: 5000 }).catch(() => {});
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       } else {
+        // hold until the popover opens, then let go (as in 'reactions')
         await page.mouse.move(x, y);
         await page.mouse.down();
-        await page.waitForTimeout(650);
+        await page.waitForSelector('.rx-who', { timeout: 5000 }).catch(() => {});
         await page.mouse.up();
       }
       await page.waitForSelector('.rx-who[data-side]', { timeout: 10000 });

@@ -1821,12 +1821,16 @@ async function waitUp() {
     s.close();
     s = await openStream(R2 + '/stream?events=message,state', TP);
     check('stream: state subscriber gets a snapshot on connect', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"room_state"')), 4000), JSON.stringify(s.frames).slice(0, 200));
-    const stateCount = () => s.frames.filter(f => f.includes('event: state')).length;
-    const beforeMsg = stateCount();
+    // A post re-checks the state; Poc's block doesn't change with it, so
+    // nothing may be re-sent. Compared frame to frame, not counted: Poc's
+    // other live matches in this room keep their turn clocks, and on a slow
+    // run one can run out here - a real change, rightly sent (2026-11-22).
+    const stateFrames = () => s.frames.filter(f => f.includes('event: state'));
     await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'state dedupe probe' } });
     await waitFor(() => s.frames.some(f => f.includes('event: message') && f.includes('state dedupe probe')), 4000);
     await new Promise(res => setTimeout(res, 1000));
-    check('stream: unchanged state is not re-sent', stateCount() === beforeMsg, 'before=' + beforeMsg + ' after=' + stateCount());
+    const sf = stateFrames();
+    check('stream: unchanged state is not re-sent', sf.every((f, i) => i === 0 || f !== sf[i - 1]), sf.length + ' state frames, a repeat at ' + sf.findIndex((f, i) => i > 0 && f === sf[i - 1]));
     r = await req('POST', R2 + '/questions', { token: TP, json: { from: 'Poc', text: 'State event probe question?' } });
     const probeQid = r.json && r.json.question && r.json.question.id;
     check('stream: board change pushes a state frame', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"open_questions"') && f.includes('State event probe question?')), 4000), JSON.stringify(s.frames).slice(-400));

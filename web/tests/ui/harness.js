@@ -623,7 +623,26 @@ async function settle(page, quiet = 120, max = 6000) {
   }
 }
 let FAILURES = 0;
-const shot = (page, f) => page.screenshot({ path: OUT + f });
+// A screenshot shows the arena's scene, not its loading line or its entry
+// cover: while a visible 3D host still says "Loading the 3D arena…" (its
+// shaders compile on first draw, seconds under load) or its entry iris is
+// still opening (1.3 s once the scene is ready), wait - up to 30 s, then
+// take whatever is there. Title cards are not waited for: some shots are
+// of them. Until 2026-11-22, 28 shots in a run caught the loading line.
+async function shot(page, f) {
+  await page
+    .waitForFunction(
+      () =>
+        ![...document.querySelectorAll('.arena3d-status')].some((s) => !s.hidden && s.offsetParent !== null && /Loading the 3D/.test(s.textContent)) &&
+        ![...document.querySelectorAll('.impact-iris')].some((s) => s.offsetParent !== null),
+      null,
+      { timeout: 30000, polling: 100 },
+    )
+    .catch(() => console.error('shot ' + f + ': the 3D arena was still loading after 30 s'));
+  // two frames, so a canvas the cover just lifted from has drawn since
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
+  return page.screenshot({ path: OUT + f });
+}
 async function run(name, o, fn) {
   // ONLY=name1,name2 runs just those scenarios (a quick re-check)
   if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;

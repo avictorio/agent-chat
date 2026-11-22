@@ -24,6 +24,9 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     if (JSON.stringify(out.tiles) !== JSON.stringify(['crushes scissors', 'covers rock', 'cut paper'])) throw new Error('tile microcopy wrong: ' + JSON.stringify(out.tiles));
     if (!/your throw decides the round/.test(out.status)) throw new Error('status line wrong: ' + out.status);
     if (!/CLASH/.test(out.verdict)) throw new Error('verdict banner should name the clash: ' + out.verdict);
+    // the arrival ends with its name card: under load the stage was still
+    // dark when the iris had gone, so let the card clear first
+    await page.waitForFunction(() => !document.querySelector('#viewer .impact-title'), null, { timeout: 15000 }).catch(() => {});
     await shot(page, 'duel-arena.png');
     await page.click('#viewer .duel-tile:nth-child(3)');
     await page.waitForFunction(() => document.querySelector('#viewer .duel-tile.queued'), null, { timeout: 10000 });
@@ -130,11 +133,16 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     const cb = await (await page.$('#view-games .gm-chime-btn')).boundingBox();
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cb.x + cb.width / 2, y: cb.y + cb.height / 2 }] });
-    await page.waitForTimeout(650);
+    // keep the finger down until the hold registers (the tip opens), then
+    // lift: a fixed hold raced the app's 450 ms timer, which runs late
+    // when the 3D scenes load the machine, so the lift could come first
+    // and count as a tap
+    await page.waitForFunction(() => document.querySelector('#view-games .gm-tip.on'), null, { timeout: 5000 });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await settle(page);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     out.hold = await page.$eval('#view-games .gm-chime-btn', e => e.getAttribute('aria-pressed')) + '|' + await page.$eval('#view-games .gm-tip', e => e.classList.contains('on') + ':' + e.textContent.slice(0, 15));
     if (out.hold !== 'true|true:Your-move chime') throw new Error('holding the chime should show what it does without toggling it: ' + out.hold);
+    await settle(page);
     await shot(page, 'games-tab-mobile-chime-tip.png');
     out.tabH = await page.$eval('#view-games [role="tab"]', e => e.getBoundingClientRect().height);
     if (out.tabH < 44) throw new Error('tabs should be at least 44px tall on touch, got ' + out.tabH);
