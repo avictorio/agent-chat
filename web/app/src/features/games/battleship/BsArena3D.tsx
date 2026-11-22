@@ -309,7 +309,7 @@ function ShipModel({
   const bx = geo.L * 0.06;
   const planeF = useMemo(() => new Plane(new Vector3(1, 0, 0), 1e4), []);
   const planeA = useMemo(() => new Plane(new Vector3(-1, 0, 0), 1e4), []);
-  const dmg = useMemo(newDamage, []);
+  const dmg = useMemo(() => newDamage(), []);
   const mats = useMemo(() => shipMaterials(geo, hex, dmg, split ? [planeF] : undefined), [geo, hex, dmg, split, planeF]);
   const matsAft = useMemo(() => (split ? shipMaterials(geo, hex, dmg, [planeA]) : null), [geo, hex, dmg, split, planeA]);
   const radarSpin = useRef(0);

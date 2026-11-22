@@ -8,6 +8,7 @@ import { same } from "../../lib/index";
 import { useFeed, useMembers, useSession } from "../room/ctx";
 import { Button } from "../../ui/Button";
 import { ErrorBoundary } from "../../ui/ErrorBoundary";
+import { useLatest } from "../../lib/useLatest";
 
 // The message feed, ported from the current app's msgNode/renderAll:
 // day separators, 5-minute same-sender grouping with gutter timestamps,
@@ -109,14 +110,13 @@ function MdText({ text }: { text: string }) {
   const { memberSet, membersVersion } = useMembers();
   const ref = useRef<HTMLDivElement | null>(null);
   const version = membersVersion;
-  const memberSetRef = useRef(memberSet);
-  memberSetRef.current = memberSet;
+  const memberSetRef = useLatest(memberSet);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
     node.textContent = "";
     node.appendChild(md(text, memberSetRef.current));
-  }, [text, version]);
+  }, [text, version, memberSetRef]);
   return <div className="text" ref={ref}></div>;
 }
 

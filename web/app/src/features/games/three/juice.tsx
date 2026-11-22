@@ -117,10 +117,11 @@ export class Juice {
 const JuiceCtx = createContext<Juice | null>(null);
 
 export function useJuiceStore(still: boolean): Juice {
-  const ref = useRef<Juice | null>(null);
-  if (!ref.current) ref.current = new Juice();
-  ref.current.still = still;
-  return ref.current;
+  // created once (a lazy state initializer, not a ref filled during render);
+  // the store is mutable by design, like the three.js objects it drives
+  const [j] = useState(() => new Juice());
+  j.still = still;
+  return j;
 }
 
 /* True the first time this page session opens this game (the entry

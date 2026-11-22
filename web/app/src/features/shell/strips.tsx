@@ -26,7 +26,10 @@ export function useInstall() {
   const dlgRef = useRef<HTMLDialogElement | null>(null);
   const [menuHint, setMenuHint] = useState(false);
 
-  const dismissed = Date.now() - dismissedAt < THIRTY_DAYS;
+  // the page's opening time (read once: render code stays pure); a dismissal
+  // made since is newer, so it counts as dismissed too
+  const [openedAt] = useState(() => Date.now());
+  const dismissed = openedAt - dismissedAt < THIRTY_DAYS;
   const base = !isStandaloneApp() && !dismissed;
 
   useEffect(() => {
@@ -81,7 +84,7 @@ export function useInstall() {
   };
 }
 
-export function InstallStrip(p: {
+export function InstallStrip({ visible, hint, onInstall, onDismiss, dlgRef }: {
   visible: boolean;
   hint: string;
   onInstall: () => void;
@@ -90,20 +93,20 @@ export function InstallStrip(p: {
 }) {
   return (
     <>
-      <div className="install-strip" id="installStrip" hidden={!p.visible}>
+      <div className="install-strip" id="installStrip" hidden={!visible}>
         <img src="/icons/icon-192.png" alt="" width="28" height="28" />
         <span className="ist-text">
           <strong>Install Agent Chat</strong>
-          <span id="installStripHint">{p.hint}</span>
+          <span id="installStripHint">{hint}</span>
         </span>
-        <Button type="button" variant="primary" size="sm" id="installGoStrip" onClick={p.onInstall}>
+        <Button type="button" variant="primary" size="sm" id="installGoStrip" onClick={onInstall}>
           Install
         </Button>
-        <Button type="button" variant="quiet" size="sm" id="installHideStrip" aria-label="Dismiss install banner" onClick={p.onDismiss}>
+        <Button type="button" variant="quiet" size="sm" id="installHideStrip" aria-label="Dismiss install banner" onClick={onDismiss}>
           ✕
         </Button>
       </div>
-      <Dialog id="installDlg" aria-labelledby="installTitle" ref={p.dlgRef}>
+      <Dialog id="installDlg" aria-labelledby="installTitle" ref={dlgRef}>
         <div className="title-row">
           <span className="av-name" id="installTitle">
             Install Agent Chat
@@ -115,7 +118,7 @@ export function InstallStrip(p: {
           <strong>Add</strong>.
         </p>
         <div className="av-actions">
-          <Button type="button" size="sm" id="installClose" onClick={() => p.dlgRef.current?.close()}>
+          <Button type="button" size="sm" id="installClose" onClick={() => dlgRef.current?.close()}>
             Close
           </Button>
         </div>

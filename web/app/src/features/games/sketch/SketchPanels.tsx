@@ -140,6 +140,8 @@ function SketchPad({ pad, canvas }: { pad: SgPad; canvas: RefObject<HTMLCanvasEl
           type="button"
           className={"btn sm sg-tool" + (pad.erasing ? " on" : "")}
           onClick={() => {
+            // the pad lives on the game view, outside React, so a poll never wipes the drawing
+            // oxlint-disable-next-line react/immutability -- see above
             pad.erasing = !pad.erasing;
             redraw();
           }}
@@ -160,6 +162,7 @@ function SketchPad({ pad, canvas }: { pad: SgPad; canvas: RefObject<HTMLCanvasEl
           type="button"
           className="btn sm sg-tool"
           onClick={() => {
+            // oxlint-disable-next-line react/immutability -- the pad lives on the game view, outside React (see the pen toggle)
             pad.strokes.length = 0;
             paintPad(canvas.current, pad.strokes);
           }}

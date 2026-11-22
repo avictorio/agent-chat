@@ -216,7 +216,8 @@ export function CodeRaceInput({ g, onCommit }: { g: CodeRaceState; onCommit: (v:
   const pal = crPalette(g);
   const keys = draft.toUpperCase().split("").slice(0, len);
   const slots: ReactElement[] = [];
-  for (let i = 0; i < len; i++) {
+  for (let n = 0; n < len; n++) {
+    const i = n;
     const k = keys[i] || null;
     slots.push(
       <button

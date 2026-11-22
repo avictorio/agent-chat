@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "../../lib/index";
 import { fmtBytes, sniffKind } from "./uploads";
+import { useLatest } from "../../lib/useLatest";
 
 // The composer's pending attachments: one clip, one image, one video,
 // one page/doc and one general file per message (the server keeps one
@@ -58,8 +59,7 @@ export function useAttachments() {
   const vidFileRef = useRef<HTMLInputElement | null>(null);
   const anyFileRef = useRef<HTMLInputElement | null>(null);
   const [clip, setClip] = useState<PendingClip | null>(null);
-  const clipRef = useRef<PendingClip | null>(null);
-  clipRef.current = clip;
+  const clipRef = useLatest(clip);
   const [image, setImage] = useState<PendingImage | null>(null);
   const [art, setArt] = useState<PendingArt | null>(null);
   const [video, setVideo] = useState<PendingVideo | null>(null);

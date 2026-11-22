@@ -17,11 +17,11 @@
     "react/react-in-jsx-scope": "off",
     "react-hooks/rules-of-hooks": "error",
     "react-hooks/exhaustive-deps": "warn",
-    "react/immutability": "off",
-    "react/refs": "off",
-    "react/preserve-manual-memoization": "off",
-    "react/purity": "off",
-    "react/use-memo": "off",
+    "react/immutability": "error",
+    "react/refs": "error",
+    "react/preserve-manual-memoization": "error",
+    "react/purity": "error",
+    "react/use-memo": "error",
     "typescript/no-explicit-any": "error"
   },
   "ignorePatterns": [
@@ -36,6 +36,19 @@
       ],
       "rules": {
         "typescript/no-explicit-any": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*Arena3D.tsx",
+        "**/games/three/**",
+        "**/games/battleship/ocean.tsx",
+        "**/games/battleship/ships.tsx",
+        "**/games/battleship/fire.tsx",
+        "**/games/lightcycles/cycles.tsx"
+      ],
+      "rules": {
+        "react/immutability": "off"
       }
     }
   ]

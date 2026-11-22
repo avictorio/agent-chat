@@ -37,6 +37,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ComponentR
 import { useFrame, useThree } from "@react-three/fiber";
 import type { CameraControls } from "@react-three/drei";
 import type { PerspectiveCamera } from "three";
+import { useLatest } from "../../../lib/useLatest";
 
 export type Ctl = ComponentRef<typeof CameraControls>;
 /* tz: the look-at point's z (default 0, the board's centre); a
@@ -212,8 +213,7 @@ export function ArenaFrame({
   frameProps?: HTMLAttributes<HTMLDivElement>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const sizeCb = useRef(onSize);
-  sizeCb.current = onSize;
+  const sizeCb = useLatest(onSize);
   const coarse = useCoarsePointer();
   const [move, setMove] = useState(false);
   const [hint, setHint] = useState(false);
@@ -270,7 +270,7 @@ export function ArenaFrame({
       node.removeEventListener("wheel", guard, { capture: true });
       if (ro) ro.disconnect();
     };
-  }, []);
+  }, [sizeCb]);
   return (
     <div ref={ref} {...frameProps} className={"arena3d-frame" + (move ? " moving" : "")}>
       <MoveCtx.Provider value={move}>{children}</MoveCtx.Provider>

@@ -6,6 +6,7 @@ import { pressable } from "../../lib/index";
 import { fmtBytes } from "../composer/uploads";
 import type { ViewerApi } from "../shell/viewer";
 import { GameCardBlock } from "../games/shared/gamecard";
+import { useLatest } from "../../lib/useLatest";
 
 // Message media, ported from the current app's msgNode: YouTube link
 // cards under the text, then image, video, audio, the HTML page card
@@ -162,11 +163,10 @@ function fillDoc(el: HTMLElement, id: number, url: string, memberSet: Set<string
 
 function DocBody({ id, url, memberSet }: { id: number; url: string; memberSet: Set<string> }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const memberSetRef = useRef(memberSet);
-  memberSetRef.current = memberSet;
+  const memberSetRef = useLatest(memberSet);
   useEffect(() => {
     if (ref.current) fillDoc(ref.current, id, url, memberSetRef.current, "Couldn't load the document - tap to try again.");
-  }, [id, url]);
+  }, [id, url, memberSetRef]);
   return <div className="doc-body" ref={ref}></div>;
 }
 
@@ -179,8 +179,7 @@ export function MediaBlocks({ m }: { m: Message }) {
   // Hooks before the early return: a message can gain media after its
   // first render (an upload finishing), and a hook called only on some
   // renders breaks React's hook order.
-  const memberSetRef = useRef(memberSet);
-  memberSetRef.current = memberSet;
+  const memberSetRef = useLatest(memberSet);
   const yts = ytLinks(m.text || "");
   if (!yts.length && !m.image && !m.video && !m.audio && !m.html && !m.doc && !m.file && !m.game) return null;
   return (
@@ -279,6 +278,7 @@ export function MediaBlocks({ m }: { m: Message }) {
       {m.doc && m.doc.url && (
         <div
           className="doc-card"
+          // oxlint-disable-next-line react/refs -- pressable only wires the handler; it runs on a press, never during render
           {...pressable(() => {
             const durl = withInvite(m.doc!.url, token);
             openViewer(

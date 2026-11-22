@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type { Message, RoomState } from "@chat/contract";
 import { same } from "../../lib/index";
 import { atBottom } from "./feed";
+import { useLatest } from "../../lib/useLatest";
 
 // The feed's message state, colocated with the feed: the list and
 // its add() semantics (dedupe, richer-copy swap, the 1200 cap),
@@ -25,8 +26,7 @@ export function useMessages(opts: {
   const pendingJumpRef = useRef(false);
   const initialSettleRef = useRef(false);
   const settleRef = useRef<{ ro: ResizeObserver | null; timer: number }>({ ro: null, timer: 0 });
-  const messagesRef = useRef<Message[]>([]);
-  messagesRef.current = messages;
+  const messagesRef = useLatest(messages);
 
   const endSettle = useCallback(() => {
     if (settleRef.current.ro) {

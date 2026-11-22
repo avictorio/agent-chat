@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLatest } from "../../lib/useLatest";
 
 // The room's tab state: which view is showing, the hash sync in
 // both directions, and the tab ref the stream/board timers read.
@@ -18,14 +19,12 @@ export const TABS: Record<string, string> = {
 };
 
 export function useTabs(opts: { onChat: () => void }) {
-  const onChatRef = useRef(opts.onChat);
-  onChatRef.current = opts.onChat;
+  const onChatRef = useLatest(opts.onChat);
   const [tab, setTab] = useState<string>(() => {
     const h = location.hash.slice(1);
     return TABS[h] ? h : "chat";
   });
-  const tabRef = useRef(tab);
-  tabRef.current = tab;
+  const tabRef = useLatest(tab);
 
   const show = useCallback((t: string, fromHash = false) => {
     const next = TABS[t] ? t : "chat";
@@ -42,7 +41,7 @@ export function useTabs(opts: { onChat: () => void }) {
         // history unavailable: the tab still switched
       }
     }
-  }, []);
+  }, [onChatRef]);
 
   useEffect(() => {
     const onHash = () => show(location.hash.slice(1), true);

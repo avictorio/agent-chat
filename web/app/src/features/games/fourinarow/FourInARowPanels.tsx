@@ -44,7 +44,8 @@ export function FourSeats({ g, me }: { g: FourInARowState; me?: string }) {
 export function FourDrops({ open, onDrop }: { open: string[]; onDrop: (col: number) => void }) {
   const room = new Set(open);
   const heads: ReactElement[] = [];
-  for (let c = 1; c <= C4_COLS; c++) {
+  for (let n = 1; n <= C4_COLS; n++) {
+    const c = n;
     const full = !room.has(String(c));
     heads.push(
       <button key={c} type="button" className="c4-drop" disabled={full} aria-label={"Drop in column " + c + (full ? " (full)" : "")} onClick={() => onDrop(c)}>

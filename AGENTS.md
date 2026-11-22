@@ -612,6 +612,15 @@ features; mobile means the website in Android Chrome and iOS Safari.
   and feed row renders inside an `ErrorBoundary`, so bad data fails that
   part, not the page: give a new view or list item one too.
 - **Browser storage:** wrap all `localStorage` access in `try/catch`.
+- **Refs and render:** never read or write `ref.current` during render
+  (`npm run lint` refuses it). For "the latest value, for a callback or
+  effect", use `useLatest(value)` (`web/app/src/lib/useLatest.ts`, kept
+  current in a layout effect; list it in dependency arrays - it is
+  stable); for an object made once, `useState(() => create())`. The 3D
+  scene files (`*Arena3D.tsx`, `games/three/`, `ocean.tsx`, `ships.tsx`,
+  `fire.tsx`, `cycles.tsx`) are exempt from `react/immutability` in
+  `web/.oxlintrc.json`: changing three.js objects in effects and frame
+  callbacks is how react-three-fiber is meant to be used.
 - **3D game arenas:** before changing the arenas in `web/app/src/features/games/`
   (all sixteen `*Arena3D.tsx`, and `arena3d.tsx`, `juice.tsx`, `sfx.ts`,
   `atmos.tsx`, `ocean.tsx`, `ships.tsx`, `fire.tsx`, `cycles.tsx`,
@@ -685,12 +694,9 @@ deleting it here in the commit that finishes it.
 
 1. **Lint the whole repo.** Done so far (2026-11-22): `correctness` is
    on and `npm run lint` covers the whole repo (unused variables, catch
-   bindings and parameters, useless escapes and the rest fixed). Left:
-   - the React Compiler rules `react/immutability` (33), `react/refs`
-     (29), `react/preserve-manual-memoization`, `react/purity` and
-     `react/use-memo` (4), switched off in `web/.oxlintrc.json` until
-     each finding is fixed (some may be real bugs: props or state
-     changed in place, refs read during render);
+   bindings and parameters, useless escapes and the rest fixed), and
+   the React Compiler rules (`react/immutability`, `react/refs`,
+   `purity`, `use-memo`, `preserve-manual-memoization`) are on. Left:
    - `suspicious`: 29 shadowed names, 7 rethrows that drop the original
      error (`preserve-caught-error`), 6 loop conditions that never
      change, 10 needless ternaries; `no-underscore-dangle` (52) is

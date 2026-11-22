@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLatest } from "../../lib/useLatest";
 import { Icon as I } from "../../ui/Icon";
 import { ApiError, RoomClient, type MemberKind } from "@chat/contract";
 import { same, store, toast } from "../../lib/index";
@@ -81,8 +82,8 @@ export function RoomShell({ room }: { room: string }) {
     value: store("chat-you:" + room) || store("chat-name") || "",
     locked: !!store("chat-you:" + room),
   }));
-  const nameStateRef = useRef(nameState.value);
-  nameStateRef.current = nameState.value;
+  // the name, for callbacks and the game store (useLatest: kept current after each render)
+  const nameRef = useLatest(nameState.value);
   const [lockedText, setLockedText] = useState<string | null>(null);
   const [avatarName, setAvatarName] = useState<string | null>(null);
   const [gate, setGate] = useState<{ name: string; block: string } | null>(null);
@@ -99,8 +100,6 @@ export function RoomShell({ room }: { room: string }) {
     return { client: new RoomClient(room, t || null), token: t };
   }, [room]);
 
-  const nameRef = useRef(nameState.value);
-  nameRef.current = nameState.value;
   const deniedRef = useRef(false);
   const streamCloseRef = useRef<() => void>(() => {});
 
@@ -151,19 +150,21 @@ export function RoomShell({ room }: { room: string }) {
   }, [tab, refreshIfStale]);
 
   const feed = useMessages({ tabRef, nameRef, applyState: board.applyState });
-  clearUnreadRef.current = feed.clearUnread;
+  useLayoutEffect(() => {
+    clearUnreadRef.current = feed.clearUnread;
+  });
   const { messages, unread, jumpVisible, setJumpVisible, listRef } = feed;
 
-  const speakerRef = useRef<Speaker | null>(null);
-  if (!speakerRef.current) {
-    speakerRef.current = new Speaker({
+  // created once (a lazy state initializer, not a ref filled during render)
+  const [speaker] = useState(() => {
+    const sp = new Speaker({
       room,
       invite: token,
       voiceOf: (n) => board.voicesRef.current[String(n || "").toLowerCase()] || null,
     });
-    speakerRef.current.onChange = (id) => setSpeakingId(id);
-  }
-  const speaker = speakerRef.current;
+    sp.onChange = (id) => setSpeakingId(id);
+    return sp;
+  });
 
   const who = useCallback((): string | null => {
     const n = (nameRef.current || "").trim();
@@ -174,7 +175,7 @@ export function RoomShell({ room }: { room: string }) {
     store("chat-name", t);
     setNameState((st) => ({ value: t, locked: st.locked }));
     return t;
-  }, []);
+  }, [nameRef]);
 
   const applyTheme = (t: string) => {
     store("chat-theme", t);
@@ -235,17 +236,20 @@ export function RoomShell({ room }: { room: string }) {
   const viewerCloseRef = useRef<(() => void) | null>(null);
   const viewerHost = useViewerHost({ onCloseRef: viewerCloseRef });
   const gameHelpRef = useRef<GameHelpHandle | null>(null);
-  const gamesRef = useRef<GameStore | null>(null);
-  if (!gamesRef.current) {
-    gamesRef.current = createGameStore({
+  // created once, like the speaker
+  // oxlint-disable-next-line react/refs -- the store keeps these callbacks and calls them later, never during render
+  const [games] = useState(() =>
+    createGameStore({
       client,
-      meName: () => nameStateRef.current,
+      meName: () => nameRef.current,
       openViewer: viewerHost.api.open,
       showHelp: (game) => gameHelpRef.current?.open(game),
-    });
-    viewerCloseRef.current = () => gamesRef.current?.viewerClosed();
-  }
-  const games = gamesRef.current;
+    })
+  );
+  const gamesRef = useRef<GameStore | null>(games);
+  useLayoutEffect(() => {
+    viewerCloseRef.current = () => games.viewerClosed();
+  }, [games]);
   // Games waiting on you, for the Games nav count too (2026-11-13).
   const [gamesAwaiting, setGamesAwaiting] = useState(0);
   useEffect(() => {

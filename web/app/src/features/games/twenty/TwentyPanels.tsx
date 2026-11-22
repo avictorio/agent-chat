@@ -165,14 +165,17 @@ export function TwentyLog({ g }: { g: TwentyState }) {
       </div>
     );
   }
+  // each answered entry's number (flagged ones get none), worked out before rendering
+  const nums: (number | null)[] = [];
   let k = 0;
+  for (const x of qa) nums.push(x.flagged ? null : ++k);
   return (
     <div className="tq-log">
       {qa.map((x, i) => {
         const a = x.flagged ? "unanswerable" : x.a ? x.a.toUpperCase() : "…";
         return (
           <div key={i} className={"tq-qa" + (x.flagged ? " flagged" : "") + (x.kind === "guess" ? " guess" : "")}>
-            <span className="tq-qa-n">{x.flagged ? "–" : String(++k)}</span>
+            <span className="tq-qa-n">{nums[i] === null ? "–" : String(nums[i])}</span>
             <span className="tq-qa-by" style={{ color: hexOf(g, x.by) }}>
               {x.by}
             </span>

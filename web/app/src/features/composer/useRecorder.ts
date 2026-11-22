@@ -29,13 +29,11 @@ export function useRecorder(opts: {
   // A MediaRecorder runs alongside a speech-recognition session that
   // collects the transcript (final results only); where recognition
   // is unavailable or blocked, the clip simply carries none.
-  const MRCtorRef = useRef<MRCtor | null | undefined>(undefined);
-  if (MRCtorRef.current === undefined) {
+  const [MR] = useState<MRCtor | null>(() => {
     const w = window as unknown as { MediaRecorder?: MRCtor };
     const md = navigator.mediaDevices as { getUserMedia?: unknown } | undefined;
-    MRCtorRef.current = md && md.getUserMedia && w.MediaRecorder ? w.MediaRecorder : null;
-  }
-  const MR = MRCtorRef.current;
+    return md && md.getUserMedia && w.MediaRecorder ? w.MediaRecorder : null;
+  });
   const [recActive, setRecActive] = useState(false);
   const [recLabel, setRecLabel] = useState("");
   const recRef2 = useRef<MRInstance | null>(null);

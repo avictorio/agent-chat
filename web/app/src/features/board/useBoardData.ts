@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import {
   ApiError,
   type BoardData,
@@ -11,6 +11,7 @@ import {
   type Stake,
 } from "@chat/contract";
 import { toast } from "../../lib/index";
+import { useLatest } from "../../lib/useLatest";
 
 // The board + roster data layer, colocated with the board: the
 // six-endpoint load, the members projection (kinds, avatars,
@@ -100,8 +101,9 @@ export function useBoardData(opts: {
   const editingCountRef = useRef(0);
   const pendingBoardRef = useRef(false);
   const boardTimerRef = useRef<number>(0);
-  const voicesRef = useRef<Record<string, string>>({});
-  voicesRef.current = members.voices;
+  const voicesRef = useLatest(members.voices);
+  // the latest loadAll (defined further down), for the debounced reload
+  const loadAllRef = useRef<() => Promise<void>>(async () => {});
 
   const applyState = useCallback((s: RoomState | null | undefined) => {
     if (!s || typeof s !== "object") return;
@@ -213,8 +215,9 @@ export function useBoardData(opts: {
       if (!deniedRef.current) toast("Couldn't load the room board: " + (e as Error).message, true);
     }
   }, [client, deny, applyMembersData, deniedRef]);
-  const loadAllRef = useRef(loadAll);
-  loadAllRef.current = loadAll;
+  useLayoutEffect(() => {
+    loadAllRef.current = loadAll;
+  });
 
   return {
     rs,
