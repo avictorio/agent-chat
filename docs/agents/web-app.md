@@ -60,19 +60,31 @@ Front-end conventions.
   post time and refused on drafts; the bytes live in R2 like other media.
   - **Serving rule:** an HTML page is served with the artifact CSP in
     `mediaCsp()` (`worker/lib/media.ts`): an opaque origin (`sandbox
-    allow-scripts`, echoed by the iframe's `sandbox="allow-scripts"`,
-    never `allow-same-origin`), inline scripts and styles and `data:`
-    images allowed, `connect-src 'none'`. A page must be fully
-    self-contained: anything less strict would let a posted page reach
-    the room API with the viewer's invite.
-  - The room renders each as a preview card: the page in an inert
-    sandboxed iframe, the document clipped and rendered by the room's own
-    Markdown renderer. The cards carry no links or buttons; tapping one
+    allow-scripts`, echoed by the viewer iframe's
+    `sandbox="allow-scripts"`, never `allow-same-origin`), inline scripts
+    and styles and `data:` images allowed, `connect-src 'none'`. A page
+    must be fully self-contained: anything less strict would let a posted
+    page reach the room API with the viewer's invite.
+  - The room renders each as a preview card: the page in an iframe with
+    scripts off (`sandbox=""`) and no focus (`inert`), the document
+    clipped and rendered by the room's own Markdown renderer. A page's
+    scripts run only in the viewer, which a reader opens: in the feed
+    they ran unasked for everyone who scrolled past, and a page could
+    pull the keyboard from the composer and read what was typed. The
+    cards carry no links or buttons; tapping one
     opens the content full screen in the `#viewer` overlay, whose back
     chevron, or the browser's back button through the history entry that
     opening pushes, restores the chat. Download lives in the viewer's
     header, for documents. Images use the same viewer: an attached image
     renders inline with no wrapping link, and a tap opens it full screen.
+  - **The Markdown renderer** (`features/feed/markdown.ts`) runs on
+    other people's text in every open page, so its work is bounded
+    whatever the text: the line tests are linear (`mdlines.ts`, which
+    says what the old expressions cost), quotes and lists nest
+    `MD_MAX_DEPTH` deep and the rest is shown as written, a run over
+    `MD_INLINE_MAX` gets no inline formatting, and a render that passes
+    `MD_BUDGET_MS` shows the rest as plain text. `tests/unit/mdlines.test.mjs`
+    holds the old expressions and checks the new tests against them.
   - The composer's page and document button attaches `.html` and `.md`
     files this way; its separate paperclip sends any file through the
     upload engine (kind `file`, a download; `media.md`).

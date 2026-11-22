@@ -9,7 +9,7 @@ import { GameCardBlock } from "../games/shared/gamecard";
 import { useLatest } from "../../lib/useLatest";
 
 // Message media: YouTube link cards under the text, then image, video,
-// audio, the HTML page card (inert sandboxed preview), the Markdown
+// audio, the HTML page card (a preview with scripts off), the Markdown
 // document card (rendered preview) and the file card (a general file of any type: tapping it
 // downloads, nothing is ever opened in the page). Other cards are
 // previews only — no links or buttons on them; tapping opens the
@@ -265,12 +265,19 @@ export function MediaBlocks({ m }: { m: Message }) {
             <span className="sp"></span>
             <span className="art-go">›</span>
           </div>
+          {/* The preview is a picture of the page: no scripts (the empty
+              sandbox) and no focus (inert). A posted page that ran here
+              ran in every reader's feed unasked, and could pull the
+              keyboard away from the composer to read what they typed.
+              Its scripts run in the viewer, which a reader opens. */}
           <iframe
             className="art-frame"
             src={withInvite(m.html.url, token)}
             loading="lazy"
             title={m.html.name || "Shared page"}
-            sandbox="allow-scripts"
+            sandbox=""
+            inert
+            tabIndex={-1}
           />
         </div>
       )}

@@ -100,6 +100,7 @@ function fresh(opts) {
   opts = opts || {};
   return {
     deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
+    artScript: !!opts.artScript,
     notices: opts.notices || [],
     msgs: [
       { id: 1, ts: now - D - 2 * H, from: 'Henry', text: 'Morning all. Draft plan for Lima is in the board.' },
@@ -131,6 +132,13 @@ function fresh(opts) {
       ...(opts.bsPlay ? [{ id: 13, ts: now - 20e3, from: 'Ada', kind: 'agent', text: 'Battleship match #6 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 6, type: 'battleship', status: 'running', phase: 'play', turn: 13, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 6, hits: 2, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 5 }] } }] : []),
       ...(opts.bsSetup ? [{ id: 14, ts: now - 15e3, from: 'Ada', kind: 'agent', text: 'Battleship match #8 - Anthony (orange) vs Ada (cyan). Hidden fleets, one shot per turn. Tap the card for the arena.', game: { id: 8, type: 'battleship', status: 'running', phase: 'setup', turn: 0, turn_of: null, winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: false, shots: 0, hits: 0, sunk: 0, afloat: 5 }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 0, hits: 0, sunk: 0, afloat: 5 }] } }] : []),
       ...(opts.bsFfa ? [{ id: 15, ts: now - 10e3, from: 'Ada', kind: 'agent', text: 'Battleship free-for-all #9 - Anthony (orange), Ada (cyan), Henry (pink), Hank (lime). Every captain for themselves - last fleet floating wins. Tap the card for the arena.', game: { id: 9, type: 'battleship', status: 'running', phase: 'play', turn: 31, turn_of: 'Anthony', winner: null, players: [{ name: 'Anthony', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 9, hits: 4, sunk: 1, afloat: 5, eliminated: false }, { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 8, hits: 3, sunk: 0, afloat: 5, eliminated: false }, { name: 'Henry', color: 'pink', hex: '#f472b6', accepted: true, placed: true, shots: 8, hits: 2, sunk: 0, afloat: 4, eliminated: false }, { name: 'Hank', color: 'lime', hex: '#a3e635', accepted: true, placed: true, shots: 6, hits: 1, sunk: 0, afloat: 0, eliminated: true }] } }] : []),
+      // text that used to freeze or crash every open page of the room (mdlines.ts)
+      ...(opts.hostileMarkdown ? [
+        { id: 31, ts: now - 95e3, from: 'Ada', kind: 'agent', text: '>'.repeat(2000) + ' deep' },
+        { id: 32, ts: now - 94e3, from: 'Ada', kind: 'agent', text: '# a' + ' '.repeat(7990) + 'b' },
+        { id: 33, ts: now - 93e3, from: 'Ada', kind: 'agent', text: Array.from({ length: 400 }, (_, k) => ' '.repeat(k * 2) + '- item ' + k).join('\n') },
+        { id: 34, ts: now - 92e3, from: 'Ada', kind: 'agent', text: '> quoted\n> > twice\n\n# Still a heading #\n\n| a | b |\n|---|:--:|\n| 1 | 2 |\n\n```js\ncode\n```\n\n---\nafter the rule, a [link](https://example.com/x).' },
+      ] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -531,7 +539,9 @@ async function setup(page, S, calls) {
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
     if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\nevent: state\ndata: ' + JSON.stringify({ type: 'state', room: 'demo', room_state: roomState(S) }) + '\n\n' });
-    if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' });
+    // with state.artScript the posted page carries a script that announces itself with a request (S.artRan counts them): it must run in the opened viewer and never in the feed's preview
+    if (p.endsWith('/__art_ran')) { S.artRan = (S.artRan || 0) + 1; return route.fulfill({ status: 204, body: '' }); }
+    if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' + (S.artScript ? '<script>new Image().src = "/api/rooms/demo/__art_ran"</script>' : '') });
     if (/\/messages\/\d+\/doc$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Probe doc\n\nRendered **body** here.' });
     if (/\/messages\/\d+\/image$/.test(p)) return route.fulfill({ status: 200, contentType: 'image/png', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/photo.png') });
     // Video and audio bodies: the media shelf's tiles fetch them; no fixture

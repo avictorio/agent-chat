@@ -1,9 +1,17 @@
 import { el } from "../../lib/index";
+import { fenceOf, headingOf, isRule, isTableSep, MD_BUDGET_MS, MD_INLINE_MAX, MD_MAX_DEPTH } from "./mdlines";
+export { plainText } from "./mdlines";
 // The markdown renderer. It builds DOM nodes — text is never parsed as
 // HTML, so a message can never inject markup — and the React side
 // appends the resulting fragment into the message's .text element.
 // Its quirks are deliberate: underscore emphasis needs word
 // boundaries, snake_case stays plain, 2 * 3 * 4 stays arithmetic.
+//
+// It renders other people's text on arrival, in every open page of the
+// room, so its work is bounded whatever the text: the line tests are
+// linear (mdlines.ts), nesting stops at MD_MAX_DEPTH, a run longer than
+// MD_INLINE_MAX gets no inline formatting, and a render that passes
+// MD_BUDGET_MS shows the rest as plain text.
 
 type Parent = HTMLElement | DocumentFragment;
 
@@ -12,9 +20,13 @@ function safeUrl(u: string): string | null {
 }
 
 const INLINE =
-  /\\([\\`*_{}[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]{1,40})/g;
+  /\\([\\`*_{}[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^[\]\n]+)\]\(([^)\s]{1,2000})(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]{1,40})/g;
 
 function inline(parent: Parent, s: string, memberSet: Set<string>): void {
+  if (s.length > MD_INLINE_MAX) {
+    parent.appendChild(document.createTextNode(s));
+    return;
+  }
   const re = new RegExp(INLINE.source, "g");
   let last = 0;
   let m: RegExpExecArray | null;
@@ -62,7 +74,6 @@ function inline(parent: Parent, s: string, memberSet: Set<string>): void {
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
-const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
 function indentOf(l: string): number {
   return l.match(/^\s*/)![0].replace(/\t/g, "    ").length;
 }
@@ -75,20 +86,45 @@ function cells(l: string): string[] {
     .map((c) => c.trim());
 }
 
+/** Lines shown as they are: one paragraph, no formatting. */
+function plainLines(root: Parent, lines: string[]): void {
+  if (!lines.length) return;
+  const p = el("p", "md-p");
+  lines.forEach((l, k) => {
+    if (k) p.appendChild(el("br"));
+    p.appendChild(document.createTextNode(l));
+  });
+  root.appendChild(p);
+}
+
 export function md(text: string, memberSet: Set<string>): DocumentFragment {
+  return blocks(text, memberSet, 0, performance.now() + MD_BUDGET_MS);
+}
+
+/** @param depth how many quotes and lists this text is inside
+ *  @param deadline when (performance.now()) to stop formatting */
+function blocks(text: string, memberSet: Set<string>, depth: number, deadline: number): DocumentFragment {
   const root = document.createDocumentFragment();
   const lines = String(text || "")
     .replace(/\r\n?/g, "\n")
     .split("\n");
+  if (depth > MD_MAX_DEPTH) {
+    plainLines(root, lines);
+    return root;
+  }
   let i = 0;
   let para: HTMLElement | null = null;
   while (i < lines.length) {
+    if (performance.now() > deadline) {
+      plainLines(root, lines.slice(i));
+      break;
+    }
     const line = lines[i]!;
-    const fence = /^\s*(`{3,}|~{3,})\s*([\w+.#-]*)\s*$/.exec(line);
+    const fence = fenceOf(line);
     if (fence) {
       const buf: string[] = [];
       i++;
-      while (i < lines.length && lines[i]!.trim().indexOf(fence[1]!) !== 0) {
+      while (i < lines.length && lines[i]!.trim().indexOf(fence) !== 0) {
         buf.push(lines[i]!);
         i++;
       }
@@ -104,16 +140,16 @@ export function md(text: string, memberSet: Set<string>): DocumentFragment {
       i++;
       continue;
     }
-    const h = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    const h = headingOf(line);
     if (h) {
-      const hn = el("div", "md-h md-h" + Math.min(h[1]!.length, 3));
-      inline(hn, h[2]!, memberSet);
+      const hn = el("div", "md-h md-h" + Math.min(h.level, 3));
+      inline(hn, h.text, memberSet);
       root.appendChild(hn);
       para = null;
       i++;
       continue;
     }
-    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
+    if (isRule(line)) {
       root.appendChild(el("hr", "md-hr"));
       para = null;
       i++;
@@ -126,7 +162,7 @@ export function md(text: string, memberSet: Set<string>): DocumentFragment {
         i++;
       }
       const bq = el("blockquote", "md-quote");
-      bq.appendChild(md(q.join("\n"), memberSet));
+      bq.appendChild(blocks(q.join("\n"), memberSet, depth + 1, deadline));
       root.appendChild(bq);
       para = null;
       continue;
@@ -134,8 +170,8 @@ export function md(text: string, memberSet: Set<string>): DocumentFragment {
     if (
       line.indexOf("|") >= 0 &&
       i + 1 < lines.length &&
-      TABLE_SEP.test(lines[i + 1]!) &&
-      lines[i + 1]!.indexOf("|") >= 0
+      lines[i + 1]!.indexOf("|") >= 0 &&
+      isTableSep(lines[i + 1]!)
     ) {
       const head = cells(line);
       const aligns = cells(lines[i + 1]!).map((c) =>
@@ -217,12 +253,12 @@ export function md(text: string, memberSet: Set<string>): DocumentFragment {
         const rest = it.slice(1);
         while (rest.length && !rest[rest.length - 1]!.trim()) rest.pop();
         if (rest.length) {
-          const cut = Math.min(
-            ...rest.filter((x) => x.trim()).map(indentOf)
-          );
+          // a loop, not Math.min(...list): a spread of a hundred thousand lines overflows the stack
+          let cut = Infinity;
+          for (const x of rest) if (x.trim()) cut = Math.min(cut, indentOf(x));
           const sub = rest.map((x) => x.replace(/\t/g, "    ").slice(cut));
           if (LIST_ITEM.test(sub[0]!) || sub.length > 1)
-            liEl.appendChild(md(sub.join("\n"), memberSet));
+            liEl.appendChild(blocks(sub.join("\n"), memberSet, depth + 1, deadline));
           else {
             liEl.appendChild(el("br"));
             inline(liEl, sub[0]!.trim(), memberSet);
@@ -243,18 +279,4 @@ export function md(text: string, memberSet: Set<string>): DocumentFragment {
     i++;
   }
   return root;
-}
-
-// Text for reading aloud: the markdown's words without its symbols.
-export function plainText(s: string): string {
-  return String(s || "")
-    .replace(/^[ \t]*(`{3,}|~{3,}).*$/gm, "")
-    .replace(/^[ \t]*\|?[ \t:|-]*-[ \t:|-]*\|?[ \t]*$/gm, "")
-    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d{1,9}[.)])\s+/gm, "")
-    .replace(/\[([^\]\n]+)\]\(([^)\s]+)[^)]*\)/g, "$1")
-    .replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g, "a link")
-    .replace(/(\*\*|__|~~|`)/g, "")
-    .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?]|$)/gm, "$1$2")
-    .replace(/^[ \t]*\|[ \t]*|[ \t]*\|[ \t]*$/gm, "")
-    .replace(/[ \t]*\|[ \t]*/g, ", ");
 }

@@ -28,7 +28,35 @@ const { settle, done, run, shot, ymd } = require('./harness');
       });
     });
   }
-  await run('artifacts', { state: { artifacts: true } }, async (page) => {
+  // Text that used to freeze or crash every open page of the room: 2,000
+  // nested quotes (the renderer called itself once per level), a heading
+  // followed by 7,990 spaces (a cubic expression), a list 400 deep.
+  await run('markdown-hostile', { state: { hostileMarkdown: true } }, async (page) => {
+    await settle(page);
+    const t0 = Date.now();
+    const out = await page.evaluate(() => {
+      const t = (id) => document.querySelector('.msg[data-id="' + id + '"] .text');
+      const nest = (root, tag) => { let d = 0, n = root.querySelector(tag); while (n) { d++; n = n.querySelector(tag); } return d; };
+      const m = t(34);
+      return {
+        quoteDepth: nest(t(31), 'blockquote'), quoteTail: t(31).textContent.slice(-8),
+        headingChars: t(32).querySelector('.md-h') ? t(32).querySelector('.md-h').textContent.length : -1,
+        listDepth: nest(t(33), 'ul'), listTail: t(33).textContent.slice(-10),
+        // an ordinary message beside them still renders as before
+        quotes: nest(m, 'blockquote'), head: m.querySelector('.md-h').textContent, cells: Array.from(m.querySelectorAll('th, td')).map(x => x.textContent + (x.style.textAlign ? '@' + x.style.textAlign : '')).join(' '),
+        pre: m.querySelector('pre code').textContent, rule: m.querySelectorAll('hr').length, link: m.querySelector('a').getAttribute('href'),
+      };
+    });
+    out.answeredMs = Date.now() - t0;
+    // past the nesting limit the rest is shown as it was written, markers and all
+    const want = { quoteDepth: 13, quoteTail: '>>> deep', headingChars: 7992, listDepth: 13, listTail: '- item 399', quotes: 2, head: 'Still a heading', cells: 'a b@center 1 2@center', pre: 'code', rule: 1, link: 'https://example.com/x' };
+    for (const k of Object.keys(want)) if (out[k] !== want[k]) throw new Error(k + ' should be ' + JSON.stringify(want[k]) + ', got ' + JSON.stringify(out[k]));
+    if (out.answeredMs > 3000) throw new Error('the page took ' + out.answeredMs + ' ms to answer');
+    await shot(page, 'markdown-hostile.png');
+    return out;
+  });
+  // (the browser reports each script it refused in the preview: that message is the point)
+  await run('artifacts', { state: { artifacts: true, artScript: true }, allowConsole: /Blocked script execution in .*\/messages\/8\/html/ }, async (page, S) => {
     const out = {};
     const fr = await page.waitForSelector('.art-card iframe.art-frame', { timeout: 10000 });
     out.frameSandbox = await fr.getAttribute('sandbox');
@@ -38,7 +66,12 @@ const { settle, done, run, shot, ymd } = require('./harness');
     out.docHead = await page.$eval('.doc-card .doc-body .md-h', e => e.textContent);
     out.docName = await page.$eval('.doc-card .art-name', e => e.textContent);
     out.docBody = await page.$eval('.doc-card .doc-body', e => e.textContent);
-    if (out.frameSandbox !== 'allow-scripts') throw new Error('iframe sandbox must be exactly allow-scripts, got: ' + out.frameSandbox);
+    // The feed's preview is a picture of the page: scripts off (an empty sandbox), no focus (inert).
+    out.frameInert = await fr.evaluate(e => e.inert === true);
+    if (out.frameSandbox !== '' || !out.frameInert) throw new Error('the preview iframe must have an empty sandbox and be inert, got sandbox=' + JSON.stringify(out.frameSandbox) + ' inert=' + out.frameInert);
+    await page.waitForTimeout(400);
+    out.ranInPreview = S.artRan || 0;
+    if (out.ranInPreview !== 0) throw new Error('the posted page\'s script ran in the feed preview (' + out.ranInPreview + ' request(s))');
     if (!/Probe doc/.test(out.docHead)) throw new Error('doc heading not rendered: ' + out.docHead);
     if (!/Rendered/.test(out.docBody)) throw new Error('doc body not rendered');
     // Cards are previews only: no Open / Expand / Download links on them.
@@ -49,6 +82,11 @@ const { settle, done, run, shot, ymd } = require('./harness');
     await page.click('.art-card');
     await page.waitForSelector('#viewer:not([hidden]) .viewer-frame', { timeout: 10000 });
     out.viewerTitle = await page.$eval('#viewerTitle', e => e.textContent);
+    // ...and in the viewer, which the reader opened, the page's script does run (so the check above can fail).
+    out.viewerSandbox = await page.$eval('#viewer .viewer-frame', e => e.getAttribute('sandbox'));
+    for (let k = 0; k < 50 && !(S.artRan > 0); k++) await page.waitForTimeout(100);
+    out.ranInViewer = S.artRan || 0;
+    if (out.viewerSandbox !== 'allow-scripts' || out.ranInViewer < 1) throw new Error('the opened page must run its script: sandbox=' + out.viewerSandbox + ' ran=' + out.ranInViewer);
     await shot(page, 'artifacts-viewer-page.png');
     await page.goBack();
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
