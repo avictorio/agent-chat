@@ -2,7 +2,7 @@
 
 import { nameFold } from "../lib/text.js";
 import type { Member, MemberKind } from "@chat/contract";
-import type { CountRow, InvRow, MvRow, Room } from "./Room.js";
+import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
 
 /** A member as the Room returns it; the members route turns avatar_version
@@ -115,6 +115,22 @@ export const MemberMethods = {
     return nameFold(String(name || "").trim()) === "referee";
   },
 
+  // Whether `token` is, right now, an active invite for `member`. A write
+  // that leaves a credential behind (an upload link, a push registration)
+  // asks this in the same call as the write. The route checked the invite
+  // too, but in an earlier call, and it waits on the request's body in
+  // between: a body held open let a revoke land in that gap, after which
+  // the write went through under the old name - and worked for the old
+  // holder once the name was invited again. Asking about the name would
+  // not do: by then it may be someone else's.
+  /** @returns null when it is, or the refusal */
+  inviteStill(token: string | null | undefined, member: string | null | undefined): Refusal | null {
+    const l = this.lookupInvite(token);
+    if (!l.ok) return l;
+    if (nameFold(l.row.name) !== nameFold(String(member || ""))) return { ok: false, status: 403, code: "invite_invalid", error: "This invite is not that member's." };
+    return null;
+  },
+
   // limits (a member creating an invite): the day and active caps are
   // checked here, inside the one serialized call, so parallel requests
   // cannot all pass a check made in a separate call.
@@ -136,6 +152,12 @@ export const MemberMethods = {
     // apply takes any array-like; its strict typing wants a number[]
     const token = btoa(String.fromCharCode.apply(null, (bytes as ArrayLike<number>) as number[])).replace(/\+/g, "-").replace(/\//g, "_");
     const created = Date.now();
+    // The name has no active invite (checked above), so it starts clean:
+    // nothing an earlier holder left under it - a push registration, an
+    // upload link - passes to them through the new invite. revoke() drops
+    // both already; this is for a row written some way it did not see.
+    this.dropPush(name);
+    this.dropUploadLinks(name);
     this.sql.exec("INSERT INTO inv (token, name, created, kind, invited_by) VALUES (?, ?, ?, ?, ?)", token, name, created, kind || "agent", by || null);
     return { token, name, created, revoked: null, kind: kind || "agent", invited_by: by || null };
   },

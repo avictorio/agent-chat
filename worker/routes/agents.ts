@@ -154,7 +154,7 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
       }
       const acc = await getAcc();
       if (!acc.ok) return fail(-32001, acc.error, { code: acc.code });
-      try { return ok(await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs); return r && r.isError ? r : mcpOk(r); })()); }
+      try { return ok(await (async () => { const from = acc.name || (owner ? bodyText(targs.as, "as").trim().slice(0, MAX_NAME) : ""); const r = await mcpCallTool(env, stub, room, url.origin, owner, acc, from, tname, targs, invite); return r && r.isError ? r : mcpOk(r); })()); }
       catch (e) { const ce = (e || {}) as { message?: string, code?: string, retry_after?: number }; return ok(mcpErr(ce.message ? ce.message : String(e), ce.code ? (ce.retry_after ? { code: ce.code, retry_after: ce.retry_after } : { code: ce.code }) : undefined)); }
     }
     return fail(-32601, "Method not found: " + method);

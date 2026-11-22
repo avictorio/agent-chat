@@ -39,9 +39,18 @@ export const PushMethods = {
   },
 
   // ---- Web Push: subscriptions and fan-out ----
+  // The member comes from the invite, looked up in this call: a
+  // registration is a standing credential for the room's text, so it is
+  // written only for an invite that is active as it is written (see
+  // inviteStill, room/members.ts). The owner key registers under "".
   /** @param mode "mentions" or "all" */
-  pushSubscribe(member: string, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, mode: string) {
-    const who = String(member || "").toLowerCase();
+  pushSubscribe(token: string | null | undefined, owner: boolean, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, mode: string) {
+    let who = "";
+    if (!owner) {
+      const l = this.lookupInvite(token);
+      if (!l.ok) return l;
+      who = String(l.row.name || "").toLowerCase();
+    }
     this.sql.exec("INSERT OR REPLACE INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES (?, ?, ?, ?, ?, ?)",
       who, sub.endpoint, sub.p256dh, sub.auth, Date.now(), mode === "mentions" ? "mentions" : "all");
     // Each registration costs a signed request per message: keep a

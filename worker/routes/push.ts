@@ -1,6 +1,6 @@
 // Web Push: the site's public key and members' subscriptions.
 
-import { deny, json, readBody, bodyText, bodyObject } from "../lib/http.js";
+import { deny, json, readBody, bodyText, bodyObject, refused } from "../lib/http.js";
 import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
 import type { RouteContext } from "../index.js";
@@ -46,7 +46,8 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (aLen < 16) return json({ error: "subscription.keys.auth looks too short" }, 400);
     // a missing body has no endpoint, refused above
     const mode = body && body.mode === "mentions" ? "mentions" : "all";
-    await stub.pushSubscribe(acc.name || "", { endpoint: endpoint, p256dh: p256dh, auth: auth }, mode);
+    const done = await stub.pushSubscribe(invite, !!owner, { endpoint: endpoint, p256dh: p256dh, auth: auth }, mode);
+    if (refused(done)) return deny(done);
     return json({ room, subscribed: true, mode: mode });
   }
   const endpoint = bodyText(body?.endpoint, "endpoint");

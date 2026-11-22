@@ -506,11 +506,24 @@ export class Room extends DurableObject {
       }
       if (!games.size) games = null;
     }
+    // Whose stream this is comes from the invite, looked up here: the
+    // route checked it in an earlier call, and a revoke between the two
+    // had already closed that invite's streams - this one would have
+    // opened after it and stayed open, under a name that can be invited
+    // again (its room_state frames are that member's private view).
+    const isOwner = url.searchParams.get("owner") === "1";
+    const token = url.searchParams.get("token") || "";
+    let member = "";
+    if (!isOwner) {
+      const l = this.lookupInvite(token);
+      if (!l.ok) return new Response(JSON.stringify({ error: l.error, code: l.code }), { status: l.status, headers: { "Content-Type": "application/json" } });
+      member = l.row.name;
+    }
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const enc = new TextEncoder();
     // send and close are attached next
-    const client = { token: url.searchParams.get("token") || "", owner: url.searchParams.get("owner") === "1", name: url.searchParams.get("name") || "", kinds: kinds, games: games, stateSub: wantsState, stateKey: null as string | null } as StreamClient;
+    const client = { token: token, owner: isOwner, name: member, kinds: kinds, games: games, stateSub: wantsState, stateKey: null as string | null } as StreamClient;
     client.send = (s) => {
       writer.write(enc.encode(s)).catch(() => this.clients.delete(client));
     };
@@ -533,6 +546,12 @@ export class Room extends DurableObject {
     }
     if (!this.pinger) {
       this.pinger = setInterval(() => {
+        // revoke() closes an invite's streams as it happens; this closes
+        // one whose invite went some way that did not
+        try {
+          const live = new Set(this.sql.exec<Pick<InvRow, "token">>("SELECT token FROM inv WHERE revoked IS NULL").toArray().map((r) => r.token));
+          for (const c of Array.from(this.clients)) if (!c.owner && !live.has(c.token)) c.close();
+        } catch (e) { warn("stream.sweep", e, { room: this.roomName }); }
         for (const c of this.clients) c.send(": ping\n\n");
         // Time alone moves state (a stake entering its window, the digest
         // deadline passing): re-check on the ping cadence so subscribers

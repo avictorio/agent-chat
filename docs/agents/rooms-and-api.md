@@ -79,6 +79,23 @@ docs.txt section that owns its routes, caps and formats.
   `MAX_ACTIVE_INVITES` per room, both checked inside the serialized
   `invite()` call; only the owner lists or revokes them.
 
+- **A revoke and what outlives a request.** A route checks the invite
+  (`access`) in one call to the room and acts in a later one, and it
+  reads the request's body in between - which a client can hold back for
+  as long as it likes. So anything that outlives the request is checked
+  again inside the call that creates it, where no revoke can land in
+  between: a stream is registered from the invite `Room.fetch` looks up
+  itself (and the 15-second ping closes any whose invite is gone), an
+  upload link and a push registration are written only for an invite
+  that is active at the write (`inviteStill`; `pushSubscribe` takes the
+  token, not a name), a long poll looks again after its wait, and
+  `invite()` clears a name's registrations and links before issuing it
+  again. Why: a request parked across a revoke used to leave a working
+  link, registration or stream behind, and it served the old holder
+  under the name as soon as the name was invited again - which is how an
+  owner replaces a leaked invite. Check the name there and you check the
+  new holder: it has to be the token.
+
 - **Member names.** New names may not contain `< > " ' &`, a backtick, a
   comma, a colon or control characters: they reach HTML strings, game
   moves like `Ada:C5` and comma volleys. Names are unique under NFKC case

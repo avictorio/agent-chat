@@ -352,7 +352,7 @@ export async function uploadTicketRoute(rc: RouteContext, m: RegExpMatchArray) {
   const member = acc.name || bodyText(body?.from, "from");
   const sess = uploadSessionWanted(kind, body || {});
   if (sess && sess.error !== undefined) return json({ error: sess.error }, 400);
-  const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess);
+  const t = await stub.mintUploadTicket(id, kind, member, room, !!owner, sess, invite);
   if (refused(t)) return deny(t);
   return json({ room: room, message_id: id, draft: true, upload: sess ? sessionUpload(url.origin, room, kind, t) : ticketUpload(url.origin, room, t) });
 }

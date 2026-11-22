@@ -16,6 +16,7 @@
 // count in KV and one of them is room-wide (30 a day), so shared state would
 // fail a later same-day run's create checks as 429s. Room names, emails and
 // client IPs stay unique per run as well.
+const http = require('http');
 const { start, OWNER } = require('./server.js');
 
 let BASE = '';
@@ -44,6 +45,24 @@ async function req(method, p, opts) {
   let json = null;
   try { json = JSON.parse(text); } catch {}
   return { status: r.status, json, text, headers: r.headers };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A POST whose headers go out now and whose body is sent later: the Worker
+// has checked the invite and is waiting for the body. send() finishes it.
+function parkedPost(p, token, bodyText) {
+  const u = new URL(BASE + p);
+  let settle;
+  const done = new Promise((r) => { settle = r; });
+  const rq = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST', headers: { 'X-Invite-Token': token, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyText) } }, (res) => {
+    let t = '';
+    res.on('data', (c) => { t += c; });
+    res.on('end', () => { let j = null; try { j = JSON.parse(t); } catch {} settle({ status: res.statusCode, json: j, text: t }); });
+  });
+  rq.on('error', (e) => settle({ status: 0, json: null, text: String(e) }));
+  rq.flushHeaders();
+  return { send: () => { rq.end(bodyText); return done; } };
 }
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -2180,6 +2199,92 @@ function mp4() {
       check('the old resumable link stays dead too: nothing uploads or publishes', part.status === 404 && fin.status === 404, part.status + ' ' + fin.status);
     }
     await req('DELETE', R2 + '/invites/' + invRev2.json.token, { owner: true });
+
+    // A request that was past its invite check when the invite was revoked
+    // leaves nothing behind. Its body is held back; the owner revokes the
+    // invite and gives the name to someone else; only then does the body
+    // arrive. (The invite is unopened until the parked request opens it,
+    // which is how the test knows the check has run.)
+    const parkAcross = async (name, path, bodyText) => {
+      const first = (await req('POST', R2 + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
+      const before = path(first);
+      const held = parkedPost(before.url, first, bodyText);
+      let opened = false;
+      for (let i = 0; i < 100 && !opened; i++) {
+        await sleep(50);
+        const list = await req('GET', R2 + '/members', { owner: true });
+        opened = (list.json.members || []).some((m) => m.name === name && m.status === 'active');
+      }
+      await req('DELETE', R2 + '/invites/' + first, { owner: true });
+      const second = (await req('POST', R2 + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
+      return { opened: opened, answer: await held.send(), second: second };
+    };
+    // the draft is written with the owner key, so the invite stays unopened
+    const draftFor = async (name) => (await req('POST', R2 + '/messages', { owner: true, json: { from: name, text: 'a draft for ' + name, draft: true } })).json.id;
+    const parkDraft = await draftFor('ParkLink');
+    let pk = await parkAcross('ParkLink', () => ({ url: R2 + '/messages/' + parkDraft + '/upload-ticket' }), JSON.stringify({ kind: 'image' }));
+    check('a link asked for across a revoke: the request had passed its invite check', pk.opened);
+    check('...and is refused when its body arrives: no link for the old holder', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked' && !pk.answer.json.upload, pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
+    const parkDraft2 = await draftFor('ParkSess');
+    pk = await parkAcross('ParkSess', () => ({ url: R2 + '/messages/' + parkDraft2 + '/upload-ticket' }), JSON.stringify({ kind: 'file', name: 'held.bin', size: 5 }));
+    check('the same for a resumable link', pk.opened && pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
+    const parkEp = 'https://fcm.googleapis.com/fcm/send/parked-' + SUF;
+    const parkSub = { subscription: { endpoint: parkEp, keys: { p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url'), auth: Buffer.alloc(16, 9).toString('base64url') } }, mode: 'all' };
+    pk = await parkAcross('ParkPush', () => ({ url: R2 + '/push/subscribe' }), JSON.stringify(parkSub));
+    check('a push registration asked for across a revoke is refused', pk.opened && pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    r = await req('GET', R2 + '/push/status?endpoint=' + encodeURIComponent(parkEp), { token: pk.second });
+    check('...so the name\'s next holder starts with no registrations', r.status === 200 && r.json.count === 0 && r.json.registered === false, r.text.slice(0, 160));
+    r = await req('POST', R2 + '/push/subscribe', { token: pk.second, json: parkSub });
+    check('a member in good standing still subscribes', r.status === 200 && r.json.subscribed === true, r.status + ' ' + r.text.slice(0, 120));
+    await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
+
+    // Streams opened while their invite is being revoked: every one either
+    // is refused or is closed; none goes on receiving the room.
+    const raceTok = (await req('POST', R2 + '/invites', { owner: true, json: { name: 'RaceStream', kind: 'agent' } })).json.token;
+    await req('GET', R2 + '/me', { token: raceTok });
+    const raced = [];
+    const openRaced = async () => {
+      const ac = new AbortController();
+      const rec = { status: 0, text: '', ended: false, stop: () => ac.abort() };
+      raced.push(rec);
+      try {
+        const res = await fetch(BASE + R2 + '/stream?after=latest', { headers: { 'X-Invite-Token': raceTok }, signal: ac.signal });
+        rec.status = res.status;
+        if (res.status !== 200) { rec.ended = true; await res.text(); return; }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        for (;;) { const c = await reader.read(); if (c.done) break; rec.text += dec.decode(c.value, { stream: true }); }
+        rec.ended = true;
+      } catch { rec.ended = true; }
+    };
+    const racing = [];
+    for (let i = 0; i < 12; i++) racing.push(openRaced());
+    const revoking = req('DELETE', R2 + '/invites/' + raceTok, { owner: true });
+    for (let i = 0; i < 12; i++) racing.push(openRaced());
+    await revoking;
+    const afterRevoke = 'posted after the revoke ' + SUF;
+    await sleep(300);
+    await req('POST', R2 + '/messages', { owner: true, json: { from: 'Owner', text: afterRevoke } });
+    await sleep(700);
+    const stillOpen = raced.filter((one) => !one.ended).length;
+    const leaked = raced.filter((one) => one.text.includes(afterRevoke)).length;
+    for (const one of raced) one.stop();
+    await Promise.all(racing);
+    check('streams opened around a revoke: all refused or closed', stillOpen === 0, stillOpen + ' of ' + raced.length + ' still open; statuses ' + raced.map((one) => one.status).join(','));
+    check('...and none receives what is posted afterwards', leaked === 0, leaked + ' leaked');
+
+    // A long poll waiting when its invite is revoked answers with the refusal, not the next message.
+    const pollTok = (await req('POST', R2 + '/invites', { owner: true, json: { name: 'RacePoll', kind: 'agent' } })).json.token;
+    const lastNow = (await req('GET', R2 + '/messages?limit=1', { token: pollTok })).json.last_id;
+    const polling = req('GET', R2 + '/messages?after=' + lastNow + '&wait=10', { token: pollTok });
+    await sleep(400);
+    await req('DELETE', R2 + '/invites/' + pollTok, { owner: true });
+    await req('POST', R2 + '/messages', { owner: true, json: { from: 'Owner', text: 'after the poller left ' + SUF } });
+    r = await polling;
+    check('a long poll across a revoke -> 403, without the later message', r.status === 403 && r.json.code === 'invite_revoked' && !r.text.includes('after the poller left'), r.status + ' ' + r.text.slice(0, 160));
+
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });

@@ -20,5 +20,5 @@ export async function streamRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   const ev = (url.searchParams.get("events") || "").trim();
   const gm = (url.searchParams.get("game") || "").trim();
-  return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + "&name=" + encodeURIComponent(acc.name || "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : ""));
+  return stub.fetch("https://room/stream?room=" + encodeURIComponent(room) + "&after=" + after + "&token=" + encodeURIComponent(invite) + (owner ? "&owner=1" : "") + (ev ? "&events=" + encodeURIComponent(ev) : "") + (gm ? "&game=" + encodeURIComponent(gm) : ""));
 }

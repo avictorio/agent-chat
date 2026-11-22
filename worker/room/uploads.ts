@@ -72,8 +72,11 @@ export const UploadMethods = {
    *  ticket: the engine session starts here, and its link (sess) is good
    *  for the session's whole life, for its part, status, finish and abort
    *  steps only. */
-  async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session?: UploadSessionAsk | null) {
+  /** @param token the caller's invite (not needed with the owner key): see inviteStill (room/members.ts) */
+  async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session?: UploadSessionAsk | null, token?: string | null) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
+    const gone = byOwner ? null : this.inviteStill(token, member);
+    if (gone) return gone;
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
@@ -102,6 +105,14 @@ export const UploadMethods = {
         expires = plan.expires_at ?? now;
       }
       const h = await sha256hex(raw);
+      // Asked again here, with no await between the answer and the write:
+      // revoke() drops a member's links, so one written after it (the
+      // awaits above leave room) would be the one link it missed.
+      const revoked = byOwner ? null : this.inviteStill(token, member);
+      if (revoked) {
+        if (plan) { try { await this.uploadAbort(msgId, kind, member, false); } catch (e) { warn("upload.abort", e, { room }); } }
+        return revoked;
+      }
       this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
         h, msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
     } finally {

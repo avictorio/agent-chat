@@ -125,7 +125,8 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     // a missing limit or wait parses as NaN, so the default applies
     const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || MESSAGES_PAGE, 1, 500);
     const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, 25);
-    const r = await stub.list(after, limit, wait, acc.name || "", room);
+    const r = await stub.list(after, limit, wait, acc.name || "", room, owner ? null : invite);
+    if ("ok" in r) return deny(r);
     const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }

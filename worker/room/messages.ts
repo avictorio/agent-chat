@@ -7,7 +7,7 @@ import { sseFrame } from "../lib/http.js";
 import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
-import type { CfgRow, InvRow, MdRow, MsgRow, Room, RxRow, StreamClient } from "./Room.js";
+import type { CfgRow, InvRow, MdRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
 
 /** A message as the API serves it (withKinds): the contract's Message,
@@ -412,8 +412,9 @@ export const MessageMethods = {
   /**
    * @param after the cursor, or null for the latest
    * @param wait seconds to hold an empty forward read open
+   * @param token the caller's invite, when that is how they came in: looked at again after a wait
    */
-  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string): Promise<Pick<MessagesResponse, "messages" | "last_id" | "room_state">> {
+  async list(after: number | null, limit: number, wait: number, who: string | null | undefined, room: string, token?: string | null): Promise<Pick<MessagesResponse, "messages" | "last_id" | "room_state"> | Refusal> {
     this.roomName = room;
     let rows = this.read(after, limit);
     if (rows.length || !wait || after === null) return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
@@ -424,6 +425,8 @@ export const MessageMethods = {
       this.waiters.add(done);
     }) as Promise<void>);
     if (!this.ready) return { messages: [], last_id: 0, room_state: { v: 1 } };
+    // the wait can outlast the invite: someone removed meanwhile does not get what was posted since
+    if (token) { const l = this.lookupInvite(token); if (!l.ok) return l; }
     rows = this.read(after, limit);
     return { messages: rows, last_id: this.lastId(), room_state: this.roomState(who, room) };
   },

@@ -436,7 +436,7 @@ function needFrom(from: string | null | undefined): asserts from is string {
  * @param name the tool
  * @param args the tool's arguments, as the client sent them
  */
-export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined) {
+export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: string, origin: string, owner: boolean, acc: { kind?: string | null, invited_by?: string | null, invited?: number, joined?: number }, from: string | null | undefined, name: string, args: Body | null | undefined, token?: string | null) {
   const A: Body = args || {};
   switch (name) {
     case "whoami": {
@@ -554,12 +554,12 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (sess && sess.error !== undefined) throw new Error(sess.error);
       const msg = await stub.post(from, bodyText(A.text, "text"), room, owner, null, null, null, true, !!A.publish_on_complete, null, null);
       if (sess) {
-        const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess);
+        const st = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, sess, token);
         if (refused(st)) { await stub.deleteMessage(msg.id, from, owner); throw st.code ? codedError(st.error, st.code) : new Error(st.error); }
         const sout = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: sessionUpload(origin, room, kind, st) };
         return sout;
       }
-      const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner);
+      const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, null, token);
       if (refused(t)) throw t.code ? codedError(t.error, t.code) : new Error(t.error);
       const out: { room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } } = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       out.upload.bigger = "For a bigger file (up to " + UP_MAX_TEXT + ") or a general file, call begin_upload with size (and name, for a file).";
