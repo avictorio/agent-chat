@@ -61,7 +61,12 @@ docs.txt section that owns its routes, caps and formats.
   `POST /api/create-room`. Anything else aimed at an unknown name gets a
   404 and writes no storage. The owner can delete a room once it has no
   active invites; rooms in `PROTECTED_ROOMS` (`worker/limits.ts`) cannot
-  be deleted through the API.
+  be deleted through the API. Deleting takes one
+  storage call per media object, and other calls run between them:
+  while it lasts the room is neither there nor free (`Room.destroying`),
+  so a create for the same name answers 409 until the delete is done. A
+  public create that landed in the middle used to get an invite into the
+  old room's messages.
 
 - **Members.** API: docs.txt MEMBERS. `GET /members` gives
   names, statuses, `joined` and `last_seen`, and every member's

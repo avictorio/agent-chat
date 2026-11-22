@@ -257,6 +257,10 @@ export class Room extends DurableObject {
   declare roomName?: string;
   /** test hook: how long each R2 call waits first (withR2Delay) */
   declare testR2DelayMs?: number;
+  /** True while destroy() is deleting the room's storage. */
+  destroying = false;
+  /** Upload links being minted right now, by folded member name (room/uploads.ts, mintUploadTicket). */
+  utMinting: Map<string, number> = new Map();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -288,7 +292,7 @@ export class Room extends DurableObject {
   }
 
   create() {
-    if (this.ready) return false;
+    if (this.ready || this.destroying) return false;
     this.ensureSchema();
     this.ready = true;
     return true;
@@ -301,7 +305,8 @@ export class Room extends DurableObject {
   // (with a separate check and create, a loser could destroy the winner's
   // room).
   createGenesis(name: string) {
-    if (this.ready) return { existed: true };
+    // a room that is being deleted is not free yet: see destroy()
+    if (this.ready || this.destroying) return { existed: true };
     this.ensureSchema();
     this.ready = true;
     const inv = this.invite(name, "human", null);
@@ -310,11 +315,26 @@ export class Room extends DurableObject {
   }
 
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
-  async destroy(room: string) {
+  async destroy(room: string): Promise<{ deleted?: boolean, error?: string, status?: number }> {
     if (!this.ready) return { error: "No room with that name", status: 404 };
     if (this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
-    await this.activityLog(room, "room deleted with the owner key");
+    if (this.destroying) return { error: "This room is being deleted", status: 409 };
+    // Deleting takes many awaits (one storage call per media object) and
+    // other calls run in between them. Until the last one is done the
+    // room is neither there (ready) nor free (destroying): a public
+    // create that landed in the middle used to get a genesis invite into
+    // the old room's messages, and then lost its tables to deleteAll.
+    this.destroying = true;
     this.ready = false;
+    try {
+      return await this.destroyNow(room);
+    } finally {
+      this.destroying = false;
+    }
+  }
+
+  private async destroyNow(room: string) {
+    await this.activityLog(room, "room deleted with the owner key");
     for (const c of Array.from(this.clients)) c.close();
     if (this.pinger) { clearInterval(this.pinger); this.pinger = null; }
     const ws = this.waiters;

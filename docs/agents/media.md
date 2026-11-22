@@ -209,12 +209,19 @@ credential, and the route reads no other.
   is stored (table `ut`), single-use and short-lived (`TICKET_TTL_MS`):
   `PUT /api/uploads/<room>/<ticket>`. Redeeming runs the same sniff, size
   cap and R2 write as the token paths. A 503, 415 or 413 does not spend
-  the ticket; used or expired answers 410, unknown 404, a revoked member
-  403. Each PUT counts as a try (`TICKET_MAX_TRIES`, then 410), a member
-  holds at most `TICKET_MAX_PER_MEMBER` open tickets (429), and the
-  ticket is claimed before the R2 write, so two parallel PUTs cannot both
-  land. A ticket minted with the owner key carries `ut.owner` and skips
-  the member check.
+  the ticket; used or expired answers 410, unknown 404. Each PUT counts
+  as a try (`TICKET_MAX_TRIES`, then 410), a member holds at most
+  `TICKET_MAX_PER_MEMBER` open tickets (429; links being minted at that
+  moment count, `utMinting`, or a burst of calls would all pass), and
+  the ticket is claimed before the R2 write, so two parallel PUTs cannot
+  both land. A ticket minted with the owner key carries `ut.owner` and
+  skips the member check.
+- **Tickets and links die with the member's last invite**
+  (`dropUploadLinks`, called by `revoke` and `revokeAll`): from then on
+  they answer 404. A link is a credential by itself and is checked
+  against the member's name, so one left behind used to work again, for
+  whoever had kept it, as soon as the name was invited anew (which is
+  how an owner replaces a leaked invite).
 - **A resumable link** comes from the same mint given a `size` (always
   for kind `file`, and for an image, clip or video past its single-shot
   cap): it starts an upload-engine session and returns

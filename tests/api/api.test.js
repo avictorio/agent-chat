@@ -439,6 +439,32 @@ function mp4() {
     await req('DELETE', '/api/rooms/apitest-ok-' + SUF + '/invites', { owner: true });
     await req('DELETE', '/api/rooms/apitest-ok-' + SUF + '?confirm=apitest-ok-' + SUF, { owner: true });
 
+    // A room that is being deleted is not free yet. Deleting takes one
+    // storage call per media object; a public create that landed in
+    // between used to get a genesis invite into the old room's messages,
+    // and the name then answered 500.
+    {
+      const race = 'apitest-race-' + SUF, RR = '/api/rooms/' + race;
+      await req('POST', RR, { owner: true });
+      const tmp = await req('POST', RR + '/invites', { owner: true, json: { name: 'Old', kind: 'human' } });
+      await req('POST', RR + '/messages', { token: tmp.json.token, json: { text: 'old room secret', image: PNG.toString('base64') } });
+      await req('DELETE', RR + '/invites', { owner: true });
+      await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: race, ms: 1200 } });
+      const deleting = req('DELETE', RR + '?confirm=' + race, { owner: true });
+      await new Promise((res) => setTimeout(res, 400));
+      const mid = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '5' }, json: { room: race, name: 'Newcomer', email: 'sent-race-' + SUF + '@example.com' } });
+      check('create-room while the room is being deleted -> 409, nothing made', mid.status === 409, mid.status + ' ' + mid.text.slice(0, 120));
+      const done = await deleting;
+      check('the delete itself completes', done.status === 200 && done.json.deleted === true, done.status + ' ' + done.text.slice(0, 120));
+      r = await req('GET', RR + '/members', { owner: true });
+      check('afterwards the name is simply free (404, not 500)', r.status === 404, r.status + ' ' + r.text.slice(0, 120));
+      r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '6' }, json: { room: race, name: 'Newcomer', email: 'sent-race-' + SUF + '@example.com' } });
+      const fresh = await req('GET', RR + '/messages', { owner: true });
+      check('and can be created again, empty', r.status === 201 && fresh.status === 200 && (fresh.json.messages || []).length === 0, r.status + ' ' + fresh.status + ' ' + fresh.text.slice(0, 120));
+      await req('DELETE', RR + '/invites', { owner: true });
+      await req('DELETE', RR + '?confirm=' + race, { owner: true });
+    }
+
     // invite_only invariants.
     r = await req('GET', R + '/members', { owner: true });
     check('members say invite_only', r.json && r.json.invite_only === true, JSON.stringify(r.json && r.json.invite_only));
@@ -2099,9 +2125,26 @@ function mp4() {
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', text: 'revoked member upload' } }, { token: TRev });
     const tk6 = r.json && r.json.result && r.json.result.structuredContent;
     check('second member can mint a ticket', !!tk6 && !!tk6.upload, JSON.stringify(r.json).slice(0, 160));
+    // ...and stays dead when the name is invited again: a link is a
+    // credential by itself, checked against the name, so one that outlived
+    // the revoke worked for whoever had kept it once the name came back.
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'file', name: 'kept.bin', size: 5, text: 'kept link', publish_on_complete: true } }, { token: TRev });
+    const tk6s = r.json && r.json.result && r.json.result.structuredContent;
+    check('the member can open a resumable link too', !!tk6s && !!tk6s.upload && !!tk6s.upload.finish, JSON.stringify(r.json).slice(0, 200));
+    const linkStep = (u, method, body) => fetch(BASE + new URL(u).pathname + new URL(u).search, { method, body });
     await req('DELETE', R2 + '/invites/' + TRev, { owner: true });
     r = await putTicket(tk6.upload.url, PNG);
-    check('ticket of a revoked member -> 403', r.status === 403, r.status);
+    check('ticket of a revoked member -> 404, as if it never was', r.status === 404, r.status);
+    const invRev2 = await req('POST', R2 + '/invites', { owner: true, json: { name: 'TickRev', kind: 'agent' } });
+    check('the name can be invited again', invRev2.status === 201 && invRev2.json.token !== TRev, invRev2.status);
+    r = await putTicket(tk6.upload.url, PNG);
+    check('the old ticket stays dead after the name is re-invited', r.status === 404, r.status);
+    if (tk6s && tk6s.upload) {
+      const part = await linkStep(tk6s.upload.part.url.replace('{n}', '1'), 'PUT', Buffer.from('hello'));
+      const fin = await linkStep(tk6s.upload.finish.url, 'POST');
+      check('the old resumable link stays dead too: nothing uploads or publishes', part.status === 404 && fin.status === 404, part.status + ' ' + fin.status);
+    }
+    await req('DELETE', R2 + '/invites/' + invRev2.json.token, { owner: true });
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image' } }, { token: TP });

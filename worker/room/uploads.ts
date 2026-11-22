@@ -38,7 +38,7 @@ import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
-import { stripControlChars } from "../lib/text.js";
+import { nameFold, stripControlChars } from "../lib/text.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
@@ -57,6 +57,17 @@ export const UploadMethods = {
   // ticket in the URL is the whole credential, which is what lets an agent
   // whose invite token lives in its gateway (never in its sandbox) upload.
   // The TTL comes from ticketTtlMs (room/test-hooks.ts).
+  // The upload links a member opened (all members' with null) stop
+  // working. The owner's own stay: they are checked against no member.
+  /** @param name the member, or null for everyone */
+  dropUploadLinks(name: string | null) {
+    if (name === null) { this.sql.exec("DELETE FROM ut WHERE owner IS NULL"); return; }
+    const fold = nameFold(name);
+    for (const r of this.sql.exec<Pick<UtRow, "member">>("SELECT DISTINCT member FROM ut WHERE owner IS NULL").toArray()) {
+      if (nameFold(r.member) === fold) this.sql.exec("DELETE FROM ut WHERE member = ? AND owner IS NULL", r.member);
+    }
+  },
+
   /** @param session opens a resumable upload instead of a single-shot
    *  ticket: the engine session starts here, and its link (sess) is good
    *  for the session's whole life, for its part, status, finish and abort
@@ -71,19 +82,32 @@ export const UploadMethods = {
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
     // A resumable link counts while its upload is in flight.
     const open = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
-    if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    // Links being minted right now count too: the row is written only
+    // after the awaits below, so without this a burst of calls arriving
+    // together would each see the same count and all pass the cap.
+    const who = nameFold(String(member || ""));
+    const minting = this.utMinting.get(who) || 0;
+    if (((open && open.n) || 0) + minting >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    this.utMinting.set(who, minting + 1);
     let plan: UpStart | null = null;
-    if (session) {
-      plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);
-      // a refused start always says why (uploadStart); the fallback only names the shape
-      if (plan.status !== 200) return { ...plan, error: plan.error || "The upload could not start" };
-    }
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     const maxBytes = session ? UP_MAX : kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : VIDEO_MAX;
-    // a session set plan above (a started plan always has its expiry)
-    const expires = session ? (plan as UpStart).expires_at ?? now : now + this.ticketTtlMs();
-    this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
-      await sha256hex(raw), msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
+    let expires = now + this.ticketTtlMs();
+    try {
+      if (session) {
+        plan = await this.uploadStart(msgId, kind, member, false, room, session.size, session.type, session.name, null, session.direct);
+        // a refused start always says why (uploadStart); the fallback only names the shape
+        if (plan.status !== 200) return { ...plan, error: plan.error || "The upload could not start" };
+        // a started plan always has its expiry
+        expires = plan.expires_at ?? now;
+      }
+      const h = await sha256hex(raw);
+      this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+        h, msgId, kind, String(member), now, expires, maxBytes, byOwner ? 1 : null, session ? 1 : null);
+    } finally {
+      const left = (this.utMinting.get(who) || 1) - 1;
+      if (left > 0) this.utMinting.set(who, left); else this.utMinting.delete(who);
+    }
     const out: { status: number, ticket: string, expires: number, max_bytes: number, size?: number, part_size?: number, parts?: number, direct?: boolean } = { status: 200, ticket: raw, expires: expires, max_bytes: maxBytes };
     // plan is set only for a session
     if (plan) { out.size = Math.floor(Number((session as UploadSessionAsk).size)); out.part_size = plan.part_size; out.parts = plan.parts; out.direct = !!plan.direct; }

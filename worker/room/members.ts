@@ -146,9 +146,15 @@ export const MemberMethods = {
     this.sql.exec("UPDATE inv SET revoked = ? WHERE token = ?", Date.now(), token);
     for (const c of this.clients) if (c.token === token) c.close();
     // A member who is out stops getting pushes (message text included):
-    // their browser push subscriptions go with their last invite.
+    // their browser push subscriptions go with their last invite. So do
+    // the upload links they opened: a link is a credential by itself, and
+    // it is checked against the name, so one left behind worked again the
+    // moment the name was invited anew - for whoever had kept it.
     const fold = nameFold(row.name);
-    if (!this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
+    if (!this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) {
+      this.dropPush(row.name);
+      this.dropUploadLinks(row.name);
+    }
     this.emitState();
     return true;
   },
@@ -161,6 +167,7 @@ export const MemberMethods = {
     const avatarKeys = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
+    this.dropUploadLinks(null);
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
     if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     return true;
