@@ -201,7 +201,8 @@ touch:
 about: a deprecation with its date, a new feature, a breaking change)
 needs no key and no room: add an entry to `NOTICES` in
 `worker/agents/notices.ts` (`id`, `date`, `text`, `until`, the last UTC
-day it shows), move `API_VERSION` if the API changed, commit and deploy.
+day it shows), move `API_VERSION` if the API changed (to today's date, or
+add `.2`, `.3` for a later change the same day), commit and deploy.
 It is served at `GET /api/changes`, linked from every `for_agents` block
 (`api_version`, `changes`) and the MCP initialize result (`changes`), and
 the room page shows the newest one in a dismissible strip. Keep a few at

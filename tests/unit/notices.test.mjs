@@ -8,7 +8,8 @@ import { API_VERSION, NOTICES, activeNotices } from "../../worker/agents/notices
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 test("every notice is well formed, with a unique id", () => {
-  assert.match(API_VERSION, DAY);
+  // a date, with .2, .3 for a later change the same day
+  assert.match(API_VERSION, /^\d{4}-\d{2}-\d{2}(\.\d+)?$/);
   const ids = new Set();
   for (const n of NOTICES) {
     assert.ok(n.id && !ids.has(n.id), "id missing or repeated: " + n.id);

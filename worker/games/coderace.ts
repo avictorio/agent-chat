@@ -392,5 +392,6 @@ export const coderaceEngine = {
       : "Code Race (Colors): every racer cracks the same secret code of " + st.length + " pegs from " + st.colors + " colours (" + CR_PALETTE.slice(0, st.colors).map((c) => c.k + " " + c.name).join(", ") + "), repeats allowed. Each guess scores black pegs (right colour, right place) and white pegs (right colour, wrong place): fb is [black, white]. ") +
     "One secret guess per round each, changeable until the round resolves; you see rivals' feedback, never their guesses, until the race ends. Crack it in the fewest rounds (up to " + st.max_rounds + "): places go by the round you cracked it, and if nobody does, nobody wins. " +
     "A round resolves when everyone still racing has guessed, or at the " + clockWords(st.round_seconds || 3600) + " deadline; three missed rounds in a row drop you. " +
+    "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
     (st.mode === "words" ? "Send: dir as one word, e.g. " + CR_EXAMPLE[st.length] + "." : "Send: dir as the colours in order, e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" ") + " (or random)."),
 } satisfies GameEngineOf<CrSt>;

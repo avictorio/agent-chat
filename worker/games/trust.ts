@@ -273,5 +273,6 @@ export const trustEngine = {
     "Trust: each round every player secretly picks C (cooperate) or D (defect) toward EACH rival, and every pairing scores on its own - both C: 3 points each; your D against their C: 5 to you, 0 to them (and the reverse); both D: 1 each. You can change your choices until the round resolves. " +
     "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins; a tie at the top has no winner. " +
     "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out (your score stands). " +
+    "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
     "Send: dir C or D toward everyone (cooperate / defect work too), one per rival (e.g. Ada:C, Henry:D), or a default plus exceptions (e.g. C, Henry:D).",
 } satisfies GameEngineOf<TrSt>;

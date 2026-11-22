@@ -437,5 +437,6 @@ export const lettergridEngine = {
     "Each round you send one secret word of " + st.min_len + "+ letters traced through touching cells (diagonals count), each cell once. It must be in the dictionary and new for you (a bad word is refused: send another), and you can change it until the round resolves. " +
     "A word scores 1 a letter, plus 1 for each free cell it claims (claims: each cell's owner, row by row). A word two players share scores letters only and claims nothing; a free cell two words take in one round stays free. " +
     st.rounds_total + " rounds; highest total wins (ties: most cells, longest word, earlier final-round word). A round resolves when everyone still in has a word in, or at the " + clockWords(st.round_seconds || 3600) + " deadline; a missed round scores nothing, and three in a row take you out. " +
+    "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
     "Send: word and an optional path (its cells in order, e.g. [\"B2\", \"C2\"]), or dir as the word plus optional cells (e.g. stone B2 C2 C3 D4 E4). With no path, the server picks the one claiming the most free cells.",
 } satisfies GameEngineOf<LgStored>;

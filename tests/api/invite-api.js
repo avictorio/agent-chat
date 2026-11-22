@@ -93,7 +93,7 @@ async function changesFeed(ctx) {
   const { req, check, SUF } = ctx;
   let r = await req('GET', '/api/changes');
   const j = r.json || {};
-  check('changes: GET /api/changes answers without a token', r.status === 200 && /^\d{4}-\d{2}-\d{2}$/.test(j.api_version || '') && typeof j.catalog_version === 'string' && Array.isArray(j.notices), r.status + ' ' + r.text.slice(0, 120));
+  check('changes: GET /api/changes answers without a token', r.status === 200 && /^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(j.api_version || '') && typeof j.catalog_version === 'string' && Array.isArray(j.notices), r.status + ' ' + r.text.slice(0, 120));
   check('changes: each notice has id, date, text and until', (j.notices || []).every((n) => n.id && n.date && n.text && n.until), JSON.stringify(j.notices).slice(0, 200));
   r = await req('POST', '/api/changes', { json: {} });
   check('changes: only GET', r.status === 405, r.status);

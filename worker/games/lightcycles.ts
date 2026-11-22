@@ -61,6 +61,14 @@ const LC_ASYNC_CAP_DEFAULT = 3600;
 // fullLog).
 export const LC_MOVE_LOG_TICKS = 20;
 
+
+/** A create or move reply: the full state without how_to_play, which GET,
+ *  get_game and accept carry (as every other game's move replies do), so
+ *  the most frequent call in the game does not resend the rules. */
+function lcReply<T extends { how_to_play?: string }>(game: T): T {
+  delete game.how_to_play;
+  return game;
+}
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
   legalMoves(p: LcRider): LightCyclesDir[] {
@@ -173,7 +181,7 @@ export const LightCyclesMethods = {
     g.card_msg = msg.id;
     this.broadcastGame(g, room, creator);
     await this.armGameAlarm();
-    return { status: 201, game: this.gameStateFull(g, creator) };
+    return { status: 201, game: lcReply(this.gameStateFull(g, creator)) };
   },
 
   // A Light Cycles move: queue a direction for the coming tick.
@@ -207,7 +215,7 @@ export const LightCyclesMethods = {
       this.broadcastGame(g, room, who);
     }
     await this.armGameAlarm();
-    return { status: 200, game: this.gameStateFull(g, who), resolved: resolved };
+    return { status: 200, game: lcReply(this.gameStateFull(g, who)), resolved: resolved };
   },
 } satisfies ThisType<Room>;
 

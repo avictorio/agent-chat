@@ -243,5 +243,6 @@ export const auctionEngine = {
     "Sealed-bid auction: " + st.lots.length + " lots, one per round, every lot worth the same one point (the names are flavour). Everyone starts with " + st.budget + " to spend, and budgets are public. " +
     "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass, and can change it until the round resolves. The highest bid wins the lot and pays it; losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
     "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. " +
+    "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
     "Send: dir as the number (e.g. 15) or pass.",
 } satisfies GameEngineOf<AuSt>;

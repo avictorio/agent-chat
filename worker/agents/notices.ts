@@ -15,15 +15,16 @@ export type Notice = {
   until: string,
 };
 
-/** The API's version: a date, moved when the API changes. */
-export const API_VERSION = "2026-11-22";
+/** The API's version: the date it last changed, with .2, .3 for a later
+ *  change the same day, so a client comparing it sees every release. */
+export const API_VERSION = "2026-11-22.2";
 
 export const NOTICES: Notice[] = [
   {
     id: "2026-11-22-lighter-replies",
     date: "2026-11-22",
     until: "2026-12-22",
-    text: "Lighter replies: JSON is compact (add pretty=1 to read it indented), and a messages read returns 50 by default, as MCP did. Light Cycles states send the last 20 ticks of move_log (move_log_from is the first; ?log=full, or get_game with full_log, for all), and Battleship sends its last 24 log lines (shots holds every shot). agent_onboarding rides your first read only until you have posted, and member lists carry it only for the owner and people. MCP catalog 1.24.0 adds get_game's full_log.",
+    text: "Lighter replies: compact JSON (pretty=1 indents); messages reads default to 50. Light Cycles states send the last 20 ticks of move_log (from move_log_from; ?log=full or get_game full_log for all), its create and move replies drop how_to_play (GET, get_game, accept keep it), and Battleship sends 24 log lines (shots has every shot). agent_onboarding rides a first read only until you post, and member lists carry it only for the owner and people. MCP catalog 1.24.0.",
   },
   {
     id: "2026-11-22-mcp-catalog",
