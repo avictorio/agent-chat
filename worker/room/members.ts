@@ -14,29 +14,29 @@ export const MemberMethods = {
   // Daily cap on room tool calls (web fetches).
   toolTake(limit: number, url?: string | null) {
     this.sql.exec("DELETE FROM tf WHERE ts <= ?", Date.now() - 86400e3);
-    if ((this.sql.exec("SELECT COUNT(*) AS n FROM tf").one() as CountRow).n >= limit) return false;
+    if (this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM tf").one().n >= limit) return false;
     this.sql.exec("INSERT INTO tf (ts, url) VALUES (?, ?)", Date.now(), url || null);
     return true;
   },
   // Seconds until the oldest fetch in the 24-hour window ages out (the
   // Retry-After of a refused take).
   toolWait() {
-    const r = this.sql.exec("SELECT MIN(ts) AS t FROM tf").one() as { t: number | null };
+    const r = this.sql.exec<{ t: number | null }>("SELECT MIN(ts) AS t FROM tf").one();
     return r.t ? Math.max(1, Math.ceil((r.t + 86400e3 - Date.now()) / 1000)) : 1;
   },
 
   invites() {
-    return this.sql.exec("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray() as Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">[];
+    return this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "kind">>("SELECT token, name, created, revoked, used, kind FROM inv ORDER BY created").toArray();
   },
 
   // Invite status for anyone in the room: active, unused or revoked. The token rides
   // along as invite_token; the one caller (GET /members) turns it into invite_link for
   // invite-only rooms (members are trusted there) and strips it otherwise.
   members(): { invite_only: true, members: RoomMember[] } {
-    const rows = this.sql.exec("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray() as Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver">[];
+    const rows = this.sql.exec<Pick<InvRow, "token" | "name" | "created" | "revoked" | "used" | "seen" | "kind" | "invited_by" | "avatar_ver">>("SELECT token, name, created, revoked, used, seen, kind, invited_by, avatar_ver FROM inv ORDER BY created").toArray();
     /** voices by (lowercased) name */
     const vmap: Record<string, VoiceCols> = {};
-    for (const v of this.sql.exec("SELECT name, provider, voice_id, sample_key FROM mv").toArray() as VoiceCols[]) vmap[v.name] = v;
+    for (const v of this.sql.exec<VoiceCols>("SELECT name, provider, voice_id, sample_key FROM mv").toArray()) vmap[v.name] = v;
     return {
       invite_only: true,
       members: rows.map((r) => { const v = vmap[String(r.name).toLowerCase()] || null; return { name: r.name, status: r.revoked ? "revoked" : (r.used ? "active" : "unused"), invited: r.created, joined: r.used || null, last_seen: r.seen || r.used || null, revoked: r.revoked || null, kind: r.kind === "human" ? "human" : "agent", invited_by: r.invited_by || null, avatar_version: r.avatar_ver || null, voice: v ? { provider: v.provider || "cartesia", voice_id: v.voice_id || null, sample: !!v.sample_key } : null, invite_token: r.token } satisfies RoomMember; }),
@@ -55,7 +55,7 @@ export const MemberMethods = {
   async setAvatar(name: string, data: ArrayBuffer, type: string, room: string) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
-    const prev = (this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray() as { avatar_key: string }[])[0];
+    const prev = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
     const ver = Date.now();
     const key = this.avatarKey(room, name, ver);
     try {
@@ -68,7 +68,7 @@ export const MemberMethods = {
   },
 
   async clearAvatar(name: string) {
-    const rows = this.sql.exec("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL", name).toArray() as Pick<InvRow, "avatar_key">[];
+    const rows = this.sql.exec<Pick<InvRow, "avatar_key">>("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL", name).toArray();
     if (!rows.length) return false;
     this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE lower(name) = lower(?)", name);
     if (this.env && this.env.MEDIA) {
@@ -81,24 +81,24 @@ export const MemberMethods = {
   // The member's avatar pointer, or null; the route streams the bytes
   // from R2.
   getAvatar(name: string) {
-    const r = (this.sql.exec("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray() as { avatar_type: string | null, avatar_ver: number, avatar_key: string }[])[0];
+    const r = this.sql.exec<{ avatar_type: string | null, avatar_ver: number, avatar_key: string }>("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
     return r ? { key: r.avatar_key, type: r.avatar_type, ver: r.avatar_ver } : null;
   },
 
   // The holder of an active invite (members can invite others). Null when the token isn't active.
   inviter(token: string | null | undefined) {
     if (!token) return null;
-    const row = (this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray() as Pick<InvRow, "name">[])[0];
+    const row = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray()[0];
     return row ? row.name : null;
   },
 
   // Invites this member made in the last 24 hours, and active invites overall.
   inviteLoad(name: string | null | undefined) {
     return {
-      recent: (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one() as CountRow).n,
+      recent: this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one().n,
       // the oldest of those, which ages out first (a refusal's Retry-After)
-      oldest: (this.sql.exec("SELECT MIN(created) AS t FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one() as { t: number | null }).t,
-      active: (this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one() as CountRow).n,
+      oldest: this.sql.exec<{ t: number | null }>("SELECT MIN(created) AS t FROM inv WHERE lower(invited_by) = lower(?) AND created > ?", name, Date.now() - 86400e3).one().t,
+      active: this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n,
     };
   },
 
@@ -127,7 +127,7 @@ export const MemberMethods = {
     name = String(name || "").normalize("NFC");
     if (this.isReservedName(name)) return null;
     const fold = nameFold(name);
-    if ((this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<InvRow, "name">[]).some((r) => nameFold(r.name) === fold)) return null;
+    if (this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) return null;
     if (limits) {
       const load = this.inviteLoad(by);
       if (load.recent >= limits.perDay) return { limit: "day", retry_after: Math.max(1, Math.ceil(((load.oldest || Date.now()) + 86400e3 - Date.now()) / 1000)) };
@@ -142,14 +142,14 @@ export const MemberMethods = {
   },
 
   revoke(token: string) {
-    const row = (this.sql.exec("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray() as Pick<InvRow, "name">[])[0];
+    const row = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE token = ? AND revoked IS NULL", token).toArray()[0];
     if (!row) return false;
     this.sql.exec("UPDATE inv SET revoked = ? WHERE token = ?", Date.now(), token);
     for (const c of this.clients) if (c.token === token) c.close();
     // A member who is out stops getting pushes (message text included):
     // their browser push subscriptions go with their last invite.
     const fold = nameFold(row.name);
-    if (!(this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<InvRow, "name">[]).some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
+    if (!this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().some((r) => nameFold(r.name) === fold)) this.dropPush(row.name);
     this.emitState();
     return true;
   },
@@ -159,7 +159,7 @@ export const MemberMethods = {
   // the inv rows are their only pointers, so a later destroy() could not
   // find them.
   async unlock() {
-    const avatarKeys = (this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray() as { avatar_key: string }[]).map((r) => r.avatar_key);
+    const avatarKeys = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray().map((r) => r.avatar_key);
     this.sql.exec("DELETE FROM inv");
     this.sql.exec("DELETE FROM push");
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
@@ -173,7 +173,7 @@ export const MemberMethods = {
   memberKind(name: string | null | undefined): MemberKind | "non_interactive" | null {
     if (!name) return null;
     const n = String(name).toLowerCase();
-    const r = (this.sql.exec("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray() as Pick<InvRow, "kind">[])[0];
+    const r = this.sql.exec<Pick<InvRow, "kind">>("SELECT kind FROM inv WHERE lower(name) = ? ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", n).toArray()[0];
     return r ? (r.kind === "human" ? "human" : "agent") : "non_interactive";
   },
 } satisfies ThisType<Room>;

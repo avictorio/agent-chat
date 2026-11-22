@@ -145,7 +145,7 @@ export const TwoTruthsMethods = {
       log: [{ tick: 0, text: "Two Truths and a Lie created by " + creator + " - storytellers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Two Truths and a Lie #" + g.id + " - " + label + ". Each round a storyteller writes two truths and a lie about themselves; everyone else votes for the lie. " + names[0] + " tells first. Clock: " + clockWords(roundSeconds) + " to write, the same to vote. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";

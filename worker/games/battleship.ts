@@ -2,7 +2,7 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 import type { BattleshipBoard, BattleshipLogLine, BattleshipMove, BattleshipShot, BattleshipShotResult, BattleshipSonar, BattleshipState, BattleshipSunkShip, BattleshipYou } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -464,7 +464,7 @@ export const BattleshipMethods = {
       misses: {}, eliminated: [], log: [{ tick: 0, text: ffa ? "Battleship free-for-all created by " + creator + " - " + names.join(", ") + ". Fleets are placed once every captain accepts." : "Battleship created by " + creator + " - " + names.join(" vs ") + ". Fleets are placed once both players accept." }],
       winner: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(ffa ? ", " : " vs ");
     const boardText = variant === "skirmish" ? "Skirmish: 8x8, fleets of four (4, 3, 3, 2)" : variant === "salvo" ? "Salvo: 10x10, fleets of five (5, 4, 3, 3, 2) - each turn fires one shot per ship you still have afloat" : "10x10, fleets of five (5, 4, 3, 3, 2)";

@@ -148,7 +148,7 @@ export const TriviaMethods = {
       log: [{ tick: 0, text: "Trivia created by " + creator + " - quizmasters in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trivia #" + g.id + " - " + label + ". Each round a quizmaster asks a question of their own; everyone else answers and wagers up to " + TV_MAX_WAGER + " of their " + TV_START + " points. " + names[0] + " asks first. Clock: " + clockWords(roundSeconds) + " a phase. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";

@@ -206,7 +206,7 @@ export const SketchMethods = {
       log: [{ tick: 0, text: "Sketch & Guess created by " + creator + " - artists in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Sketch & Guess #" + g.id + " - " + label + ". Each round an artist draws a secret prompt; everyone else guesses what it shows. " + names[0] + " draws first. Clock: " + clockWords(drawSeconds) + " to draw, " + clockWords(guessSeconds) + " to guess. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
@@ -334,7 +334,7 @@ export const SketchMethods = {
   // The room's daily allowance of Referee calls (counted when spent).
   sgJudgeBudget() {
     const day = new Date().toISOString().slice(0, 10);
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray() as Pick<CfgRow, "v">[])[0];
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'sg_judge_day'").toArray()[0];
     const [d, c] = String((r && r.v) || "").split(":");
     const used = d === day ? parseInt(c, 10) || 0 : 0;
     if (used >= SG_JUDGE_DAILY) return false;
@@ -345,7 +345,7 @@ export const SketchMethods = {
   // Tests: a verdict laid by the test hook stands in for Claude, once.
   sgTestJudge(): SgVerdict | null {
     if (!this.env || !this.env.TEST_HOOKS) return null;
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray() as Pick<CfgRow, "v">[])[0];
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'test_sg_judge'").toArray()[0];
     if (!r) return null;
     this.sql.exec("DELETE FROM cfg WHERE k = 'test_sg_judge'");
     try {

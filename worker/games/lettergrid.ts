@@ -310,7 +310,7 @@ export const LetterGridMethods = {
       log: [{ tick: 0, text: "Letter Grid created by " + creator + " - " + names.join(", ") + ", a " + size + "x" + size + " grid, " + rounds + " rounds. The clock starts when everyone accepts." }],
       winner: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Letter Grid match #" + g.id + " - " + label + ". One " + size + "x" + size + " grid of letters for everyone; each round, trace one secret word through touching cells (diagonals count). 1 point a letter, plus 1 for every cell you claim first. " + rounds + " rounds; round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";

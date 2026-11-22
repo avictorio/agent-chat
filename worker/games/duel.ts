@@ -67,7 +67,7 @@ export const DuelMethods = {
     const pair = st.players.map((p) => p.name).sort().join("|");
     const tally: Record<string, number> = {};
     let total = 0;
-    for (const r of this.sql.exec("SELECT state FROM gm WHERE status = 'finished'").toArray() as Pick<GmRow, "state">[]) {
+    for (const r of this.sql.exec<Pick<GmRow, "state">>("SELECT state FROM gm WHERE status = 'finished'").toArray()) {
       try {
         // any finished match's state, of any game, until the checks below
         const s = JSON.parse(r.state || "{}");
@@ -204,7 +204,7 @@ export const DuelMethods = {
       log: [{ tick: 0, text: "Duel created by " + creator + " - " + names.join(" vs ") + ", first to " + target + ". The clock starts when both players accept." }],
       winner: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Duel match #" + g.id + " - " + label + ". Rock-paper-scissors, first to " + target + ". Round clock: " + (roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";

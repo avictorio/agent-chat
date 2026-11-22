@@ -29,12 +29,12 @@ export const MessageMethods = {
   reactionsFor(id: number) {
     /** who, by emoji */
     const out: Record<string, string[]> = {};
-    for (const r of this.sql.exec("SELECT emoji, who FROM rx WHERE msg = ? ORDER BY ts", id).toArray() as Pick<RxRow, "emoji" | "who">[]) (out[r.emoji] = out[r.emoji] || []).push(r.who);
+    for (const r of this.sql.exec<Pick<RxRow, "emoji" | "who">>("SELECT emoji, who FROM rx WHERE msg = ? ORDER BY ts", id).toArray()) (out[r.emoji] = out[r.emoji] || []).push(r.who);
     return out;
   },
 
   reactionsOf(id: number, who: string | null | undefined, owner: boolean) {
-    const r = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender" | "draft">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return null;
     // Drafts are invisible to everyone but their sender and the owner, here
     // as everywhere else: a draft answers exactly like a missing message.
@@ -44,7 +44,7 @@ export const MessageMethods = {
 
   /** @param emoji null takes the reaction back */
   react(id: number, who: string, emoji: string | null, room: string, owner: boolean) {
-    const msg = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender" | "draft">[])[0];
+    const msg = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!msg) return null;
     if (msg.draft && !owner && String(msg.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
     const ts = Date.now();
@@ -72,7 +72,7 @@ export const MessageMethods = {
     await this.sweepDrafts();
     this.roomName = room;
     const ts = Date.now();
-    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one() as Pick<MsgRow, "id">).id;
+    const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
     // Inline media is all or nothing (phase A): every put lands in R2 before
     // the message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
@@ -100,7 +100,7 @@ export const MessageMethods = {
       }
     } catch (e) {
       if (isStoreError(e)) {
-        const keys = (this.sql.exec("SELECT r2key FROM md WHERE msg = ?", id).toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key).filter(Boolean);
+        const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
         this.sql.exec("DELETE FROM md WHERE msg = ?", id);
         this.sql.exec("DELETE FROM m WHERE id = ?", id);
         if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
@@ -111,7 +111,7 @@ export const MessageMethods = {
     if (id > KEEP) {
       // Drafts are exempt from the trim: a long upload can sit on an old id
       // in a busy room, and trimming it would kill the upload mid-flight.
-      const staleKeys = (this.sql.exec("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key);
+      const staleKeys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg <= ? AND r2key IS NOT NULL AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP).toArray().map((r) => r.r2key);
       this.sql.exec("DELETE FROM m WHERE id <= ? AND (draft IS NULL OR draft = 0)", id - KEEP); this.sql.exec("DELETE FROM rx WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM md WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP); this.sql.exec("DELETE FROM upp WHERE msg <= ? AND msg NOT IN (SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0)", id - KEEP);
       if (staleKeys.length && this.env && this.env.MEDIA) this.ctx.waitUntil(this.env.MEDIA.delete(staleKeys).catch((e) => warn("media.delete", e, { room: this.roomName })));
     }
@@ -153,8 +153,8 @@ export const MessageMethods = {
   // message served the new one's media (sweep, 2026-11-19). A high-water
   // mark in cfg keeps every id fresh.
   nextMsgId() {
-    const max = (this.sql.exec("SELECT MAX(id) AS id FROM m").one() as { id: number | null }).id || 0;
-    const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray() as Pick<CfgRow, "v">[])[0];
+    const max = this.sql.exec<{ id: number | null }>("SELECT MAX(id) AS id FROM m").one().id || 0;
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray()[0];
     const id = Math.max(max, r ? parseInt(r.v, 10) || 0 : 0) + 1;
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(id));
     return id;
@@ -164,7 +164,7 @@ export const MessageMethods = {
   // never claims a member's name, and members cannot post as it.
   postSystem(text: string, room: string) {
     const ts = Date.now();
-    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, "Referee", text, ts).one() as Pick<MsgRow, "id">).id;
+    const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, pub_ts) VALUES (?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, "Referee", text, ts).one().id;
     const msg = this.withKinds([{ id: id, ts: ts, from: "Referee", text: text }])[0];
     this.announce(msg, room);
     return msg;
@@ -172,7 +172,7 @@ export const MessageMethods = {
 
   /** @param text a caption to publish with (undefined or null keeps the draft's) */
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
-    const r = (this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray() as MsgRow[])[0];
+    const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
@@ -183,7 +183,7 @@ export const MessageMethods = {
     if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
     this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
-    const f = (this.sql.exec("SELECT * FROM m WHERE id = ?", id).toArray() as MsgRow[])[0];
+    const f = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name, file_type: f.file_type, file_size: f.file_size, file_name: f.file_name };
     const msg = this.withKinds([row])[0];
     this.roomName = room;
@@ -199,7 +199,7 @@ export const MessageMethods = {
   // this server-side path acts with the member's own standing, never the
   // owner's.
   async maybeAutoPublish(id: number, room: string) {
-    const r = (this.sql.exec("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender" | "draft" | "pubauto">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "pubauto">>("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
     if (!r || !r.draft || !r.pubauto) return null;
     const res = await this.publishMessage(id, r.sender, false, room, undefined);
     return res && res.status === 200 ? res.msg : null;
@@ -209,11 +209,11 @@ export const MessageMethods = {
   // row, its reactions, and any media: in-flight multipart uploads are
   // aborted and R2 objects deleted (all media lives in R2 since phase B).
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
     if (this.env && this.env.MEDIA) {
-      for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray() as Pick<MdRow, "r2key" | "upload_id">[]) {
+      for (const md of this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", id).toArray()) {
         if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
         if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
       }
@@ -233,7 +233,7 @@ export const MessageMethods = {
     const t = String(text || "");
     if (!t || t.indexOf("@") < 0) return [];
     const self = String(selfName || "").toLowerCase();
-    const list = names || (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
+    const list = names || this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     const low = t.toLowerCase();
     const hits = [];
     for (const name of list) {
@@ -265,8 +265,8 @@ export const MessageMethods = {
   withKinds(rows: MsgListRow[]): ApiMessage[] {
     if (!rows.length) return rows as ApiMessage[];
     /** kind by lowercased name */
-    const map: Map<string, string> = new Map((this.sql.exec("SELECT lower(name) AS n, kind FROM inv").toArray() as Array<{ n: string, kind: string | null }>).map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
-    const names = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
+    const map: Map<string, string> = new Map(this.sql.exec<{ n: string, kind: string | null }>("SELECT lower(name) AS n, kind FROM inv").toArray().map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
+    const names = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     for (const r of rows as MsgBag[]) {
       const n = String(r.from || "").toLowerCase();
       r.kind = !r.from ? null : (map.get(n) || "non_interactive");
@@ -277,7 +277,7 @@ export const MessageMethods = {
     if (ids.length) {
       /** who reacted, by emoji, by message */
       const by: Map<number, Record<string, string[]>> = new Map();
-      for (const x of this.sql.exec("SELECT msg, emoji, who FROM rx WHERE msg BETWEEN ? AND ? ORDER BY ts", Math.min(...ids), Math.max(...ids)).toArray() as Pick<RxRow, "msg" | "emoji" | "who">[]) {
+      for (const x of this.sql.exec<Pick<RxRow, "msg" | "emoji" | "who">>("SELECT msg, emoji, who FROM rx WHERE msg BETWEEN ? AND ? ORDER BY ts", Math.min(...ids), Math.max(...ids)).toArray()) {
         if (!by.has(x.msg)) by.set(x.msg, {});
         const o = by.get(x.msg) as Record<string, string[]>; // set just above
         (o[x.emoji] = o[x.emoji] || []).push(x.who);
@@ -333,19 +333,19 @@ export const MessageMethods = {
   /** @param after the cursor, or null for the latest */
   read(after: number | null, limit: number) {
     if (after === null) {
-      return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray() as MsgListRow[]);
+      return this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
     }
     // Forward reads are id-ordered, plus one exception: a draft that published
     // after the cursor was taken keeps its original (lower) id, so id alone
     // would skip it forever. pub_ts is the publish time; anything published
     // after the cursor message was is owed to the reader too.
-    return this.withKinds(this.sql.exec('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray() as MsgListRow[]);
+    return this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray());
   },
 
   lastId(): number {
     // The highest id a reader can actually see: drafts do not count. A cursor
     // taken from last_id must never skip a message that publishes later.
-    return (this.sql.exec("SELECT MAX(id) AS id FROM m WHERE draft IS NULL OR draft = 0").one() as { id: number | null }).id || 0;
+    return this.sql.exec<{ id: number | null }>("SELECT MAX(id) AS id FROM m WHERE draft IS NULL OR draft = 0").one().id || 0;
   },
 
   // The room's attachments, newest first: one entry per media row on a
@@ -381,7 +381,7 @@ export const MessageMethods = {
     const fromSql = from ? " AND lower(m.sender) = lower(?)" : "";
     const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0, file: 0 };
     const cArgs = from ? [from] : [];
-    for (const r of this.sql.exec("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray() as Array<{ kind: string, n: number }>) {
+    for (const r of this.sql.exec<{ kind: string, n: number }>("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
       if (r.kind in counts) { (counts as Record<string, number>)[r.kind] = r.n; counts.all += r.n; }
     }
     let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
@@ -390,7 +390,7 @@ export const MessageMethods = {
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind as string); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
     args.push(limit + 1);
-    const rows = this.sql.exec(sql, ...args).toArray() as Array<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: AttachmentKind, type: string, bytes: number }>;
+    const rows = this.sql.exec<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: AttachmentKind, type: string, bytes: number }>(sql, ...args).toArray();
     const more = rows.length > limit;
     if (more) rows.pop();
     const out = rows.map((r) => ({

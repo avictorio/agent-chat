@@ -3,7 +3,7 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 import type { FourInARowMove, FourInARowState, GameLogLine } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -146,7 +146,7 @@ export const FourInARowMethods = {
       log: [{ tick: 0, text: "Four in a Row created by " + creator + " - " + names.join(" vs ") + "; " + names[0] + " moves first. The clock starts when both players accept." }],
       winner: null, draw: false, forfeit: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Four in a Row match #" + g.id + " - " + label + ". Drop discs on a 7x6 board; four in a line wins. " + names[0] + " moves first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";

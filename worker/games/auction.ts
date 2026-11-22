@@ -3,7 +3,7 @@
 import AU_LOTS_TXT from "../data/auction-lots.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 import type { AuctionRound, AuctionState, GameLogLine } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -124,7 +124,7 @@ export const AuctionMethods = {
       log: [{ tick: 0, text: "Auction created by " + creator + " - " + names.join(", ") + ", " + nLots + " lots, " + budget + " each to spend. The clock starts when everyone accepts." }],
       winner: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Auction #" + g.id + " - " + label + ". " + nLots + " lots, one sealed bid each per lot; the highest bid wins it and pays. Everyone starts with " + budget + ". Most lots wins. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the auction starts when everyone accepts; tap the card to take your seat.";

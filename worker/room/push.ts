@@ -17,14 +17,14 @@ export const PushMethods = {
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
   async vapidRecord(): Promise<VapidRecord> {
     this.sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)");
-    const got = (this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray() as { v: string }[])[0];
+    const got = this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'vapid'").toArray()[0];
     if (got) return JSON.parse(got.v);
     const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
     const pub = b64urlEncode(concatBytes(new Uint8Array([4]), b64urlDecode(jwk.x), b64urlDecode(jwk.y)));
     const rec = { jwk: jwk, pub: pub };
     this.sql.exec("INSERT OR IGNORE INTO meta (k, v) VALUES ('vapid', ?)", JSON.stringify(rec));
-    return JSON.parse((this.sql.exec("SELECT v FROM meta WHERE k = 'vapid'").toArray() as { v: string }[])[0].v);
+    return JSON.parse(this.sql.exec<{ v: string }>("SELECT v FROM meta WHERE k = 'vapid'").toArray()[0].v);
   },
   async vapidPublic() { return (await this.vapidRecord()).pub; },
   /** @param aud the push service's origin */
@@ -55,7 +55,7 @@ export const PushMethods = {
     return { status: 200 };
   },
   pushStatus(member: string, endpoint: string) {
-    const rows = this.sql.exec("SELECT endpoint, mode FROM push WHERE member = ?", String(member || "").toLowerCase()).toArray() as Pick<PushRow, "endpoint" | "mode">[];
+    const rows = this.sql.exec<Pick<PushRow, "endpoint" | "mode">>("SELECT endpoint, mode FROM push WHERE member = ?", String(member || "").toLowerCase()).toArray();
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   },
@@ -67,10 +67,10 @@ export const PushMethods = {
     // Only the owner ("") and members with an active invite hear about a
     // message: revoke() drops a leaving member's registrations, and this
     // keeps any that slipped through (older rows) from leaking text.
-    const active = new Set((this.sql.exec("SELECT name FROM inv WHERE revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => String(r.name).toLowerCase()));
+    const active = new Set(this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
     const allowed = (m: string) => m === "" || active.has(m);
     // Web push (browser subscriptions).
-    const rows = this.sql.exec("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray() as Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">[];
+    const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">>("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
     const targets = rows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     for (const r of targets) {
       try {

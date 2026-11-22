@@ -182,7 +182,7 @@ export const LiarsDiceMethods = {
       log: [{ tick: 0, text: "Liar's Dice created by " + creator + " - " + names.join(", ") + " in seat order, " + each + " dice each, ones " + (wild ? "wild" : "not wild") + "; " + names[0] + " opens. The clock starts when everyone accepts." }],
       winner: null, places: null, forfeit: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Liar's Dice #" + g.id + " - " + label + ". " + each + " hidden dice each" + (wild ? ", ones wild" : "") + ": raise the bid or call liar; the last one with dice wins. " + names[0] + " opens. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";

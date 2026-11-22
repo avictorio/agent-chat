@@ -200,7 +200,7 @@ export const StateMethods = {
       const now = Date.now();
       const today = new Date(now).toISOString().slice(0, 10);
       const horizon = new Date(now + STATE_STAKE_DAYS * 86400e3).toISOString().slice(0, 10);
-      const inv = this.sql.exec("SELECT name, revoked, used, posted, kind FROM inv").toArray() as Array<Pick<InvRow, "name" | "revoked" | "used" | "posted" | "kind">>;
+      const inv = this.sql.exec<Pick<InvRow, "name" | "revoked" | "used" | "posted" | "kind">>("SELECT name, revoked, used, posted, kind FROM inv").toArray();
       const members = inv.filter((r) => r.used && !r.revoked).map((r) => r.name);
       const decisions: StateData["decisions"] = [];
       for (const d of this.decisions().decisions) {
@@ -211,30 +211,30 @@ export const StateMethods = {
         decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing });
       }
       decisions.sort((a, b) => (b.missing.length - a.missing.length) || (a.signed_by.length - b.signed_by.length) || (a.id - b.id));
-      const digest = (this.sql.exec("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray() as StateData["digest"][])[0] || null;
-      const digestsToday = (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE day = ?", today).one() as CountRow).n;
+      const digest = this.sql.exec<NonNullable<StateData["digest"]>>("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray()[0] || null;
+      const digestsToday = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM dg WHERE day = ?", today).one().n;
       const digestClose = nextDigestClose(now);
-      const digestsInWindow = (this.sql.exec("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one() as CountRow).n;
-      const recent = this.sql.exec("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray() as StateData["recent"];
-      const fetched = (this.sql.exec("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray() as Array<{ url: string }>).map((r) => String(r.url).toLowerCase());
+      const digestsInWindow = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
+      const recent = this.sql.exec<StateData["recent"][number]>("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray();
+      const fetched = this.sql.exec<{ url: string }>("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase());
       return {
         members: members,
         humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => r.name.toLowerCase()),
-        constitution: (this.sql.exec("SELECT MAX(v) AS v FROM con").one() as { v: number | null }).v || null,
-        questions: this.sql.exec("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray() as StateData["questions"],
+        constitution: this.sql.exec<{ v: number | null }>("SELECT MAX(v) AS v FROM con").one().v || null,
+        questions: this.sql.exec<StateData["questions"][number]>("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
         decisions: decisions,
-        stakes: (this.sql.exec("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray() as Array<{ id: number, title: string, date: string }>).map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
+        stakes: this.sql.exec<{ id: number, title: string, date: string }>("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray().map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
         digest: digest,
         digests_today: digestsToday,
         // Only rooms with a member list have this; null means nobody is expected in this digest window.
         awaiting_digest: inv.length ? (digestsInWindow ? null : expectedDigestAuthor(inv, digest)) : undefined,
         digest_due_at: new Date(digestClose).toISOString().replace(".000Z", "Z"),
-        fetches_used: (this.sql.exec("SELECT COUNT(*) AS n FROM tf WHERE ts > ?", now - 86400e3).one() as CountRow).n,
+        fetches_used: this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM tf WHERE ts > ?", now - 86400e3).one().n,
         recent: recent,
         fetched: fetched,
-        rx: this.sql.exec('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray() as ReactionToRow[],
+        rx: this.sql.exec<ReactionToRow>('SELECT rx.msg AS msg, rx.emoji AS emoji, rx.who AS who, rx.ts AS ts, m.sender AS "to", substr(m.text, 1, 80) AS excerpt FROM rx JOIN m ON m.id = rx.msg WHERE rx.ts > ? ORDER BY rx.ts DESC LIMIT 100', now - 86400e3).toArray(),
         // filter(Boolean) drops the matches whose state did not parse
-        games: (this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Array<Pick<GmRow, "id" | "status" | "state">>).map((r) => {
+        games: this.sql.exec<Pick<GmRow, "id" | "status" | "state">>("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray().map((r) => {
           // each live match as room_state sees it (engine.stateItem):
           // per player alive / moved / accepted, plus the engine's turn
           try { const st = JSON.parse(r.state || "{}"); return gameEngine(st).stateItem(r, st); } catch { return null; }

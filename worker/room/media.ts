@@ -26,7 +26,7 @@ export const MediaMethods = {
   // Worker for verification; the bytes themselves never leave the pair.
   mediaSigKeyBytes() {
     if (this._sigBytes) return this._sigBytes;
-    const row = (this.sql.exec("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray() as Pick<CfgRow, "v">[])[0];
+    const row = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'media_sig_key'").toArray()[0];
     if (row && row.v) {
       try {
         const b = b64urlDecode(row.v);
@@ -64,7 +64,7 @@ export const MediaMethods = {
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) throw storeError();
     try { await this.env.MEDIA.put(key, data, { httpMetadata: { contentType: type } }); } catch { throw storeError(); }
     // A single-shot attach replaces any upload in flight for the same kind.
-    const prev = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray() as Pick<MdRow, "r2key" | "upload_id">[])[0];
+    const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(prev.r2key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("INSERT OR REPLACE INTO md (msg, kind, type, r2key, size) VALUES (?, ?, ?, ?, ?)", id, kind, type, key, data.byteLength);
@@ -73,21 +73,21 @@ export const MediaMethods = {
 
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
     if (viewer && !viewer.owner) {
-      const m = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray() as DraftCols[])[0];
+      const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
       if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
     }
     // An upload still in flight has no object yet.
-    const row = (this.sql.exec("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray() as Pick<MdRow, "type" | "r2key" | "size" | "name">[])[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
     return row ? { type: row.type, r2key: row.r2key, size: row.size, name: row.name || null } : null;
   },
 
   /** @param range the request's Range header */
   async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<MediaBytes | null> {
     if (viewer && !viewer.owner) {
-      const m = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", id).toArray() as DraftCols[])[0];
+      const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
       if (m && m.draft && String(m.sender).toLowerCase() !== String(viewer.name || "").toLowerCase()) return null;
     }
-    const row = (this.sql.exec("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray() as Pick<MdRow, "type" | "r2key" | "size" | "name">[])[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
       try {
         const rr = parseRange(range, row.size);
@@ -106,7 +106,7 @@ export const MediaMethods = {
 
   /** @param transcript undefined keeps the current one */
   async attachAudio(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, transcript: string | null | undefined, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
@@ -116,7 +116,7 @@ export const MediaMethods = {
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
@@ -125,7 +125,7 @@ export const MediaMethods = {
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }

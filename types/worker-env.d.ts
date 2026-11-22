@@ -89,10 +89,14 @@ interface DurableObjectStorage {
 
 type SqlStorageValue = ArrayBuffer | string | number | null;
 
-/** A query's rows. Their shape depends on the query text, so an uncast
- *  cursor's rows are any: the Worker casts each query it reads to its row
- *  type (an `as` cast of the cursor, or of its toArray() or one()). */
-interface SqlStorageCursor<T = any> {
+/** A row as SQLite returns it: column name to value. */
+type SqlStorageRow = Record<string, SqlStorageValue>;
+
+/** A query's rows. Their shape depends on the query text: name it at the
+ *  call, `sql.exec<Pick<InvRow, "name">>(...)`, the one place the Worker
+ *  asserts a row type (as Cloudflare's own SqlStorage types do). A query
+ *  read without one gives plain rows of SQL values, never any. */
+interface SqlStorageCursor<T = SqlStorageRow> {
   next(): IteratorResult<T>;
   toArray(): T[];
   one(): T;
@@ -104,7 +108,9 @@ interface SqlStorageCursor<T = any> {
 }
 
 interface SqlStorage {
-  exec(query: string, ...bindings: unknown[]): SqlStorageCursor;
+  // No constraint on T (Cloudflare's has one): the contract's row types
+  // are interfaces, which an index-signature constraint would refuse.
+  exec<T = SqlStorageRow>(query: string, ...bindings: unknown[]): SqlStorageCursor<T>;
   readonly databaseSize: number;
 }
 

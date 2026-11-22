@@ -130,7 +130,7 @@ export const TwentyMethods = {
       log: [{ tick: 0, text: "Twenty Questions created by " + creator + " - answerers in this order: " + names.join(", ") + (rotations > 1 ? ", " + rotations + " times round" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Twenty Questions #" + g.id + " - " + label + ". Each round one player holds a secret and " + (names.length === 2 ? "the other" : "the rest of the table") + " gets twenty yes-or-no questions to name it. " + names[0] + " answers first. Clock: " + clockWords(roundSeconds) + " a move. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";

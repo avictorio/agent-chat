@@ -60,14 +60,14 @@ export const UploadMethods = {
   /** @param session opens a resumable upload instead of a single-shot ticket */
   async mintUploadTicket(msgId: number, kind: string, member: string, room: string, byOwner: boolean, session: UploadSessionAsk | null | undefined) {
     if (!this.ready) return { status: 404, error: "No message with that id" };
-    const r = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray() as Array<Pick<MsgRow, "sender" | "draft">>)[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
     if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
     // A resumable link counts while its upload is in flight.
-    const open = (this.sql.exec("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray() as CountRow[])[0];
+    const open = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
     if (open && open.n >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
     let plan: UpStart | null = null;
     if (session) {
@@ -90,11 +90,11 @@ export const UploadMethods = {
   // ticket it is not spent by use: it lasts as long as the upload can.
   async uploadSessionTicket(rawTicket: unknown) {
     if (!this.ready) return { status: 404, error: "Unknown upload link" };
-    const t = (this.sql.exec("SELECT msg, kind, member, expires, owner, sess FROM ut WHERE h = ?", await sha256hex(String(rawTicket || ""))).toArray() as Array<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "owner" | "sess">>)[0];
+    const t = this.sql.exec<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "owner" | "sess">>("SELECT msg, kind, member, expires, owner, sess FROM ut WHERE h = ?", await sha256hex(String(rawTicket || ""))).toArray()[0];
     if (!t || !t.sess) return { status: 404, error: "Unknown upload link" };
     if (Date.now() > t.expires) return { status: 410, error: "This upload link has expired" };
     if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
-    const m = (this.sql.exec("SELECT sender FROM m WHERE id = ?", t.msg).toArray() as Array<Pick<MsgRow, "sender">>)[0];
+    const m = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The message this upload was opened for is gone" };
     if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The message changed hands; open a fresh upload" };
     return { status: 200, msg: t.msg, kind: t.kind, member: t.member };
@@ -104,7 +104,7 @@ export const UploadMethods = {
     // An unknown room answers exactly like an unknown ticket: no hint.
     if (!this.ready) return { status: 404, error: "Unknown upload ticket" };
     const h = await sha256hex(String(rawTicket || ""));
-    const t = (this.sql.exec("SELECT msg, kind, member, expires, max_bytes, used, tries, owner, sess FROM ut WHERE h = ?", h).toArray() as Array<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "max_bytes" | "used" | "tries" | "owner" | "sess">>)[0];
+    const t = this.sql.exec<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "max_bytes" | "used" | "tries" | "owner" | "sess">>("SELECT msg, kind, member, expires, max_bytes, used, tries, owner, sess FROM ut WHERE h = ?", h).toArray()[0];
     // No hint whether a garbled ticket ever existed.
     if (!t) return { status: 404, error: "Unknown upload ticket" };
     if (t.sess) return { status: 405, error: "This is a resumable upload link: PUT the parts to its /part?n=N address, then POST its /finish" };
@@ -117,7 +117,7 @@ export const UploadMethods = {
     // rotated has a revoked row and a live one. Owner-minted tickets carry
     // no member check (the owner posts under any name).
     if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
-    const m = (this.sql.exec("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray() as Array<Pick<MsgRow, "sender" | "draft">>)[0];
+    const m = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The draft this upload was opened for is gone" };
     if (!m.draft) return { status: 409, error: "The draft this upload was opened for is already published" };
     if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The draft changed hands; open a fresh upload" };
@@ -153,10 +153,10 @@ export const UploadMethods = {
     // A draft lives a day - or, while an upload for it is in flight, as
     // long as that upload can (UP_SESSION_MS from its start: R2 drops an
     // unfinished multipart upload after 7 days).
-    const stale = this.sql.exec("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - 86400000, now - UP_SESSION_MS).toArray() as Array<Pick<MsgRow, "id">>;
+    const stale = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - 86400000, now - UP_SESSION_MS).toArray();
     for (const d of stale) {
       if (this.env && this.env.MEDIA) {
-        for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>) {
+        for (const md of this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray()) {
           if (md.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
           if (md.r2key) { try { await this.env.MEDIA.delete(md.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         }
@@ -176,14 +176,14 @@ export const UploadMethods = {
   // through here. Every step checks the caller is the message's sender
   // or holds the owner key.
   upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string) {
-    const r = (this.sql.exec("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray() as Array<Pick<MsgRow, "sender" | "ts" | "draft">>)[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
     return { status: 200, msg: r };
   },
 
   upSession(id: number, kind: string): UpSession | null {
-    return (this.sql.exec("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode FROM md WHERE msg = ? AND kind = ?", id, kind).toArray() as UpSession[])[0] || null;
+    return this.sql.exec<UpSession>("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
   },
 
   // The plan a session runs on, pinned at its start (streamed ones
@@ -214,7 +214,7 @@ export const UploadMethods = {
       for (const [n, p] of listed) if (n <= plan.parts && p.size === partLength(row.size, plan.part_size, n)) got.set(n, p.etag);
       return got;
     }
-    for (const p of this.sql.exec("SELECT n, etag FROM upp WHERE msg = ? AND kind = ?", id, kind).toArray() as Array<Pick<UppRow, "n" | "etag">>) got.set(p.n, p.etag);
+    for (const p of this.sql.exec<Pick<UppRow, "n" | "etag">>("SELECT n, etag FROM upp WHERE msg = ? AND kind = ?", id, kind).toArray()) got.set(p.n, p.etag);
     return got;
   },
 
@@ -313,7 +313,7 @@ export const UploadMethods = {
   },
 
   uploadPartDone(id: number, kind: string, uploadId: string, n: number, etag: string) {
-    const row = (this.sql.exec("SELECT upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray() as Array<Pick<MdRow, "upload_id">>)[0];
+    const row = this.sql.exec<Pick<MdRow, "upload_id">>("SELECT upload_id FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0];
     // A part that lands after its session was replaced or cancelled
     // belongs to nothing: no receipt.
     if (!row || row.upload_id !== uploadId) return { status: 409, error: "This upload was replaced or cancelled while the part was in flight" };
@@ -330,7 +330,7 @@ export const UploadMethods = {
       const a = this.upAuth(id, who, owner, kind);
       if (a.status !== 200) return { status: 200, uploading: false, received: [] };
       msg = a.msg;
-    } else msg = (this.sql.exec("SELECT ts FROM m WHERE id = ?", id).toArray() as Array<Pick<MsgRow, "ts">>)[0];
+    } else msg = this.sql.exec<Pick<MsgRow, "ts">>("SELECT ts FROM m WHERE id = ?", id).toArray()[0];
     const row = this.upSession(id, kind);
     if (!row) return { status: 200, uploading: false, received: [] };
     if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, received: [] };
@@ -435,7 +435,7 @@ export const UploadMethods = {
   // that lost its place - a reload, another device - picks it back up.
   async findResumableUpload(who: string | null | undefined, size: unknown, fp: unknown, owner: boolean, kind: string | null | undefined) {
     if (!fp || !size) return { status: 200, found: false };
-    const rows = this.sql.exec("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray() as Array<{ msg: number, kind: string, sender: string }>;
+    const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
       if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
@@ -451,14 +451,14 @@ export const UploadMethods = {
   // streamBegin reserves the upload, streamComplete indexes it after the Worker's
   // own size + signature verification, streamAbort discards it.
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
-    const r = (this.sql.exec("SELECT sender FROM m WHERE id = ?", id).toArray() as Array<Pick<MsgRow, "sender">>)[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: "Videos can be up to 5 GB" };
     const key = this.mediaKey(room, id, "video");
-    const prev = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>)[0];
+    const prev = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (prev && prev.r2key && !prev.upload_id) return { status: 409, error: "That message already has a video" };
     if (prev && prev.upload_id) { try { await this.env.MEDIA.resumeMultipartUpload(key, prev.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
@@ -471,7 +471,7 @@ export const UploadMethods = {
   // for the same message replaces the row, and a late finish or abort of
   // the old one must not index or delete the new one.
   async streamComplete(id: number, size: number, sniffed: string, room: string | null | undefined, uploadId: string | null | undefined) {
-    const row = (this.sql.exec("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray() as Array<Pick<MdRow, "size" | "upload_id">>)[0];
+    const row = this.sql.exec<Pick<MdRow, "size" | "upload_id">>("SELECT size, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 409, error: "This upload was replaced by a newer one for the same message" };
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL WHERE msg = ? AND kind = 'video'", sniffed, size, id);
@@ -484,7 +484,7 @@ export const UploadMethods = {
     // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
-    const row = (this.sql.exec("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray() as Array<Pick<MdRow, "r2key" | "upload_id">>)[0];
+    const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
     if (!row || (uploadId && row.upload_id !== uploadId)) return { status: 200 };
     if (row && row.upload_id && this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
     // a stream that completed in R2 but failed the size/type check left an object

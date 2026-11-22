@@ -270,7 +270,7 @@ export class Room extends DurableObject {
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
   async destroy(room: string) {
     if (!this.ready) return { error: "No room with that name", status: 404 };
-    if ((this.sql.exec("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one() as CountRow).n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
+    if (this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM inv WHERE revoked IS NULL").one().n) return { error: "This room has active invites. Remove them first with DELETE /api/rooms/" + room + "/invites.", status: 409 };
     await this.activityLog(room, "room deleted with the owner key");
     this.ready = false;
     for (const c of Array.from(this.clients)) c.close();
@@ -282,11 +282,11 @@ export class Room extends DurableObject {
     // only the object store would orphan them in the bucket forever, voice
     // samples included, while the API promises the room is gone for good.
     try {
-      const keys = (this.sql.exec("SELECT r2key FROM md WHERE r2key IS NOT NULL").toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key);
-      for (const v of this.sql.exec("SELECT sample_key FROM mv WHERE sample_key IS NOT NULL").toArray() as { sample_key: string }[]) keys.push(v.sample_key);
-      for (const v of this.sql.exec("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray() as { avatar_key: string }[]) keys.push(v.avatar_key);
+      const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE r2key IS NOT NULL").toArray().map((r) => r.r2key);
+      for (const v of this.sql.exec<{ sample_key: string }>("SELECT sample_key FROM mv WHERE sample_key IS NOT NULL").toArray()) keys.push(v.sample_key);
+      for (const v of this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE avatar_key IS NOT NULL").toArray()) keys.push(v.avatar_key);
       // Sketch & Guess drawings: their keys live in each match's state
-      for (const v of this.sql.exec("SELECT state FROM gm").toArray() as Pick<GmRow, "state">[]) {
+      for (const v of this.sql.exec<Pick<GmRow, "state">>("SELECT state FROM gm").toArray()) {
         try {
           const st = JSON.parse(v.state || "{}");
           if (st.type === "sketch") for (const im of Object.values(st.images || {}) as Array<{ key?: string } | null>) if (im && im.key) keys.push(im.key);
@@ -296,7 +296,7 @@ export class Room extends DurableObject {
       }
       // Abort any in-flight multipart sessions so their parts die too
       // (same pattern as deleteMessage: the md row carries key + upload id).
-      for (const md of this.sql.exec("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray() as { r2key: string, upload_id: string }[]) {
+      for (const md of this.sql.exec<{ r2key: string, upload_id: string }>("SELECT r2key, upload_id FROM md WHERE upload_id IS NOT NULL").toArray()) {
         try { await this.env.MEDIA.resumeMultipartUpload(md.r2key, md.upload_id).abort(); } catch { /* already completed, aborted or expired */ }
       }
       let failed = 0, first: unknown = null;
@@ -331,7 +331,7 @@ export class Room extends DurableObject {
   // refusal carries its code beside the sentence (lib/http.ts deny).
   lookupInvite(token: string | null | undefined): InviteLookup {
     if (!token) return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
-    const row = (this.sql.exec("SELECT name, revoked, used, seen, kind, invited_by, created FROM inv WHERE token = ?", token).toArray() as InviteCols[])[0];
+    const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };
     return { ok: true, row: row };
@@ -344,8 +344,8 @@ export class Room extends DurableObject {
     const l = this.lookupInvite(token);
     if (!l.ok) return l;
     const r = l.row;
-    const con = (this.sql.exec("SELECT text FROM con ORDER BY v DESC LIMIT 1").toArray() as { text: string }[])[0];
-    const members = (this.sql.exec("SELECT name, kind FROM inv WHERE revoked IS NULL AND used IS NOT NULL ORDER BY created").toArray() as Pick<InvRow, "name" | "kind">[])
+    const con = this.sql.exec<{ text: string }>("SELECT text FROM con ORDER BY v DESC LIMIT 1").toArray()[0];
+    const members = this.sql.exec<Pick<InvRow, "name" | "kind">>("SELECT name, kind FROM inv WHERE revoked IS NULL AND used IS NOT NULL ORDER BY created").toArray()
       .map((m) => ({ name: m.name, kind: (m.kind === "human" ? "human" : "agent") as "human" | "agent" }));
     return {
       ok: true,
@@ -376,7 +376,7 @@ export class Room extends DurableObject {
   // finish overnight with nobody reading it.
   async alarm() {
     let saved = "";
-    try { const r = (this.sql.exec("SELECT v FROM cfg WHERE k = 'room_name'").toArray() as Pick<CfgRow, "v">[])[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
+    try { const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'room_name'").toArray()[0]; saved = r ? String(r.v || "") : ""; } catch (e) { warn("alarm.name", e); }
     const room: string = this.roomName || (this.ctx.id && this.ctx.id.name) || saved || "";
     if (room && !this.roomName) this.roomName = room;
     // One match's bad state must not stop every clock in the room:
@@ -385,7 +385,7 @@ export class Room extends DurableObject {
     // no match had a clock until somebody happened to read one
     // (games review, 2026-11-12).
     try {
-      const rows = this.sql.exec("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "id">[];
+      const rows = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm WHERE status IN ('running', 'lobby')").toArray();
       for (const r of rows) {
         try {
           const g = this.gameRow(r.id);

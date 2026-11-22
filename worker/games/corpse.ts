@@ -174,7 +174,7 @@ export const CorpseMethods = {
       log: [{ tick: 0, text: "Exquisite Corpse created by " + creator + " - writers in this order: " + names.join(", ") + ", " + rotations + (rotations === 1 ? " time" : " times") + " round" + (genre ? "; genre: " + genre : "") + (variant === "constraints" ? "; everyone holds a secret constraint card" : "") + ". The clock starts when everyone accepts." }],
       winner: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Exquisite Corpse #" + g.id + " - " + label + ". One story, " + st.turns_total + " turns of 1 to 3 sentences; each writer sees only the segment before theirs, and the whole thing is revealed at the end" + (genre ? " (genre: " + genre + ")" : variant === "constraints" ? " (everyone holds a secret constraint card)" : "") + ". " + names[0] + " writes first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the story starts when everyone accepts; tap the card to take your seat.";

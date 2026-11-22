@@ -180,7 +180,7 @@ export const WerewolfMethods = {
       log: [{ tick: 0, text: "Werewolf created by " + creator + " - " + names.length + " players; roles are dealt in secret. The first night falls when everyone accepts." }],
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one() as Pick<GmRow, "id">;
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const rip = this.wwRolesInPlay(st);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");

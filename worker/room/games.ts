@@ -41,7 +41,7 @@ export const GameMachineryMethods = {
   },
 
   gameRow(id: number): GameRow | null {
-    const r = (this.sql.exec("SELECT * FROM gm WHERE id = ?", id).toArray() as GmRow[])[0];
+    const r = this.sql.exec<GmRow>("SELECT * FROM gm WHERE id = ?", id).toArray()[0];
     if (!r) return null;
     // the match state (untyped JSON); null only if a stored row did not parse,
     // and every write is JSON.stringify of the state
@@ -66,7 +66,7 @@ export const GameMachineryMethods = {
   // membership rules - and their wording - can never drift apart.
   /** @param playersIn the names a create asked for */
   gamePlayers(playersIn: unknown[]) {
-    const members = (this.sql.exec("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray() as Pick<InvRow, "name">[]).map((r) => r.name);
+    const members = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     const byLower = new Map(members.map((n) => [n.toLowerCase(), n]));
     const names = [];
     for (const p of playersIn) {
@@ -228,7 +228,7 @@ export const GameMachineryMethods = {
   // armed time already matches, so hot read paths stay cheap.
   async armGameAlarm() {
     try {
-      const rows = this.sql.exec("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray() as Pick<GmRow, "id" | "status" | "state">[];
+      const rows = this.sql.exec<Pick<GmRow, "id" | "status" | "state">>("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray();
       /** the nearest deadline */
       let next: number | null = null;
       for (const r of rows) {
@@ -275,7 +275,7 @@ export const GameMachineryMethods = {
   // renders in the stream and opens the arena full-screen.
   async postGameCard(sender: string, text: string, gameId: number, room: string) {
     const ts = Date.now();
-    const id = (this.sql.exec("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one() as Pick<MsgRow, "id">).id;
+    const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, game_id, pub_ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, gameId, ts).one().id;
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const msg = this.withKinds([{ id: id, ts: ts, from: sender, text: text, game_id: gameId }])[0];
     this.announce(msg, room);
@@ -443,7 +443,7 @@ export const GameMachineryMethods = {
   // takes a W, the other finishers an L; undecided finishes and
   // called-off matches count for nothing).
   listGames() {
-    const scanned = this.sql.exec("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray() as Pick<GmRow, "id">[];
+    const scanned = this.sql.exec<Pick<GmRow, "id">>("SELECT id FROM gm ORDER BY id DESC LIMIT 500").toArray();
     // filter(Boolean) drops the rows that did not parse
     const all = scanned.map((r) => {
       const g = this.gameRow(r.id);
@@ -491,7 +491,7 @@ export const GameMachineryMethods = {
       const floor = scanned[scanned.length - 1].id;
       try {
         // ws and places come back as JSON text (json_extract of a list)
-        const rows = this.sql.exec("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.winners') AS ws, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray() as Array<{ t: string | null, w: string | null, ws: string | null, places: string | null, name: string | null, hex: string | null }>;
+        const rows = this.sql.exec<{ t: string | null, w: string | null, ws: string | null, places: string | null, name: string | null, hex: string | null }>("SELECT json_extract(gm.state, '$.type') AS t, json_extract(gm.state, '$.winner') AS w, json_extract(gm.state, '$.winners') AS ws, json_extract(gm.state, '$.places') AS places, json_extract(pl.value, '$.name') AS name, json_extract(pl.value, '$.hex') AS hex FROM gm, json_each(gm.state, '$.players') AS pl WHERE gm.status = 'finished' AND gm.id < ?", floor).toArray();
         for (const r of rows) {
           if ((!r.w && !r.ws) || !r.name) continue;
           const type = (GAME_ENGINES as Record<string, unknown>)[r.t as string] ? (r.t as string) : "lightcycles";
@@ -528,9 +528,10 @@ export const GameMachineryMethods = {
     /** by game type, then player name */
     const ladder: Record<string, Record<string, LadderRow>> = {};
     /** ps: the players as JSON text */
-    let rows: Array<{ id: number, t: string | null, w: string | null, d: number | null, ps: string | null }> = [];
+    type FinishedRow = { id: number, t: string | null, w: string | null, d: number | null, ps: string | null };
+    let rows: Array<FinishedRow> = [];
     try {
-      rows = this.sql.exec("SELECT id, json_extract(state, '$.type') AS t, json_extract(state, '$.winner') AS w, json_extract(state, '$.draw') AS d, json_extract(state, '$.players') AS ps FROM gm WHERE status = 'finished' ORDER BY id").toArray();
+      rows = this.sql.exec<FinishedRow>("SELECT id, json_extract(state, '$.type') AS t, json_extract(state, '$.winner') AS w, json_extract(state, '$.draw') AS d, json_extract(state, '$.players') AS ps FROM gm WHERE status = 'finished' ORDER BY id").toArray();
     } catch {
       return {};
     }

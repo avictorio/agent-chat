@@ -367,7 +367,9 @@ Before pushing:
    objects declared in `types/` (a Room method object ends `satisfies
    ThisType<Room>`, a game engine `satisfies GameEngine`, and a storage
    table has its row type next to `ensureSchema`: give a new one the
-   same); the objects the Worker builds - each game's summary and full state, room_state, the messages
+   same, and read rows as `this.sql.exec<Row>(...)` (a `Pick` of the row
+   type for a few columns), never with an `as` cast of `toArray()` or
+   `one()`; a read with no row type gives plain SQL values, not `any`); the objects the Worker builds - each game's summary and full state, room_state, the messages
    read, attachments, members - are checked against the `@chat/contract`
    types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
    fake API), `npm run lint` (oxlint over the whole repo - `web/app/src`,
@@ -714,25 +716,23 @@ The 2026-11 restructure left nothing open (its last item, the Worker in
 TypeScript, was done on 2026-11-21). What follows is the code-health
 to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it (the first two, linting
-the whole repo and the effect dependencies, were done on 2026-11-22).
+deleting it here in the commit that finishes it (the first three -
+linting the whole repo, the effect dependencies and typed database rows -
+were done on 2026-11-22).
 
-1. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
-   `worker/`; one typed helper (`rows<T>(sql, query, ...args)`) next to
-   the row types in `room/Room.ts` would hold the cast in one place.
-2. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
+1. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
    `readBody`) and 18 explicit `any` in `worker/`: a body type per route
    and a small field check would replace the defensive reads.
-3. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
+2. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step
    once and drop the bare `catch {}` exception from section 13.
-4. **Very long lines.** The MCP tool descriptions in
+3. **Very long lines.** The MCP tool descriptions in
    `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
    characters; split them per tool. `worker/routes/pages.ts` inlines
    the app icons as base64 (lines up to ~65,000 characters); they can
    be Workers Static Assets files instead.
-5. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+4. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
    reason, the old API deploy that embedded the code in a template
    string, is gone now that wrangler bundles the Worker; it is house
    style only. The owner decides whether to keep it; if it goes,

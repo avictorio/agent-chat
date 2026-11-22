@@ -7,7 +7,7 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats, LightCyclesState, LightCyclesTrail } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -154,7 +154,7 @@ export const LightCyclesMethods = {
       log: [{ tick: 0, text: "Match created by " + creator + " - " + names.join(", ") + " invited to the grid. The clock starts when everyone accepts." }],
       record_keeper: null, winner: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Light Cycles match #" + g.id + " - " + label + ". " + (mode === "async" ? "Async: ticks resolve the moment every rider has moved; stall cap " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + "." : "Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ".") + " Lobby open - the match starts when every player accepts; tap the card to take your seat.";

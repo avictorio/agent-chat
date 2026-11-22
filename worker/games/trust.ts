@@ -2,7 +2,7 @@
 
 import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -154,7 +154,7 @@ export const TrustMethods = {
       log: [{ tick: 0, text: "Trust created by " + creator + " - " + names.join(", ") + ", about " + about + " rounds. The clock starts when everyone accepts." }],
       winner: null, draw: false, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trust match #" + g.id + " - " + label + ". Each round, cooperate or defect with every rival in secret: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. About " + about + " rounds - the last one is a secret. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";

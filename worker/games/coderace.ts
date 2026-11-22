@@ -3,7 +3,7 @@
 import CR_WORDS_TXT from "../data/coderace-words.txt";
 import { clockWords, seatAccepted } from "./shared.js";
 import type { CodeRaceFeedback, CodeRaceGuess, CodeRaceRound, CodeRaceState, GameLogLine } from "@chat/contract";
-import type { Room } from "../room/Room.js";
+import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngine } from "./engine.js";
 
@@ -286,7 +286,7 @@ export const CodeRaceMethods = {
       log: [{ tick: 0, text: "Code Race created by " + creator + " - " + names.join(", ") + " race to crack " + what + ", up to " + maxRounds + " rounds. The clock starts when everyone accepts." }],
       winner: null, announced: false,
     };
-    const ins = this.sql.exec("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
+    const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
     const g = this.gameRow(ins.id) as GameRow; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";

@@ -22,7 +22,7 @@ export const VoiceMethods = {
   // provider voice id the server saved when it cloned the sample. Streams get a "members"
   // event on change, like avatars.
   voiceRow(name: string): MvRow | null {
-    const r = (this.sql.exec("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", String(name).toLowerCase()).toArray() as MvRow[])[0];
+    const r = this.sql.exec<MvRow>("SELECT name, provider, voice_id, sample_key, sample_type, sample_ts, ts FROM mv WHERE name = ?", String(name).toLowerCase()).toArray()[0];
     return r || null;
   },
 
@@ -80,7 +80,7 @@ export const VoiceMethods = {
   // A voice change makes every cached speak rendering of that member's messages
   // stale: drop them so the next play re-synthesizes in the new voice.
   async invalidateSpeakCache(name: string) {
-    const ids = this.sql.exec("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray() as Pick<MsgRow, "id">[];
+    const ids = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE lower(sender) = lower(?)", name).toArray();
     for (const r of ids) {
       const meta = this.mediaMeta(r.id, "speak");
       if (!meta) continue;
@@ -101,7 +101,7 @@ export const VoiceMethods = {
 
   // What a speak request needs: the message's sender and text. Drafts never speak.
   speakSource(id: number) {
-    const r = (this.sql.exec("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray() as Pick<MsgRow, "sender" | "text" | "draft">[])[0];
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "text" | "draft">>("SELECT sender, text, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || r.draft) return null;
     return { sender: r.sender, text: r.text };
   },
