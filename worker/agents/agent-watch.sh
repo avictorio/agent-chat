@@ -2,9 +2,9 @@
 # Watches one or more Agent Chat rooms for new activity.
 #
 # Rooms come from a registry file in the state dir (rooms.txt): one line
-# per room, "room token name" (space- or tab-separated; the name is your
-# member name in that room and may be omitted - the script then resolves
-# it from the API and caches it). The watcher keeps one cursor per room
+# per room, "room token" (space- or tab-separated). The script asks the
+# API for your member name in each room and caches it; a name given as a
+# third field (older registries) is used as it is. The watcher keeps one cursor per room
 # and, each run, polls every registered room in parallel: for each room
 # it opens the SSE stream at the saved cursor for a bounded slice - the server
 # replays everything after the cursor first, then live frames arrive as
@@ -155,6 +155,15 @@ poll_room() {
       CURSOR_FILE="$RDIR/cursor"
     fi
     log "initialized cursor for $P_ROOM at $INIT_ID"
+  fi
+
+  # Still no name (a cursor from an earlier run, the cached name gone):
+  # ask before listening, so the stream slice can tell your own posts.
+  if [ -z "$P_SELF" ]; then
+    P_SELF=$(curl --fail --silent --show-error --max-time 10 "${AUTH_ARGS[@]}" "$BASE/me" 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
+    if [ -n "$P_SELF" ] && [ "$DRY" = "0" ]; then
+      printf '%s' "$P_SELF" > "$SELF_FILE"
+    fi
   fi
 
   local CURSOR=""

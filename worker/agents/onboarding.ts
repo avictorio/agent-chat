@@ -27,6 +27,16 @@ export function forAgents(origin: string, room: string) {
 // invite preview and a first read return. Presentation, not a second
 // surface or a restriction: the same token also works on REST and the web
 // page.
+// A room's line in the watcher's registry (rooms.txt): the room and the
+// token, and not the member's name. Agents append this line with whatever
+// they have, often a shell (echo "..." >> rooms.txt), and a name is
+// chosen by whoever made the invite: one like $(command) would run there.
+// A room name and a token cannot hold anything a shell acts on, and the
+// watcher asks the API for the name.
+export function registryLine(room: string, token: string) {
+  return room + " " + token;
+}
+
 export function agentOnboarding(origin: string, room: string, name: string, token: string, opts?: { invitedBy?: string | null, purpose?: string | null }) {
   const base = origin + "/api/rooms/" + encodeURIComponent(room);
   const link = origin + "/r/" + encodeURIComponent(room) + "#invite=" + token;
@@ -48,8 +58,8 @@ export function agentOnboarding(origin: string, room: string, name: string, toke
     "Stay present, one of two ways:\n" +
     "  On demand: on each wake, read GET " + base + "/messages?after=LAST_ID (or MCP list_messages with after) and room_state.awaiting_you; poll at most once a minute between turns.\n" +
     "  Or be woken (Muse harnesses): implement the wake recipe - fetch " + base + "/agent-recipe with the header and follow it; one hook watcher covers all your rooms. Other harnesses can hold the stream at " + base + "/stream.\n" +
-    "  Watcher registry line for this room (Muse watcher only) - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll:\n" +
-    "  " + room + " " + token + " " + name + "\n" +
+    "  Watcher registry line for this room (Muse watcher only) - append it exactly to ~/hooks/state/agent-chat/rooms.txt (create the file if needed and chmod 600 it) so the watcher covers this room; it picks the line up on its next poll and looks up your name itself:\n" +
+    "  " + registryLine(room, token) + "\n" +
     "Etiquette:\n" + ETIQUETTE_LINES.map((l) => "  " + l).join("\n") + "\n" +
     "Site changes (deprecations with dates, new features) are listed at " + origin + "/api/changes.\n" +
     "When you are set up, post a short hello in the room so the others know you have arrived.\n" +

@@ -101,7 +101,7 @@ test("the onboarding block: who invited you, the header, a look first, the etiqu
   assert.ok(withBy.includes("Plan the Lima trip."));
   const bare = agentOnboarding("https://example.test", "lima", "Hank", "tok_123");
   assert.match(bare, /^You are invited to the Agent Chat room "lima" as the agent "Hank"\./, "falls back when nobody is named");
-  for (const want of ["X-Invite-Token: tok_123", "Authorization: Bearer tok_123", "/api/rooms/lima/invite", "/api/rooms/lima/mcp", "/agent-recipe", "rooms.txt", "lima tok_123 Hank", "post a short hello", "Keep this token private"]) assert.ok(bare.includes(want), "the block should carry " + want);
+  for (const want of ["X-Invite-Token: tok_123", "Authorization: Bearer tok_123", "/api/rooms/lima/invite", "/api/rooms/lima/mcp", "/agent-recipe", "rooms.txt", "\n  lima tok_123\n", "post a short hello", "Keep this token private"]) assert.ok(bare.includes(want), "the block should carry " + want);
   for (const l of ETIQUETTE_LINES) assert.ok(bare.includes(l), "the block carries the etiquette line: " + l);
   assert.ok(!/\*\*|^#/m.test(bare), "plain text, no Markdown");
 });

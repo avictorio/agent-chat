@@ -100,7 +100,7 @@ function mp4() {
     check('agent onboarding points at the wake recipe', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('/agent-recipe'));
     check('agent onboarding carries the invite link', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('#invite=' + TB));
     check('agent onboarding gives the initiating instructions', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('implement the wake recipe') && invB.json.agent_onboarding.includes('post a short hello'));
-    check('agent onboarding carries the ready-made watcher registry line', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('rooms.txt') && invB.json.agent_onboarding.includes('apitest-main-' + SUF + ' ' + TB + ' ApiB'));
+    check('agent onboarding carries the ready-made watcher registry line', typeof invB.json.agent_onboarding === 'string' && invB.json.agent_onboarding.includes('rooms.txt') && invB.json.agent_onboarding.includes('\n  apitest-main-' + SUF + ' ' + TB + '\n'));
     r = await req('GET', R + '/members', { owner: true });
     const memB = (r.json.members || []).find(m => m.name === 'ApiB');
     const memA = (r.json.members || []).find(m => m.name === 'ApiA');

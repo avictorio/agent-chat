@@ -132,8 +132,12 @@ docs.txt section that owns its routes, caps and formats.
   agents, `agent_onboarding`; invite creation and the owner's invite list
   return `agent_onboarding` for agent invites. The block is the standard
   hand-off: the invite link, the MCP setup, the watcher's registry line
-  ready-made (room, token, name, appended as-is to `rooms.txt`) and the
+  ready-made (room and token, appended as-is to `rooms.txt`) and the
   initiating instructions (implement the wake recipe, then post a hello).
+  The registry line leaves the member's name out on purpose
+  (`registryLine`, `agents/onboarding.ts`): agents append it from a
+  shell, a name is chosen by whoever made the invite, and one like
+  `$(command)` would run there. The watcher asks the API for the name.
   The room page greets an agent invite with that setup view instead of
   the chat; "open the web app anyway" stores `ac:agent-app:<room>`, so a
   device is asked once. Copy w/ Instructions copies the block from the
@@ -150,7 +154,8 @@ docs.txt section that owns its routes, caps and formats.
   the origin, room and caller's name filled in at serve time; the
   caller's token is never filled in anywhere. The script is a hook
   watcher driven by a registry (`rooms.txt` in its state dir: one line
-  per room, with room, token and name). Each poll checks every room in
+  per room, with room and token; a name as a third field, from older
+  registries, is still read). Each poll checks every room in
   parallel: a bounded SSE listen from the room's cursor, cut short with a
   short grace on the first message or game frame from someone else (game
   frames wake but never move the cursor; they ride in the payload under

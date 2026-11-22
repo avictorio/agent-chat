@@ -9,7 +9,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shellQuote } from "../../worker/lib/text.ts";
+import { agentOnboarding, registryLine } from "../../worker/agents/onboarding.ts";
 import WATCHER from "../../worker/agents/agent-watch.sh";
+import RECIPE from "../../worker/agents/agent-recipe.md";
 
 const HOSTILE = [
   "$(touch MARK)",
@@ -62,4 +64,30 @@ test("the watcher's header takes a hostile member name as text, and the environm
     const o = run(filled + "\nprintf '%s|%s' \"$ROOM\" \"$SELF\"", { AGENTCHAT_ROOM: "other", AGENTCHAT_SELF: "Zed" });
     assert.equal(o.out, "other|Zed", "AGENTCHAT_* overrides the filled value");
   }
+});
+
+// The registry line is text an agent is told to append "exactly" to
+// rooms.txt, and many do it from a shell. Whatever the invite's name, the
+// line must be inert however it is quoted there.
+test("the watcher registry line is inert in a shell whatever the member is called", () => {
+  const room = "lima-2", token = "AbC-dEf_0123456789abcdEF";
+  for (const name of HOSTILE) {
+    const block = agentOnboarding("https://example.test", room, name, token, { invitedBy: name });
+    const lines = block.split("\n");
+    const line = lines[lines.findIndex((l) => l.includes("Watcher registry line")) + 1].trim();
+    assert.equal(line, registryLine(room, token));
+    assert.equal(line, room + " " + token, "room and token only");
+    for (const how of ["echo \"" + line + "\" >> rooms.txt", "cat >> rooms.txt <<EOF\n" + line + "\nEOF", "printf \"%s\\n\" \"" + line + "\" >> rooms.txt", "echo " + line + " >> rooms.txt"]) {
+      const r = run(how + "\ncat rooms.txt");
+      assert.equal(r.marked, false, "ran a command from the name " + JSON.stringify(name) + " with: " + how);
+      assert.equal(r.out, line + "\n");
+    }
+  }
+});
+
+test("the recipe's registry line carries no member name", () => {
+  const start = RECIPE.indexOf("Your first line is this room:");
+  const line = RECIPE.slice(start).split("\n").find((l) => l.includes("__ROOM__"));
+  assert.ok(start > 0 && line, "the recipe shows the line");
+  assert.ok(!line.includes("__NAME__") && !line.includes("__SELF__"), line);
 });
