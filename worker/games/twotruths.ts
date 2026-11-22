@@ -5,6 +5,7 @@ import type { GameLogLine, GameStatus, TwoTruthsRound, TwoTruthsState, TwoTruths
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { randInt } from "../lib/random.js";
 
 /** A seat as createTwoTruths stores it (st.players). */
 export type TtSeat = { name: string, color: string, hex: string };
@@ -121,7 +122,7 @@ export const TwoTruthsMethods = {
     if (resolved.error) return resolved;
     const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randInt(i + 1);
       [names[i], names[j]] = [names[j], names[i]];
     }
     const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
@@ -181,7 +182,7 @@ export const TwoTruthsMethods = {
       // shuffle for the table; remember where the lie landed
       const idx = [0, 1, 2];
       for (let i = 2; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = randInt(i + 1);
         [idx[i], idx[j]] = [idx[j], idx[i]];
       }
       const shown = idx.map((i) => (p.statements as string[])[i]);

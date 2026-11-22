@@ -7,6 +7,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { randInt } from "../lib/random.js";
 
 /** A bidder's seat. */
 export type AuSeat = { name: string, color: string, hex: string };
@@ -110,7 +111,7 @@ export const AuctionMethods = {
     const budget = clamp(opts.budget, 10, 1000, 100);
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 180);
     const deck = pool.slice();
-    for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    for (let i = deck.length - 1; i > 0; i--) { const j = randInt(i + 1); const t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const prog: Record<string, AuProg> = {};

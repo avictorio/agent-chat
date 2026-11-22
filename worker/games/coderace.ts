@@ -7,6 +7,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { randInt } from "../lib/random.js";
 
 /** A racer's seat. */
 export type CrSeat = { name: string, color: string, hex: string };
@@ -122,7 +123,7 @@ export const CodeRaceMethods = {
       return w;
     }
     const pal = CR_PALETTE.slice(0, st.colors);
-    if (s === "random") return Array.from({ length: st.length }, () => pal[Math.floor(Math.random() * pal.length)].k).join("");
+    if (s === "random") return Array.from({ length: st.length }, () => pal[randInt(pal.length)].k).join("");
     const byName: Record<string, string> = {};
     pal.forEach((c) => { byName[c.name] = c.k; byName[c.k.toLowerCase()] = c.k; });
     let toks = s.split(/[^a-z]+/).filter(Boolean);
@@ -264,8 +265,8 @@ export const CodeRaceMethods = {
     let secret;
     if (words) {
       const list = crWords()[length].answers;
-      secret = list[Math.floor(Math.random() * list.length)];
-    } else secret = Array.from({ length: length }, () => CR_PALETTE[Math.floor(Math.random() * (ncolors as number))].k).join(""); // colors mode: ncolors is set
+      secret = list[randInt(list.length)];
+    } else secret = Array.from({ length: length }, () => CR_PALETTE[randInt(ncolors as number)].k).join(""); // colors mode: ncolors is set
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
     const prog: Record<string, CrProg> = {};

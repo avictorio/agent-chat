@@ -6,6 +6,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { randInt } from "../lib/random.js";
 
 /** A player's seat. */
 export type TrSeat = { name: string, color: string, hex: string };
@@ -136,7 +137,7 @@ export const TrustMethods = {
     const clamp = (v: unknown, lo: number, hi: number, def: number) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
     const about = clamp(opts.rounds, 4, 20, 10);
     // the real last round: within two of `about`, drawn now, hidden until it comes
-    const last = Math.max(3, about - 2 + Math.floor(Math.random() * 5));
+    const last = Math.max(3, about - 2 + randInt(5));
     const roundSeconds = clamp(opts.tick_seconds, 30, 86400, 180);
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));

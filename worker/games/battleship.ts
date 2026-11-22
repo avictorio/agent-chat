@@ -6,6 +6,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { coin, randInt } from "../lib/random.js";
 
 /** Shots an agent's read carries (the whole record with log=full). */
 export const BS_SHOTS_TAIL = 24;
@@ -162,8 +163,8 @@ export const BattleshipMethods = {
       for (const size of sizes) {
         let placed = false;
         for (let t = 0; t < 100 && !placed; t++) {
-          const horiz = Math.random() < 0.5;
-          const x = Math.floor(Math.random() * bw), y = Math.floor(Math.random() * bh);
+          const horiz = coin();
+          const x = randInt(bw), y = randInt(bh);
           const cells = [];
           let good = true;
           for (let k = 0; k < size; k++) {
@@ -281,8 +282,8 @@ export const BattleshipMethods = {
     // The axis is a coin flip: following the ship's shape would give its
     // orientation away (a one-column ship would always draw a row ping);
     // a random axis stays truthful and says nothing.
-    const useRow = Math.random() < 0.5;
-    const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
+    const useRow = coin();
+    const pick = useRow ? rows[randInt(rows.length)] : cols[randInt(cols.length)];
     const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
     st.sonar = { turn: st.turn, for: shooter.name, axis: useRow ? "row" : "column", label: label };
     st.log.push({ tick: st.turn, text: "Sonar ping for " + shooter.name + ": a hull cell of " + opp.name + "'s last ship sits in " + label + " of their waters." });
@@ -322,8 +323,8 @@ export const BattleshipMethods = {
     for (const s of leader.fleet as BsShip[]) for (const c of s.cells) if (s.hits.indexOf(c) < 0) open.push(c.split(",").map(Number));
     if (!open.length) return;
     const rows = [...new Set(open.map((c) => c[1]))], cols = [...new Set(open.map((c) => c[0]))];
-    const useRow = Math.random() < 0.5;
-    const pick = useRow ? rows[Math.floor(Math.random() * rows.length)] : cols[Math.floor(Math.random() * cols.length)];
+    const useRow = coin();
+    const pick = useRow ? rows[randInt(rows.length)] : cols[randInt(cols.length)];
     const label = useRow ? "row " + (pick + 1) : "column " + String.fromCharCode(65 + pick);
     st.sonar = { turn: st.turn, for: shooter.name, target: leader.name, axis: useRow ? "row" : "column", label: label };
     st.log.push({ tick: st.turn, text: "Sonar ping for " + shooter.name + ": a hull cell of " + leader.name + "'s fleet - the leader, " + this.bsAfloat(leader) + " afloat - sits in " + label + " of their waters." });
@@ -556,7 +557,7 @@ export const BattleshipMethods = {
         st.phase = "play";
         // The first shot is a coin flip, so the creator's seat order
         // doesn't hand anyone the first shot.
-        st.turn_of = st.players[Math.floor(Math.random() * st.players.length)].name;
+        st.turn_of = st.players[randInt(st.players.length)].name;
         st.turn = 1;
         st.deadline = Date.now() + st.tick_seconds * 1000;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
@@ -704,7 +705,7 @@ export const BattleshipMethods = {
       if (st.phase === "setup") {
         for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(st); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
         st.phase = "play";
-        st.turn_of = st.players[Math.floor(Math.random() * st.players.length)].name;
+        st.turn_of = st.players[randInt(st.players.length)].name;
         st.turn = 1;
         st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
         this.bsBeginTurn(st);

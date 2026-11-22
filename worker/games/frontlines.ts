@@ -6,6 +6,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { randFloat, randInt } from "../lib/random.js";
 
 /** A commander's seat. */
 export type FlSeat = { name: string, color: string, hex: string };
@@ -69,7 +70,7 @@ export const FrontlinesMethods = {
   },
 
   flRandom() {
-    const w = Array.from({ length: FL_HILLS }, () => Math.random() + 0.05);
+    const w = Array.from({ length: FL_HILLS }, () => randFloat() + 0.05);
     const tot = w.reduce((a, b) => a + b, 0);
     const out = w.map((x) => Math.floor((x / tot) * FL_TROOPS));
     let left = FL_TROOPS - out.reduce((a, b) => a + b, 0);
@@ -79,7 +80,7 @@ export const FrontlinesMethods = {
 
   flValues() {
     const v = [1, 1, 2, 2, 3];
-    for (let i = v.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = v[i]; v[i] = v[j]; v[j] = t; }
+    for (let i = v.length - 1; i > 0; i--) { const j = randInt(i + 1); const t = v[i]; v[i] = v[j]; v[j] = t; }
     return v;
   },
 

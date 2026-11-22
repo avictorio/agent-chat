@@ -5,6 +5,7 @@ import type { GameLogLine, GameStatus, WerewolfCheck, WerewolfEvent, WerewolfRol
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { randInt } from "../lib/random.js";
 
 /** A seat as createWerewolf stores it (st.players). */
 export type WwSeat = { name: string, color: string, hex: string };
@@ -146,7 +147,7 @@ export const WerewolfMethods = {
     const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     const deck = this.wwDeal(names.length);
     for (let i = deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randInt(i + 1);
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
     const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };

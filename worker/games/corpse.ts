@@ -8,6 +8,7 @@ import type { CorpseBeat, CorpseSegment, CorpseState, CorpseYou, GameLogLine, Ga
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { randInt } from "../lib/random.js";
 
 /** A seat as createCorpse stores it (st.players). */
 export type EcSeat = { name: string, color: string, hex: string };
@@ -133,7 +134,7 @@ export const CorpseMethods = {
     if (resolved.error) return resolved;
     const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randInt(i + 1);
       [names[i], names[j]] = [names[j], names[i]];
     }
     const clamp: (v: unknown, lo: number, hi: number, def: number) => number = (v, lo, hi, def): number => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(hi, Math.max(lo, n)) : def; };
@@ -147,13 +148,13 @@ export const CorpseMethods = {
     if (seed.length > EC_MAX) return { status: 400, error: "A seed line can be up to " + EC_MAX + " characters" };
     if (!seed) {
       const pool = ecSeeds();
-      seed = pool[Math.floor(Math.random() * pool.length)];
+      seed = pool[randInt(pool.length)];
     }
     const constraints: Record<string, string> = {};
     if (variant === "constraints") {
       const deck = ecRules().slice();
       for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = randInt(i + 1);
         [deck[i], deck[j]] = [deck[j], deck[i]];
       }
       names.forEach((n, i) => (constraints[n] = deck[i % deck.length]));

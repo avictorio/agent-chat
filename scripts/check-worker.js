@@ -9,6 +9,9 @@
 // failure with warn() (worker/lib/log.ts), or write catch { /* reason */ }.
 // There is no exception: the schema steps check columns instead of letting
 // an ALTER fail.
+//
+// And it refuses Math.random: a player can work out its next values from
+// the ones a game shows them, so every draw goes through worker/lib/random.ts.
 "use strict";
 
 const fs = require("fs");
@@ -57,6 +60,10 @@ for (const f of files.sort()) {
     if (silent) {
       bad++;
       console.error(rel + ":" + (i + 1) + ": an empty catch - log it with warn() (lib/log.ts) or say why: catch { /* reason */ }");
+    }
+    if (/\bMath\s*\.\s*random\b/.test(line.replace(/\/\/.*$/, ""))) {
+      bad++;
+      console.error(rel + ":" + (i + 1) + ": Math.random is predictable - draw with randInt, randFloat or coin (lib/random.ts)");
     }
   });
 }

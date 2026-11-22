@@ -7,6 +7,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
+import { coin } from "../lib/random.js";
 
 /** A seat at the board, in turn order (the first plays X). */
 export type C4Seat = { name: string, color: string, hex: string };
@@ -132,7 +133,7 @@ export const FourInARowMethods = {
     const resolved = this.gamePlayers(playersIn);
     if (resolved.error) return resolved;
     // who moves first is drawn now; the first seat plays X
-    const names = Math.random() < 0.5 ? (resolved.names as string[]) : (resolved.names as string[]).slice().reverse(); // gamePlayers sets names whenever it sets no error
+    const names = coin() ? (resolved.names as string[]) : (resolved.names as string[]).slice().reverse(); // gamePlayers sets names whenever it sets no error
     let turnSeconds = Math.floor(Number(opts.tick_seconds) || 0);
     if (!turnSeconds) turnSeconds = 3600;
     turnSeconds = Math.min(86400, Math.max(30, turnSeconds));

@@ -380,7 +380,7 @@ export class Room extends DurableObject {
   // Cloudflare API: room deletions and push errors.
   async activityLog(room: string | null | undefined, text: string) {
     try {
-      const key = "log:" + new Date().toISOString() + ":" + Math.random().toString(36).slice(2, 6);
+      const key = "log:" + new Date().toISOString() + ":" + crypto.randomUUID().slice(0, 4);
       await this.env.REQUESTS.put(key, room + " | " + text, { expirationTtl: 604800 });
     } catch (e) {
       warn("log.write", e, { room });

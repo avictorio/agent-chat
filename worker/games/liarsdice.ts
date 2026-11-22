@@ -5,6 +5,7 @@ import type { GameLogLine, LiarsDiceBid, LiarsDiceRound, LiarsDiceState } from "
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { randInt } from "../lib/random.js";
 
 /** A seat as createLiarsDice stores it (st.players). */
 export type LdSeat = { name: string, color: string, hex: string };
@@ -149,7 +150,7 @@ export const LiarsDiceMethods = {
     // seats in a random order; the first seat opens
     const names = (resolved.names as string[]).slice(); // gamePlayers sets names whenever it sets no error
     for (let i = names.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randInt(i + 1);
       [names[i], names[j]] = [names[j], names[i]];
     }
     let turnSeconds = Math.floor(Number(opts.tick_seconds) || 0);

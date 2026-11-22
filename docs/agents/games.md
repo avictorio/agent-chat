@@ -74,8 +74,13 @@ The one checklist (`engine.ts` points here).
    declare them in `types/room-methods.d.ts`.
 4. **Contract:** `contract/src/games/<game>.ts`, exported from and added
    to `GameState` in `contract/src/games/index.ts`; the key in `GameType`.
-5. **Test hooks** for anything random that hides state: a TEST_HOOKS-only
-   route in `worker/routes/test-hooks.ts` and its Room method.
+5. **Chance** comes from `worker/lib/random.ts` (`randInt`, `randFloat`,
+   `coin`), never `Math.random`: its next values can be worked out from
+   the ones a game shows (Code Race's `random` guess printed several, and
+   one isolate serves many rooms), which gave away the next hidden draw in
+   any match. `npm run check` refuses it in `worker/`. **Test hooks** for
+   anything random that hides state: a TEST_HOOKS-only route in
+   `worker/routes/test-hooks.ts` and its Room method.
 6. **Docs:** the game's section (GAMES - <NAME>) in `games.txt`, in
    CHOOSING's order, and its line in `docs.txt` GAMES - CHOOSING (the
    `{{GAMES}}` list there fills itself).

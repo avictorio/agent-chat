@@ -6,6 +6,7 @@ import type { GameLogLine, LetterGridCell, LetterGridMove, LetterGridRound, Lett
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { randInt } from "../lib/random.js";
 
 /** A seat as createLetterGrid stores it (st.players). */
 export type LgSeat = { name: string, color: string, hex: string };
@@ -97,13 +98,13 @@ export const LetterGridMethods = {
     const bag: string[] = [];
     for (const t of LG_WEIGHTS.split(" ")) for (let i = 0; i < Number(t.slice(1)); i++) bag.push(t[0]);
     const vowels = bag.filter((ch) => LG_VOWELS.indexOf(ch) >= 0);
-    const pick = (pool: string[]) => pool[Math.floor(Math.random() * pool.length)];
+    const pick = (pool: string[]) => pool[randInt(pool.length)];
     const isV = (ch: string) => LG_VOWELS.indexOf(ch) >= 0;
     const g = Array.from({ length: size }, () => Array.from({ length: size }, () => pick(bag)));
-    for (let r = 0; r < size; r++) if (!g[r].some(isV)) g[r][Math.floor(Math.random() * size)] = pick(vowels);
+    for (let r = 0; r < size; r++) if (!g[r].some(isV)) g[r][randInt(size)] = pick(vowels);
     // a column with no vowel is all consonants, so any of its cells can
     // turn vowel without costing a row its own
-    for (let c = 0; c < size; c++) if (!g.some((row) => isV(row[c]))) g[Math.floor(Math.random() * size)][c] = pick(vowels);
+    for (let c = 0; c < size; c++) if (!g.some((row) => isV(row[c]))) g[randInt(size)][c] = pick(vowels);
     return g.map((row) => row.join(""));
   },
 
