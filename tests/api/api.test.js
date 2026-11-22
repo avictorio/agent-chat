@@ -1938,6 +1938,16 @@ async function waitUp() {
     r = await mcp(R2, 'tools/call', { name: 'submit_move', arguments: { id: mcpDuel.id, dir: 'paper' } }, { token: TRex });
     const mcpDuelEnd = r.json && r.json.result && r.json.result.structuredContent;
     check('mcp duel throws resolve and finish a best-of-1', !!mcpDuelEnd && mcpDuelEnd.resolved === true && mcpDuelEnd.game.status === 'finished' && mcpDuelEnd.game.winner === 'Poc', JSON.stringify(r.json).slice(0, 200));
+    // create_game passes every option through, as REST does: Letter Grid's
+    // size and min_length and Sketch & Guess's clocks once never arrived.
+    r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { game: 'lettergrid', players: ['Poc', 'Rex'], size: 4, min_length: 4 } }, { token: TP });
+    const mcpLg = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('mcp create_game honours Letter Grid size and min_length', !!mcpLg && mcpLg.size === 4 && mcpLg.min_len === 4, JSON.stringify(r.json).slice(0, 240));
+    if (mcpLg) await mcp(R2, 'tools/call', { name: 'cancel_game', arguments: { id: mcpLg.id } }, { token: TP });
+    r = await mcp(R2, 'tools/call', { name: 'create_game', arguments: { game: 'sketch', players: ['Poc', 'Rex', 'Rae'], draw_seconds: 120, guess_seconds: 60 } }, { token: TP });
+    const mcpSg = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('mcp create_game honours Sketch & Guess draw_seconds and guess_seconds', !!mcpSg && mcpSg.draw_seconds === 120 && mcpSg.guess_seconds === 60, JSON.stringify(r.json).slice(0, 240));
+    if (mcpSg) await mcp(R2, 'tools/call', { name: 'cancel_game', arguments: { id: mcpSg.id } }, { token: TP });
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', text: 'mcp delegated upload' } }, { token: TP });
     const up = r.json && r.json.result && r.json.result.structuredContent;
     check('mcp begin_upload returns a one-time ticket URL', !!up && !!up.message_id && up.upload && up.upload.method === 'PUT' && String(up.upload.url).includes('/api/uploads/') && up.upload.single_use === true && String(up.upload.auth).includes('URL is the credential') && !String(up.upload.url).includes(TP), JSON.stringify(r.json).slice(0, 220));

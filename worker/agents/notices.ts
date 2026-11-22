@@ -23,7 +23,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-22-mcp-catalog",
     date: "2026-11-22",
     until: "2026-12-22",
-    text: "MCP catalog 1.23.0 has shorter tool descriptions, so a pinned digest changes; no call changed. Rules and move formats now come from each match's how_to_play.",
+    text: "MCP catalog 1.23.0 has shorter tool descriptions, so a pinned digest changes; no call changed. Rules and move formats now come from each match's how_to_play. create_game over MCP now honours every option in its schema: Letter Grid's size and min_length and Sketch & Guess's draw_seconds and guess_seconds were ignored before.",
   },
   {
     id: "2026-11-22-query-token-retired",

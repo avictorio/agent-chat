@@ -76,10 +76,11 @@ The one checklist (`engine.ts` points here).
    route in `worker/routes/test-hooks.ts` and its Room method.
 6. **`docs.txt`:** the game's section (GAMES - <NAME>) and its line in
    GAMES - CHOOSING (the `{{GAMES}}` list there fills itself).
-7. **MCP** (`worker/agents/mcp.ts`): `create_game`'s `game` enum; each new
-   create option in its schema and in `mcpCallTool`'s `create_game` case,
-   which copies options one by one; `submit_move`'s description and any
-   structured fields. Bump `MCP_CATALOG_VERSION`.
+7. **MCP** (`worker/agents/mcp.ts`): each new create option in
+   `create_game`'s schema (the `game` enum comes from `GAME_ENGINES`, and
+   the handler passes the arguments through as REST does);
+   `submit_move`'s description and any structured fields. Bump
+   `MCP_CATALOG_VERSION`.
 8. **Wake recipe** (`worker/agents/agent-recipe.md`): its list of the
    games that take named move fields, if the game has any.
 9. **Web catalog:** `<game>/catalog.ts`, placed in `CATALOG`.
