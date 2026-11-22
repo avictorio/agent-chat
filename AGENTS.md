@@ -372,8 +372,11 @@ Before pushing:
    types the web app reads; change both together), `npm test` (the `web/` Playwright suite against a
    fake API), `npm run lint` (oxlint over the whole repo - `web/app/src`,
    `contract/src`, `worker/`, `tests/` and `web/tests/` - with the
-   `correctness` category, the React hooks rules and `no-explicit-any`
-   (not yet in `worker/`, to-do item 4); any finding fails it, a disable
+   `correctness` and `suspicious` categories, the React hooks and React
+   Compiler rules and `no-explicit-any` (not yet in `worker/`: to-do
+   item 3); `no-underscore-dangle` is off (style), and so is `no-shadow`
+   in `web/tests/ui/`, where Playwright's browser-side functions
+   re-declare the arguments they are handed; any finding fails it, a disable
    comment says why after `--`, and one that no longer suppresses
    anything is reported; an unused catch binding is written
    `catch { ... }`),
@@ -690,37 +693,32 @@ The 2026-11 restructure left nothing open (its last item, the Worker in
 TypeScript, was done on 2026-11-21). What follows is the code-health
 to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it.
+deleting it here in the commit that finishes it (the first, linting the
+whole repo, was done on 2026-11-22).
 
-1. **Lint the whole repo.** Done so far (2026-11-22): `correctness` is
-   on and `npm run lint` covers the whole repo (unused variables, catch
-   bindings and parameters, useless escapes and the rest fixed), and
-   the React Compiler rules (`react/immutability`, `react/refs`,
-   `purity`, `use-memo`, `preserve-manual-memoization`) are on. Left:
-   - `suspicious`: 29 shadowed names, 7 rethrows that drop the original
-     error (`preserve-caught-error`), 6 loop conditions that never
-     change, 10 needless ternaries; `no-underscore-dangle` (52) is
-     style and stays off; its 12 effect-dependency hits go with item 2.
-2. **Effect dependencies.** 81 `eslint-disable` comments for
+1. **Effect dependencies.** 81 `eslint-disable` comments for
    `react-hooks/exhaustive-deps` in `web/app/src`. React 19.3 has
    `useEffectEvent` (unused so far), the standard fix for an effect
    that reads the latest props or state without re-running on them.
-3. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
+   The linter's `react/exhaustive-effect-dependencies` (12 hits) and
+   `react/memo-dependencies` (1) are off in `web/.oxlintrc.json` until
+   this item is done; turn them on with it.
+2. **Typed database rows.** 143 `toArray() as` / `one() as` casts in
    `worker/`; one typed helper (`rows<T>(sql, query, ...args)`) next to
    the row types in `room/Room.ts` would hold the cast in one place.
-4. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
+3. **Typed request bodies.** 25 `Record<string, any>` bodies (most from
    `readBody`) and 18 explicit `any` in `worker/`: a body type per route
    and a small field check would replace the defensive reads.
-5. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
+4. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step
    once and drop the bare `catch {}` exception from section 13.
-6. **Very long lines.** The MCP tool descriptions in
+5. **Very long lines.** The MCP tool descriptions in
    `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
    characters; split them per tool. `worker/routes/pages.ts` inlines
    the app icons as base64 (lines up to ~65,000 characters); they can
    be Workers Static Assets files instead.
-7. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+6. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
    reason, the old API deploy that embedded the code in a template
    string, is gone now that wrangler bundles the Worker; it is house
    style only. The owner decides whether to keep it; if it goes,

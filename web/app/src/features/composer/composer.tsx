@@ -322,8 +322,8 @@ export function Composer(p: ComposerProps) {
       setVideo(null);
       setArt(null);
       p.onPosted(d);
-    } catch (err) {
-      setErr("Couldn't send: " + (err instanceof Error ? err.message : String(err)));
+    } catch (sendErr) {
+      setErr("Couldn't send: " + (sendErr instanceof Error ? sendErr.message : String(sendErr)));
     } finally {
       sendingRef.current = false;
       if (!p.denied) {

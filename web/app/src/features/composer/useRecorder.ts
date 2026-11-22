@@ -185,12 +185,12 @@ export function useRecorder(opts: {
     recStreamRef.current = stream;
     recChunksRef.current = [];
     recMimeRef.current = "";
-    const opts: { mimeType?: string } = {};
-    if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/webm;codecs=opus")) opts.mimeType = "audio/webm;codecs=opus";
-    else if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/mp4")) opts.mimeType = "audio/mp4";
+    const recOpts: { mimeType?: string } = {};
+    if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/webm;codecs=opus")) recOpts.mimeType = "audio/webm;codecs=opus";
+    else if (MR && MR.isTypeSupported && MR.isTypeSupported("audio/mp4")) recOpts.mimeType = "audio/mp4";
     let recorder: MRInstance;
     try {
-      recorder = new MR!(stream, opts);
+      recorder = new MR!(stream, recOpts);
     } catch {
       try {
         recorder = new MR!(stream);

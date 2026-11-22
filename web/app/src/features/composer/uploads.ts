@@ -288,7 +288,7 @@ async function uploadItem(
     );
   } catch (e) {
     if (e instanceof UploadCancelled) throw e;
-    throw new Error(denied(e) ? "Upload was denied" : errText(e));
+    throw new Error(denied(e) ? "Upload was denied" : errText(e), { cause: e });
   }
   const ps = plan.part_size;
   const partBlob = (n: number) => blob.slice((n - 1) * ps, Math.min(n * ps, blob.size));
@@ -419,7 +419,7 @@ async function uploadItem(
       return;
     } catch (e) {
       if (e instanceof UploadCancelled) throw e;
-      if (denied(e)) throw new Error("Upload was denied");
+      if (denied(e)) throw new Error("Upload was denied", { cause: e });
       let missing: number[] = [];
       if (e instanceof ApiError && e.status === 409) {
         const st = await net(() => client.uploadStatus(id, kind), signal, meter).catch(() => null);
@@ -428,7 +428,7 @@ async function uploadItem(
         const got = new Set((st && st.received) || []);
         for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
       }
-      if (!missing.length || round >= 2) throw new Error(errText(e));
+      if (!missing.length || round >= 2) throw new Error(errText(e), { cause: e });
       for (const n of missing) meter.add(-partBlob(n).size);
       await sendAll(missing);
     }
@@ -564,7 +564,7 @@ export async function sendWithUploads(
         pd = await net(() => client.createDraft(from, text), signal, meter);
       } catch (e) {
         if (e instanceof UploadCancelled) throw e;
-        throw new Error(denied(e) ? "Posting was denied" : errText(e));
+        throw new Error(denied(e) ? "Posting was denied" : errText(e), { cause: e });
       }
       id = pd.id;
       try {
@@ -592,14 +592,14 @@ export async function sendWithUploads(
       live = await net(() => client.publishMessage(id!, text), signal, meter);
     } catch (e) {
       if (e instanceof UploadCancelled) throw e;
-      if (denied(e)) throw new Error("Publishing was denied");
+      if (denied(e)) throw new Error("Publishing was denied", { cause: e });
       // 409: already live - an earlier publish landed and only its answer
       // was lost. Read the message back instead.
       if (e instanceof ApiError && e.status === 409) {
         const ld = await client.messages(id - 1, 5).catch(() => null);
         live = (ld && (ld.messages || []).find((x) => x.id === id)) || null;
       }
-      if (!live) throw new Error("Publish failed: " + errText(e));
+      if (!live) throw new Error("Publish failed: " + errText(e), { cause: e });
     }
     forgetPending(room, id);
     try {

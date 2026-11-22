@@ -169,7 +169,7 @@ function diff(a, b) {
       if (x === y) continue;
       n++;
       let i = 0;
-      while (x && y && x[i] === y[i]) i++;
+      if (x && y) while (i < x.length && x[i] === y[i]) i++;
       console.log('DIFF ' + k + ' ' + part + ' at ' + i + ':\n  - ' + String(x).slice(Math.max(0, i - 120), i + 200) + '\n  + ' + String(y).slice(Math.max(0, i - 120), i + 200));
     }
   }

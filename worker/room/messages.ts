@@ -103,7 +103,7 @@ export const MessageMethods = {
         const keys = (this.sql.exec("SELECT r2key FROM md WHERE msg = ?", id).toArray() as Pick<MdRow, "r2key">[]).map((r) => r.r2key).filter(Boolean);
         this.sql.exec("DELETE FROM md WHERE msg = ?", id);
         this.sql.exec("DELETE FROM m WHERE id = ?", id);
-        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
         throw storeError();
       }
       throw e;

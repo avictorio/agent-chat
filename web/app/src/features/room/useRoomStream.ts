@@ -202,6 +202,7 @@ export function useRoomStream(opts: {
           // no preview (an older server, a network error): the read below decides
         }
       }
+      // oxlint-disable-next-line no-unmodified-loop-condition -- the effect's cleanup sets cancelled; the feed and a refusal set the refs
       while (!cancelled && feed.lastRef.current === null && !deniedRef.current) {
         try {
           const d = await client.messages(undefined, 200);

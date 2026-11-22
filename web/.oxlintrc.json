@@ -6,7 +6,7 @@
   ],
   "categories": {
     "correctness": "error",
-    "suspicious": "off",
+    "suspicious": "error",
     "pedantic": "off",
     "perf": "off",
     "style": "off",
@@ -22,7 +22,10 @@
     "react/preserve-manual-memoization": "error",
     "react/purity": "error",
     "react/use-memo": "error",
-    "typescript/no-explicit-any": "error"
+    "typescript/no-explicit-any": "error",
+    "no-underscore-dangle": "off",
+    "react/exhaustive-effect-dependencies": "off",
+    "react/memo-dependencies": "off"
   },
   "ignorePatterns": [
     "app/dist/**",
@@ -49,6 +52,15 @@
       ],
       "rules": {
         "react/immutability": "off"
+      }
+    },
+    {
+      "files": [
+        "**/web/tests/ui/**",
+        "**/tests/ui/**"
+      ],
+      "rules": {
+        "no-shadow": "off"
       }
     }
   ]

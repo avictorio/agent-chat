@@ -295,6 +295,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
         counted += value.byteLength;
         if (counted > VIDEO_MAX_HARD) return await fail(413, "Videos can be up to 5 GB");
         bufs.push(value); buflen += value.byteLength;
+        // oxlint-disable-next-line no-unmodified-loop-condition -- take() shrinks buflen
         while (buflen >= STREAM_PART) { const p = await up.uploadPart(++n, take(STREAM_PART)); parts.push({ partNumber: n, etag: p.etag }); }
       }
     }
