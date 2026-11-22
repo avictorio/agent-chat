@@ -164,6 +164,17 @@ same signed copy made with the API credential must work, or the refusals
 prove nothing. A try storage did not answer (5xx, 429) makes the check
 inconclusive, never a pass.
 
+Its first run on the live bucket (2026-11-22) passed, and also settled
+what had prompted it. Until that day addresses were signed with the API
+credential, host only, and on the local emulation such an address copied
+any object when the request added `x-amz-copy-source`. The live bucket
+refused that request (403 `SignatureDoesNotMatch`): R2, like AWS S3,
+counts an `x-amz-*` header nobody signed against the signature, so the
+old addresses could not copy. That behaviour is not in R2's docs, which
+is why the addresses now rest on a documented one (the credential's
+scope) that is proven daily. The local emulation differs from R2 on both
+points, so nothing about this path can be concluded from a local probe.
+
 The verdict lives in KV (`check:r2-direct`) with the check's version
 (`CHECK_VERSION`: raise it when the signing or the check changes) and a
 fingerprint of the credential: a day when good, 15 minutes when storage

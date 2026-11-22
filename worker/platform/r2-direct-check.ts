@@ -19,7 +19,9 @@
 //            credential, which is allowed to                   must copy
 //
 // The control is what gives `copy` its meaning: without it a refusal could
-// be a malformed request, not the scope. Direct uploads are offered only
+// be a malformed request, not the scope. (On the live bucket `header` is
+// refused as a signature mismatch: R2, like AWS S3, counts an x-amz header
+// nobody signed against the signature. The local emulation acts on it.) Direct uploads are offered only
 // after all five come out as above. A try storage did not answer (a 5xx,
 // a 429, an error) settles nothing: the check is inconclusive and runs
 // again within a minute.
@@ -191,13 +193,6 @@ export async function r2DirectCheck(env: R2DirectEnv): Promise<DirectVerdict> {
     else if (copy.status !== 403 || read.status !== 403) verdict.error = "the credential's scope was not what refused";
     else if (!control.copied) verdict.error = "the control copy did not copy, so the refusals prove nothing";
     else verdict.ok = true;
-
-    // TEMPORARY (2026-11-22): until today part addresses were signed with
-    // the API credential, host only, so all a holder could add was a
-    // header nobody signed. Whether storage copied on that says if other
-    // rooms' media was exposed while they were. Read once from the live
-    // bucket; this goes with the next change.
-    try { await send("old_address", await partOf(5, api, null), { method: "PUT", headers: copyFrom }); } catch { verdict.tries.old_address = "no answer"; }
   } catch (e) {
     verdict.inconclusive = true;
     verdict.error = String((e && (e as Error).message) || e).slice(0, 200);

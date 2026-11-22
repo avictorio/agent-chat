@@ -176,7 +176,7 @@ test("the check passes when storage enforces the credential's scope, and leaves 
     const v = await r2DirectCheck(b.env);
     assert.equal(v.ok, true, JSON.stringify(v));
     assert.equal(v.v, CHECK_VERSION);
-    assert.deepEqual(v.tries, { part: "200", header: "403 AccessDenied", copy: "403 AccessDenied", read: "403 AccessDenied", control: "200 copied", old_address: "200 copied" });
+    assert.deepEqual(v.tries, { part: "200", header: "403 AccessDenied", copy: "403 AccessDenied", read: "403 AccessDenied", control: "200 copied" });
     assert.equal(v.error, undefined);
     assert.equal(b.objects.size, 0, "its own object is deleted");
     assert.deepEqual([...b.uploads.values()].map((u) => u.aborted), [true], "its upload is aborted");
@@ -192,7 +192,7 @@ test("the check passes on storage that refuses or ignores headers nobody signed"
     await withBucket(Object.assign({}, SOUND, { unsignedHeaders }), async (b) => {
       const v = await r2DirectCheck(b.env);
       assert.equal(v.ok, true, JSON.stringify(v));
-      assert.equal(v.tries.old_address, unsignedHeaders === "refuse" ? "403 AccessDenied" : "200", "and reports that the old addresses could not copy there");
+      assert.equal(v.tries.header, unsignedHeaders === "refuse" ? "403 AccessDenied" : "200");
     });
   }
 });
