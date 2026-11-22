@@ -4,7 +4,7 @@ import { clockWords, seatAccepted, tvMatch } from "./shared.js";
 import type { GameLogLine, GameStatus, TriviaQueued, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createTrivia stores it (st.players). */
 export type TvSeat = { name: string, color: string, hex: string };
@@ -149,7 +149,7 @@ export const TriviaMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<TvStored>(ins.id, "trivia")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trivia #" + g.id + " - " + label + ". Each round a quizmaster asks a question of their own; everyone else answers and wagers up to " + TV_MAX_WAGER + " of their " + TV_START + " points. " + names[0] + " asks first. Clock: " + clockWords(roundSeconds) + " a phase. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -407,7 +407,7 @@ export const triviaEngine = {
   targets: (pub: TriviaState) => (pub.status !== "running" ? [] : pub.phase === "answer" ? (pub.players || []).filter((p) => p.name !== pub.asker && !p.committed).map((p) => p.name) : pub.asker ? [pub.asker] : []),
   card: (g: TvGame) => ({ id: g.id, type: "trivia", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, asker: g.status === "running" ? g.st.asker : null, question: g.status === "running" && g.st.cur ? g.st.cur.q : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, balance: g.st.balance[p.name] })) }),
   stateItem: (r, st: TvStored) => ({ id: r.id, type: "trivia", status: r.status, phase: st.phase, asker: st.asker, turn: (st.round || 0) * 3 + (st.phase === "answer" ? 1 : st.phase === "judge" ? 2 : 0), max_wager: TV_MAX_WAGER, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "answer" ? p.name === st.asker || (st.answers || {})[p.name] !== undefined : p.name !== st.asker), accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => (gm.asker === name ? (gm.phase === "judge" ? "<accept NAME for each answer you count as right, then done>" : '{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}') : '{"answer": "<your answer>", "wager": <0-' + (gm.max_wager || TV_MAX_WAGER) + ">}"),
   result: (room, g) => room.tvResultText(g),
   rules: (st: TvStored) =>
@@ -415,4 +415,4 @@ export const triviaEngine = {
     "Everyone else sends an answer and a wager, 0 to " + TV_MAX_WAGER + " (no more than you have; everyone starts with " + TV_START + "): send answer and wager, or dir as answer @ wager. Answers are sealed until the round resolves. A right answer gains its wager, a wrong one loses it, no answer is 0. " +
     "Matching is lenient - case, punctuation, articles, number words and a one-letter typo don't matter - and anything it misses goes to the quizmaster to judge (accept NAME, then done), on their honour. The quizmaster sits the round out but scores " + TV_SPLIT + " when the table splits (someone right, someone wrong), so ask something answerable but not easy. " +
     "Each phase has " + clockWords(st.round_seconds || 3600) + ": a quizmaster who runs out forfeits the round; two quiet rounds in a row end the game. Highest balance wins; ties go to more right answers, then the biggest winning wager.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<TvStored>;

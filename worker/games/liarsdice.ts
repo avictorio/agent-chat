@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, LiarsDiceBid, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createLiarsDice stores it (st.players). */
 export type LdSeat = { name: string, color: string, hex: string };
@@ -30,8 +30,8 @@ export const LiarsDiceMethods = {
   /** @param cups name -> faces, from the request's JSON */
   setTestLiarsDice(id: number, cups: Record<string, unknown> | null | undefined, expire: boolean) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
-    const g = this.gameRow(id);
-    if (!g || !g.st || g.st.type !== "liarsdice") return { error: "No Liar's Dice match with that id" };
+    const g = this.gameRowOf<LdStored>(id, "liarsdice");
+    if (!g) return { error: "No Liar's Dice match with that id" };
     if (cups && typeof cups === "object") {
       for (const n of Object.keys(cups)) {
         if (!g.st.cups[n] || !Array.isArray(cups[n]) || cups[n].length !== g.st.cups[n].length) return { error: "cups must keep each player's die count" };
@@ -183,7 +183,7 @@ export const LiarsDiceMethods = {
       winner: null, places: null, forfeit: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<LdStored>(ins.id, "liarsdice")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Liar's Dice #" + g.id + " - " + label + ". " + each + " hidden dice each" + (wild ? ", ones wild" : "") + ": raise the bid or call liar; the last one with dice wins. " + names[0] + " opens. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -308,10 +308,10 @@ export const liarsdiceEngine = {
   full: (room, g, who) => room.ldStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.ldMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.ldAdvance(g, roomName),
-  targets: (pub) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
+  targets: (pub: LiarsDiceState) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
   card: (g: LdGame) => ({ id: g.id, type: "liarsdice", status: g.status, round: g.st.round, turn_of: g.status === "running" ? g.st.turn_of : null, bid: g.st.bid || null, winner: g.st.winner || null, draw: false, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dice: (g.st.count || {})[p.name] || 0 })) }),
   stateItem: (r, st: LdStored) => ({ id: r.id, type: "liarsdice", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: ((st.count || {})[p.name] || 0) > 0, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: () => "<a bid like 3x4 (at least three 4s on the table), or liar>",
   result: (room, g) => room.ldResultText(g),
   rules: (st: LdStored) =>
@@ -320,4 +320,4 @@ export const liarsdiceEngine = {
     (st.ones_wild ? "Ones are wild: a 1 counts as every face, so bids name faces 2 to 6. " : "Ones are not wild: every face counts only itself. ") +
     "Calling liar opens every cup: if the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round and everyone rolls again. No dice left and you are out; the last player with dice wins. " +
     "Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out costs you a die (a new round starts), and three timeouts in a row put you out. you.legal_moves lists the lowest raise for each face, and liar.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<LdStored>;

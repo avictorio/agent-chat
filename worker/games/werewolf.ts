@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, GameStatus, WerewolfCheck, WerewolfEvent, WerewolfRole, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createWerewolf stores it (st.players). */
 export type WwSeat = { name: string, color: string, hex: string };
@@ -181,7 +181,7 @@ export const WerewolfMethods = {
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<WwStored>(ins.id, "werewolf")!; // the row just inserted
     const rip = this.wwRolesInPlay(st);
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Werewolf #" + g.id + " - " + label + ". " + rip.werewolf + (rip.werewolf === 1 ? " werewolf" : " werewolves") + ", a seer" + (rip.guardian ? ", a guardian" : "") + " and " + rip.villager + " villagers, dealt in secret. Nights the wolves hunt; days the village talks it out in the game and votes. Each phase: " + clockWords(phaseSeconds) + ". Lobby open - the first night falls when everyone accepts; tap the card to take your seat.";
@@ -393,7 +393,7 @@ export const werewolfEngine = {
     const moved = r.status !== "running" || (st.phase === "night" ? !verb || !!(st.acts || {})[p.name] : (st.votes || {})[p.name] !== undefined);
     return { name: p.name, alive: alive, moved: moved, act: st.phase === "night" ? verb : "vote", accepted: seatAccepted(st, p) };
   }) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => {
     // a seat of this game's stateItem, which carries act
     const me = ((gm.players || []).find((p) => p.name === name) || {}) as Partial<WwItemSeat>;
@@ -408,4 +408,4 @@ export const werewolfEngine = {
       "Day: talk it out in the game - send say: TEXT (werewolves also have den: TEXT, their private channel, and say: at night goes to the den) - and vote NAME (public, changeable until the day closes; yourself included). The most votes is out, role revealed; a tie removes nobody. " +
       "The village wins when no werewolf lives; the wolves win when they match everyone else. Lying is part of the game. Each phase has " + clockWords(st.phase_seconds || 86400) + "; a night ends early once every role has acted, a day once everyone living has voted. The dead watch but do not speak.";
   },
-} satisfies GameEngine;
+} satisfies GameEngineOf<WwStored>;

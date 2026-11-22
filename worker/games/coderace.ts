@@ -5,7 +5,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { CodeRaceFeedback, CodeRaceGuess, CodeRaceRound, CodeRaceState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A racer's seat. */
@@ -84,8 +84,8 @@ export const CodeRaceMethods = {
   // on purpose (TEST_HOOKS only, like the other setTest* hooks).
   setTestCrSecret(id: number, secret: unknown) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
-    const g = this.gameRow(id);
-    if (!g || !g.st || g.st.type !== "coderace") return { error: "No Code Race with that id" };
+    const g = this.gameRowOf<CrSt>(id, "coderace");
+    if (!g) return { error: "No Code Race with that id" };
     g.st.secret = g.st.mode === "words" ? String(secret || "").toLowerCase() : String(secret || "").toUpperCase().replace(/[^A-Z]/g, "");
     this.saveGame(g);
     return { ok: true };
@@ -288,7 +288,7 @@ export const CodeRaceMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<CrSt>(ins.id, "coderace")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
     const cardText = "Code Race match #" + g.id + " - " + label + ". Everyone cracks " + what + ", one guess a round, up to " + maxRounds + " rounds. Round clock: " + clock + ". Lobby open - the race starts when everyone accepts; tap the card to take your seat.";
@@ -391,8 +391,8 @@ export const coderaceEngine = {
   targets: (pub: CodeRaceState) => pub.players.filter((p) => !p.committed && !p.solved && !p.out).map((p) => p.name),
   card: (g: CrGame) => ({ id: g.id, type: "coderace", status: g.status, round: g.st.round, max_rounds: g.st.max_rounds, mode: g.st.mode, length: g.st.length, colors: g.st.colors, winner: g.st.winner || null, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, solved: pr.solved || null, out: !!pr.out, guesses: pr.guesses || 0 }; }) }),
   stateItem: (r, st: CrSt) => ({ id: r.id, type: "coderace", status: r.status, round: st.round, mode: st.mode, length: st.length, colors: st.colors, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.solved || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
-  turnOf: (gm) => gm.round,
-  moveHint: (gm) => (gm.mode === "words" ? "<a " + (gm.length || 5) + "-letter word, e.g. " + CR_EXAMPLE[gm.length || 5] + ">" : "<" + (gm.length || 4) + " colours from " + CR_PALETTE.slice(0, gm.colors || 6).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, gm.length || 4).map((c) => c.k).join(" ") + ">"),
+  turnOf: (gm) => Number(gm.round),
+  moveHint: (gm) => (gm.mode === "words" ? "<a " + (Number(gm.length) || 5) + "-letter word, e.g. " + CR_EXAMPLE[Number(gm.length) || 5] + ">" : "<" + (Number(gm.length) || 4) + " colours from " + CR_PALETTE.slice(0, Number(gm.colors) || 6).map((c) => c.k).join(" ") + ", e.g. " + CR_PALETTE.slice(0, Number(gm.length) || 4).map((c) => c.k).join(" ") + ">"),
   result: (room, g) => room.crResultText(g),
   rules: (st: CrSt) =>
     (st.mode === "words"
@@ -400,4 +400,4 @@ export const coderaceEngine = {
       : "Code Race (Colors): every racer cracks the same secret code of " + st.length + " pegs from " + st.colors + " colours (" + CR_PALETTE.slice(0, st.colors).map((c) => c.k + " " + c.name).join(", ") + "), repeats allowed. Each guess scores black pegs (right colour, right place) and white pegs (right colour, wrong place): fb is [black, white]. ") +
     "One secret guess per round each; you see rivals' feedback, never their guesses, until the race ends. Crack it in the fewest rounds (up to " + st.max_rounds + "). A round resolves when everyone still racing has guessed, or at the " + clockWords(st.round_seconds || 3600) + " deadline; three missed rounds in a row drop you. " +
     (st.mode === "words" ? "Send dir as one word, e.g. " + CR_EXAMPLE[st.length] + "." : "Send dir as the colours in order, e.g. " + CR_PALETTE.slice(0, st.length).map((c) => c.k).join(" ") + " (or random)."),
-} satisfies GameEngine;
+} satisfies GameEngineOf<CrSt>;

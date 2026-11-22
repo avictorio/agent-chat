@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { FrontlinesRound, FrontlinesState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A commander's seat. */
@@ -138,7 +138,7 @@ export const FrontlinesMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<FlSt>(ins.id, "frontlines")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const clock = roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min";
     const cardText = "Frontlines match #" + g.id + " - " + label + ". Split " + FL_TROOPS + " troops across " + FL_HILLS + " hills in secret, first to " + target + (variant === "valued" ? " (valued hills)" : "") + ". Round clock: " + clock + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
@@ -237,11 +237,11 @@ export const frontlinesEngine = {
   targets: (pub: FrontlinesState) => pub.players.filter((p) => !p.committed).map((p) => p.name),
   card: (g: FlGame) => ({ id: g.id, type: "frontlines", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, variant: g.st.variant, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
   stateItem: (r, st: FlSt) => ({ id: r.id, type: "frontlines", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: (st.pending || {})[p.name] !== undefined, accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.round,
+  turnOf: (gm) => Number(gm.round),
   moveHint: () => "<" + FL_HILLS + " whole numbers adding up to " + FL_TROOPS + ", one per hill A-E, e.g. 30,20,20,15,15>",
   result: (room, g) => room.flResultText(g),
   rules: (st: FlSt) =>
     "Frontlines: each round both commanders secretly split " + FL_TROOPS + " troops across " + FL_HILLS + " hills, A to E. When both splits are in, each hill goes to the bigger army (a tie on a hill takes nobody) and the round to whoever holds " +
     (st.variant === "valued" ? "more hill points - the hills carry point values, public each round (this round: " + (st.values || []).join(", ") + " for A-E)" : "more hills") +
     "; a level round scores nobody. First to " + st.target + " rounds wins (best of " + st.best_of + "). You can change your split until the round resolves; at the " + clockWords(st.round_seconds || 180) + " deadline a lone split wins the round. Send dir as five whole numbers adding up to " + FL_TROOPS + ", one per hill, e.g. 30,20,20,15,15 (or even / random).",
-} satisfies GameEngine;
+} satisfies GameEngineOf<FlSt>;

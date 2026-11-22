@@ -5,7 +5,7 @@ import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
 import type { GameLogLine, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createTwenty stores it (st.players). */
 export type TqSeat = { name: string, color: string, hex: string };
@@ -131,7 +131,7 @@ export const TwentyMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<TqStored>(ins.id, "twenty")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Twenty Questions #" + g.id + " - " + label + ". Each round one player holds a secret and " + (names.length === 2 ? "the other" : "the rest of the table") + " gets twenty yes-or-no questions to name it. " + names[0] + " answers first. Clock: " + clockWords(roundSeconds) + " a move. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -331,7 +331,7 @@ export const twentyEngine = {
   full: (room, g, who) => room.tqStateFull(g, who),
   move: (room, g, who, dir, roomName) => room.tqMove(g, who, dir, roomName),
   advance: (room, g, roomName) => room.tqAdvance(g, roomName),
-  targets: (pub) => (pub.status !== "running" ? [] : pub.phase === "ask" ? (pub.players || []).filter((p) => p.name !== pub.answerer).map((p) => p.name) : pub.answerer ? [pub.answerer] : []),
+  targets: (pub: TwentyState) => (pub.status !== "running" ? [] : pub.phase === "ask" ? (pub.players || []).filter((p) => p.name !== pub.answerer).map((p) => p.name) : pub.answerer ? [pub.answerer] : []),
   card: (g: TqGame) => {
     const t: Record<string, number> = {};
     for (const p of g.st.players) t[p.name] = 0;
@@ -339,7 +339,7 @@ export const twentyEngine = {
     return { id: g.id, type: "twenty", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, answerer: g.status === "running" ? g.st.answerer : null, asked: g.st.asked, budget: TQ_BUDGET, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
   stateItem: (r, st: TqStored) => ({ id: r.id, type: "twenty", status: r.status, phase: st.phase, answerer: st.answerer, turn: (st.round || 0) * 100 + (st.asked || 0) * 2 + (st.phase === "answer" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "ask" ? p.name === st.answerer : p.name !== st.answerer), accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => (gm.answerer === name ? (gm.phase === "secret" ? "<your secret: a noun phrase, or random>" : "<yes or no; a guess: right or wrong; or unanswerable>") : "<a yes/no question, or guess: your answer>"),
   result: (room, g) => room.tqResultText(g),
   rules: (st: TqStored) =>
@@ -347,4 +347,4 @@ export const twentyEngine = {
     (st.players.length === 2 ? "The other player questions. " : "Everyone else questions together: any of you may ask when no question is waiting. ") +
     "Send a yes/no question as dir, or guess: <answer>. The answerer replies yes or no (a guess: right or wrong; an exact guess is right on its own), with an optional note after a dash, or unanswerable - which costs nothing. Twenty questions a round, guesses included; the whole Q/A log is public. " +
     "A right guess scores the questions left for the questioners, split evenly; twenty spent scores 10 for the answerer. Each move has " + clockWords(st.round_seconds || 3600) + ": an answerer who goes silent forfeits the round, a secret not chosen in time is drawn, and three clocks with no question hand the round to the answerer. Highest total wins.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<TqStored>;

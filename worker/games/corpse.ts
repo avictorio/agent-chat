@@ -7,7 +7,7 @@ import EC_RULES_TXT from "../data/corpse-constraints.txt";
 import type { CorpseBeat, CorpseSegment, CorpseState, CorpseYou, GameLogLine, GameStatus } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createCorpse stores it (st.players). */
 export type EcSeat = { name: string, color: string, hex: string };
@@ -175,7 +175,7 @@ export const CorpseMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<EcStored>(ins.id, "corpse")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Exquisite Corpse #" + g.id + " - " + label + ". One story, " + st.turns_total + " turns of 1 to 3 sentences; each writer sees only the segment before theirs, and the whole thing is revealed at the end" + (genre ? " (genre: " + genre + ")" : variant === "constraints" ? " (everyone holds a secret constraint card)" : "") + ". " + names[0] + " writes first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the story starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -318,7 +318,7 @@ export const corpseEngine = {
   targets: (pub: CorpseState) => (pub.status !== "running" ? [] : pub.phase === "write" ? (pub.turn_of ? [pub.turn_of] : []) : (pub.players || []).filter((p) => !p.committed && (pub.story || []).some((x) => x.by !== p.name)).map((p) => p.name)),
   card: (g: EcGame) => ({ id: g.id, type: "corpse", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turns_total: g.st.turns_total, turn_of: g.status === "running" && g.st.phase === "write" ? g.st.writer : null, segments: g.st.segments.length, genre: g.st.genre || null, variant: g.st.variant, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, segments: g.st.segments.filter((x) => x.by === p.name).length, out: g.st.active.indexOf(p.name) < 0 })) }),
   stateItem: (r, st: EcStored) => ({ id: r.id, type: "corpse", status: r.status, phase: st.phase, turn: (st.turn || 0) * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.writer : (st.votes || {})[p.name] !== undefined || !(st.segments || []).some((x) => x.by !== p.name)), accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm) => (gm.phase === "vote" ? "<the number of your favourite segment - not your own>" : "<your segment: 1 to 3 sentences, following on from the one you can see>"),
   result: (room, g) => room.ecResultText(g),
   rules: (st: EcStored) =>
@@ -327,4 +327,4 @@ export const corpseEngine = {
     (st.variant === "genre" ? "Genre: " + st.genre + " - honour it, loosely. " : st.variant === "constraints" ? "You hold a secret constraint card (you.constraint): honour it in every segment; the cards are revealed with the story. " : "") +
     "When the last turn lands, the whole story is revealed with its authors and everyone votes for a favourite segment, not their own: send dir as the segment's number. Most votes takes the honours; ties share them. " +
     "Each turn has " + clockWords(st.turn_seconds || 86400) + "; a turn that runs out is a silent beat (the story goes on), and two in a row take you out of the rotation.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<EcStored>;

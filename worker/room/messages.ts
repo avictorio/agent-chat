@@ -17,9 +17,9 @@ export type ApiMessage = Message & { targets: string[] };
  *  turns its media columns into media references. */
 export type MsgListRow = { id: number, ts: number, from: string, text: string }
   & Partial<Omit<MsgRow, "id" | "ts" | "sender" | "text" | "draft" | "pubauto" | "pub_ts" | "owntrust">>;
-/** A listing row while withKinds rewrites it in place into an ApiMessage
- *  (columns deleted, references and reactions added). */
-export type MsgBag = Record<string, any>;
+/** A listing row while withKinds rewrites it in place into an ApiMessage:
+ *  its columns as read (typed), plus the fields it gains on the way. */
+export type MsgBag = MsgListRow & Record<string, unknown>;
 /** Inline media for post(): the bytes and their sniffed type, plus the
  *  audio transcript or the page / document name those kinds carry. */
 export type InlineMedia = { data: ArrayBuffer, type: string, transcript?: string | null, name?: string };

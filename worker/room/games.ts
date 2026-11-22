@@ -5,9 +5,9 @@
 import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
-import type { GameStatus } from "@chat/contract";
+import type { GameLogLine, GameStatus } from "@chat/contract";
 import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
-import type { GameEngine, GamePub } from "../games/engine.js";
+import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
 
@@ -19,8 +19,32 @@ export type RoundsEngine = GameEngine & Required<Pick<GameEngine, "resolveRound"
 export type RecordRow = { name: string, hex: string | null, w: number, l: number, p2?: number, p3?: number };
 /** A player's row on the ladder (gameLadder), before rounding. */
 export type LadderRow = { name: string, hex: string | null, rating: number, w: number, l: number, d: number, last: number };
+/** What every stored match state has, whatever its game: the fields the
+ *  shared machinery reads. Each game's module types the rest of its own
+ *  state (TvStored, BsSt and the like), and those types fit this one. */
+export type StoredBase = {
+  type?: string,
+  players: Array<{ name: string }>,
+  log: GameLogLine[],
+  deadline?: number | null,
+  lobby_deadline?: number | null,
+  accepted?: Record<string, boolean>,
+  winner?: string | null,
+  draw?: boolean,
+  forfeit?: string | null,
+  ended?: number | null,
+  announced?: boolean,
+  declined_by?: string,
+  [field: string]: unknown,
+};
+/** The simultaneous-rounds games' share of their state (roundsCommit,
+ *  roundsAdvance): the round, its clock and the secret commitments. */
+export type RoundsStored = StoredBase & { round: number, deadline: number | null, pending: Record<string, unknown>, pending_at?: Record<string, number> };
+/** The turn-order games' share (turnsNext, turnsAdvance): the seats in
+ *  order, whose turn it is, the turn count and clock, the timeouts. */
+export type TurnsStored = StoredBase & { order: string[], turn_of: string | null, turn: number, turn_seconds: number, deadline: number | null, timeouts?: Record<string, number>, passes?: number, pass_limit?: number };
 /** A match as gameRow reads it: its gm row, with the state parsed. */
-export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: any };
+export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: StoredBase };
 
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
@@ -44,11 +68,20 @@ export const GameMachineryMethods = {
   gameRow(id: number): GameRow | null {
     const r = this.sql.exec<GmRow>("SELECT * FROM gm WHERE id = ?", id).toArray()[0];
     if (!r) return null;
-    // the match state (untyped JSON); null only if a stored row did not parse,
-    // and every write is JSON.stringify of the state
-    let st: any = null;
-    try { st = JSON.parse(r.state || "{}"); } catch { warn("game.state.parse", null, { room: this.roomName, id }); }
+    // the match state: every write is JSON.stringify of a state its game
+    // built (so the stored text has the StoredBase fields); a row whose
+    // state does not parse is unreadable, and counts as no match
+    let st: StoredBase;
+    try { st = JSON.parse(r.state || "{}") as StoredBase; } catch { warn("game.state.parse", null, { room: this.roomName, id }); return null; }
     return { id: r.id, status: r.status, created: r.created, created_by: r.created_by, card_msg: r.card_msg, st: st };
+  },
+
+  /** A match of one game: its row with the state as that game's type, or
+   *  null when there is no such match or it is another game's (the type
+   *  is checked, so the state's shape follows from it). */
+  gameRowOf<S extends StoredBase>(id: number, type: string): GameRowOf<S> | null {
+    const g = this.gameRow(id);
+    return g && g.st && g.st.type === type ? (g as GameRowOf<S>) : null;
   },
 
   saveGame(g: GameRow) {
@@ -112,15 +145,17 @@ export const GameMachineryMethods = {
      round waits on (default: all of them - Code Race leaves out racers
      who have finished or dropped). */
   /** @param st the match state */
-  roundsActive(st: any): Array<{ name: string }> {
+  roundsActive(st: StoredBase): Array<{ name: string }> {
     const eng = gameEngine(st);
     return eng.active ? eng.active(this, st) : st.players;
   },
 
   /** @param who a seated player */
-  roundsCommit(g: GameRow, who: string, move: unknown, room: string) {
+  roundsCommit(g: GameRowOf<RoundsStored>, who: string, move: unknown, room: string) {
     const st = g.st;
-    const me = st.players.find((p: { name: string }) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
+    // the engines commit only for a seated player
+    if (!me) return false;
     st.pending[me.name] = move;
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();
@@ -134,8 +169,8 @@ export const GameMachineryMethods = {
     return all;
   },
 
-  roundsAdvance(g: GameRow | null, room: string) {
-    if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
+  roundsAdvance(g: GameRowOf<RoundsStored> | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline || 0)) return;
     const st = g.st;
     const eng = gameEngine(st) as RoundsEngine;
     const committed = this.roundsActive(st).filter((p) => st.pending[p.name] !== undefined).length;
@@ -170,33 +205,35 @@ export const GameMachineryMethods = {
      (the rival wins), and pass_limit passes in all (st.pass_limit, when set)
      call it a draw - so two absent players cannot keep a match alive
      forever. The engine's advance is turnsAdvance. */
-  turnsNext(g: GameRow) {
+  turnsNext(g: GameRowOf<TurnsStored>) {
     const st = g.st;
-    const i = st.order.indexOf(st.turn_of);
-    st.turn_of = st.order[(i + 1) % st.order.length];
+    // no one's turn (-1) hands it to the first seat
+    const i = st.turn_of === null ? -1 : st.order.indexOf(st.turn_of);
+    st.turn_of = st.order[(i + 1) % st.order.length] ?? null;
     st.turn += 1;
     st.deadline = Date.now() + st.turn_seconds * 1000;
   },
 
-  turnsAdvance(g: GameRow | null, room: string) {
-    if (!g || g.status !== "running" || Date.now() < g.st.deadline) return;
+  turnsAdvance(g: GameRowOf<TurnsStored> | null, room: string) {
+    if (!g || g.status !== "running" || Date.now() < (g.st.deadline || 0)) return;
     const st = g.st;
-    const who = st.turn_of;
-    if (!st.timeouts) st.timeouts = {};
-    st.timeouts[who] = (st.timeouts[who] || 0) + 1;
-    st.passes = (st.passes || 0) + 1;
-    if (st.timeouts[who] >= 3) {
+    // (a turn is always someone's while the clock runs; String() keeps the key as before)
+    const who = String(st.turn_of);
+    const timeouts = st.timeouts || (st.timeouts = {});
+    timeouts[who] = (timeouts[who] || 0) + 1;
+    const passes = (st.passes = (st.passes || 0) + 1);
+    if (timeouts[who] >= 3) {
       g.status = "finished";
       st.forfeit = who;
       st.winner = st.order.find((n: string) => n !== who) || null;
       st.log.push({ tick: st.turn, text: who + "'s turn timed out a third time - " + who + " forfeits; " + st.winner + " wins." });
-    } else if (st.pass_limit && st.passes >= st.pass_limit) {
+    } else if (st.pass_limit && passes >= st.pass_limit) {
       g.status = "finished";
       st.winner = null;
       st.draw = true;
-      st.log.push({ tick: st.turn, text: st.passes + " turns passed on the clock - the match is a draw." });
+      st.log.push({ tick: st.turn, text: passes + " turns passed on the clock - the match is a draw." });
     } else {
-      st.log.push({ tick: st.turn, text: who + "'s turn timed out - a pass (" + st.timeouts[who] + " of 3)." });
+      st.log.push({ tick: st.turn, text: who + "'s turn timed out - a pass (" + timeouts[who] + " of 3)." });
       this.turnsNext(g);
     }
     this.saveGame(g);
@@ -212,7 +249,7 @@ export const GameMachineryMethods = {
    * @param st the match state
    * @param n the round
    */
-  roleOf(st: any, n: number): string {
+  roleOf(st: { order: string[] }, n: number): string {
     return st.order[(n - 1) % st.order.length];
   },
 
@@ -368,7 +405,7 @@ export const GameMachineryMethods = {
 
   // The match's own clock step - a tick, a round, a turn - for log lines.
   /** @param st the match state */
-  gameLogTick(st: any) {
+  gameLogTick(st: StoredBase) {
     return gameEngine(st).logTick(st);
   },
 
@@ -397,12 +434,12 @@ export const GameMachineryMethods = {
     if (!me) return { status: 403, error: "You are not a player in this match" };
     if (g.status === "running") return { status: 200, game: this.gameStateFull(g, who) };
     if (g.status !== "lobby") return { status: 409, error: "That match is " + g.status };
-    if (!st.accepted) st.accepted = {};
-    if (!st.accepted[me.name]) {
-      st.accepted[me.name] = true;
+    const accepted = st.accepted || (st.accepted = {});
+    if (!accepted[me.name]) {
+      accepted[me.name] = true;
       st.log.push({ tick: this.gameLogTick(st), text: me.name + " is in." });
     }
-    if (st.players.every((pl: { name: string }) => st.accepted[pl.name])) {
+    if (st.players.every((pl) => accepted[pl.name])) {
       g.status = "running";
       st.deadline = Date.now() + gameEngine(st).clockSeconds(st) * 1000;
       st.log.push({ tick: this.gameLogTick(st), text: "Everyone is in - the match starts." });

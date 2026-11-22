@@ -5,7 +5,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, LetterGridCell, LetterGridMove, LetterGridRound, LetterGridState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createLetterGrid stores it (st.players). */
 export type LgSeat = { name: string, color: string, hex: string };
@@ -67,8 +67,8 @@ export const LetterGridMethods = {
   /** @param rows from the request's JSON */
   setTestLetterGrid(id: number, rows: unknown) {
     if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
-    const g = this.gameRow(id);
-    if (!g || !g.st || g.st.type !== "lettergrid") return { error: "No Letter Grid match with that id" };
+    const g = this.gameRowOf<LgStored>(id, "lettergrid");
+    if (!g) return { error: "No Letter Grid match with that id" };
     const n = g.st.size;
     if (!Array.isArray(rows) || rows.length !== n || rows.some((r) => !new RegExp("^[a-z]{" + n + "}$").test(String(r).toLowerCase()))) return { error: "rows must be " + n + " strings of " + n + " letters" };
     g.st.grid = rows.map((r) => String(r).toLowerCase());
@@ -311,7 +311,7 @@ export const LetterGridMethods = {
       winner: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<LgStored>(ins.id, "lettergrid")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Letter Grid match #" + g.id + " - " + label + ". One " + size + "x" + size + " grid of letters for everyone; each round, trace one secret word through touching cells (diagonals count). 1 point a letter, plus 1 for every cell you claim first. " + rounds + " rounds; round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -439,7 +439,7 @@ export const lettergridEngine = {
   targets: (pub: LetterGridState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
   card: (g: LgGame) => ({ id: g.id, type: "lettergrid", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, size: g.st.size, grid: g.st.grid, claims: g.st.claims, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, score: pr.score || 0, cells: pr.cells || 0, out: !!pr.out }; }) }),
   stateItem: (r, st: LgStored) => ({ id: r.id, type: "lettergrid", status: r.status, round: st.round, min_len: st.min_len, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
-  turnOf: (gm) => gm.round,
+  turnOf: (gm) => Number(gm.round),
   moveHint: (gm) => "<a word of " + (gm.min_len || 3) + "+ letters traced through touching cells (diagonals count) - the word alone, or with its cells, e.g. stone B2 C2 C3 D4 E4>",
   result: (room, g) => room.lgResultText(g),
   rules: (st: LgStored) =>
@@ -448,4 +448,4 @@ export const lettergridEngine = {
     "Words stay sealed until the round resolves. A word scores 1 point a letter, plus 1 for each cell it claims: a cell nobody has claimed yet goes to the first player whose word uses it (claims lists each cell's owner, row by row). The same word from two players in one round scores letters only and claims nothing, and a cell two words both take first in the same round stays free. " +
     st.rounds_total + " rounds; highest total wins, then most cells claimed, then the longest word, then the earlier final-round word. A round resolves when everyone still in has sent a word, or at the " + clockWords(st.round_seconds || 3600) + " deadline; a missed round scores nothing, and three in a row take you out. " +
     "Send word, and optionally path - the cells in order, as labels like [\"B2\", \"C2\"] or [[row, col], ...] counted from 0 - or dir as the word, optionally followed by its cells (e.g. stone B2 C2 C3 D4 E4). Without a path, the server takes the one that claims the most free cells. You can change your word until the round resolves.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<LgStored>;

@@ -5,7 +5,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { AuctionRound, AuctionState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A bidder's seat. */
@@ -126,7 +126,7 @@ export const AuctionMethods = {
       winner: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<AuSt>(ins.id, "auction")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Auction #" + g.id + " - " + label + ". " + nLots + " lots, one sealed bid each per lot; the highest bid wins it and pays. Everyone starts with " + budget + ". Most lots wins. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the auction starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -239,11 +239,11 @@ export const auctionEngine = {
   targets: (pub: AuctionState) => pub.players.filter((p) => !p.committed && p.budget > 0).map((p) => p.name),
   card: (g: AuGame) => ({ id: g.id, type: "auction", status: g.status, round: g.st.round, lots_total: g.st.lots.length, lot: g.status === "running" ? g.st.lots[g.st.round - 1] : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, budget: pr.budget, won: pr.won || 0 }; }) }),
   stateItem: (r, st: AuSt) => ({ id: r.id, type: "auction", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: (pr.budget || 0) > 0, moved: (st.pending || {})[p.name] !== undefined || (pr.budget || 0) <= 0, accepted: seatAccepted(st, p) }; }) }),
-  turnOf: (gm) => gm.round,
+  turnOf: (gm) => Number(gm.round),
   moveHint: () => "<a whole number from 0 to your budget left, or pass>",
   result: (room, g) => room.auResultText(g),
   rules: (st: AuSt) =>
     "Sealed-bid auction: " + st.lots.length + " lots, one per round, every lot worth the same one point (the names are flavour). Everyone starts with " + st.budget + " to spend, and budgets are public. " +
     "Each round everyone sends one sealed bid, a whole number from 0 up to what they have left, or pass; the highest bid wins the lot and pays it, losing bids cost nothing. A tie at the top goes to whoever has spent less so far, then to the earlier bid; a lot nobody bids on goes unsold. " +
     "Most lots wins; budget left breaks a tie. A round resolves when everyone with budget left has bid, or at the " + clockWords(st.round_seconds || 180) + " deadline - a missed round is a pass. Send dir as the number (e.g. 15) or pass; you can change it until the round resolves.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<AuSt>;

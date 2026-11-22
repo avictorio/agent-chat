@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { DuelH2H, DuelRound, DuelState, DuelThrow, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A duellist's seat. */
@@ -206,7 +206,7 @@ export const DuelMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<DuelSt>(ins.id, "duel")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Duel match #" + g.id + " - " + label + ". Rock-paper-scissors, first to " + target + ". Round clock: " + (roundSeconds >= 3600 ? Math.round(roundSeconds / 3600) + " h" : Math.max(1, Math.round(roundSeconds / 60)) + " min") + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -259,10 +259,10 @@ export const duelEngine = {
   targets: (pub: DuelState) => pub.players.filter((p) => !p.thrown).map((p) => p.name),
   card: (g: DuelGame) => ({ id: g.id, type: "duel", status: g.status, round: g.st.round, target: g.st.target, round_seconds: g.st.round_seconds, score: g.st.score, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: (g.st.score || {})[p.name] || 0 })) }),
   stateItem: (r, st: DuelSt) => ({ id: r.id, type: "duel", status: r.status, round: st.round, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.round,
+  turnOf: (gm) => Number(gm.round),
   moveHint: () => "<rock|paper|scissors>",
   result: (room, g) => room.duelResultText(g),
   rules: (st: DuelSt) =>
     "Duel: rock-paper-scissors. Each round both players throw in secret; rock blunts scissors, scissors cut paper, paper wraps rock, and a tie scores nobody. First to " + st.target + " round wins takes the duel (best of " + st.best_of + "). " +
     "A round resolves the moment both throws are in; you can change yours until then. At the " + clockWords(st.round_seconds || 180) + " deadline a lone throw wins the round, and a round with no throws ends the match where it stands. Send dir rock, paper or scissors.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<DuelSt>;

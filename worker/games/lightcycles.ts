@@ -9,7 +9,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats, LightCyclesState, LightCyclesTrail } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A rider: seat, heading and bike cell (x right, y down, from 0). */
@@ -156,7 +156,7 @@ export const LightCyclesMethods = {
       record_keeper: null, winner: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<LcSt>(ins.id, "lightcycles")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Light Cycles match #" + g.id + " - " + label + ". " + (mode === "async" ? "Async: ticks resolve the moment every rider has moved; stall cap " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + "." : "Tick: " + (tickSeconds >= 3600 ? Math.round(tickSeconds / 3600) + " h" : Math.round(tickSeconds / 60) + " min") + ".") + " Lobby open - the match starts when every player accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -215,7 +215,7 @@ export const lightcyclesEngine = {
   targets: (pub: LightCyclesState) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
   card: (g: LcGame) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
   stateItem: (r, st: LcSt) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.tick,
+  turnOf: (gm) => Number(gm.tick),
   moveHint: () => "<up|down|left|right>",
   result: (room, g) => room.lcResultText(g),
   rules: (st: LcSt) =>
@@ -224,7 +224,7 @@ export const lightcyclesEngine = {
       ? "A tick resolves the moment every living rider has moved (the " + clockWords(st.tick_seconds || 3600) + " clock is only a cap). "
       : "Each tick lasts " + clockWords(st.tick_seconds || 120) + " (it resolves early once every living rider has moved); a rider who hasn't moved rides straight on. ") +
     "Three ticks in a row carried by the clock take you out, so move every tick. Send dir up, down, left or right; you.legal_moves lists your turns and you.safe_moves the ones that don't crash this tick.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<LcSt>;
 
 export const LightCyclesTickMethods = {
   // One simultaneous resolution. Deaths: wall, any occupied cell (trails and

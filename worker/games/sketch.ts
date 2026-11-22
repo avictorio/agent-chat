@@ -6,7 +6,7 @@ import { sgClaudeJudge } from "../platform/claude.js";
 import type { GameLogLine, GameStatus, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import type { CfgRow, GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createSketch stores it (st.players). */
 export type SgSeat = { name: string, color: string, hex: string };
@@ -131,8 +131,8 @@ export const SketchMethods = {
   // The image of round n, for the image route: public once posted.
   /** @param n the round */
   sketchImage(gid: number, n: number): SgImageMeta | null {
-    const g = this.gameRow(gid);
-    if (!g || !g.st || g.st.type !== "sketch") return null;
+    const g = this.gameRowOf<SgStored>(gid, "sketch");
+    if (!g) return null;
     return (g.st.images || {})[n] || null;
   },
 
@@ -207,7 +207,7 @@ export const SketchMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<SgStored>(ins.id, "sketch")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Sketch & Guess #" + g.id + " - " + label + ". Each round an artist draws a secret prompt; everyone else guesses what it shows. " + names[0] + " draws first. Clock: " + clockWords(drawSeconds) + " to draw, " + clockWords(guessSeconds) + " to guess. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -235,7 +235,7 @@ export const SketchMethods = {
       const key = "games/" + room + "/" + g.id + "/r" + st.round + "-" + rnd + "." + (img.type as string).split("/")[1];
       try { await this.env.MEDIA.put(key, img.bytes as Uint8Array, { httpMetadata: { contentType: img.type } }); } catch { return { status: 503, error: "The image could not be stored - try again" }; }
       // the state may have moved while the image was stored
-      const g2 = this.gameRow(g.id) as SgGame | null;
+      const g2 = this.gameRowOf<SgStored>(g.id, "sketch");
       if (!g2 || g2.status !== "running" || g2.st.phase !== "draw" || g2.st.round !== st.round) return { status: 409, error: "The round moved on while your drawing was uploading" };
       const s2 = g2.st;
       if (!s2.images) s2.images = {};
@@ -265,7 +265,7 @@ export const SketchMethods = {
     this.sgClose(g);
     this.saveGame(g);
     await this.sgJudgeNow(g.id, room);
-    const g3 = this.gameRow(g.id);
+    const g3 = this.gameRowOf<SgStored>(g.id, "sketch");
     // the row this move saved, unless the room was destroyed during the
     // Referee's call
     if (!g3) return { status: 404, error: "No game with that id" };
@@ -299,7 +299,7 @@ export const SketchMethods = {
   async sgJudgeNow(gid: number, room: string) {
     if (!this.sgJudging) this.sgJudging = new Set();
     if (this.sgJudging.has(gid)) return;
-    const g0 = this.gameRow(gid) as SgGame | null;
+    const g0 = this.gameRowOf<SgStored>(gid, "sketch");
     if (!g0 || g0.status !== "running" || g0.st.phase !== "judging") return;
     this.sgJudging.add(gid);
     try {
@@ -321,7 +321,7 @@ export const SketchMethods = {
         else verdict = { error: "daily_cap" };
       }
       // the round may have moved on while the Referee thought
-      const g = this.gameRow(gid) as SgGame | null;
+      const g = this.gameRowOf<SgStored>(gid, "sketch");
       if (!g || g.status !== "running" || g.st.phase !== "judging" || g.st.round !== n) return;
       this.sgResolve(g, auto, verdict);
       this.saveGame(g);
@@ -460,7 +460,7 @@ export const SketchMethods = {
   // The alarm's path: the clock work, then the judge when it is due.
   async sgAdvanceAsync(g: SgGame, room: string) {
     this.sgAdvance(g, room);
-    const g2 = this.gameRow(g.id);
+    const g2 = this.gameRowOf<SgStored>(g.id, "sketch");
     if (g2 && g2.status === "running" && g2.st.phase === "judging") await this.sgJudgeNow(g2.id, room);
   },
 
@@ -504,7 +504,7 @@ export const sketchEngine = {
     return { id: g.id, type: "sketch", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, artist: g.status === "running" ? g.st.artist : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
   stateItem: (r, st: SgStored) => ({ id: r.id, type: "sketch", status: r.status, phase: st.phase, artist: st.artist, turn: (st.round || 0) * 3 + (st.phase === "guess" ? 1 : st.phase === "judging" ? 2 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "draw" ? p.name !== st.artist : st.phase === "guess" ? p.name === st.artist || (st.guesses || {})[p.name] !== undefined : true), accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => (gm.artist === name ? '{"image": "data:image/png;base64,<your drawing of you.prompt>"}' : '{"guess": "<what the drawing shows>"}'),
   result: (room, g) => room.sgResultText(g),
   rules: (st: SgStored) =>
@@ -513,4 +513,4 @@ export const sketchEngine = {
     "Then everyone else sends one sealed guess (guess, or dir) - changeable until the guesses close. A guess that matches the prompt is right on its own; the Referee (Claude) rules on close calls - same meaning counts. " +
     "A right guess scores 2; the artist scores 1 per right guesser, at most 2 - so draw something guessable but not trivial. If nobody gets it, the prompt is revealed with a roast. " +
     "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then quicker right guesses.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<SgStored>;

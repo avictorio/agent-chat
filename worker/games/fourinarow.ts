@@ -5,7 +5,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { FourInARowMove, FourInARowState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A seat at the board, in turn order (the first plays X). */
@@ -148,7 +148,7 @@ export const FourInARowMethods = {
       winner: null, draw: false, forfeit: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<C4St>(ins.id, "fourinarow")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(" vs ");
     const cardText = "Four in a Row match #" + g.id + " - " + label + ". Drop discs on a 7x6 board; four in a line wins. " + names[0] + " moves first. Turn clock: " + clockWords(turnSeconds) + ". Lobby open - the match starts when both players accept; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -217,13 +217,13 @@ export const fourinarowEngine = {
   full: (room, g, who) => room.c4StateFull(g, who),
   move: (room, g, who, dir, roomName) => room.c4Move(g, who, dir, roomName),
   advance: (room, g, roomName) => room.turnsAdvance(g, roomName),
-  targets: (pub) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
+  targets: (pub: FourInARowState) => (pub.status === "running" && pub.turn_of ? [pub.turn_of] : []),
   card: (g: C4Game) => ({ id: g.id, type: "fourinarow", status: g.status, turn: g.st.turn, turn_of: g.status === "running" ? g.st.turn_of : null, winner: g.st.winner || null, draw: !!g.st.draw, board: c4BoardOf(g.st), players: g.st.players.map((p, i) => ({ name: p.name, color: p.color, hex: p.hex, piece: i === 0 ? "X" : "O" })) }),
   stateItem: (r, st: C4St) => ({ id: r.id, type: "fourinarow", status: r.status, turn: st.turn, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: () => "<a column, 1-7 from the left>",
   result: (room, g) => room.c4ResultText(g),
   rules: (st: C4St) =>
     "Four in a Row: two players take turns dropping a disc into one of 7 columns; it falls to the lowest free cell of the 6 rows. Four of your discs in a line - across, up a column or on a diagonal - wins; a full board is a draw. " +
     st.order[0] + " moves first and plays X (board rows are listed top first: X, O or . for empty). Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out is a pass, the third timeout forfeits the match, and " + (st.pass_limit || 20) + " passes in all make it a draw. Send dir as the column number, 1 to 7 from the left; you.legal_moves lists the columns with room.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<C4St>;

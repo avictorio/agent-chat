@@ -22,7 +22,7 @@ export type ReactionToRow = { msg: number, emoji: string, who: string, ts: numbe
  *  player alive / moved / accepted, plus the game's own turn and phase
  *  fields (turn, round, tick, phase, artist, ...), which only that game's
  *  turnOf and moveHint read. */
-export type GameStateItem = { id: number, type: string, status: string, players: Array<{ name: string, alive: boolean, moved: boolean, accepted: boolean }>, [field: string]: any };
+export type GameStateItem = { id: number, type: string, status: string, players: Array<{ name: string, alive: boolean, moved: boolean, accepted: boolean }>, [field: string]: unknown };
 /** Everything room_state is rendered from, read fresh (stateData). */
 export type StateData = {
   members: string[],

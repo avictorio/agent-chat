@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A player's seat. */
@@ -156,7 +156,7 @@ export const TrustMethods = {
       winner: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<TrSt>(ins.id, "trust")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Trust match #" + g.id + " - " + label + ". Each round, cooperate or defect with every rival in secret: both cooperate 3 each, a betrayal 5 to 0, both defect 1 each. About " + about + " rounds - the last one is a secret. Round clock: " + clockWords(roundSeconds) + ". Lobby open - the match starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -272,7 +272,7 @@ export const trustEngine = {
   targets: (pub: TrustState) => pub.players.filter((p) => !p.committed && !p.out).map((p) => p.name),
   card: (g: TrGame) => ({ id: g.id, type: "trust", status: g.status, round: g.st.round, rounds_about: g.st.rounds_about, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => { const pr = (g.st.prog || {})[p.name] || {}; return { name: p.name, color: p.color, hex: p.hex, score: pr.score || 0, out: !!pr.out }; }) }),
   stateItem: (r, st: TrSt) => ({ id: r.id, type: "trust", status: r.status, round: st.round, players: (st.players || []).map((p) => { const pr = (st.prog || {})[p.name] || {}; return { name: p.name, alive: !pr.out, moved: (st.pending || {})[p.name] !== undefined || !!pr.out, accepted: seatAccepted(st, p) }; }) }),
-  turnOf: (gm) => gm.round,
+  turnOf: (gm) => Number(gm.round),
   moveHint: () => "<C or D toward everyone, or one per rival, e.g. C, Ada:D>",
   result: (room, g) => room.trResultText(g),
   rules: (st: TrSt) =>
@@ -280,4 +280,4 @@ export const trustEngine = {
     "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins. " +
     "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out. " +
     "Send dir as C or D for everyone (cooperate / defect work too), or one per rival, e.g. Ada:C, Henry:D, or a default plus exceptions, e.g. C, Henry:D. You can change it until the round resolves.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<TrSt>;

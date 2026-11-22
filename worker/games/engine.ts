@@ -18,7 +18,7 @@ import { SG_IMAGE_MAX, sketchEngine } from "./sketch.js";
 import { triviaEngine } from "./trivia.js";
 import type { GameType } from "@chat/contract";
 import type { Room } from "../room/Room.js";
-import type { GameRow } from "../room/games.js";
+import type { GameRow, StoredBase } from "../room/games.js";
 import type { GameStateItem } from "../room/state.js";
 import type { Body } from "../lib/http.js";
 
@@ -26,37 +26,51 @@ import type { Body } from "../lib/http.js";
  *  it: the fields every game's state has (GameStateBase in the contract)
  *  plus its game's own, which the machinery passes through untouched (and
  *  to which it adds targets, created, ended, how_to_play). */
-export type GamePub = { id: number, type: string, status: string, players: Array<{ name: string, hex: string, accepted?: boolean }>, [field: string]: any };
+export type GamePub = {
+  id: number, type: string, status: string,
+  players: Array<{ name: string, hex: string, accepted?: boolean }>,
+  winner?: string | null, winners?: string[] | null, places?: string[] | null,
+  // what the machinery adds on its way out
+  how_to_play?: string, trails?: unknown, targets?: string[], boards?: unknown, created?: number, ended?: number | null,
+};
 /** What a create or a move answers: the status to send, with the match's
  *  full state or the error (and, for a refused move, example moves). */
 export type GameReply = { status?: number, error?: string, game?: unknown, legal_moves?: string[], resolved?: boolean };
+/** A match row whose state is one game's own stored type. */
+export type GameRowOf<S extends StoredBase> = Omit<GameRow, "st"> & { st: S };
 /**
- * A game's plug-in: one entry of GAME_ENGINES, as described below. The
- * match state (st) is untyped JSON here, as on GameRow; each game's own
- * module types its own state.
+ * A game's plug-in: one entry of GAME_ENGINES, as described below, over
+ * that game's own stored state S (each module ends its engine with
+ * `satisfies GameEngineOf<ItsSt>`). The machinery holds them all as
+ * GameEngine (S = StoredBase) and hands each engine only its own matches
+ * - gameEngine() picks it by the state's type - which is what lets an
+ * engine take a GameRow as its own GameRowOf<S>: the methods below are
+ * method signatures, so their parameters compare both ways.
  */
-export type GameEngine = {
+export type GameEngineOf<S extends StoredBase> = {
   name: string,
   turnWord: string,
-  logTick(st: any): number,
-  clockSeconds(st: any): number,
+  logTick(st: S): number,
+  clockSeconds(st: S): number,
   create(room: Room, creator: string, players: unknown[], opts: Body, roomName: string): GameReply | Promise<GameReply>,
-  summary(room: Room, g: GameRow): GamePub,
-  full(room: Room, g: GameRow, who: string | null | undefined): GamePub,
-  move(room: Room, g: GameRow, who: string, dir: unknown, roomName: string, fields?: Record<string, unknown> | null): GameReply | Promise<GameReply>,
-  advance(room: Room, g: GameRow, roomName: string): void,
-  advanceAsync?(room: Room, g: GameRow, roomName: string): Promise<void>,
+  summary(room: Room, g: GameRowOf<S>): GamePub,
+  full(room: Room, g: GameRowOf<S>, who: string | null | undefined): GamePub,
+  move(room: Room, g: GameRowOf<S>, who: string, dir: unknown, roomName: string, fields?: Record<string, unknown> | null): GameReply | Promise<GameReply>,
+  advance(room: Room, g: GameRowOf<S>, roomName: string): void,
+  advanceAsync?(room: Room, g: GameRowOf<S>, roomName: string): Promise<void>,
   targets(pub: GamePub): string[],
-  card(g: GameRow): object,
-  stateItem(r: { id: number, status: string }, st: any): GameStateItem,
+  card(g: GameRowOf<S>): object,
+  stateItem(r: { id: number, status: string }, st: S): GameStateItem,
   turnOf(item: GameStateItem): number | string,
   moveHint(item: GameStateItem, me: string): string,
-  result(room: Room, g: GameRow): string,
-  rules(st: any): string,
-  resolveRound?(room: Room, g: GameRow): void,
-  standing?(room: Room, st: any): string | null,
-  active?(room: Room, st: any): Array<{ name: string }>,
+  result(room: Room, g: GameRowOf<S>): string,
+  rules(st: S): string,
+  resolveRound?(room: Room, g: GameRowOf<S>): void,
+  standing?(room: Room, st: S): string | null,
+  active?(room: Room, st: S): Array<{ name: string }>,
 };
+/** An engine as the machinery holds it: over any match. */
+export type GameEngine = GameEngineOf<StoredBase>;
 
 /* ---------- game engines (groundwork, 2026-11-19) ----------
    Every game the Room plays is one entry here. The shared machinery -

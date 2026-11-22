@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { BattleshipBoard, BattleshipLogLine, BattleshipMove, BattleshipShot, BattleshipShotResult, BattleshipSonar, BattleshipState, BattleshipSunkShip, BattleshipYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
 /** A ship as stored: its cells and the ones hit, as board keys ("x,y",
@@ -466,7 +466,7 @@ export const BattleshipMethods = {
       winner: null, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<BsSt>(ins.id, "battleship")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(ffa ? ", " : " vs ");
     const boardText = variant === "skirmish" ? "Skirmish: 8x8, fleets of four (4, 3, 3, 2)" : variant === "salvo" ? "Salvo: 10x10, fleets of five (5, 4, 3, 3, 2) - each turn fires one shot per ship you still have afloat" : "10x10, fleets of five (5, 4, 3, 3, 2)";
     const cardText = ffa
@@ -780,7 +780,7 @@ export const battleshipEngine = {
   targets: (pub: BattleshipState) => (pub.phase === "setup" ? pub.players.filter((p) => !p.placed).map((p) => p.name) : pub.turn_of ? [pub.turn_of] : []),
   card: (g: BsGame) => ({ id: g.id, type: "battleship", status: g.status, phase: g.status === "running" ? g.st.phase : null, turn: g.st.turn, turn_of: g.status === "running" && g.st.phase === "play" ? g.st.turn_of : null, turn_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex })) }),
   stateItem: (r, st: BsSt) => ({ id: r.id, type: "battleship", status: r.status, turn: st.turn, phase: r.status === "running" ? st.phase : null, fleet_sizes: st.fleet_sizes || [5, 4, 3, 3, 2], players: (st.players || []).map((p) => ({ name: p.name, alive: !p.eliminated, moved: r.status !== "running" ? true : p.eliminated ? true : st.phase === "setup" ? !!p.fleet : st.turn_of !== p.name, accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, me) =>
     gm.phase === "setup"
       ? "<place: " + ((gm.fleet_sizes || [5, 4, 3, 3, 2]) as number[]).map((s, i) => "A" + (2 * i + 1) + "H").join(",") + " or random>"
@@ -801,4 +801,4 @@ export const battleshipEngine = {
       "Placement: dir lists one start cell plus H or V per ship, in fleet order (e.g. " + eg + "), or random. A shot: dir is a cell" + (ffa ? " with its target (Name:C5)" : " (e.g. C5)") + ". Each turn has " + clockWords(st.tick_seconds || 3600) + "; an expired turn counts as a miss, and three in a row forfeit."
     );
   },
-} satisfies GameEngine;
+} satisfies GameEngineOf<BsSt>;

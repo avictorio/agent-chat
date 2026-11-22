@@ -4,7 +4,7 @@ import { clockWords, seatAccepted } from "./shared.js";
 import type { GameLogLine, GameStatus, TwoTruthsRound, TwoTruthsState, TwoTruthsYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
-import type { GameEngine } from "./engine.js";
+import type { GameEngineOf } from "./engine.js";
 
 /** A seat as createTwoTruths stores it (st.players). */
 export type TtSeat = { name: string, color: string, hex: string };
@@ -146,7 +146,7 @@ export const TwoTruthsMethods = {
       winner: null, places: null, draw: false, announced: false,
     };
     const ins = this.sql.exec<Pick<GmRow, "id">>("INSERT INTO gm (status, created, created_by, state) VALUES ('lobby', ?, ?, ?) RETURNING id", Date.now(), creator, JSON.stringify(st)).one();
-    const g = this.gameRow(ins.id) as GameRow; // the row just inserted
+    const g = this.gameRowOf<TtStored>(ins.id, "twotruths")!; // the row just inserted
     const label = players.map((p) => p.name + " (" + p.color + ")").join(", ");
     const cardText = "Two Truths and a Lie #" + g.id + " - " + label + ". Each round a storyteller writes two truths and a lie about themselves; everyone else votes for the lie. " + names[0] + " tells first. Clock: " + clockWords(roundSeconds) + " to write, the same to vote. Lobby open - the game starts when everyone accepts; tap the card to take your seat.";
     const msg = await this.postGameCard(creator, cardText, g.id, room);
@@ -330,7 +330,7 @@ export const twotruthsEngine = {
     return { id: g.id, type: "twotruths", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, teller: g.status === "running" ? g.st.teller : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
   stateItem: (r, st: TtStored) => ({ id: r.id, type: "twotruths", status: r.status, round: st.round, phase: st.phase, teller: st.teller, turn: st.round * 2 + (st.phase === "vote" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "write" ? p.name !== st.teller : p.name === st.teller || (st.votes || {})[p.name] !== undefined), accepted: seatAccepted(st, p) })) }),
-  turnOf: (gm) => gm.turn,
+  turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => (gm.phase === "write" && gm.teller === name ? '{"statements": ["<a truth>", "<a truth>", "<a lie>"], "lie": 3}' : "<1, 2 or 3: the statement you think is the lie>"),
   result: (room, g) => room.ttResultText(g),
   rules: (st: TtStored) =>
@@ -338,4 +338,4 @@ export const twotruthsEngine = {
     "The storyteller writes three statements about themselves - two true, one a lie - and says which is the lie: send statements (an array of three) and lie (1, 2 or 3), or the same JSON as dir. The statements are published shuffled; the lie stays secret. " +
     "Everyone else votes for the statement they think is the lie: send dir 1, 2 or 3. Votes are sealed until all are in. A right vote scores 2; the storyteller scores 1 for each player fooled, at most 2. Truth is on the storyteller's honour. " +
     "Each phase has " + clockWords(st.round_seconds || 3600) + ": a storyteller who runs out forfeits the round, a voter who runs out scores nothing; two quiet rounds in a row end the game. Highest total wins; ties go to more lies spotted, then quicker right votes.",
-} satisfies GameEngine;
+} satisfies GameEngineOf<TtStored>;

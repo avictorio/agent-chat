@@ -365,7 +365,9 @@ Before pushing:
    check of the Worker - `tsconfig.worker.json`, full `strict`, zero
    errors, with the runtime's modules and the Room's installed method
    objects declared in `types/` (a Room method object ends `satisfies
-   ThisType<Room>`, a game engine `satisfies GameEngine`, and a storage
+   ThisType<Room>`, a game engine `satisfies GameEngineOf<ItsStored>` -
+   its own stored state type, so its rows arrive typed (`gameRowOf<S>(id,
+   type)` fetches one, checking the type) - and a storage
    table has its row type next to `ensureSchema`: give a new one the
    same, and read rows as `this.sql.exec<Row>(...)` (a `Pick` of the row
    type for a few columns), never with an `as` cast of `toArray()` or
@@ -375,8 +377,9 @@ Before pushing:
    fake API), `npm run lint` (oxlint over the whole repo - `web/app/src`,
    `contract/src`, `worker/`, `tests/` and `web/tests/` - with the
    `correctness` and `suspicious` categories, the React hooks and React
-   Compiler rules and `no-explicit-any` (not yet in `worker/`: to-do
-   item 3); `no-underscore-dangle` is off (style), and so is `no-shadow`
+   Compiler rules and `no-explicit-any` (everywhere, the Worker included,
+   since 2026-11-22: the Room stub is typed as the Room's methods, so a
+   route's call is checked too); `no-underscore-dangle` is off (style), and so is `no-shadow`
    in `web/tests/ui/`, where Playwright's browser-side functions
    re-declare the arguments they are handed; any finding fails it, a disable
    comment says why after `--`, and one that no longer suppresses
@@ -724,28 +727,20 @@ The 2026-11 restructure left nothing open (its last item, the Worker in
 TypeScript, was done on 2026-11-21). What follows is the code-health
 to-do list from the 2026-11-21 audit, roughly in the order to take it.
 Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it (the first three -
-linting the whole repo, the effect dependencies and typed database rows -
-were done on 2026-11-22).
+deleting it here in the commit that finishes it (the first four -
+linting the whole repo, the effect dependencies, typed database rows and
+no `any` in the Worker - were done on 2026-11-22).
 
-1. **No `any` in the Worker.** Request bodies are typed and checked
-   (2026-11-22); what is left before `typescript/no-explicit-any` can
-   come on for `worker/` (it is off there in `web/.oxlintrc.json`): the
-   match state, `any` on `GameRow.st` and in the `GameEngine` methods
-   (`engine.ts`, `room/games.ts`; each game already has its stored type,
-   `TvStored` and the like), the open `[field: string]: any` of `GamePub`
-   and `GameStateItem`, and `MsgBag` in `room/messages.ts`. (The Room
-   stub the routes call is typed as the Room's methods since 2026-11-22.)
-2. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
+1. **Versioned migrations.** `ensureSchema` runs about 40 `ALTER TABLE`s
    on every Durable Object start and relies on each one throwing once
    its column exists. A schema version in `cfg` would run each step
    once and drop the bare `catch {}` exception from section 13.
-3. **Very long lines.** The MCP tool descriptions in
+2. **Very long lines.** The MCP tool descriptions in
    `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
    characters; split them per tool. `worker/routes/pages.ts` inlines
    the app icons as base64 (lines up to ~65,000 characters); they can
    be Workers Static Assets files instead.
-4. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
+3. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
    reason, the old API deploy that embedded the code in a template
    string, is gone now that wrangler bundles the Worker; it is house
    style only. The owner decides whether to keep it; if it goes,

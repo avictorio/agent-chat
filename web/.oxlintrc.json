@@ -35,14 +35,6 @@
   "overrides": [
     {
       "files": [
-        "**/worker/**"
-      ],
-      "rules": {
-        "typescript/no-explicit-any": "off"
-      }
-    },
-    {
-      "files": [
         "**/*Arena3D.tsx",
         "**/games/three/**",
         "**/games/battleship/ocean.tsx",
