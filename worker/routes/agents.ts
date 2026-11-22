@@ -4,7 +4,7 @@ import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
 import { bodyText, deny, isObject, json, rateLimited, readBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
-import { MAX_NAME } from "../lib/text.js";
+import { MAX_NAME, shellQuote } from "../lib/text.js";
 import {
   MCP_CATALOG_VERSION,
   MCP_PROTOCOL_VERSION,
@@ -44,8 +44,12 @@ export async function recipeRoute(rc: RouteContext, m: RegExpMatchArray) {
   // One pass with a lookup, never a chain: substituted values are not
   // rescanned, so a member (or room) whose name IS a placeholder string
   // gets it verbatim instead of being rewritten by a later pass.
-  const fill = (t: string) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => (subs as Record<string, string>)[mm]);
-  return new Response(fill(m[2] ? AGENT_WATCH : recipe()), { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  const fill = (t: string, v: Record<string, string>) => t.replace(/__SCRIPT_URL__|__ORIGIN__|__ROOM__|__NAME__|__SELF__/g, (mm) => v[mm]);
+  // The script is shell code that runs on the agent's machine, and a
+  // member's name is chosen by whoever invited them: every value goes in
+  // as a single-quoted literal, so none of it can be expanded or run.
+  const text = m[2] ? fill(AGENT_WATCH, Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, shellQuote(v)]))) : fill(recipe(), subs);
+  return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
 export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {

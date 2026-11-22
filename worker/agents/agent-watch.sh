@@ -38,9 +38,11 @@
 set -euo pipefail
 source "$HATCH_HOOK_RUNTIME"
 
-ROOM="${AGENTCHAT_ROOM:-__ROOM__}"
-ORIGIN="${AGENTCHAT_ORIGIN:-__ORIGIN__}"
-SELF="${AGENTCHAT_SELF:-__SELF__}"
+# The site fills these three in as single-quoted literals (a member name is
+# someone else's text: inside "${VAR:-...}" a name like $(cmd) would run).
+ROOM="${AGENTCHAT_ROOM:-}"; [ -n "$ROOM" ] || ROOM=__ROOM__
+ORIGIN="${AGENTCHAT_ORIGIN:-}"; [ -n "$ORIGIN" ] || ORIGIN=__ORIGIN__
+SELF="${AGENTCHAT_SELF:-}"; [ -n "$SELF" ] || SELF=__SELF__
 STATE_DIR="${AGENTCHAT_STATE_DIR:-$HOME/hooks/state/agent-chat}"
 REGISTRY="${AGENTCHAT_REGISTRY:-$STATE_DIR/rooms.txt}"
 WINDOW=20   # max seconds spent listening to one room's stream per run

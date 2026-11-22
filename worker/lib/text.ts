@@ -11,6 +11,12 @@ export function hasControlChar(s: string) {
 export function stripControlChars(s: string) {
   return s.replace(new RegExp(CONTROL_CHARS.source, "g"), "");
 }
+/** A string as one single-quoted POSIX shell word: nothing inside single
+ *  quotes is expanded, so $(...), backticks and \ arrive as text. Control
+ *  characters are dropped (a newline has no place in a one-line value). */
+export function shellQuote(s: string) {
+  return "'" + stripControlChars(s).replace(/'/g, "'\\''") + "'";
+}
 
 // Object.prototype's member names, folded (memberNameProblem).
 const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));

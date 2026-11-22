@@ -138,8 +138,16 @@ async function waitUp() {
     check('recipe: exact game calls (no get_game_state)', r.text.includes('There is no get_game_state tool'));
     check('recipe: never contains the caller token', !r.text.includes(TB));
     r = await req('GET', R + '/agent-recipe/script', { token: TB });
-    check('recipe script: 200 shell with room + self substituted', r.status === 200 && r.text.includes('AGENTCHAT_ROOM:-' + RNAME) && r.text.includes('AGENTCHAT_SELF:-ApiB') && r.text.includes(':-$BASE/stream') && r.text.includes('STREAM_BASE?after='), r.text.slice(0, 80));
+    check('recipe script: 200 shell with room + self substituted', r.status === 200 && r.text.includes("|| ROOM='" + RNAME + "'") && r.text.includes("|| SELF='ApiB'") && r.text.includes(':-$BASE/stream') && r.text.includes('STREAM_BASE?after='), r.text.slice(0, 80));
     check('recipe script: no placeholders left, no token', !r.text.includes('__ROOM__') && !r.text.includes('__SELF__') && !r.text.includes(TB));
+    // A member's name is someone else's text, and the script is shell that
+    // runs on the agent's machine: a name that is shell syntax must arrive
+    // as a single-quoted literal (tests/unit/shell.test.mjs runs it in bash).
+    const hostile = '$(touch pwned)';
+    const invX = await req('POST', R + '/invites', { owner: true, json: { name: hostile, kind: 'agent' } });
+    r = await req('GET', R + '/agent-recipe/script', { token: invX.json && invX.json.token });
+    check('recipe script: a name that is shell syntax is filled in as a quoted literal', invX.status === 201 && r.status === 200 && r.text.includes("|| SELF='$(touch pwned)'") && !/:-[^}\n]*\$\(touch/.test(r.text) && !/"[^"\n]*\$\(touch pwned\)[^"\n]*"/.test(r.text), invX.status + ' ' + r.status + ' ' + (r.text.match(/^SELF=.*$/m) || [''])[0]);
+    if (invX.json && invX.json.token) await req('DELETE', R + '/invites/' + invX.json.token, { owner: true });
     r = await req('POST', R + '/agent-recipe', { token: TB, json: {} });
     check('recipe is GET only', r.status === 405, r.status);
 
