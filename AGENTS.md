@@ -53,13 +53,15 @@ guide and the code disagree, the code wins. The live API reference is
    asked for until Anthony approves it.
 7. **Check UI changes visually before calling them done** (section 10).
    Logic or computed-style checks alone have missed real bugs.
-8. **House style:** the hand-written files in `worker/` (`index.ts` and
-   its modules, the recipe and watcher) use no template literals
-   (backticks); the modules are TypeScript with erasable syntax only (no
-   enums, namespaces or parameter properties), which wrangler bundles at
-   deploy; types come in through `import type { X } from "..."`, not
-   inline `import("...").X`. The front end is React + TypeScript in `web/`
-   with its own conventions (`web/README.md`).
+8. **House style:** the Worker's modules (`worker/index.ts` and the rest)
+   are TypeScript with erasable syntax only (no enums, namespaces or
+   parameter properties), which wrangler bundles at deploy; types come in through `import type { X } from "..."`, not
+   inline `import("...").X`. Template literals are fine everywhere (the
+   old no-backticks rule went on 2026-11-22: the API deploy that pasted
+   the code into one template string is long gone); older code that
+   builds strings with `+` changes only when someone works on it. The
+   front end is React + TypeScript in `web/` with its own conventions
+   (`web/README.md`).
 
 Never touch: the root and `www` records (Squarespace), MX/SPF/DKIM (Google
 Workspace), and `sha.victorio.cloud` (a Cloudflare Tunnel for another
@@ -394,9 +396,7 @@ Before pushing:
    serves the build as static assets).
 2. For UI changes, do the visual checks in section 10 — inspect visually
    before committing, at desktop and mobile sizes.
-3. Keep the hand-written files in `worker/` free of template literals (no
-   backtick-delimited strings; house style) and everything free of
-   secrets.
+3. Keep everything free of secrets.
 4. Note the current live version id for rollback
    (`GET .../workers/scripts/victorio-chat/deployments`).
 5. If the change touches `wrangler.toml` or any dashboard-side configuration,
@@ -576,7 +576,6 @@ features; mobile means the website in Android Chrome and iOS Safari.
 | Warm DO outlives the deploy | A new route 500'd (1101) for ~20 minutes, then cycled to the new generation. Worse, a *changed* method fails silently: after the 2026-11-07 artifact deploy, the busy room's `post()` ran the old generation for ~40 minutes and silently dropped the new `html`/`doc` fields — the post returned 201 with no error, and only the response's missing `html` field showed the attachment was gone | Probe a brand-new behavior against the live room and re-check; don't declare failure (or success) from the first probe. For changed methods, verify the new field is present in the response (or the listing), not just the status code, and re-post once the room cycles if it is missing |
 | Serve-time placeholder also lives in the page's own JS | The build-id stamp used a global replace of `__BUILD_ID__`; the pages' update check compares against that same literal, so stamping rewrote the comparison too and the check always bailed — silently, in production and in the test mock alike | Stamp only the exact meta attribute (`content="__BUILD_ID__"`) in `src/app/index.html`. The app's own comparison lives in an asset module, which is never stamped (only an inline script in index.html would need the literal spelled in two parts). The test mock stamps the same targeted way, so the harness cannot mask this |
 | Patch matched 0 or 2 times | The code had changed since you last read it | Exact-match patches that must match exactly once; re-read the region and retry |
-| Backticks in site code | Broke the old tooling that embedded the code in JS template strings when deploying through the API (a path section 1 now forbids) | Keep the site code free of template literals - house style today (string concatenation) |
 | Token parsed as alphanumeric | Real invite tokens contain `-` and `_`; a `[A-Za-z0-9]+` parser silently chopped one and the room answered invite-only | Parse tokens as `[A-Za-z0-9_-]+` everywhere |
 | API suite create-room checks start failing 429 | The suite's public-creation checks counted against the persisted local KV day caps (`create:*` in `.wrangler/state`), so after enough runs in one UTC day the 409/502 checks got 429 (2026-11-08) | Fixed 2026-11-20: each run gets its own temp state (`--persist-to`) and client IPs, so a 429 there now points at the code |
 | Testing UI with logic checks only | "Light" still rendered dark under auto-dark | Do the visual checks in section 10 |
@@ -606,8 +605,7 @@ features; mobile means the website in Android Chrome and iOS Safari.
 ## 13. Design conventions
 
 - **Code style:** the Worker's modules are TypeScript (erasable syntax
-  only; wrangler bundles them at deploy), and they and the other
-  hand-written `worker/` files use no template literals. The front end is
+  only; wrangler bundles them at deploy). The front end is
   React + TypeScript in `web/`, built by Vite and served as Workers
   Static Assets: no external scripts or CDNs, everything is served from
   the site's own origin.
@@ -738,21 +736,12 @@ Announce        POST /api/rooms/ROOM/messages  {"from":"claude","text":"..."}  +
 ## 15. Open work
 
 The 2026-11 restructure left nothing open (its last item, the Worker in
-TypeScript, was done on 2026-11-21). What follows is the code-health
-to-do list from the 2026-11-21 audit, roughly in the order to take it.
-Counts are from that day; re-count before starting. Tick an item off by
-deleting it here in the commit that finishes it (the first five -
-linting the whole repo, the effect dependencies, typed database rows, no
-`any` in the Worker and versioned migrations - were done on 2026-11-22).
-
-1. **Very long lines.** The MCP tool descriptions in
-   `worker/agents/mcp.ts` sit on lines of ~11,000 and ~5,000
-   characters; split them per tool. `worker/routes/pages.ts` inlines
-   the app icons as base64 (lines up to ~65,000 characters); they can
-   be Workers Static Assets files instead.
-2. **The no-template-literal rule** (sections 1, 7, 12 and 13). Its
-   reason, the old API deploy that embedded the code in a template
-   string, is gone now that wrangler bundles the Worker; it is house
-   style only. The owner decides whether to keep it; if it goes,
-   update those sections and the pitfalls row together.
+TypeScript, was done on 2026-11-21), and neither did the code-health
+to-do list from the 2026-11-21 audit: all seven items were done on
+2026-11-22 - linting the whole repo, the effect dependencies, typed
+database rows, no `any` in the Worker, versioned migrations, the very
+long lines (the MCP catalog one entry per tool, the app icons as static
+files) and dropping the no-template-literal rule. Add new items here the
+same way - roughly in the order to take them, deleted in the commit that
+finishes each.
 

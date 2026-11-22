@@ -24,15 +24,15 @@ preview_urls = false
 routes = [{ pattern = "chat.victorio.cloud", custom_domain = true }]
 
 # The web app (web/, built by Vite) as Workers Static Assets. Cloudflare
-# answers the hashed /assets/* files itself (web/app/public/_headers gives
-# them a one-year immutable cache); the Worker runs first for everything
-# else, so it owns the API, the page routes and the build-id stamp, and
+# answers the hashed /assets/* files and the app icons (/icons/*) itself
+# (web/app/public/_headers gives the first a one-year immutable cache, the
+# icons a day); the Worker runs first for everything else, so it owns the API, the page routes and the build-id stamp, and
 # reads index.html through the ASSETS binding. A miss under /assets/*
 # (a stale chunk after a deploy) falls through to the Worker's 404.
 [assets]
 directory = "web/app/dist"
 binding = "ASSETS"
-run_worker_first = ["/*", "!/assets/*"]
+run_worker_first = ["/*", "!/assets/*", "!/icons/*"]
 html_handling = "none"
 not_found_handling = "none"
 

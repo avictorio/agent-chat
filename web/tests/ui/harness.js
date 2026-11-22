@@ -63,7 +63,7 @@ const HTML = fs.readFileSync(DIST + '/index.html', 'utf8').replace('content="nex
 // (a RegExp).
 const RESOURCE_STATUS = /^console: Failed to load resource: the server responded with a status of \d+/;
 const badConsole = (errs, allow) => errs.filter((e) => e.startsWith('console:') && !RESOURCE_STATUS.test(e) && !(allow && allow.test(e)));
-// The app icon the install strip shows (the live Worker serves /icons/*):
+// The app icon the install strip shows (static files, /icons/*):
 // a 1x1 PNG is enough for the stubs.
 const ICON_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const FIXTURES = require('path').join(TESTS, '..', '..', 'tests', 'fixtures') + '/';

@@ -2237,6 +2237,15 @@ async function waitUp() {
     check('bundle cached for a year, immutable', !!ar && /max-age=31536000/.test(ar.headers.get('cache-control') || '') && /immutable/.test(ar.headers.get('cache-control') || ''), ar && ar.headers.get('cache-control'));
     const miss = await fetch(BASE + '/assets/no-such-file-' + SUF + '.js');
     check('an unknown asset is a 404', miss.status === 404, miss.status);
+    // The app icons (static files since 2026-11-22): the manifest's three
+    // and the apple-touch-icon, PNGs with a day's cache.
+    for (const ic of ['icon-192', 'icon-512', 'icon-512-maskable', 'icon-180']) {
+      const ir = await fetch(BASE + '/icons/' + ic + '.png');
+      const ib = Buffer.from(await ir.arrayBuffer());
+      check('icon ' + ic + ' is a PNG with a day\'s cache', ir.status === 200 && /image\/png/.test(ir.headers.get('content-type') || '') && ib.slice(0, 4).toString('hex') === '89504e47' && /max-age=86400/.test(ir.headers.get('cache-control') || ''), ir.status + ' ' + ir.headers.get('content-type') + ' ' + ir.headers.get('cache-control') + ' ' + ib.length);
+    }
+    const mf = await req('GET', '/manifest.webmanifest');
+    check('the manifest still names the icons', mf.status === 200 && (mf.json && mf.json.icons || []).length === 3, mf.status + ' ' + mf.text.slice(0, 160));
 
     // Clean up room one.
     await req('DELETE', R + '?confirm=apitest-main-' + SUF, { owner: true });

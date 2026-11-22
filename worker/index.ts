@@ -15,7 +15,6 @@ import {
   apiDocsRoute,
   currentBuildId,
   emojiRoute,
-  iconRoute,
   manifestRoute,
   page,
   roomPageRoute,
@@ -122,8 +121,6 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
 
     if (path === "/manifest.webmanifest" && request.method === "GET") { const r = await manifestRoute(); if (r !== undefined) return r; }
     if (path === "/sw.js" && request.method === "GET") { const r = await serviceWorkerRoute(); if (r !== undefined) return r; }
-    const iconMatch = path.match(/^\/icons\/icon-(192|512|512-maskable|180)\.png$/);
-    if (iconMatch && request.method === "GET") { const r = await iconRoute(rc, iconMatch); if (r !== undefined) return r; }
     if (path === "/api/push/key" && request.method === "GET") { const r = await pushKeyRoute(rc); if (r !== undefined) return r; }
 
     let m = path.match(/^\/r\/([^/]+)\/?$/);
