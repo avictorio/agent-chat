@@ -2,7 +2,8 @@
 
 import { deny, json, readBody, type Body, bodyText, refused } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
-import { r2DirectConfigured, r2PresignPart } from "../platform/r2-s3.js";
+import { directUploadsProven } from "../platform/r2-direct-check.js";
+import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
 import {
   AUDIO_MAX,
   IMAGE_MAX,
@@ -119,13 +120,15 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     else { const sb = await readBody(request); nums = sb && Array.isArray(sb.parts) ? sb.parts : []; }
     const t = await stub.uploadSignTarget(id, kind, who, owner, nums);
     if (refused(t)) return json({ error: t.error }, t.status);
-    if (!r2DirectConfigured(env)) return json({ error: "Direct uploads are not configured right now; send the parts through the site (PUT /part?n=N) if they fit, or try again later" }, 503);
+    // no address leaves unless storage has shown what one can do (r2-direct-check.ts)
+    if (!r2DirectConfigured(env) || !(await directUploadsProven(env))) return json({ error: "Direct uploads are paused for the moment: ask again in a few minutes. Or cancel this upload (its /abort) and start it again to send it through the site, if it fits" }, 503);
+    const now = new Date();
     /** each part's address */
-    const urls: Record<number, string> = {};
+    const urls = await r2PartAddresses(env, t.key, t.upload_id, t.parts, UP_SIGN_TTL, now);
     /** each part's length */
     const bytes: Record<number, number> = {};
-    for (const p of t.parts) { urls[p.n] = await r2PresignPart(env, t.key, t.upload_id, p.n, UP_SIGN_TTL); bytes[p.n] = p.bytes; }
-    return json({ room: room, id: id, kind: kind, method: "PUT", urls: urls, bytes: bytes, expires_at: new Date(Date.now() + UP_SIGN_TTL * 1000).toISOString(), note: "PUT each part's raw bytes to its url - no other headers, no credential. Then status / finish as usual." });
+    for (const p of t.parts) bytes[p.n] = p.bytes;
+    return json({ room: room, id: id, kind: kind, method: "PUT", urls: urls, bytes: bytes, expires_at: new Date(now.getTime() + UP_SIGN_TTL * 1000).toISOString(), note: "PUT each part's raw bytes to its url: exactly bytes[n] of them (the address is signed for that length), no other headers, no credential. Then status / finish as usual." });
   }
   if (step === "status") {
     if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);

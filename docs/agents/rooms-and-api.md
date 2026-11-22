@@ -243,3 +243,6 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
   abuse-brake caveat.
 - `asset:emoji-<sha>.json` (`EMOJI_KV_KEY`): the web picker's emoji list,
   built once from the pinned dataset (`EMOJI_SOURCE`).
+- `check:r2-direct`: the direct-upload check's verdict: a day when it
+  passed, 15 minutes when it failed, a minute when storage did not answer
+  (`docs/agents/media.md`, The direct path).

@@ -92,8 +92,8 @@ Each stands until the owner changes it; the detail is where it points.
 | Static assets | `web/app/dist`, binding `ASSETS`, built in Workers Builds and never committed. `run_worker_first = ["/*", "!/assets/*"]`; `html_handling` and `not_found_handling` are `none`. Cloudflare serves the hashed `/assets/*` itself (a year, immutable: `web/app/public/_headers`); the Worker serves `index.html` at `/` and `/r/:room`. |
 | Repo | `github.com/avictorio/agent-chat` (private). Pushes to `main` deploy (section 7). |
 | Durable Object | class `Room`, binding `ROOM`, namespace `29093ff8f2ff4c99849420d5bb02ac6a`. SQLite-backed (migration tag `v1`). One object per room, from `idFromName(room)`. |
-| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters |
-| R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings (`docs/agents/media.md`) |
+| KV namespace | binding `REQUESTS`, id `ead7ef78e44247a6944c442514c2023e` (`victorio-chat-requests`): activity log, emoji cache, create-room and voice-clone counters, the direct-upload check's verdict |
+| R2 bucket | binding `MEDIA`, bucket `victorio-chat-media`: message media and uploads, avatars, voice samples, Sketch & Guess drawings, and the direct check's short-lived objects under `_check/` (`docs/agents/media.md`) |
 | Cron trigger | none: `wrangler.toml` carries `crons = []` (section 7) |
 | Compatibility date | `2025-04-01` |
 | Observability | on |
@@ -148,9 +148,9 @@ agent-chat/
 | `RESEND_API_KEY` | **secret** | optional second email transport (not currently set) |
 | `RESEND_FROM` | plain text | optional Resend sender override; set it in `wrangler.toml` if ever used |
 | `ANTHROPIC_API_KEY` | **secret** | optional: Sketch & Guess's Referee asks Claude about close-call guesses (`sgClaudeJudge`); without it the game falls back to plain text matching |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential that signs direct upload parts: the account-owned API token "chat site direct uploads (R2 victorio-chat-media objects)", object read and write on that bucket only. Key id = the token's id; secret = the SHA-256 of its value (R2's S3 convention). To rotate, roll the token and set both secrets again. |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | **secret** | the R2 API credential behind direct uploads: the account-owned API token "chat site direct uploads (R2 victorio-chat-media objects)", object read and write on that bucket only. It never signs an address that leaves the Worker: each upload's part addresses are signed with a temporary credential derived from it, good for uploading parts of that one file only (`docs/agents/media.md`, The direct path). Key id = the token's id; secret = the SHA-256 of its value (R2's S3 convention). To rotate, roll the token and set both secrets again. |
 | `R2_ACCOUNT_ID` / `R2_BUCKET` | plain text | where presigned part addresses point (`<account>.r2.cloudflarestorage.com/<bucket>/...`); `wrangler.toml` [vars] |
-| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them. `wrangler.toml` [vars] |
+| `R2_DIRECT` | plain text | `"1"` turns direct uploads on for every client that asks; without it only an owner request with `"direct": "force"` uses them. Either way they are offered only while the direct check passes on the live bucket. `wrangler.toml` [vars] |
 | `TEST_HOOKS` | test only | arms the `/api/test-hooks/*` routes; set only on the API suite's local server (`tests/api/server.js`), never live (`check:config` fails by name if it appears) |
 
 The bindings `ROOM`, `REQUESTS`, `MEDIA` and `ASSETS` are in the table

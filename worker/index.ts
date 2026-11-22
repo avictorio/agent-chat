@@ -3,6 +3,8 @@
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json } from "./lib/http.js";
 import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
+import { renewDirectVerdict } from "./platform/r2-direct-check.js";
+import { r2DirectConfigured } from "./platform/r2-s3.js";
 import {
   uploadLinkRoute,
   uploadLinkStepRoute,
@@ -73,9 +75,9 @@ async function prettyIfAsked(request: Request, res: Response): Promise<Response>
 }
 
 export default {
-  async fetch(request: Request, env: Env) {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     try {
-      return await prettyIfAsked(request, await queryTokenNotice(request, await routeRequest(request, env)));
+      return await prettyIfAsked(request, await queryTokenNotice(request, await routeRequest(request, env, ctx)));
     } catch (e) {
       // A malformed %-escape in a path segment (decodeURIComponent throws
       // URIError) is the client's mistake: answer 400, not a 500.
@@ -87,7 +89,7 @@ export default {
   },
 };
 
-async function routeRequest(request: Request, env: Env): Promise<Response> {
+async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -102,7 +104,13 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (path === "/") return page(env, url.origin);
-    if (path === "/api/build") return json({ build: await currentBuildId(env, url.origin) });
+    if (path === "/api/build") {
+      // Every open page asks this every few minutes, which makes it the
+      // place to keep the direct-upload check fresh (r2-direct-check.ts),
+      // so that no upload's start has to wait for it.
+      if (env.R2_DIRECT === "1" && r2DirectConfigured(env)) ctx.waitUntil(renewDirectVerdict(env).catch(() => undefined));
+      return json({ build: await currentBuildId(env, url.origin) });
+    }
     if (path === "/api/changes") return changesRoute(rc);
     if (path === "/api/test-hooks/game-images") { const r = await hookGameImages(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/r2-fail") { const r = await hookR2Fail(rc); if (r !== undefined) return r; }

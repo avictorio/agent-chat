@@ -34,6 +34,7 @@ import {
   uploadPlan,
   uploadPlanDirect,
 } from "../uploads/plan.js";
+import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
@@ -223,12 +224,15 @@ export const UploadMethods = {
   },
 
   // Whether a session may send its parts straight to R2: the client asked
-  // (direct), the credential is configured, and the switch is on - or the
-  // owner asked with "force", to try it live before the switch flips.
+  // (direct), the credential is configured, the switch is on - or the
+  // owner asked with "force", to try it live before the switch flips -
+  // and storage has shown that a part address can only take its part
+  // (platform/r2-direct-check.ts). Otherwise the parts go through the site.
   /** @param direct the client's direct: true, or "force" */
-  upDirectAllowed(direct: unknown, owner: boolean) {
+  async upDirectAllowed(direct: unknown, owner: boolean) {
     if (!direct || !r2DirectConfigured(this.env)) return false;
-    return this.env.R2_DIRECT === "1" || (direct === "force" && !!owner);
+    if (this.env.R2_DIRECT !== "1" && !(direct === "force" && !!owner)) return false;
+    return directUploadsProven(this.env);
   },
 
   /**
@@ -242,11 +246,13 @@ export const UploadMethods = {
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     size = Math.floor(Number(size));
     if (!Number.isFinite(size) || size < 1) return { status: 400, error: "\"size\" is required: the file's exact length in bytes" };
-    const useDirect = this.upDirectAllowed(direct, owner);
+    const useDirect = await this.upDirectAllowed(direct, owner);
     if (size > (useDirect ? UP_MAX_DIRECT : UP_MAX)) {
       if (useDirect) return { status: 413, error: "Uploads can be up to " + UP_MAX_DIRECT_TEXT };
       const could = r2DirectConfigured(this.env) && this.env.R2_DIRECT === "1";
-      return { status: 413, error: "Uploads through the site can be up to " + UP_MAX_TEXT + (could ? "; start with \"direct\": true to send the parts straight to storage, up to " + UP_MAX_DIRECT_TEXT : "") };
+      // asked for direct and did not get it: the direct check is not passing right now
+      const hint = !could ? "" : direct ? "; direct uploads, which carry up to " + UP_MAX_DIRECT_TEXT + ", are paused for the moment - try again in a few minutes" : "; start with \"direct\": true to send the parts straight to storage, up to " + UP_MAX_DIRECT_TEXT;
+      return { status: 413, error: "Uploads through the site can be up to " + UP_MAX_TEXT + hint };
     }
     fp = fp ? String(fp).slice(0, 200) : null;
     await this.sweepDrafts();

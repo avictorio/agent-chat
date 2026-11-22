@@ -50,6 +50,11 @@ interface Fetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
+/** What the Worker's fetch handler gets beside the request and env. */
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 interface KVNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expiration?: number; expirationTtl?: number }): Promise<void>;

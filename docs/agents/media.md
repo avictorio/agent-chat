@@ -113,20 +113,73 @@ way; the routes are in docs.txt UPLOADING FILES.
 
 A client that starts with `"direct": true` gets a direct session
 (`md.mode = 'direct'`) when the R2 credential and `R2_DIRECT` are set
-(`AGENTS.md` section 2). `sign {parts}` returns presigned PUT addresses
-on R2's S3 endpoint (SigV4, region `auto`, `UP_SIGN_TTL` each, up to
-`UP_SIGN_MAX` a call); the client sends each part there with no
-credential. Status, finish and resume read storage's own part list (S3
-ListParts; a part of the wrong length counts as missing) before the
-binding completes the upload: multipart uploads started through the
-binding accept parts sent through S3. Parts run to `UP_DIRECT_PART_MAX`
-and an upload to `UP_MAX_DIRECT`. `sigv4Presign` is checked against AWS's
-published example by `/api/test-hooks/sigv4`. The bucket's CORS rule lets
-only `https://chat.victorio.cloud` PUT (any header, ETag exposed), and the
-bucket keeps R2's default 7-day multipart abort rule, which
-`UP_SESSION_MS` relies on. The web uploader always asks for direct, falls
-back to the Worker path when the answer says `direct: false`, signs in
-coalesced batches and re-signs when storage turns an address away (403).
+(`AGENTS.md` section 2) and the direct check has passed (below). `sign
+{parts}` returns presigned PUT addresses on R2's S3 endpoint (SigV4,
+region `auto`, `UP_SIGN_TTL` each, up to `UP_SIGN_MAX` a call); the
+client sends each part there with no credential. Status, finish and
+resume read storage's own part list (S3 ListParts; a part of the wrong
+length counts as missing) before the binding completes the upload:
+multipart uploads started through the binding accept parts sent through
+S3. Parts run to `UP_DIRECT_PART_MAX` and an upload to `UP_MAX_DIRECT`.
+The bucket's CORS rule lets only `https://chat.victorio.cloud` PUT (any
+header, ETag exposed), and the bucket keeps R2's default 7-day multipart
+abort rule, which `UP_SESSION_MS` relies on. The web uploader always asks
+for direct, falls back to the Worker path when the answer says `direct:
+false`, signs in coalesced batches and re-signs when storage turns an
+address away (403).
+
+**What an address can do.** An address goes to whoever is uploading, so
+what matters is what its holder can do with it (`platform/r2-s3.ts`):
+
+- It is signed with a credential made for that upload, never with the
+  API credential. S3 turns an UploadPart into UploadPartCopy when the
+  request adds an `x-amz-copy-source` header, and the API credential
+  reads the whole bucket, so an address signed with it could copy any
+  object (another room's media, at a key anyone can work out) into the
+  caller's own upload. `r2PartCredential` mints an R2 temporary
+  credential that allows `UploadPart` on the upload's own key and nothing
+  else: a JWT signed with the API credential's secret, which R2 checks on
+  every request. No call to Cloudflare is needed to make one.
+- An address **is** that credential. The JWT rides in it
+  (`X-Amz-Security-Token`) and the temporary secret is the JWT's SHA-256,
+  so a holder can sign requests of their own within the scope: any part
+  number, any length, on that one object, until it expires
+  (`UP_SIGN_TTL`). The scope is the whole fence. `r2PartAddresses` is the
+  one place part addresses are made.
+- Each address also signs `content-length`. That tells a client that sent
+  the wrong slice at once; it is not a limit, since the holder can sign
+  another length. What bounds an upload is the scope, the expiry, finish
+  counting only parts of the planned length, and the 7-day abort rule.
+  A cap on what one member can park in storage is a separate matter.
+
+**The direct check** (`platform/r2-direct-check.ts`). The scope is
+enforced by R2, not by this code, and the local emulation does not
+enforce it, so no test here can show it. The Worker tries it on the live
+bucket instead, with objects of its own under `_check/` (no room name can
+start with `_`), doing what the holder of an address could: the address
+must take its part; a copy of another object signed with the address's
+own credential must be refused with 403, and so must a read; the same
+copy sent as an unsigned header must not copy; and, as a control, the
+same signed copy made with the API credential must work, or the refusals
+prove nothing. A try storage did not answer (5xx, 429) makes the check
+inconclusive, never a pass.
+
+The verdict lives in KV (`check:r2-direct`) with the check's version
+(`CHECK_VERSION`: raise it when the signing or the check changes) and a
+fingerprint of the credential: a day when good, 15 minutes when storage
+failed a try, a minute when inconclusive. Direct uploads are offered only
+while it is good; otherwise `start` answers `direct: false` and `sign`
+503. `GET /api/build`, which every open page polls, runs it in the
+background when nothing is proven and renews a pass from 12 hours on, so
+an upload seldom waits for it. One check runs at a time per isolate.
+Read it in the logs: a pass is `{"note": "r2direct.check"}`, anything
+else `{"warn": "r2direct.check"}`, each with storage's status and error
+code for every try. `tests/unit/r2-direct.test.mjs` recomputes the JWT
+and the signature independently (one signature is pinned to what
+aws4fetch, the signer in Cloudflare's docs, produced) and runs the check
+against a stand-in bucket in each of the ways storage could behave;
+`/api/test-hooks/sigv4` checks `sigv4Presign` against AWS's published
+example.
 
 ## Tickets and links
 
