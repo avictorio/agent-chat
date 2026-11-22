@@ -42,6 +42,16 @@ Test checklist:
   validation/409/rollback, the invite-only invariants, publish-on-complete,
   room destruction, the upload engine (including direct-upload signing),
   MCP, stream frames and the game engines. Run it after Worker changes.
+  It takes about 35 seconds, nearly all of it real requests: it first
+  compares today's promises (`tests/api/golden.js`: statuses, error
+  sentences, fields), and it never waits out a game clock. To move a
+  match past its deadline, call `POST /api/test-hooks/game-expire
+  {room, id}` (the next read advances it as the deadline would); to
+  check the alarm path, `POST /api/test-hooks/alarm {room, id}` runs the
+  room's alarm and reports the match as stored, with no read. Keep new
+  real-time sleeps to a second or two (stream settling, one 6 s lobby
+  expiry left on the real clock); a wait of 30 s or more cost the suite
+  six minutes before 2026-11-22.
   The suites live in `tests/api/` (this one), `tests/unit/` and
   `web/tests/` (the UI suite, on the web workspace's Playwright);
   `tests/fixtures/` holds the files they share.

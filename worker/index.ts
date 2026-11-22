@@ -25,6 +25,7 @@ import { createRoomRoute, roomRoute } from "./routes/rooms.js";
 import { streamRoute } from "./routes/stream.js";
 import {
   hookCoderaceSecret,
+  hookAlarm,
   hookGameExpire,
   hookGameImages,
   hookLetterGrid,
@@ -102,6 +103,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     if (path === "/api/test-hooks/ticket-ttl") { const r = await hookTicketTtl(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/coderace-secret") { const r = await hookCoderaceSecret(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/game-expire") { const r = await hookGameExpire(rc); if (r !== undefined) return r; }
+    if (path === "/api/test-hooks/alarm") { const r = await hookAlarm(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/sketch-judge") { const r = await hookSketchJudge(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/lettergrid") { const r = await hookLetterGrid(rc); if (r !== undefined) return r; }
     if (path === "/api/test-hooks/sigv4") { const r = await hookSigv4(rc); if (r !== undefined) return r; }

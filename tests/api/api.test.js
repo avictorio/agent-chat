@@ -437,6 +437,13 @@ async function waitUp() {
 
     // Publish-on-complete + destruction (second room).
     const R2 = '/api/rooms/apitest-poc-' + SUF;
+    // Game clocks in this room are run out with the test hook (game-expire
+    // puts a match's deadline in the past) instead of being waited out:
+    // the next read advances the match exactly as the deadline would.
+    // runAlarm runs the room's alarm and reports the match as stored, so
+    // the alarm path is checked without a read.
+    const expireGame = (id) => req('POST', '/api/test-hooks/game-expire', { owner: true, json: { room: R2.slice('/api/rooms/'.length), id } });
+    const runAlarm = async (id) => (await req('POST', '/api/test-hooks/alarm', { owner: true, json: { room: R2.slice('/api/rooms/'.length), id } })).json || {};
     await req('POST', R2, { owner: true });
     const invP = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Poc', kind: 'human' } });
     const TP = invP.json.token;
@@ -637,7 +644,16 @@ async function waitUp() {
     // so is how_to_play, the rules text, for the same reason.)
     const rivalView = JSON.stringify(Object.assign({}, r.json.game, { how_to_play: null })).split('"legal_moves":["rock","paper","scissors"]').join('');
     check('duel throw stays secret from the rival', r.status === 200 && (r.json.game.players.find(p => p.name === 'Poc') || {}).thrown === true && r.json.game.you.queued === null && !rivalView.includes('rock'), JSON.stringify(r.json.game).slice(0, 200));
-    await new Promise(res => setTimeout(res, 31000));
+    // The alarm is armed by the match's deadline, and the alarm alone (no
+    // read) advances the match once that deadline has passed.
+    let al = await runAlarm(clockId);
+    check('the room alarm is armed by the running match', al.ran === true && al.tick === 0 && typeof al.armed_after === 'number' && al.armed_after <= al.deadline && al.armed_after > Date.now() - 1000, JSON.stringify(al));
+    await expireGame(clockId);
+    // (the queued-throw duel's 30 s round runs out here too: its forfeit
+    // checks follow the cancelled clock match below)
+    await expireGame(duelF);
+    al = await runAlarm(clockId);
+    check('the alarm alone advances an expired match', al.ran === true && al.tick >= 1 && al.status === 'running' && al.deadline > Date.now(), JSON.stringify(al));
     r = await req('GET', R2 + '/games/' + clockId, { token: TP });
     check('expired tick sends bikes straight', r.json.game.tick >= 1 && r.json.game.players[0].x >= 4 && r.json.game.players[0].alive, JSON.stringify(r.json.game.players));
     const clockTick = (r.json.game.log || []).filter(e => e.tick >= 1).pop();
@@ -729,7 +745,7 @@ async function waitUp() {
         const mv = (g.you.safe_moves && g.you.safe_moves[0]) || (g.you.legal_moves || [])[0];
         if (mv) await req('POST', R2 + '/games/' + lcAbsent + '/moves', { token: TRex, json: { dir: mv } });
       }
-      await new Promise(res => setTimeout(res, 1500));
+      await expireGame(lcAbsent);
     }
     check('safe_moves ride inside legal_moves', lcSafeOk, '');
     check('an absent rider is taken out after three clock ticks', !!lcFinal && lcFinal.winner === 'Rex' && (lcFinal.log || []).some(e => e.text.includes('taken out - three ticks')), JSON.stringify(lcFinal).slice(0, 240));
@@ -738,10 +754,9 @@ async function waitUp() {
     // secrecy, turn order, a sinking, the win, and the result post.
     // Poc's fleet hugs rows 10/5-8/6/2-4/2, Rex's rows 1/3-6/5/7-9, so
     // every scripted shot's outcome is known in advance.
-    // Both captains walk away: this game is set up FIRST so its 30s
-    // turns expire while the rest of the suite runs; the late checks
-    // at the end verify it ends with no winner, not a win for
-    // whoever's clock happened to fire last.
+    // Both captains walk away: the late checks at the end run its 30s
+    // turns out (expireGame) and verify it ends with no winner, not a
+    // win for whoever's clock happened to fire last.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex'], tick_seconds: 30 } });
     const bsAbandon = r.json.game.id;
     await req('POST', R2 + '/games/' + bsAbandon + '/accept', { token: TRex, json: {} });
@@ -828,7 +843,7 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + bsClock + '/moves', { token: TRex, json: { dir: 'random' } });
     check('random placements open play', r.status === 200 && r.json.game.phase === 'play' && r.json.game.you.fleet.length === 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 160));
     const bsClockFirst = r.json.game.turn_of;
-    await new Promise(res => setTimeout(res, 32000));
+    await expireGame(bsClock);
     r = await req('GET', R2 + '/games/' + bsClock, { token: TP });
     check('an expired turn passes to the rival', r.status === 200 && r.json.game.status === 'running' && r.json.game.turn_of === (bsClockFirst === 'Poc' ? 'Rex' : 'Poc') && (r.json.game.log || []).some(e => e.text.includes('let the turn clock run out')) && (r.json.game.misses || {})[bsClockFirst] === 1, JSON.stringify(r.json.game).slice(0, 240));
 
@@ -887,9 +902,9 @@ async function waitUp() {
     const ffaTok = { Poc: TP, Rex: TRex, Rae: TRae };
     const ffaState = async (id) => (await req('GET', R2 + '/games/' + id, { token: TP })).json.game;
     const ffaFire = async (id, dir) => { const g = await ffaState(id); return req('POST', R2 + '/games/' + id + '/moves', { token: ffaTok[g.turn_of], json: { dir } }); };
-    // The abandoned-table game is set up FIRST so its 30s turns
-    // expire while the rest of the suite runs; the late checks at
-    // the end verify a fully silent table ends with no winner.
+    // The abandoned table: the late checks at the end run its 30s turns
+    // out (expireGame) and verify a fully silent table ends with no
+    // winner.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'battleship', from: 'Poc', players: ['Poc', 'Rex', 'Rae'], tick_seconds: 30 } });
     const bsFfaAbandon = r.json.game.id;
     await req('POST', R2 + '/games/' + bsFfaAbandon + '/accept', { token: TRex, json: {} });
@@ -1688,7 +1703,7 @@ async function waitUp() {
     r = await req('POST', R2 + '/games/' + duelDef + '/cancel', { token: TP, json: {} });
     check('default-clock duel cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
     // An unthrown round 1 calls the duel off (verified in the late
-    // checks at the end of the run, once its 30s round has expired).
+    // checks at the end of the run, which expire its 30s round).
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 30 } });
     const duelR1 = r.json.game.id;
     await req('POST', R2 + '/games/' + duelR1 + '/accept', { token: TRex, json: {} });
@@ -2170,26 +2185,26 @@ async function waitUp() {
     check('games list: record carries duel standings', recDuel.length >= 1 && recDuel.every((p) => typeof p.w === 'number' && typeof p.l === 'number'), JSON.stringify(rec).slice(0, 200));
     check('games list: record sorted by wins, wins were recorded', recDuel.every((p, i) => i === 0 || recDuel[i - 1].w >= p.w) && recDuel.reduce((a, p) => a + p.w, 0) >= 1, JSON.stringify(recDuel));
 
-    // Late checks for the two clock-driven matches set up earlier
-    // (the unthrown-round-1 duel and the double-abandon battleship):
-    // poll briefly, since the wall-clock time they need depends on
-    // how long the rest of the suite took. These run BEFORE the room
+    // Late checks for the clock-driven matches set up earlier (the
+    // unthrown-round-1 duel, the double-abandon battleship, the silent
+    // free-for-all): run each one's clock out with the test hook, one
+    // expired turn per try, until it ends. These run BEFORE the room
     // destruction below: after it, every poll would 404.
-    async function pollGame(id, pred, tries, gapMs) {
+    async function pollGame(id, pred, tries) {
       let g = null;
       for (let i = 0; i < tries; i++) {
         const rr = await req('GET', R2 + '/games/' + id, { token: TP });
         if (rr.json && rr.json.game) g = rr.json.game;
         if (g && pred(g)) return g;
-        await new Promise(res => setTimeout(res, gapMs));
+        await expireGame(id);
       }
       return g;
     }
-    const r1Final = await pollGame(duelR1, g => g.status !== 'running', 8, 10000);
+    const r1Final = await pollGame(duelR1, g => g.status !== 'running', 8);
     check('an unthrown round 1 calls the duel off (no phantom 0-0)', !!r1Final && r1Final.status === 'cancelled' && !r1Final.winner, JSON.stringify(r1Final || null).slice(0, 200));
-    const abFinal = await pollGame(bsAbandon, g => g.status === 'finished', 12, 15000);
+    const abFinal = await pollGame(bsAbandon, g => g.status === 'finished', 20);
     check('both captains abandoning ends with no winner', !!abFinal && abFinal.status === 'finished' && !abFinal.winner && (abFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(abFinal || null).slice(0, 240));
-    const ffaAbFinal = await pollGame(bsFfaAbandon, g => g.status === 'finished', 14, 15000);
+    const ffaAbFinal = await pollGame(bsFfaAbandon, g => g.status === 'finished', 30);
     check('a fully silent ffa table ends with no winner', !!ffaAbFinal && ffaAbFinal.status === 'finished' && !ffaAbFinal.winner && (ffaAbFinal.log || []).some(e => e.text.includes('abandoned the sea')), JSON.stringify(ffaAbFinal || null).slice(0, 240));
 
     const gameImages = async () => ((await req('POST', '/api/test-hooks/game-images', { owner: true, json: { room: roomOf2 } })).json || {}).count;

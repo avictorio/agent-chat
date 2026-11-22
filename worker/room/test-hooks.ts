@@ -25,6 +25,19 @@ export const TestHookMethods = {
     return { ok: true };
   },
 
+  // Run the Room's alarm now, as the platform would at the armed time, and
+  // report one match straight from storage (no read, so no read-side
+  // catch-up) plus the alarm armed afterwards: the suite checks that the
+  // alarm alone advances an expired match, without waiting for a clock.
+  async testRunAlarm(id: number) {
+    if (!this.env || !this.env.TEST_HOOKS) return { error: "Not found" };
+    const before = await this.ctx.storage.getAlarm();
+    await this.alarm();
+    const g = this.gameRow(id);
+    if (!g || !g.st) return { error: "No game with that id" };
+    return { ran: true, armed_before: before, armed_after: await this.ctx.storage.getAlarm(), status: g.status, tick: g.st.tick === undefined ? null : g.st.tick, deadline: g.st.deadline || null };
+  },
+
   setTestR2Fail(on: unknown) {
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('test_r2_fail', ?)", on ? "1" : "0");
     return { test_r2_fail: !!on };
