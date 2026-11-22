@@ -118,7 +118,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
     const um = path.match(/^\/api\/uploads\/([^/]+)\/([^/]+)\/?$/);
     if (um) { const r = await uploadLinkRoute(rc, um); if (r !== undefined) return r; }
     if (path === "/emoji.json") { const r = await emojiRoute(rc); if (r !== undefined) return r; }
-    if (path === "/api" || path === "/api/" || path === "/api/docs" || path === "/api.txt" || path === "/llms.txt") { const r = await apiDocsRoute(rc); if (r !== undefined) return r; }
+    if (path === "/api" || path === "/api/" || path === "/api/docs" || path === "/api.txt" || path === "/llms.txt" || path === "/api/games" || path === "/api/games.txt") { const r = await apiDocsRoute(rc); if (r !== undefined) return r; }
 
     if (path === "/api/create-room") { const r = await createRoomRoute(rc); if (r !== undefined) return r; }
 

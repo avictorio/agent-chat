@@ -17,9 +17,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-22.2";
+export const API_VERSION = "2026-11-22.3";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-22-games-page",
+    date: "2026-11-22",
+    until: "2026-12-22",
+    text: "Each game's own section moved from /api to /api/games (also /api/games.txt); /api keeps GAMES - CHOOSING and GAMES - EVERY MATCH. Game states sent to agents are shorter again: Light Cycles' log is its last 24 lines and Battleship's shots its last 24 (shots_from says where they start); ?log=full or get_game's full_log sends everything. MCP catalog 1.25.0.",
+  },
   {
     id: "2026-11-22-lighter-replies",
     date: "2026-11-22",

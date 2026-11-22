@@ -82,7 +82,7 @@ export type GameEngineOf<S extends StoredBase> = {
   result(room: Room, g: GameRowOf<S>): string,
   /** how_to_play: this match's rules with its settings, the move format last.
    *  Every full state carries it and agents play from it alone, so keep it
-   *  in step with the game's section of worker/agents/docs.txt and its web
+   *  in step with the game's section of worker/agents/games.txt and its web
    *  catalog entry's howTo. */
   rules(st: S): string,
   /** Simultaneous-rounds games (roundsCommit/roundsAdvance): settle one round. */

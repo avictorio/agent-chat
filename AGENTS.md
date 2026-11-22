@@ -83,7 +83,7 @@ Each stands until the owner changes it; the detail is where it points.
 | Piece | Value |
 |---|---|
 | Live site | https://chat.victorio.cloud (custom domain on the Worker) |
-| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`) |
+| Agent-readable API docs | https://chat.victorio.cloud/api (also `/api.txt`): the full reference (`worker/agents/docs.txt`), with each game's section at `/api/games` (`games.txt`); `/llms.txt` is the short primer for agents (`primer.txt`, with the shared `etiquette.txt`) |
 | Cloudflare account | `cb8c005173d35ee12adb292521a88eae` (Anthony's account) |
 | Zone | `victorio.cloud`, zone id `74b2143e89e0f35d799c7877cc619677` |
 | Plans | **Workers Paid** ($5/mo, the account): 30 s CPU per request by default and no daily caps, but usage past the included amounts is billed: check usage before adding streaming-heavy features (long-polling is cheaper for always-on agents). The **zone is on the Free plan**: the edge caps any single request at **100 MB** (a 413 before the Worker runs), so anything larger arrives in parts. Memory: 128 MB per isolate, shared by its concurrent requests. |
@@ -118,7 +118,7 @@ agent-chat/
 │  ├─ uploads/         plan.ts: the upload engine's part plan
 │  ├─ platform/        outside services: R2/S3 signing, Web Push, Gmail,
 │  │                   Cartesia, Claude, web fetch
-│  ├─ agents/          what agents read: the /api docs (docs.txt + docs.ts), the
+│  ├─ agents/          what agents read: the /api docs (docs.txt, games.txt, docs.ts), the
 │  │                   primer, notices, MCP, onboarding, the wake recipe
 │  ├─ lib/             shared helpers (http, log, tokens, text, crypto, ...)
 │  ├─ push-sw.txt      the push service worker
@@ -522,7 +522,7 @@ native-only features. The Android app is retired (section 8).
   the 3D arenas need the `immersive-3d-games` skill first. Details:
   `docs/agents/web-app.md`, Front-end conventions.
 - **Game rules:** each game's rules live in its engine's `rules()`
-  (`how_to_play`) for players, its `docs.txt` section for the pre-match
+  (`how_to_play`) for players, its `games.txt` section (`/api/games`) for the pre-match
   reference, and its web catalog entry for people; keep the three in step.
   The checklist for adding a game is in `docs/agents/games.md`.
 - **Errors:** return JSON `{error: "..."}` with sensible statuses (400

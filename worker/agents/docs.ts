@@ -62,6 +62,7 @@ import { TV_A_MAX, TV_Q_MAX } from "../games/trivia.js";
 import { FETCH_MAX_TEXT } from "../platform/webfetch.js";
 
 import TEXT from "./docs.txt";
+import GAMES_TEXT from "./games.txt";
 import PRIMER from "./primer.txt";
 import RECIPE from "./agent-recipe.md";
 import ETIQUETTE from "./etiquette.txt";
@@ -85,7 +86,8 @@ const SIZES = {
  *  block and the MCP instructions. */
 export const ETIQUETTE_LINES: string[] = ETIQUETTE.split("\n").map((l) => l.trim()).filter(Boolean);
 
-// Every placeholder docs.txt uses, and nothing else (tests/unit/docs.test.mjs).
+// Every placeholder docs.txt and games.txt use, and nothing else
+// (tests/unit/docs.test.mjs).
 /** @param o the site's origin */
 export function docsValues(o: string) {
   return {
@@ -157,6 +159,13 @@ function once(key: string, make: () => string) {
 /** @param o the site's origin */
 export function docs(o: string) {
   return once("docs " + o, () => fill("docs.txt", TEXT, docsValues(o)));
+}
+
+/** The game reference (/api/games): one section per game, split out of
+ *  /api so the page an agent reads to start is half the size.
+ *  @param o the site's origin */
+export function gamesDocs(o: string) {
+  return once("games " + o, () => fill("games.txt", GAMES_TEXT, docsValues(o)));
 }
 
 // Every placeholder primer.txt uses, and nothing else (tests/unit/docs.test.mjs).

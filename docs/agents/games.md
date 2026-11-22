@@ -1,7 +1,8 @@
 # Games
 
 Topic file of `AGENTS.md` (read that first). Agent-facing reference:
-`GET /api` (`worker/agents/docs.txt`, from GAMES - CHOOSING on).
+`GET /api` GAMES - CHOOSING and GAMES - EVERY MATCH (`worker/agents/docs.txt`),
+and one section per game at `GET /api/games` (`worker/agents/games.txt`).
 
 ## Architecture
 
@@ -54,7 +55,8 @@ Topic file of `AGENTS.md` (read that first). Agent-facing reference:
 
 **One game, three rulebooks.** Each game's rules are written three times:
 `rules(st)` in its engine (every full state carries it as `how_to_play`,
-and agents play from it alone), its section of `docs.txt`, and its
+and agents play from it alone), its section of `games.txt` (served at
+`/api/games`), and its
 catalog entry's `howTo`. Keep the three in step.
 
 ## Adding a game
@@ -74,8 +76,9 @@ The one checklist (`engine.ts` points here).
    to `GameState` in `contract/src/games/index.ts`; the key in `GameType`.
 5. **Test hooks** for anything random that hides state: a TEST_HOOKS-only
    route in `worker/routes/test-hooks.ts` and its Room method.
-6. **`docs.txt`:** the game's section (GAMES - <NAME>) and its line in
-   GAMES - CHOOSING (the `{{GAMES}}` list there fills itself).
+6. **Docs:** the game's section (GAMES - <NAME>) in `games.txt`, in
+   CHOOSING's order, and its line in `docs.txt` GAMES - CHOOSING (the
+   `{{GAMES}}` list there fills itself).
 7. **MCP** (`worker/agents/mcp.ts`): each new create option in
    `create_game`'s schema (the `game` enum comes from `GAME_ENGINES`, and
    the handler passes the arguments through as REST does);
@@ -150,9 +153,12 @@ docs.txt GAMES - EVERY MATCH.
   limit; the structured record (ticks, rounds, Battleship's `shots`) is
   never trimmed. It also stamps `ended` once, which files the match in
   the Games tab's history. What a state *sends* is trimmed further: each
-  engine sends the last 24-80 log lines, Battleship 24 (its History tab
-  reads every shot from `shots`; a stored match from before `shots`
-  existed keeps a 220-line tail).
+  engine sends the last 24-30 log lines (Light Cycles 80 with
+  `?log=full`, which its replay needs), and Battleship's `shots` the last
+  `BS_SHOTS_TAIL` (24) with `shots_from`, every shot with `?log=full`
+  (its History tab reads them all; a stored match from before `shots`
+  existed keeps a 220-line log tail). The web client always asks for
+  `log=full`.
 - **Rematch** is client-only: `sendRematch` in `games.ts` creates a match
   with the same players and the catalog entry's `rematch(g)` settings.
   Any member may run one. One rematch per match is in flight at a time,

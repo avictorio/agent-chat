@@ -106,7 +106,9 @@ export const LightCyclesMethods = {
     const out = this.lcSummary(g);
     const st = g.st;
     out.trails = st.trails;
-    out.log = st.log.slice(-80);
+    // The narrative log: a short tail like every game's, 80 lines when the
+    // whole record is asked for (the web's replay reads "is out at tick N").
+    out.log = st.log.slice(g.fullLog ? -80 : -24);
     // Ticks count from 1 (tick 0 is the spawn), so move_log_from 1 is
     // the whole log.
     const from = g.fullLog ? 1 : Math.max(1, st.tick - LC_MOVE_LOG_TICKS + 1);

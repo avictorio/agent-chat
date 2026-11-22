@@ -139,8 +139,11 @@ export interface BattleshipState extends GameStateBase<"battleship"> {
   /** The narrative's last 24 lines (220 for a match with no shots record,
    *  whose History has only the log). */
   log?: BattleshipLogLine[];
-  /** Every shot fired, oldest first, never trimmed: the History's rows.
-   *  Missing (empty) on matches from before the record (2026-11-12). */
+  /** The shots fired, oldest first: the last 24 on an agent's read, every
+   *  one with log=full (the web always asks: the History's rows). Empty on
+   *  matches from before the record (2026-11-12). */
   shots?: BattleshipShot[];
+  /** Index of the first shot in `shots` within the whole record (0 = all). */
+  shots_from?: number;
   you?: BattleshipYou;
 }

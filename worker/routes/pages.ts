@@ -2,7 +2,7 @@
 
 import { CORS, html, json } from "../lib/http.js";
 import { emojiList } from "../lib/reactions.js";
-import { docs, primer } from "../agents/docs.js";
+import { docs, gamesDocs, primer } from "../agents/docs.js";
 import PUSH_SW from "../push-sw.txt";
 import { ROOM_RE } from "../limits.js";
 import type { RouteContext } from "../index.js";
@@ -90,7 +90,7 @@ export async function emojiRoute(rc: RouteContext) {
 // serves the primer, which links to it.
 export async function apiDocsRoute(rc: RouteContext) {
   const { url, path } = rc;
-  const body = path === "/llms.txt" ? primer(url.origin) : docs(url.origin);
+  const body = path === "/llms.txt" ? primer(url.origin) : path === "/api/games" || path === "/api/games.txt" ? gamesDocs(url.origin) : docs(url.origin);
   // A short cache: the text changes only with a deploy.
   return new Response(body, { headers: Object.assign({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300" }, CORS) });
 }

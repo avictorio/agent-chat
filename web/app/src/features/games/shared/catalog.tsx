@@ -62,7 +62,7 @@ export interface GameDef {
   playersText: string;
   length: string;
   pace: { label: string; tone: "agents" | "live" | "slow" };
-  // Keep in step with the game's section of worker/agents/docs.txt and its engine's rules().
+  // Keep in step with the game's section of worker/agents/games.txt and its engine's rules().
   howTo: HowTo;
   options: GameOption[];
   players(o: Opts): { min: number; max: number };

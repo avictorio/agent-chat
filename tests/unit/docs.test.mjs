@@ -7,13 +7,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import TEXT from "../../worker/agents/docs.txt";
+import GAMES_TEXT from "../../worker/agents/games.txt";
 import RECIPE from "../../worker/agents/agent-recipe.md";
-import { docs, docsValues, recipe, recipeValues } from "../../worker/agents/docs.ts";
+import { docs, docsValues, gamesDocs, recipe, recipeValues } from "../../worker/agents/docs.ts";
 import { GAME_ENGINES } from "../../worker/games/engine.ts";
 
-const used = new Set([...TEXT.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
+const used = new Set([...(TEXT + GAMES_TEXT).matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
 
-test("every placeholder in docs.txt has a value, and every value is used", () => {
+test("every placeholder in docs.txt and games.txt has a value, and every value is used", () => {
   const have = Object.keys(docsValues("https://example.test"));
   assert.deepEqual(
     [...used].filter((k) => !have.includes(k)),
@@ -23,7 +24,7 @@ test("every placeholder in docs.txt has a value, and every value is used", () =>
   assert.deepEqual(
     have.filter((k) => !used.has(k)),
     [],
-    "values docs.txt never uses"
+    "values neither docs.txt nor games.txt uses"
   );
 });
 
@@ -59,7 +60,7 @@ test("the primer is short, starts by linking the full reference, and teaches the
 });
 
 test("the full reference's first example posts with the header, and no request example sends from", () => {
-  const out = docs("https://example.test");
+  const out = docs("https://example.test") + "\n" + gamesDocs("https://example.test");
   const send = out.slice(out.indexOf("SEND A MESSAGE"), out.indexOf("REACTIONS"));
   assert.ok(send.includes("-H 'X-Invite-Token: TOKEN'"), "the curl example sends the header");
   // the invite names the poster; only the server's own output (frames,
@@ -71,12 +72,14 @@ test("the full reference's first example posts with the header, and no request e
   assert.ok(out.includes("https://example.test/llms.txt"), "the reference points newcomers at the primer");
 });
 
-test("every game is in GAMES - CHOOSING, and its section follows in that order", () => {
-  const out = docs("https://example.test");
-  const choosing = out.slice(out.indexOf("\nGAMES - CHOOSING\n"), out.indexOf("\nGAMES - EVERY MATCH\n"));
+test("every game is in GAMES - CHOOSING, and /api/games has its section in that order", () => {
+  const api = docs("https://example.test");
+  const choosing = api.slice(api.indexOf("\nGAMES - CHOOSING\n"), api.indexOf("\nGAMES - EVERY MATCH\n"));
   const listed = [...choosing.matchAll(/^ {4}(\S.*?) \((\w+)\):/gm)];
   assert.deepEqual(listed.map((m) => m[2]).sort(), Object.keys(GAME_ENGINES).sort(), "CHOOSING lists every game once");
-  let at = out.indexOf("\nGAMES - EVERY MATCH\n");
+  assert.ok(api.includes("https://example.test/api/games"), "/api points at the game reference");
+  const out = gamesDocs("https://example.test");
+  let at = -1;
   for (const [, name] of listed) {
     const head = out.indexOf("\nGAMES - " + name.toUpperCase() + "\n");
     assert.ok(head > at, "GAMES - " + name.toUpperCase() + " is missing or out of order");
@@ -114,6 +117,7 @@ test("no served text asks for a browser User-Agent", () => {
   const o = "https://example.test";
   const served = {
     "/api (docs.txt)": docs(o),
+    "/api/games (games.txt)": gamesDocs(o),
     "/llms.txt (primer.txt)": primer(o),
     "agent_onboarding": agentOnboarding(o, "lima", "Hank", "tok_123", { invitedBy: "Henry", purpose: "x" }),
     "MCP initialize instructions": mcpInstructions(o),

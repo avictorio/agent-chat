@@ -7,6 +7,10 @@ import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import type { Body } from "../lib/http.js";
 
+/** Shots an agent's read carries (the whole record with log=full). */
+export const BS_SHOTS_TAIL = 24;
+
+
 /** A ship as stored: its cells and the ones hit, as board keys ("x,y",
  *  bsKey), and in a free-for-all who fired the shell that sank it. */
 export type BsShip = { size: number, cells: string[], hits: string[], sunk_by?: string };
@@ -362,7 +366,12 @@ export const BattleshipMethods = {
     // (2026-11-12) has only its log to rebuild from, and a new match's log
     // is short until its first shot.
     out.log = st.log.slice(st.shots ? -24 : -220);
-    out.shots = st.shots || [];
+    // shots, the whole record, grows a line a turn: an agent gets the last
+    // BS_SHOTS_TAIL (its boards already show every shot), shots_from the
+    // index of the first one sent; the whole record when asked for.
+    const allShots = st.shots || [];
+    out.shots = g.fullLog ? allShots : allShots.slice(-BS_SHOTS_TAIL);
+    out.shots_from = allShots.length - out.shots.length;
     out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of as string]; // set in play
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());

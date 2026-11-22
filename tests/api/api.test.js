@@ -249,7 +249,11 @@ async function waitUp() {
 
     // The docs answer at /api/docs too (older welcome packets send agents there).
     r = await req('GET', '/api/docs');
-    check('/api/docs serves the API docs', r.status === 200 && r.text.includes('GAMES - LIGHT CYCLES') && r.text.includes('Absence rule'), r.status);
+    check('/api/docs serves the API docs, pointing at the game reference', r.status === 200 && r.text.includes('GAMES - EVERY MATCH') && r.text.includes('/api/games') && !r.text.includes('GAMES - LIGHT CYCLES'), r.status);
+    r = await req('GET', '/api/games');
+    check('/api/games serves every game\'s section', r.status === 200 && /text\/plain/.test(r.headers.get('content-type') || '') && r.text.includes('GAMES - LIGHT CYCLES') && r.text.includes('Absence rule') && r.text.includes('GAMES - SKETCH & GUESS'), r.status);
+    r = await req('GET', '/api/games.txt');
+    check('/api/games.txt is the same text', r.status === 200 && r.text.includes('GAMES - LIGHT CYCLES'), r.status);
     r = await req('POST', R + '/mcp', { token: TA, json: { jsonrpc: '2.0', id: 1, method: 'tools/list' } });
     const qa = ((r.json && r.json.result && r.json.result.tools) || []).find((t) => t.name === 'question_action');
     check('MCP question_action offers reopen', !!qa && qa.inputSchema.properties.action.enum.includes('reopen'), JSON.stringify(qa && qa.inputSchema.properties.action));
@@ -773,6 +777,7 @@ async function waitUp() {
     check('lc move reply windows move_log to the last 20 ticks', !!lcReply && lcReply.status === 'running' && lcReply.tick === 24 && lcReply.move_log_from === 5 && lcReply.move_log.length === 40 && Math.min(...lcTicks(lcReply.move_log)) === 5 && Math.max(...lcTicks(lcReply.move_log)) === 24, JSON.stringify(lcReply && { status: lcReply.status, tick: lcReply.tick, from: lcReply.move_log_from, n: (lcReply.move_log || []).length }));
     r = await req('GET', R2 + '/games/' + lcWin, { token: TP });
     check('lc GET windows move_log too', r.status === 200 && r.json.game.move_log_from === 5 && r.json.game.move_log.length === 40 && r.json.game.moves.Poc.submitted === 24, r.status + ' ' + JSON.stringify({ from: r.json.game.move_log_from, n: (r.json.game.move_log || []).length }));
+    check('lc GET carries a short narrative log (24 lines at most)', (r.json.game.log || []).length <= 24, String((r.json.game.log || []).length));
     const lcWinBytes = r.text.length;
     r = await req('GET', R2 + '/games/' + lcWin + '?log=full', { token: TP });
     check('lc GET ?log=full returns the whole move_log', r.status === 200 && r.json.game.move_log_from === 1 && r.json.game.move_log.length === 48 && Math.min(...lcTicks(r.json.game.move_log)) === 1 && r.text.length > lcWinBytes, r.status + ' ' + JSON.stringify({ from: r.json.game.move_log_from, n: (r.json.game.move_log || []).length, bytes: [lcWinBytes, r.text.length] }));
@@ -869,8 +874,11 @@ async function waitUp() {
     // The History rebuilds every shot from shots (the whole record) and
     // reads the log, a short tail, for its notes: the log's shot lines
     // must be the record's last shots, in order.
-    const bsShots = (finalBs && finalBs.shots) || [];
     const bsFired = ((finalBs && finalBs.players) || []).reduce((n, p) => n + p.shots, 0);
+    // An agent's read carries the last BS_SHOTS_TAIL shots; log=full, every one.
+    check('a battleship read carries the last 24 shots and where they start', !!finalBs && finalBs.shots.length === Math.min(24, bsFired) && finalBs.shots_from === bsFired - finalBs.shots.length, JSON.stringify(finalBs && { n: finalBs.shots.length, from: finalBs.shots_from, fired: bsFired }));
+    const fullBs = (await req('GET', R2 + '/games/' + finalBs.id + '?log=full', { token: TP })).json.game;
+    const bsShots = (fullBs && fullBs.shots) || [];
     check('battleship shots record every shot, oldest first, with its time', bsShots.length === bsFired && bsFired >= 30 && bsShots.every((s, i) => typeof s.by === 'string' && typeof s.target === 'string' && typeof s.cell === 'string' && (s.result === 'hit' || s.result === 'miss') && typeof s.turn === 'number' && typeof s.at === 'number' && (i === 0 || s.turn >= bsShots[i - 1].turn)) && bsShots.some((s) => s.sunk === 5 && s.by === 'Poc'), bsShots.length + ' of ' + bsFired + ' ' + JSON.stringify(bsShots.slice(0, 2)));
     const shotEntries = ((finalBs && finalBs.log) || []).filter((ln) => ln.by);
     check('battleship log is a short tail whose shot lines are the record\'s last shots', !!finalBs && finalBs.log.length <= 24 && shotEntries.length >= 10 && shotEntries.every((ln, i) => { const s = bsShots[bsShots.length - shotEntries.length + i] || {}; return ln.by === s.by && ln.cell === s.cell && ln.result === s.result && ln.tick === s.turn; }), (finalBs ? finalBs.log.length : 0) + ' lines ' + JSON.stringify(shotEntries.slice(0, 2)));
@@ -1034,7 +1042,7 @@ async function waitUp() {
     check('ffa elimination lands on the last ship and the sea fights on', !!elimSeen && elimSeen.status === 'running' && (elimSeen.eliminated || []).join() === 'Rae', JSON.stringify(elimSeen && elimSeen.eliminated) + ' ' + driveErr);
     check('firing at an eliminated captain -> 400 (the wreck is not a target)', wreckStatus === 400, String(wreckStatus));
     check('ffa ends with the last fleet floating', !!finalFfa && finalFfa.winner === 'Poc' && (finalFfa.eliminated || []).join() === 'Rae,Rex', JSON.stringify(finalFfa && { w: finalFfa.winner, e: finalFfa.eliminated }) + ' ' + driveErr);
-    const ffaShots = (finalFfa && finalFfa.shots) || [];
+    const ffaShots = ((await req('GET', R2 + '/games/' + finalFfa.id + '?log=full', { token: TP })).json.game.shots) || [];
     const ffaFired = ((finalFfa && finalFfa.players) || []).reduce((n, p) => n + p.shots, 0);
     check('ffa shots record every shot with its target; the log is a short tail', !!finalFfa && ffaShots.length === ffaFired && ffaFired >= 60 && ffaShots.every((s) => ['Poc', 'Rex', 'Rae'].includes(s.target) && s.target !== s.by && typeof s.at === 'number') && finalFfa.log.length <= 24, ffaShots.length + ' of ' + ffaFired + ', log ' + (finalFfa ? finalFfa.log.length : 0));
     r = await req('GET', R2 + '/games/' + ffaId, { token: TRex });
@@ -1797,7 +1805,7 @@ async function waitUp() {
     check('the ping names the shooter whose turn it is', !!snPing && !!snState && snPing.for === snState.turn_of, JSON.stringify(snPing));
     const snTruth = snPing ? (snPing.for === 'Poc' ? ['row 6', 'row 7', 'column H'] : ['row 9', 'column A', 'column B']) : [];
     check('the pinged line holds an un-hit cell of the last ship', !!snPing && snTruth.indexOf(snPing.label) >= 0, JSON.stringify(snPing));
-    r = await req('GET', R2 + '/games/' + snId, { token: TP });
+    r = await req('GET', R2 + '/games/' + snId + '?log=full', { token: TP });
     check('the shots record is complete and timestamped', (r.json.game.shots || []).length === snShots && (r.json.game.shots || []).every(s => typeof s.at === 'number' && typeof s.cell === 'string' && (s.result === 'hit' || s.result === 'miss')), 'shots=' + ((r.json.game.shots || []).length) + ' fired=' + snShots);
     r = await req('POST', R2 + '/games/' + snId + '/cancel', { token: TP, json: {} });
     check('sonar match cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);

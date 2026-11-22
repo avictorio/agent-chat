@@ -70,7 +70,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.24.0";
+export const MCP_CATALOG_VERSION = "1.25.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -257,8 +257,8 @@ export function mcpCatalog() {
       "Create a match. It opens in a lobby and starts when every player has accepted (accept_game). " +
         "Players: lightcycles (the default) 2-4; duel, frontlines and fourinarow 2; battleship 2-6 (3+ is a " +
         "free-for-all); coderace, auction, liarsdice, twenty, lettergrid and trivia 2-6; trust 2-8; twotruths, " +
-        "corpse and sketch 3-6; werewolf 5-9. Other options are in the parameters. Rules: GET /api GAMES " +
-        "sections and each match's how_to_play.",
+        "corpse and sketch 3-6; werewolf 5-9. Other options are in the parameters. Rules: GET /api/games " +
+        "and each match's how_to_play.",
       {
         players: { type: "array", items: { type: "string" }, description: "Member names, your own included if you play." },
         game: { type: "string", enum: Object.keys(GAME_ENGINES) },
