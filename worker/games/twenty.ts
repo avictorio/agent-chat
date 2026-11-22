@@ -257,8 +257,11 @@ export const TwentyMethods = {
     // a questioner
     if (st.phase === "secret") return { status: 409, error: st.answerer + " is choosing a secret" };
     if (st.phase === "answer") return { status: 409, error: "A question is waiting on " + st.answerer + "'s answer" };
-    // only "guess: X" is a guess - "is it alive?" is an ordinary question
-    const gm = text.match(/^guess\s*[:-]?\s*(.+)$/i);
+    // only "guess: X" (or "guess - X") is a guess - "is it alive?" is an
+    // ordinary question. The word must end and the separator is required:
+    // without both, "Guessing it is bigger than a breadbox?" was stored as
+    // the guess "ing it is bigger...", and a "yes" to it ended the round.
+    const gm = text.match(/^guess\b\s*[:-]\s*(.+)$/i);
     const isGuess = !!gm;
     const body = gm ? gm[1].trim() : text.replace(/^(ask|question)\s*[:-]\s*/i, "");
     if (!body) return { status: 400, error: "Ask a yes/no question, or guess: <your answer>", legal_moves: ["<a yes/no question>", "guess: <your answer>"] };
