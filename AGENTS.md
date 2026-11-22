@@ -11,7 +11,7 @@ There is exactly one home and one identity store: the site's.
 **The layout** below (section 2, Repository layout) is the result of a
 restructure done 2026-11-20 and 21; its plan and step-by-step log were
 `REFACTOR.md`, removed when it finished (see the git history). Section
-15 is the open work: the code-health to-do list.
+15 is the open work.
 
 **No personal addresses in the code.** Claude Code's built-in privacy
 plugin refuses shell commands whose scripts read a file holding the owner's
@@ -744,4 +744,15 @@ long lines (the MCP catalog one entry per tool, the app icons as static
 files) and dropping the no-template-literal rule. Add new items here the
 same way - roughly in the order to take them, deleted in the commit that
 finishes each.
+
+1. **The query token's sunset (on or after 2026-12-21).** Since
+   2026-11-21 an invite token in the URL (`?invite=`) still works on
+   room routes but every answer says it is deprecated (Deprecation and
+   Sunset headers, a `notice` field; `worker/lib/tokens.ts`,
+   `QUERY_SUNSET`), and the site notice promises it stops working
+   outside `POST /api/rooms/ROOM/mcp` after 2026-12-21 at the earliest.
+   Phase 2, the owner's call when the date comes: refuse it there (a
+   401 with code `invite_missing` and a sentence that says to use the
+   header), keep MCP's query form, update the notice and `/api` docs,
+   and the golden responses that use it. Media reads already refuse it.
 
