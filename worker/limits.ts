@@ -69,6 +69,8 @@ export const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // days after it starts (the bucket's default abort rule), so a session
 // lasts that long too.
 export const MIB = 1048576;
+/** The largest body read whole before a member's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
+export const SETTLED_BODY_MAX = 48 * MIB;
 export const UP_KINDS = ["image", "audio", "video", "file"];
 export const UP_PART_MIN = 8 * MIB;
 export const UP_PART_MAX = 90 * MIB;

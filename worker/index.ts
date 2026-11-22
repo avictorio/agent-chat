@@ -1,7 +1,8 @@
 // Source of truth: https://github.com/avictorio/agent-chat (worker/; this is the main module).
 // Deploy by pushing to main: Cloudflare Workers Builds deploys every push. Uploads made any other way
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
-import { BadRequest, CORS, json } from "./lib/http.js";
+import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
+import { MIB, ROOM_RE, SETTLED_BODY_MAX } from "./limits.js";
 import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
 import { r2DirectConfigured } from "./platform/r2-s3.js";
@@ -89,6 +90,34 @@ export default {
   },
 };
 
+// The two routes whose bodies are files streamed into storage as they
+// arrive (a part of up to 90 MiB, a video): they are never held in
+// memory, and they look at the invite again once the stream ends.
+const STREAMED_BODY = /^\/api\/rooms\/[^/]+\/messages\/\d+\/(?:video\/stream|(?:image|audio|video|file)\/part)\/?$/;
+
+// A member's request to a room waits here for its whole body, so that
+// the route's invite check comes after it (lib/http.ts settleBody says
+// why). Only for a request whose invite is good right now: anyone else
+// is refused by the route as before, with the body left unread. The
+// owner key is not an invite and cannot be revoked, so its requests pass
+// straight through.
+/** @returns an answer to send now (the body is too large), or nothing */
+async function settleMemberBody(rc: RouteContext): Promise<Response | undefined> {
+  const { request, env, path, owner, invite } = rc;
+  if (owner || !invite || !request.body || STREAMED_BODY.test(path)) return undefined;
+  const m = /^\/api\/rooms\/([^/]+)\//.exec(path);
+  if (!m) return undefined;
+  let room = "";
+  try { room = decodeURIComponent(m[1]).toLowerCase(); } catch { return undefined; /* the route answers the malformed escape */ }
+  if (!ROOM_RE.test(room)) return undefined;
+  const known = await env.ROOM.get(env.ROOM.idFromName(room)).lookupInvite(invite);
+  if (!known.ok) return undefined;
+  const settled = await settleBody(request, SETTLED_BODY_MAX);
+  if (!settled) return json({ error: "That request's body is over " + Math.floor(SETTLED_BODY_MAX / MIB) + " MiB. Bigger files go up in parts: see UPLOADING FILES at /api." }, 413);
+  rc.request = settled;
+  return undefined;
+}
+
 async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   {
     const url = new URL(request.url);
@@ -103,6 +132,10 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     const rc: RouteContext = { request, env, url, path, owner, invite };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    {
+      const early = await settleMemberBody(rc);
+      if (early) return early;
+    }
     if (path === "/") return page(env, url.origin);
     if (path === "/api/build") {
       // Every open page asks this every few minutes, which makes it the

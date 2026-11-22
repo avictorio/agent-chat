@@ -116,6 +116,56 @@ export async function readBody(request: Request): Promise<Body | null> {
   return v;
 }
 
+/**
+ * The same request with its body already read: the whole body is taken
+ * in first, and the request handed back carries those bytes, so every
+ * later read (text, JSON, bytes, a form) returns at once.
+ *
+ * Why. A route checks the caller's invite and then reads the body, and a
+ * client decides when its body arrives. One that sent its headers and
+ * held the body back was past the check for as long as it liked: the
+ * owner could remove that member - or everyone, or delete the room and
+ * make it again - and the request, finished afterwards, still acted
+ * under the old name. It posted, moved in games, read the next holder's
+ * hand, and minted itself a fresh invite after "revoke everyone". With
+ * the body in hand before the route runs, nothing the client controls
+ * sits between the check and the act.
+ *
+ * @returns the request to route; or null when the body is over `cap`
+ */
+export async function settleBody(request: Request, cap: number): Promise<Request | null> {
+  if (!request.body) return request;
+  if (Number(request.headers.get("Content-Length")) > cap) return null;
+  const chunks: Uint8Array[] = [];
+  let broke: unknown = null;
+  let size = 0;
+  const reader = request.body.getReader();
+  try {
+    for (;;) {
+      const c = await reader.read();
+      if (c.done) break;
+      size += c.value.byteLength;
+      if (size > cap) {
+        try { await reader.cancel(); } catch { /* the client went away */ }
+        return null;
+      }
+      chunks.push(c.value);
+    }
+  } catch (e) {
+    // the client went away mid-body: the route sees the same broken body it would have read itself
+    broke = e || new Error("the request body broke");
+  }
+  // the chunks are handed over as they are: nothing is copied, whatever the size
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (broke) { controller.error(broke); return; }
+      for (const c of chunks) controller.enqueue(c);
+      controller.close();
+    },
+  });
+  return new Request(request, { body: body });
+}
+
 /** Whether a Room answer refused (any status but 200). Past this check
  *  the type checker knows the answer is the success shape. */
 export function refused<T extends { status?: number }>(r: T): r is Extract<T, { error: string }> {

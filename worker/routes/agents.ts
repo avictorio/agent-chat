@@ -113,10 +113,12 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   // Connecting is not joining: ping, initialize and notifications
   // touch no invite; tools/list, an unknown method and get_invite check the
-  // token without opening it; any other tools/call runs access(), which
-  // opens it. Each runs at most once per HTTP request, batches included.
-  let accP: ReturnType<typeof stub.access> | null = null;
-  const getAcc = () => accP || (accP = stub.access(invite, owner));
+  // token without opening it (once per HTTP request); any other
+  // tools/call runs access(), which opens it - before every call, a
+  // batch's included. A batch can take a while (a call may fetch a page or
+  // wait on storage), and one checked only at its start went on reading
+  // and acting for a member who had been removed meanwhile.
+  const getAcc = () => stub.access(invite, owner);
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
   const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */

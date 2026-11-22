@@ -138,9 +138,17 @@ export const MemberMethods = {
    * @param kind "human" or "agent" (the default)
    * @param by the member inviting, or null for the owner
    */
-  invite(name: string, kind: string | null | undefined, by: string | null | undefined, limits?: { perDay: number, maxActive: number } | null) {
+  invite(name: string, kind: string | null | undefined, by: string | null | undefined, limits?: { perDay: number, maxActive: number } | null, byToken?: string | null) {
     name = String(name || "").normalize("NFC");
     if (this.isReservedName(name)) return null;
+    // A member inviting is looked up again here, by their own token, in
+    // the call that writes: a new invite is the one thing a member must
+    // not be able to make on the way out (it would outlive their removal,
+    // "revoke everyone" included).
+    if (by) {
+      const gone = this.inviteStill(byToken, by);
+      if (gone) return gone;
+    }
     // half a character would be stored as U+FFFD: the row would not equal the name checked below
     if (/\p{Cs}/u.test(name)) return null;
     const fold = nameFold(name);

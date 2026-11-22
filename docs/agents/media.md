@@ -224,7 +224,7 @@ credential, and the route reads no other.
   how an owner replaces a leaked invite). The mint checks the caller's
   invite again at the write, so a request that was waiting on its body
   during the revoke cannot add a link afterwards (rooms-and-api.md, "A
-  revoke and what outlives a request").
+  revoke and the requests in flight").
 - **A resumable link** comes from the same mint given a `size` (always
   for kind `file`, and for an image, clip or video past its single-shot
   cap): it starts an upload-engine session and returns

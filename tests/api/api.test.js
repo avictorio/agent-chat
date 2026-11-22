@@ -2200,45 +2200,66 @@ function mp4() {
     }
     await req('DELETE', R2 + '/invites/' + invRev2.json.token, { owner: true });
 
-    // A request that was past its invite check when the invite was revoked
-    // leaves nothing behind. Its body is held back; the owner revokes the
-    // invite and gives the name to someone else; only then does the body
-    // arrive. (The invite is unopened until the parked request opens it,
-    // which is how the test knows the check has run.)
-    const parkAcross = async (name, path, bodyText) => {
-      const first = (await req('POST', R2 + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
-      const before = path(first);
-      const held = parkedPost(before.url, first, bodyText);
-      let opened = false;
-      for (let i = 0; i < 100 && !opened; i++) {
-        await sleep(50);
-        const list = await req('GET', R2 + '/members', { owner: true });
-        opened = (list.json.members || []).some((m) => m.name === name && m.status === 'active');
-      }
-      await req('DELETE', R2 + '/invites/' + first, { owner: true });
-      const second = (await req('POST', R2 + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
-      return { opened: opened, answer: await held.send(), second: second };
+    // A request whose body is held back while its invite is revoked does
+    // nothing when the body arrives. The owner revokes the invite and
+    // gives the name to someone else in between. (A member's body is read
+    // whole before the route checks the invite; the Room's own checks at
+    // the write stand behind that.)
+    const parkAcross = async (name, path, bodyText, room) => {
+      const at = room || R2;
+      const first = (await req('POST', at + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
+      const held = parkedPost(path(first).url, first, bodyText);
+      await sleep(300);
+      await req('DELETE', at + '/invites/' + first, { owner: true });
+      const second = (await req('POST', at + '/invites', { owner: true, json: { name: name, kind: 'agent' } })).json.token;
+      return { answer: await held.send(), second: second };
     };
     // the draft is written with the owner key, so the invite stays unopened
     const draftFor = async (name) => (await req('POST', R2 + '/messages', { owner: true, json: { from: name, text: 'a draft for ' + name, draft: true } })).json.id;
     const parkDraft = await draftFor('ParkLink');
     let pk = await parkAcross('ParkLink', () => ({ url: R2 + '/messages/' + parkDraft + '/upload-ticket' }), JSON.stringify({ kind: 'image' }));
-    check('a link asked for across a revoke: the request had passed its invite check', pk.opened);
-    check('...and is refused when its body arrives: no link for the old holder', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked' && !pk.answer.json.upload, pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    check('a link asked for across a revoke is refused when its body arrives: no link for the old holder', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked' && !pk.answer.json.upload, pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
     await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
     const parkDraft2 = await draftFor('ParkSess');
     pk = await parkAcross('ParkSess', () => ({ url: R2 + '/messages/' + parkDraft2 + '/upload-ticket' }), JSON.stringify({ kind: 'file', name: 'held.bin', size: 5 }));
-    check('the same for a resumable link', pk.opened && pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    check('the same for a resumable link', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
     await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
     const parkEp = 'https://fcm.googleapis.com/fcm/send/parked-' + SUF;
     const parkSub = { subscription: { endpoint: parkEp, keys: { p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url'), auth: Buffer.alloc(16, 9).toString('base64url') } }, mode: 'all' };
     pk = await parkAcross('ParkPush', () => ({ url: R2 + '/push/subscribe' }), JSON.stringify(parkSub));
-    check('a push registration asked for across a revoke is refused', pk.opened && pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    check('a push registration asked for across a revoke is refused', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
     r = await req('GET', R2 + '/push/status?endpoint=' + encodeURIComponent(parkEp), { token: pk.second });
     check('...so the name\'s next holder starts with no registrations', r.status === 200 && r.json.count === 0 && r.json.registered === false, r.text.slice(0, 160));
     r = await req('POST', R2 + '/push/subscribe', { token: pk.second, json: parkSub });
     check('a member in good standing still subscribes', r.status === 200 && r.json.subscribed === true, r.status + ' ' + r.text.slice(0, 120));
     await req('DELETE', R2 + '/invites/' + pk.second, { owner: true });
+
+    // The same for anything a member can do: a post, and the one that
+    // matters most, a new invite made on the way out of "revoke everyone".
+    const parkRoom = '/api/rooms/apitest-park-' + SUF;
+    await req('POST', parkRoom, { owner: true });
+    pk = await parkAcross('Poster', () => ({ url: parkRoom + '/messages' }), JSON.stringify({ text: 'posted by a parked request ' + SUF }), parkRoom);
+    check('a post held back across a revoke and a re-invite -> 403', pk.answer.status === 403 && pk.answer.json.code === 'invite_revoked', pk.answer.status + ' ' + pk.answer.text.slice(0, 160));
+    r = await req('GET', parkRoom + '/messages?after=0&limit=50', { owner: true });
+    check('...and nothing was posted under the name', r.status === 200 && !r.text.includes('posted by a parked request'), r.text.slice(0, 200));
+    const slowPost = parkedPost(parkRoom + '/messages', pk.second, JSON.stringify({ text: 'a slow but honest post ' + SUF }));
+    await sleep(300);
+    r = await slowPost.send();
+    check('a member whose body is merely slow still posts', r.status === 201 || r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    const sneak = parkedPost(parkRoom + '/invites', pk.second, JSON.stringify({ name: 'Sneak', kind: 'agent' }));
+    await sleep(300);
+    r = await req('DELETE', parkRoom + '/invites', { owner: true });
+    check('everyone is revoked while an invite request waits', r.status === 200, r.status);
+    r = await sneak.send();
+    check('an invite asked for across "revoke everyone" -> 403, no new invite', r.status === 403 && !r.json.token, r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', parkRoom + '/invites', { owner: true });
+    check('...and the room has no active invite', r.status === 200 && (r.json.invites || []).filter((i) => !i.revoked).length === 0, r.text.slice(0, 200));
+    // a member's body over the limit is refused, not held in memory (the
+    // dev server answers only once the client has finished sending)
+    r = await req('POST', R2 + '/messages', { token: TP, headers: { 'Content-Type': 'application/json' }, body: Buffer.alloc(49 * 1048576, 0x20) });
+    check('a member body over the limit -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('DELETE', parkRoom + '?confirm=apitest-park-' + SUF, { owner: true });
+    check('the throwaway room is deleted', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
 
     // Streams opened while their invite is being revoked: every one either
     // is refused or is closed; none goes on receiving the room.

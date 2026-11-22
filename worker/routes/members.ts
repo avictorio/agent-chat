@@ -122,7 +122,8 @@ export async function invitesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (nameFold(name) === "referee") return json({ error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot be a member." }, 400);
     const nameErr = memberNameProblem(name);
     if (nameErr) return json({ error: nameErr }, 400);
-    const inv = await stub.invite(name, kind, owner ? null : inviter, memberCreate ? { perDay: MEMBER_INVITES_PER_DAY, maxActive: MAX_ACTIVE_INVITES } : null);
+    const inv = await stub.invite(name, kind, owner ? null : inviter, memberCreate ? { perDay: MEMBER_INVITES_PER_DAY, maxActive: MAX_ACTIVE_INVITES } : null, owner ? null : invite);
+    if (inv && "ok" in inv) return deny(inv);
     if (inv && "limit" in inv) {
       if (inv.limit === "day") return rateLimited("You can create up to " + MEMBER_INVITES_PER_DAY + " invites a day", "retry_after" in inv && inv.retry_after ? inv.retry_after : 3600);
       return limitReached("This room already has " + MAX_ACTIVE_INVITES + " active invites");

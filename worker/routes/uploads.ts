@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { deny, json, readBody, type Body, bodyText, refused } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyText, refused, settleBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
@@ -87,7 +87,8 @@ export async function streamUploadPart(up: R2MultipartUpload, n: number, body: R
  * @param stub the room
  * @param step start, part, sign, status, finish or abort
  */
-export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean) {
+/** @param still asked once a streamed part has arrived: the refusal if the caller's credential has gone meanwhile */
+export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean, still?: () => Promise<{ status: number, error: string, code?: string } | null>) {
   if (step === "part") {
     // A refused part is read away before the answer goes back: a client
     // still sending its body would otherwise see the connection drop
@@ -109,6 +110,9 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     try { res = await streamUploadPart(env.MEDIA.resumeMultipartUpload(t.key, t.upload_id), n, request.body, len, t.sniff ? upSniff(kind) : null); }
     catch (e) { return json({ error: "Part " + n + " did not reach storage (" + String((e && (e as Error).message) || e) + "); send it again" }, 502); }
     if (!res.part) return json({ error: upTypeError(kind) + " (checked from the first bytes of part 1); nothing was stored" }, 415);
+    // a part can take minutes to arrive: whoever sent it must still be welcome when it is recorded
+    const gone = still ? await still() : null;
+    if (gone) return deny(gone);
     const d = await stub.uploadPartDone(id, kind, t.upload_id, n, res.part.etag);
     if (refused(d)) return json({ error: d.error }, d.status);
     return json({ room: room, id: id, kind: kind, part: n });
@@ -223,12 +227,20 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   const uroom = decodeURIComponent(usm[1]).toLowerCase();
   if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
-  const st = await ustub.uploadSessionTicket(decodeURIComponent(usm[2]));
+  const link = decodeURIComponent(usm[2]);
+  // Every step but a part has a small body or none: it is read before
+  // the link is looked up, so a body held back cannot carry a step (a
+  // finish that publishes, say) past the link's end (settleBody).
+  let asked: Request | null = request;
+  if (usm[3] !== "part") asked = await settleBody(request, MIB);
+  if (!asked) return json({ error: "That request's body is too large for this step" }, 413);
+  const st = await ustub.uploadSessionTicket(link);
   if (refused(st)) {
-    if (request.body) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
+    if (asked.body && !asked.bodyUsed) { try { await asked.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
     return json({ error: st.error }, st.status);
   }
-  return uploadStep(request, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false);
+  const still = async () => { const again = await ustub.uploadSessionTicket(link); return refused(again) ? again : null; };
+  return uploadStep(asked, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false, still);
 }
 
 // Upload tickets: PUT /api/uploads/ROOM/TICKET redeems a
@@ -315,6 +327,11 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
     try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
   }
   if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
+  // the stream can take minutes: its sender must still be welcome when the video is attached
+  if (!owner) {
+    const l = await stub.lookupInvite(invite);
+    if (!l.ok) return await fail(l.status, l.error);
+  }
   const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);
   if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
   return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
@@ -331,7 +348,8 @@ export async function uploadRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
-  return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner);
+  const still = async () => { if (owner) return null; const l = await stub.lookupInvite(invite); return l.ok ? null : l; };
+  return uploadStep(request, env, url, stub, room, id, m[3], m[4], acc.name || "", owner, still);
 }
 
 // Mint an upload ticket for one of your drafts: the REST twin

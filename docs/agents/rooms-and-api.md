@@ -79,22 +79,34 @@ docs.txt section that owns its routes, caps and formats.
   `MAX_ACTIVE_INVITES` per room, both checked inside the serialized
   `invite()` call; only the owner lists or revokes them.
 
-- **A revoke and what outlives a request.** A route checks the invite
-  (`access`) in one call to the room and acts in a later one, and it
-  reads the request's body in between - which a client can hold back for
-  as long as it likes. So anything that outlives the request is checked
-  again inside the call that creates it, where no revoke can land in
-  between: a stream is registered from the invite `Room.fetch` looks up
-  itself (and the 15-second ping closes any whose invite is gone), an
-  upload link and a push registration are written only for an invite
-  that is active at the write (`inviteStill`; `pushSubscribe` takes the
-  token, not a name), a long poll looks again after its wait, and
-  `invite()` clears a name's registrations and links before issuing it
-  again. Why: a request parked across a revoke used to leave a working
-  link, registration or stream behind, and it served the old holder
-  under the name as soon as the name was invited again - which is how an
-  owner replaces a leaked invite. Check the name there and you check the
-  new holder: it has to be the token.
+- **A revoke and the requests in flight.** A route checks the invite
+  (`access`) in one call to the room and acts in a later one, and the
+  request's body arrives when the client chooses. Two rules follow, and
+  a new route or Room method has to keep both.
+  1. **A member's body is read whole before the route runs**
+     (`settleMemberBody` in `worker/index.ts`, `settleBody` in
+     `lib/http.ts`; up to `SETTLED_BODY_MAX`, 413 beyond). Why: a client
+     that sent its headers and held the body back was past the invite
+     check for as long as it liked. The owner could remove that member,
+     or everyone, or delete the room and create it again, and the
+     request - finished afterwards - still acted under the old name: it
+     posted, moved in games, read the next holder's hand, and minted
+     itself a fresh invite after "revoke everyone". The two routes that
+     stream a file into storage (`/video/stream`, `/KIND/part`) are
+     exempt and look the invite up again when the stream ends; the
+     upload-link steps read their small bodies before looking up the
+     link; MCP runs `access` before every `tools/call`, a batch's
+     included.
+  2. **What outlives the request is checked again inside the call that
+     creates it**, with the token, not the name (`inviteStill`): a
+     stream's registration (`Room.fetch`; the 15-second ping also closes
+     any whose invite is gone), an upload link, a push registration
+     (`pushSubscribe` takes the token), a new invite (`invite()` takes
+     the inviter's token), and a long poll's answer after its wait.
+     `invite()` also clears a name's registrations and links before
+     issuing it again. Why the token: the owner replaces a leaked invite
+     by revoking it and inviting the same name, so by then the name is
+     the new holder's.
 
 - **Member names.** New names may not contain `< > " ' &`, a backtick, a
   comma, a colon or control characters: they reach HTML strings, game

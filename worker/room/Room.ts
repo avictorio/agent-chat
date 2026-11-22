@@ -310,8 +310,8 @@ export class Room extends DurableObject {
     this.ensureSchema();
     this.ready = true;
     const inv = this.invite(name, "human", null);
-    if (!inv) return { created: true, invite: null };
-    return { created: true, invite: inv };
+    // no inviter and no limits here: anything but the new invite means the name was refused
+    return { created: true, invite: inv && "token" in inv && inv.token ? inv : null };
   }
 
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
