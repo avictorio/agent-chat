@@ -59,6 +59,20 @@ export function sgDeck() {
   sgDeckCache = String(SG_PROMPTS_TXT).split("\n").map((l) => l.trim()).filter((l) => l && l[0] !== "#");
   return sgDeckCache;
 }
+// A move's part from dir. The call room_state.awaiting_you hands out puts
+// JSON in dir - {"image": ...} for the artist, {"guess": ...} for the
+// rest - so dir that opens with { is read as JSON, as Trivia and Letter
+// Grid read theirs. It used to be read as text: a guess was stored as the
+// JSON itself and never matched the prompt, and the drawing was refused.
+// Null when dir is not JSON; the JSON's part stands in for the named field.
+export function sgFromDir(raw: unknown, key: "image" | "guess"): { value: string | null } | { error: string } | null {
+  const s = String(raw == null ? "" : raw).trim();
+  if (s[0] !== "{") return null;
+  let o: Record<string, unknown>;
+  try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + (e as Error).message }; }
+  const v = o && o[key];
+  return { value: typeof v === "string" ? v : null };
+}
 // An image move: a data URL (or bare base64) of a PNG, JPEG, GIF or WebP,
 // checked by its magic bytes, not its label.
 export function sgDecodeImage(raw: unknown) {
@@ -220,7 +234,9 @@ export const SketchMethods = {
     if (st.phase === "judging") return { status: 409, error: "The Referee is judging this round's guesses - the reveal is a moment away" };
     if (st.phase === "draw") {
       if (me.name !== st.artist) return { status: 409, error: st.artist + " is drawing - you guess once the drawing is up" };
-      const src = fields && typeof fields.image === "string" ? fields.image : /^\s*data:/.test(String(raw || "")) ? raw : null;
+      const d = fields && typeof fields.image === "string" ? { value: fields.image } : sgFromDir(raw, "image");
+      if (d && "error" in d) return { status: 400, error: d.error };
+      const src = d ? d.value : /^\s*data:/.test(String(raw || "")) ? raw : null;
       if (!src) return { status: 400, error: "As the artist, send image: your drawing of the prompt (you.prompt) as a data URL - data:image/png;base64,... - a PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB", legal_moves: ['{"image": "data:image/png;base64,<your drawing>"}'] };
       const img = sgDecodeImage(src);
       if (img.error) return { status: 400, error: img.error };
@@ -253,7 +269,9 @@ export const SketchMethods = {
       return { status: 200, game: this.sgStateFull(g2, who), resolved: false };
     }
     if (me.name === st.artist) return { status: 409, error: "You are the artist this round - the others are guessing your drawing" };
-    const s = String(fields && typeof fields.guess === "string" ? fields.guess : raw == null ? "" : raw).replace(/^\s*guess\s*:\s*/i, "").replace(/\s+/g, " ").trim();
+    const d = fields && typeof fields.guess === "string" ? { value: fields.guess } : sgFromDir(raw, "guess");
+    if (d && "error" in d) return { status: 400, error: d.error };
+    const s = String(d ? d.value || "" : raw == null ? "" : raw).replace(/^\s*guess\s*:\s*/i, "").replace(/\s+/g, " ").trim();
     if (!s) return { status: 400, error: "Send guess: what the drawing shows", legal_moves: ['{"guess": "<what the drawing shows>"}'] };
     if (s.length > SG_GUESS_MAX) return { status: 400, error: "A guess can be up to " + SG_GUESS_MAX + " characters" };
     st.guesses[me.name] = { guess: s, at: Date.now() };

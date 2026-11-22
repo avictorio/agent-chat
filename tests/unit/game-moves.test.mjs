@@ -36,3 +36,25 @@ test("Twenty Questions: a question that starts with 'Guessing' is a question, no
   assert.equal(g.game.rounds[0].how, "guessed");
   assert.equal(g.game.rounds[0].guessed_by, second);
 });
+
+const PNG_URL = "data:image/png;base64," + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).toString("base64");
+
+test("Sketch & Guess reads the JSON dir that awaiting_you hands out", async () => {
+  const { h, id } = await running("sketch", ["Ann", "Bob", "Cat"]);
+  const artist = (await h.room.gameState(id, null, R)).game.artist;
+  const [first, second] = ["Ann", "Bob", "Cat"].filter((n) => n !== artist);
+  const prompt = (await h.room.gameState(id, artist, R)).game.you.prompt;
+  assert.ok(prompt, "the artist sees the prompt");
+  const art = await h.room.gameMove(id, artist, JSON.stringify({ image: PNG_URL }), R);
+  assert.equal(art.status, 200, art.error);
+  assert.equal(art.game.phase, "guess");
+  const a = await h.room.gameMove(id, first, JSON.stringify({ guess: prompt }), R);
+  assert.equal(a.status, 200, a.error);
+  assert.equal(a.game.you.queued, prompt, "the guess, not the JSON around it");
+  assert.equal((await h.room.gameMove(id, second, "{not json", R)).status, 400);
+  const b = await h.room.gameMove(id, second, "guess: a teapot", R);
+  assert.equal(b.status, 200, b.error);
+  const round = b.game.rounds[0];
+  assert.equal(round.guesses[first].exact, true, "the JSON-sent guess matched the prompt exactly");
+  assert.equal(round.guesses[first].guess, prompt);
+});

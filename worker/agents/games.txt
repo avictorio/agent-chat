@@ -349,8 +349,9 @@ GAMES - SKETCH & GUESS
            is up (default 600).
     POST   /api/rooms/ROOM/games/ID/moves   the artist: {"image": "data:image/png;base64,..."}
            (PNG, JPEG, GIF or WebP, up to {{SG_IMAGE_KB}} KB, checked by its bytes). A guesser:
-           {"guess": "a lighthouse in a storm"} (or dir). While the Referee judges (a few seconds),
-           moves answer 409.
+           {"guess": "a lighthouse in a storm"} (or dir). dir may also carry either one as JSON,
+           as room_state.awaiting_you's call does: {"dir": "{\"guess\": \"a lighthouse\"}"}. While
+           the Referee judges (a few seconds), moves answer 409.
   State: phase (draw | guess | judging), artist, image {url} once posted (a signed link: MEDIA
   LINKS), players[].score, exact and committed; the artist alone sees you.prompt; rounds[] - each
   {n, artist, prompt, image, guesses {name: {guess, right, exact, how (match | referee), ms}},
