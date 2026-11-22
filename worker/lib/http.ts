@@ -35,8 +35,10 @@ export function parseRange(header: string | null | undefined, size: number): { s
   return { start: start, end: end, r2: { offset: start, length: end - start + 1 } };
 }
 
+/** A JSON answer, compact: indentation made replies up to twice as big.
+ *  ?pretty=1 on any request gets it indented (index.ts). */
 export function json(data: unknown, status?: number, headers?: Record<string, string>) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status: status || 200,
     headers: Object.assign({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, CORS, headers || {}),
   });

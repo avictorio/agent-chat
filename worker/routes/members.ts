@@ -17,12 +17,14 @@ import type { Member } from "@chat/contract";
  *  raw token. Every caller of a listing holds an invite or the owner key,
  *  so a lost link can be re-sent from it; tokens never appear in messages.
  *  @param avatarParams the avatar's signed query, when it has one */
-export function memberReply(x: RoomMember, origin: string, room: string, avatarParams: string | undefined): Member {
+/** @param handOff whether to include an agent's hand-off block: for the
+ *  owner and people (the web's "Copy w/ Instructions"), not for agents. */
+export function memberReply(x: RoomMember, origin: string, room: string, avatarParams: string | undefined, handOff = true): Member {
   const { avatar_version: v, invite_token: tok, ...rest } = x;
   const out: Member = Object.assign(rest, { avatar: v ? origin + "/api/rooms/" + room + "/avatars/" + encodeURIComponent(x.name) + "?v=" + v + (avatarParams ? "&" + avatarParams : "") : null });
   if (x.status !== "revoked" && tok) {
     out.invite_link = origin + "/r/" + room + "#invite=" + tok;
-    if (x.kind !== "human") out.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by });
+    if (handOff && x.kind !== "human") out.agent_onboarding = agentOnboarding(origin, room, x.name, tok, { invitedBy: x.invited_by });
   }
   return out;
 }

@@ -149,7 +149,10 @@ docs.txt GAMES - EVERY MATCH.
   keeps the last 200), so a marathon match cannot grow its row without
   limit; the structured record (ticks, rounds, Battleship's `shots`) is
   never trimmed. It also stamps `ended` once, which files the match in
-  the Games tab's history.
+  the Games tab's history. What a state *sends* is trimmed further: each
+  engine sends the last 24-80 log lines, Battleship 24 (its History tab
+  reads every shot from `shots`; a stored match from before `shots`
+  existed keeps a 220-line tail).
 - **Rematch** is client-only: `sendRematch` in `games.ts` creates a match
   with the same players and the catalog entry's `rematch(g)` settings.
   Any member may run one. One rematch per match is in flight at a time,
@@ -263,7 +266,12 @@ Build notes only; the rules are in each engine module's comment and its
   together credit nobody (`first_out_decided`). `move_log` records, per
   tick and rider, the direction, its source (submitted or clock
   default), `pending_at` and the resolve time; `move_stats` totals them
-  for the result post's "Moves submitted". Secret: queued moves. Web:
+  for the result post's "Moves submitted". A state sends only the last
+  `LC_MOVE_LOG_TICKS` (20) ticks of `move_log`, with `move_log_from` the
+  first tick included (1 = whole); `?log=full` (REST, on every call that
+  returns the state) or `full_log` (MCP `get_game`) sends it all, and the
+  web client always asks for it (`contract/src/client.ts`), since its
+  replay and History need the whole log. Secret: queued moves. Web:
   heading markers in the scene and the pad both call the moves endpoint;
   `lcmodel.ts` (unit-tested) rebuilds the timeline the arena replays.
 - **Duel** (`duel`): rock-paper-scissors for two, first to a majority of

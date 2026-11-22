@@ -55,7 +55,7 @@ export async function queryTokenNotice(request: Request, res: Response): Promise
         // refusal's sentence (its code, invite_missing, is unchanged).
         if (!fromHeader && res.status === 401 && out.code === "invite_missing") out.error = QUERY_REFUSED;
         headers.delete("Content-Length");
-        return new Response(JSON.stringify(out, null, 2), init);
+        return new Response(JSON.stringify(out), init);
       }
     } catch {
       // not JSON after all: send it as it was, with the headers

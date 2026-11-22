@@ -67,6 +67,35 @@ const OUT = TESTS + '/shots/';
 fs.mkdirSync(OUT, { recursive: true });
 const now = clockNow(), H = 3600e3, D = 86400e3;
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+// A two-captain Battleship fixture's record, as the server sends it:
+// shots, every shot oldest first, read off the boards (each captain's fire
+// is the other's incoming, in listed order; turns alternate from the first
+// shooter; a hit that lays a listed sunk ship's last cell sinks it), and
+// log, the narrative's last lines (the shots' own lines plus the notes,
+// each placed before the turn it opens). Returns the match with both set.
+function bsRecord(g, first, notes) {
+  const [a, b] = g.boards;
+  const fire = { [a.name]: Object.keys(b.incoming), [b.name]: Object.keys(a.incoming) };
+  const second = first === a.name ? b.name : a.name;
+  const total = fire[a.name].length + fire[b.name].length;
+  const hit = { [a.name]: new Set(), [b.name]: new Set() };
+  const shots = [];
+  for (let t = 1; t <= total; t++) {
+    const by = t % 2 ? first : second;
+    const target = by === a.name ? b : a;
+    const cell = fire[by][(t - (t % 2 ? 1 : 2)) / 2];
+    const result = target.incoming[cell];
+    if (result === 'hit') hit[target.name].add(cell);
+    const ship = result === 'hit' ? target.sunk_ships.find((x) => x.cells.includes(cell) && x.cells.every((c) => hit[target.name].has(c))) : null;
+    shots.push({ by, target: target.name, cell, result, sunk: ship ? ship.size : null, turn: t, at: now - (total - t + 1) * 600e3 });
+  }
+  const lines = [];
+  shots.forEach((x) => {
+    (notes[x.turn] || []).forEach((text) => lines.push({ tick: x.turn, text }));
+    lines.push({ tick: x.turn, text: x.by + ' fires ' + x.cell + ' - ' + (x.sunk ? 'hit, and ' + x.target + "'s " + x.sunk + '-ship is sunk.' : x.result + '.'), by: x.by, target: x.target, cell: x.cell, result: x.result, sunk: x.sunk });
+  });
+  return Object.assign(g, { shots, log: lines.slice(-24) });
+}
 function fresh(opts) {
   opts = opts || {};
   return {
@@ -142,6 +171,8 @@ function fresh(opts) {
       ],
       trails: [[3, 5, 0], [4, 5, 0], [5, 5, 0], [9, 5, 1], [8, 5, 1], [7, 5, 1], [6, 0, 2], [6, 1, 2], [6, 2, 2], [6, 3, 2]],
       log: [{ tick: 0, text: 'Match created by Henry - Ada, Henry, Anthony on the grid.' }],
+      // the whole log, as the app asks for it (log=full)
+      move_log_from: 1,
       move_log: [
         { tick: 1, name: 'Ada', dir: 'right', submitted: true }, { tick: 1, name: 'Henry', dir: 'left', submitted: true }, { tick: 1, name: 'Anthony', dir: 'down', submitted: false },
         { tick: 2, name: 'Ada', dir: 'right', submitted: true }, { tick: 2, name: 'Henry', dir: 'left', submitted: false }, { tick: 2, name: 'Anthony', dir: 'down', submitted: true },
@@ -353,19 +384,21 @@ function fresh(opts) {
         { n: 3, throws: { Ada: 'paper', Anthony: 'paper' }, winner: null, at: now - 20e3, throws_at: { Ada: now - 21e3, Anthony: now - 20e3 } },
       ],
       you: { playing: true, queued: null } } : null,
-    bs: opts.bs ? { id: 5, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 12, phase: 'play', turn: 80, turn_of: 'Henry', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
+    bs: opts.bs ? bsRecord({ id: 5, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 12, phase: 'play', turn: 80, turn_of: 'Henry', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null,
       last_move: { by: 'Ada', cell: 'A7', result: 'hit', sunk: null, turn: 79 },
       players: [
         { name: 'Ada', color: 'cyan', hex: '#22d3ee', accepted: true, placed: true, shots: 40, hits: 16, sunk: 4, afloat: 1 },
         { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, placed: true, shots: 39, hits: 15, sunk: 4, afloat: 1 },
       ],
       boards: [
-        { name: 'Ada', hex: '#22d3ee', incoming: { A3: 'hit', A4: 'hit', A5: 'hit', A6: 'hit', A7: 'hit', C7: 'hit', D7: 'hit', E7: 'hit', F7: 'hit', E2: 'hit', E3: 'hit', E4: 'hit', I4: 'hit', I5: 'hit', I9: 'hit', E5: 'miss', F5: 'miss', G5: 'miss', H5: 'miss', H6: 'miss', D3: 'miss', D4: 'miss', F4: 'miss', G3: 'miss', B4: 'miss', C2: 'miss', B7: 'miss', I3: 'miss', H3: 'miss', G7: 'miss', A8: 'miss', C6: 'miss', C8: 'miss', F2: 'miss', D2: 'miss', E1: 'miss', F1: 'miss', J2: 'miss', B8: 'miss' }, sunk_ships: [{ size: 5, cells: ['A3', 'A4', 'A5', 'A6', 'A7'] }, { size: 4, cells: ['C7', 'D7', 'E7', 'F7'] }, { size: 3, cells: ['E2', 'E3', 'E4'] }, { size: 2, cells: ['I4', 'I5'] }] },
-        { name: 'Henry', hex: '#fb923c', incoming: { B5: 'hit', B6: 'hit', B7: 'hit', C5: 'hit', D5: 'hit', C9: 'hit', D9: 'hit', E9: 'hit', I4: 'hit', I5: 'hit', I6: 'hit', I7: 'hit', I8: 'hit', A9: 'hit', A8: 'hit', A7: 'hit', A2: 'miss', B3: 'miss', B9: 'miss', C4: 'miss', C8: 'miss', D1: 'miss', D6: 'miss', D8: 'miss', E6: 'miss', E8: 'miss', F3: 'miss', F9: 'miss', G10: 'miss', H1: 'miss', H7: 'miss', I9: 'miss', J3: 'miss', D10: 'miss', G5: 'miss', F4: 'miss', F2: 'miss', A5: 'miss', J6: 'miss', H2: 'miss' }, sunk_ships: [{ size: 5, cells: ['I4', 'I5', 'I6', 'I7', 'I8'] }, { size: 3, cells: ['C9', 'D9', 'E9'] }, { size: 3, cells: ['B5', 'B6', 'B7'] }, { size: 2, cells: ['C5', 'D5'] }] },
+        { name: 'Ada', hex: '#22d3ee', incoming: { A3: 'hit', A4: 'hit', A5: 'hit', A6: 'hit', A7: 'hit', C7: 'hit', D7: 'hit', E7: 'hit', F7: 'hit', E2: 'hit', E3: 'hit', E4: 'hit', I4: 'hit', I5: 'hit', E5: 'miss', F5: 'miss', G5: 'miss', H5: 'miss', H6: 'miss', D3: 'miss', D4: 'miss', F4: 'miss', G3: 'miss', B4: 'miss', C2: 'miss', B7: 'miss', I3: 'miss', H3: 'miss', G7: 'miss', A8: 'miss', C6: 'miss', C8: 'miss', F2: 'miss', D2: 'miss', E1: 'miss', F1: 'miss', J2: 'miss', B8: 'miss', I9: 'hit' }, sunk_ships: [{ size: 5, cells: ['A3', 'A4', 'A5', 'A6', 'A7'] }, { size: 4, cells: ['C7', 'D7', 'E7', 'F7'] }, { size: 3, cells: ['E2', 'E3', 'E4'] }, { size: 2, cells: ['I4', 'I5'] }] },
+        { name: 'Henry', hex: '#fb923c', incoming: { B5: 'hit', B6: 'hit', B7: 'hit', C5: 'hit', D5: 'hit', C9: 'hit', D9: 'hit', E9: 'hit', I4: 'hit', I5: 'hit', I6: 'hit', I7: 'hit', I8: 'hit', A9: 'hit', A8: 'hit', A2: 'miss', B3: 'miss', B9: 'miss', C4: 'miss', C8: 'miss', D1: 'miss', D6: 'miss', D8: 'miss', E6: 'miss', E8: 'miss', F3: 'miss', F9: 'miss', G10: 'miss', H1: 'miss', H7: 'miss', I9: 'miss', J3: 'miss', D10: 'miss', G5: 'miss', F4: 'miss', F2: 'miss', A5: 'miss', J6: 'miss', H2: 'miss', A7: 'hit' }, sunk_ships: [{ size: 5, cells: ['I4', 'I5', 'I6', 'I7', 'I8'] }, { size: 3, cells: ['C9', 'D9', 'E9'] }, { size: 3, cells: ['B5', 'B6', 'B7'] }, { size: 2, cells: ['C5', 'D5'] }] },
       ],
-      log: [{ tick: 78, text: 'Henry fires I9 - hit.', by: 'Henry', cell: 'I9', result: 'hit', sunk: null }, { tick: 79, text: "Ada fires A7 - hit, and Henry's 5-ship is sunk.", by: 'Ada', cell: 'A7', result: 'hit', sunk: 5 }],
       awaiting: ['Henry'], awaiting_accept: [],
-      you: { playing: false } } : null,
+      you: { playing: false } },
+      // the record from the boards (Ada fired first); both captains are down
+      // to one ship, so the endgame sonar has pinged
+      'Ada', { 75: ["Sonar ping for Ada: a hull cell of Henry's last ship sits in column A of their waters."] }) : null,
     bsPlay: opts.bsPlay ? { id: 6, type: 'battleship', status: 'running', created_by: 'Ada', card_msg: 13, phase: 'play', turn: 13, turn_of: 'Anthony', turn_seconds: 3600, deadline: now + 3500e3, lobby_deadline: null, winner: null, declined_by: null, misses: { Anthony: 2 },
       last_move: { by: 'Ada', cell: 'H5', result: 'hit', sunk: null, turn: 12 },
       players: [
@@ -376,6 +409,8 @@ function fresh(opts) {
         { name: 'Anthony', hex: '#fb923c', incoming: { H5: 'hit', A2: 'miss', J10: 'miss', D4: 'miss', B7: 'miss', F9: 'miss' }, sunk_ships: [] },
         { name: 'Ada', hex: '#22d3ee', incoming: { C5: 'hit', C6: 'hit', D5: 'miss', A1: 'miss', J9: 'miss', G8: 'miss' }, sunk_ships: [] },
       ],
+      // no shots record and plain log lines: a match from before the
+      // record, whose History reads its log alone
       log: [{ tick: 11, text: 'Anthony fires C6 - hit.' }, { tick: 12, text: 'Ada fires H5 - hit.' }],
       awaiting: ['Anthony'], awaiting_accept: [],
       you: { playing: true, accepted: true, phase: 'play', your_turn: true,
@@ -419,6 +454,9 @@ function fresh(opts) {
         { name: 'Henry', hex: '#f472b6', incoming: { B2: 'hit', B3: 'hit', G8: 'miss' }, sunk_ships: [], eliminated: false },
         { name: 'Hank', hex: '#a3e635', incoming: { J1: 'hit', J2: 'hit', E5: 'miss' }, sunk_ships: [{ size: 2, cells: ['J1', 'J2'] }], eliminated: true },
       ],
+      // every shot, oldest first, as the boards and the log tell it
+      shots: [[9, 'Anthony', 'Ada', 'C5', 'hit'], [13, 'Anthony', 'Ada', 'D5', 'miss'], [17, 'Anthony', 'Henry', 'B2', 'hit'], [21, 'Anthony', 'Henry', 'B3', 'hit'], [22, 'Ada', 'Henry', 'G8', 'miss'], [23, 'Henry', 'Ada', 'B9', 'miss'], [25, 'Anthony', 'Hank', 'J1', 'hit'], [26, 'Ada', 'Hank', 'E5', 'miss'], [27, 'Henry', 'Anthony', 'A2', 'miss'], [28, 'Hank', 'Anthony', 'J10', 'miss'], [29, 'Anthony', 'Hank', 'J2', 'hit', 2], [30, 'Ada', 'Anthony', 'H5', 'hit']]
+        .map(([turn, by, target, cell, result, sunk]) => ({ by, target, cell, result, sunk: sunk || null, turn, at: now - (31 - turn) * 1800e3 })),
       log: [{ tick: 29, text: "Anthony fires J2 at Hank - hit, and Hank's 2-ship is sunk.", by: 'Anthony', target: 'Hank', cell: 'J2', result: 'hit', sunk: 2 }, { tick: 29, text: "Hank's last ship is gone - Hank is eliminated (1 of 3 out). Their board is a wreck chart now." }, { tick: 30, text: 'Ada fires H5 at Anthony - hit.', by: 'Ada', target: 'Anthony', cell: 'H5', result: 'hit', sunk: null }],
       awaiting: ['Anthony'], awaiting_accept: [],
       you: { playing: true, accepted: true, phase: 'play', your_turn: true, eliminated: false,

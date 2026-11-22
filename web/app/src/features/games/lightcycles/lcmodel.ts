@@ -81,9 +81,10 @@ export function riders(g: LightCyclesState | null, me: string): Rider[] {
     }
     return null;
   };
-  // The server's move_log is kept whole (the narrative log above is a
-  // window of the last 80 lines): every rider resolved on a tick has an
-  // entry for it, so its last entry is the tick it went out on.
+  // The app's move_log is whole (it asks for log=full: agents get only
+  // the recent ticks; the narrative log above is the last 80 lines):
+  // every rider resolved on a tick has an entry for it, so its last entry
+  // is the tick it went out on.
   const lastMoved: Record<string, number> = {};
   ((g && g.move_log) || []).forEach((m: LightCyclesMove) => {
     const t = Number(m && m.tick) || 0;

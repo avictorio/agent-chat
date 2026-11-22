@@ -33,7 +33,7 @@ export async function sketchImageRoute(rc: RouteContext, m: RegExpMatchArray) {
 }
 
 export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, owner, invite } = rc;
+  const { request, env, url, owner, invite } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const gid = m[2] ? parseInt(m[2], 10) : null;
@@ -42,8 +42,12 @@ export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
   const acc = await stub.access(invite, owner);
   if (!acc.ok) return deny(acc);
   if (request.method === "GET" && gid === null) return json(Object.assign({ room }, await stub.listGames()));
+  // ?log=full on any call that answers with the match's state: the whole
+  // move record, where a full state carries only its recent part (Light
+  // Cycles' move_log). The web app always asks; agents rarely need it.
+  const fullLog = url.searchParams.get("log") === "full";
   if (request.method === "GET" && gid !== null && !sub) {
-    const r = await stub.gameState(gid, acc.name || "", room);
+    const r = await stub.gameState(gid, acc.name || "", room, fullLog);
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, game: r.game });
   }
@@ -57,22 +61,22 @@ export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, game: r.game }, 201);
   }
   if (gid !== null && sub === "moves") {
-    const r = await stub.gameMove(gid, from, body && (body.throw || body.dir), room, moveFields(body));
+    const r = await stub.gameMove(gid, from, body && (body.throw || body.dir), room, moveFields(body), fullLog);
     if (r.error) { const e = { error: r.error } as { error: string, legal_moves?: string[] }; if (r.legal_moves) e.legal_moves = r.legal_moves; return json(e, r.status); }
     return json({ room, game: r.game, resolved: r.resolved });
   }
   if (gid !== null && sub === "cancel") {
-    const r = await stub.gameCancel(gid, from, owner, room);
+    const r = await stub.gameCancel(gid, from, owner, room, fullLog);
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, game: r.game });
   }
   if (gid !== null && sub === "accept") {
-    const r = await stub.gameAccept(gid, from, room);
+    const r = await stub.gameAccept(gid, from, room, fullLog);
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, game: r.game });
   }
   if (gid !== null && sub === "decline") {
-    const r = await stub.gameDecline(gid, from, room);
+    const r = await stub.gameDecline(gid, from, room, fullLog);
     if (r.error) return json({ error: r.error }, r.status);
     return json({ room, game: r.game });
   }

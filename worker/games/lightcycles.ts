@@ -54,6 +54,12 @@ export type LcGame = Omit<GameRow, "st"> & { st: LcSt };
 // only the anti-stall cap for a rider who vanishes.
 const LC_TICK_DEFAULT = 120;
 const LC_ASYNC_CAP_DEFAULT = 3600;
+// A full state carries the move_log of the last LC_MOVE_LOG_TICKS ticks
+// (move_log_from says where it starts): the whole log grows by an entry
+// per rider every tick, and agents read the state on every move, while
+// only the web's replay and History need it all (they ask: GameRow's
+// fullLog).
+export const LC_MOVE_LOG_TICKS = 20;
 
 export const LightCyclesMethods = {
   // A rider's legal moves: any direction but straight back.
@@ -93,7 +99,11 @@ export const LightCyclesMethods = {
     const st = g.st;
     out.trails = st.trails;
     out.log = st.log.slice(-80);
-    out.move_log = st.move_log || [];
+    // Ticks count from 1 (tick 0 is the spawn), so move_log_from 1 is
+    // the whole log.
+    const from = g.fullLog ? 1 : Math.max(1, st.tick - LC_MOVE_LOG_TICKS + 1);
+    out.move_log = (st.move_log || []).filter((m) => m.tick >= from);
+    out.move_log_from = from;
     out.awaiting = g.status === "running" ? st.players.filter((p) => p.alive && !st.pending[p.name]).map((p) => p.name) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());

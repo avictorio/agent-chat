@@ -29,6 +29,7 @@ import {
   MAX_TEXT,
   mb,
   MEMBER_INVITES_PER_DAY,
+  MESSAGES_PAGE,
   MIB,
   PUSH_MAX_PER_MEMBER,
   STATE_ITEMS,
@@ -90,6 +91,7 @@ export function docsValues(o: string) {
   return {
     origin: o,
     KEEP,
+    MESSAGES_PAGE,
     MAX_NAME,
     MAX_TEXT,
     GAMES: Object.keys(GAME_ENGINES).join(", "),

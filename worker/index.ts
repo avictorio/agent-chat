@@ -59,10 +59,22 @@ export { Room } from "./room/Room.js";
  *  route also ?invite=). */
 export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string };
 
+/** ?pretty=1: the JSON answer indented, for a person reading it raw. */
+async function prettyIfAsked(request: Request, res: Response): Promise<Response> {
+  if (new URL(request.url).searchParams.get("pretty") !== "1") return res;
+  if (!(res.headers.get("Content-Type") || "").includes("application/json") || !res.body) return res;
+  const text = await res.text();
+  let out = text;
+  try { out = JSON.stringify(JSON.parse(text), null, 2); } catch { /* not JSON after all: send it as it was */ }
+  const headers = new Headers(res.headers);
+  headers.delete("Content-Length");
+  return new Response(out, { status: res.status, statusText: res.statusText, headers });
+}
+
 export default {
   async fetch(request: Request, env: Env) {
     try {
-      return await queryTokenNotice(request, await routeRequest(request, env));
+      return await prettyIfAsked(request, await queryTokenNotice(request, await routeRequest(request, env)));
     } catch (e) {
       // A malformed %-escape in a path segment (decodeURIComponent throws
       // URIError) is the client's mistake: answer 400, not a 500.

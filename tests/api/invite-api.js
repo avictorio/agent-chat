@@ -169,7 +169,7 @@ async function preview(ctx) {
   r = await rpc(Q, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const tools = (r.json && r.json.result && r.json.result.tools) || [];
   const gi = tools.find((t) => t.name === 'get_invite');
-  check('mcp: catalog 1.23.0 lists get_invite, read-only', r.json.result.catalog.version === '1.23.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  check('mcp: catalog 1.24.0 lists get_invite, read-only', r.json.result.catalog.version === '1.24.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
   r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
   r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
   const gr = r.json && r.json.result && r.json.result.structuredContent;
@@ -371,6 +371,43 @@ async function bodies(ctx) {
   await req('DELETE', R + '?confirm=' + room, { owner: true });
 }
 
+// Lighter replies: compact JSON (pretty=1 indents), a 50-message default
+// page, and the agent hand-off block only where someone hands it off.
+async function lighter(ctx) {
+  const { req, check, SUF } = ctx;
+  const room = 'apitest-light-' + SUF;
+  const R = '/api/rooms/' + room;
+  const rpc = (token, body) => req('POST', R + '/mcp', { token, json: body });
+  await req('POST', R, { owner: true });
+  const H = (await req('POST', R + '/invites', { owner: true, json: { name: 'LitH', kind: 'human' } })).json.token;
+  const A = (await req('POST', R + '/invites', { owner: true, json: { name: 'LitA', kind: 'agent' } })).json.token;
+  let r = await req('GET', R + '/messages?limit=5', { token: A });
+  check('lighter: replies are compact JSON', r.status === 200 && !/\n/.test(r.text), r.text.slice(0, 80));
+  check('lighter: an agent that has not posted gets the hand-off block on a first read', typeof r.json.agent_onboarding === 'string', JSON.stringify(Object.keys(r.json)));
+  r = await req('GET', R + '/messages?limit=5&pretty=1', { token: H });
+  check('lighter: pretty=1 indents the same reply', r.status === 200 && /\n {2}"/.test(r.text) && r.json.room === room, r.text.slice(0, 80));
+  await req('POST', R + '/messages', { token: A, json: { text: 'hello from LitA' } });
+  r = await req('GET', R + '/messages?limit=5', { token: A });
+  check('lighter: once the agent has posted, a first read has no hand-off block', r.status === 200 && r.json.you === 'LitA' && !('agent_onboarding' in r.json), JSON.stringify(Object.keys(r.json)));
+  const rowOf = (j) => ((j && j.members) || []).find((m) => m.name === 'LitA') || {};
+  r = await req('GET', R + '/members', { token: A });
+  check('lighter: an agent listing members gets rows without hand-off blocks', r.status === 200 && !!rowOf(r.json).invite_link && !('agent_onboarding' in rowOf(r.json)), JSON.stringify(rowOf(r.json)).slice(0, 160));
+  r = await req('GET', R + '/members', { token: H });
+  check('lighter: a person listing members still gets the agent rows\' blocks', typeof rowOf(r.json).agent_onboarding === 'string', JSON.stringify(Object.keys(rowOf(r.json))));
+  r = await req('GET', R + '/members', { owner: true });
+  check('lighter: the owner still gets them', typeof rowOf(r.json).agent_onboarding === 'string', JSON.stringify(Object.keys(rowOf(r.json))));
+  r = await rpc(A, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_members', arguments: {} } });
+  const mcpRow = rowOf(r.json && r.json.result && r.json.result.structuredContent);
+  check('lighter: MCP get_members as an agent has no hand-off blocks', !!mcpRow.name && !('agent_onboarding' in mcpRow), JSON.stringify(mcpRow).slice(0, 160));
+  for (let i = 0; i < 55; i++) await req('POST', R + '/messages', { token: H, json: { text: 'page filler ' + i } });
+  r = await req('GET', R + '/messages', { token: H });
+  check('lighter: a read without limit returns 50 messages', r.status === 200 && (r.json.messages || []).length === 50, String((r.json.messages || []).length));
+  r = await req('GET', R + '/messages?limit=60', { token: H });
+  check('lighter: limit still raises it', (r.json.messages || []).length > 50, String((r.json.messages || []).length));
+  await req('DELETE', R + '/invites', { owner: true });
+  await req('DELETE', R + '?confirm=' + room, { owner: true });
+}
+
 async function inviteApi(ctx) {
   await queryToken(ctx);
   await linkPage(ctx);
@@ -380,6 +417,7 @@ async function inviteApi(ctx) {
   await preview(ctx);
   await me(ctx);
   await bodies(ctx);
+  await lighter(ctx);
 }
 
 module.exports = { inviteApi };

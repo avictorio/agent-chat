@@ -62,7 +62,8 @@ export interface BattleshipShot extends BattleshipMove {
   at: number;
 }
 
-/** A log line; a shot's line also carries the shot (the History reads it). */
+/** A log line; a shot's line also carries the shot (the History reads it
+ *  where a match has no shots record). */
 export interface BattleshipLogLine extends GameLogLine {
   by?: string;
   target?: string;
@@ -135,8 +136,11 @@ export interface BattleshipState extends GameStateBase<"battleship"> {
   /** Free-for-all: the captains out, in order. */
   eliminated: string[];
   players: BattleshipPlayer[];
+  /** The narrative's last 24 lines (220 for a match with no shots record,
+   *  whose History has only the log). */
   log?: BattleshipLogLine[];
-  /** Every shot fired, oldest first. */
+  /** Every shot fired, oldest first, never trimmed: the History's rows.
+   *  Missing (empty) on matches from before the record (2026-11-12). */
   shots?: BattleshipShot[];
   you?: BattleshipYou;
 }

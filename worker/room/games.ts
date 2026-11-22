@@ -43,8 +43,12 @@ export type RoundsStored = StoredBase & { round: number, deadline: number | null
 /** The turn-order games' share (turnsNext, turnsAdvance): the seats in
  *  order, whose turn it is, the turn count and clock, the timeouts. */
 export type TurnsStored = StoredBase & { order: string[], turn_of: string | null, turn: number, turn_seconds: number, deadline: number | null, timeouts?: Record<string, number>, passes?: number, pass_limit?: number };
-/** A match as gameRow reads it: its gm row, with the state parsed. */
-export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: StoredBase };
+/** A match as gameRow reads it: its gm row, with the state parsed.
+ *  fullLog is not stored (saveGame writes only status and st): it is set
+ *  on a call that asked for the whole move record (REST ?log=full, MCP
+ *  get_game full_log), and an engine that windows its record (Light
+ *  Cycles' move_log) reads it when it builds the full state. */
+export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: StoredBase, fullLog?: boolean };
 
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
@@ -327,9 +331,12 @@ export const GameMachineryMethods = {
     return eng.create(this, creator, playersIn, opts || {}, room);
   },
 
-  async gameState(id: number, who: string | null | undefined, room: string) {
+  // fullLog, here and on the calls below that answer with the state: the
+  // caller asked for the whole move record (GameRow).
+  async gameState(id: number, who: string | null | undefined, room: string, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    g.fullLog = fullLog;
     this.advanceGame(g, room);
     this.advanceLobby(g, room);
     await this.armGameAlarm();
@@ -339,9 +346,10 @@ export const GameMachineryMethods = {
   // fields: a structured move's named parts, beside or instead of dir -
   // e.g. a storyteller's {statements, lie}. Engines that take only dir
   // ignore them, so every string move keeps working.
-  async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null) {
+  async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    g.fullLog = fullLog;
     this.advanceGame(g, room);
     this.advanceLobby(g, room);
     if (g.status === "lobby") return { status: 409, error: "That match is still in the lobby - it starts when every player accepts" };
@@ -352,9 +360,10 @@ export const GameMachineryMethods = {
   // Stop a running match where it stands: no winner, no result post, no
   // further ticks or moves. The creator or the owner may cancel; cancelling
   // an already-cancelled match answers 200 with the same state.
-  async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string) {
+  async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    g.fullLog = fullLog;
     this.advanceLobby(g, room);
     if (!owner && String(g.created_by || "").toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "Only the member who created this match (or the owner) can cancel it" };
     if (g.status === "finished") return { status: 409, error: "That match is already finished" };
@@ -420,9 +429,10 @@ export const GameMachineryMethods = {
   // Take your seat. Idempotent for a player already in, and for a match
   // that has already started (a slow agent re-accepting on a later wake
   // just gets the live state). The last accept starts the clock.
-  async gameAccept(id: number, who: string | null | undefined, room: string) {
+  async gameAccept(id: number, who: string | null | undefined, room: string, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    g.fullLog = fullLog;
     this.advanceLobby(g, room);
     const st = g.st;
     const me = st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(who || "").toLowerCase());
@@ -448,9 +458,10 @@ export const GameMachineryMethods = {
   // Refuse your seat: the match is called off for everyone, and the
   // Referee posts that it is off: declining is news, and a silent card
   // leaves a dead match nobody can explain.
-  async gameDecline(id: number, who: string | null | undefined, room: string) {
+  async gameDecline(id: number, who: string | null | undefined, room: string, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    g.fullLog = fullLog;
     this.advanceLobby(g, room);
     if (g.status === "running") return { status: 409, error: "That match is already under way" };
     if (g.status !== "lobby") return { status: 409, error: "That match is " + g.status };

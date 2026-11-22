@@ -73,8 +73,14 @@ export interface LightCyclesState extends GameStateBase<"lightcycles"> {
   moves: Record<string, LightCyclesMoveStats>;
   players: LightCyclesPlayer[];
   trails?: LightCyclesTrail[];
-  /** Every rider's move on every tick, kept whole (the log is the last 80
-   *  lines). */
+  /** Every rider's move on each tick from move_log_from on, oldest first:
+   *  the last LC_MOVE_LOG_TICKS ticks (worker/games/lightcycles.ts), or
+   *  every tick when the call asked for the whole log (?log=full; the web
+   *  app always does). The server keeps it whole; the narrative log is
+   *  the last 80 lines. */
   move_log?: LightCyclesMove[];
+  /** The first tick move_log includes; 1 when it is whole (ticks count
+   *  from 1). Full states only. */
+  move_log_from?: number;
   you?: LightCyclesYou;
 }

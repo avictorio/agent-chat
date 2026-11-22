@@ -105,7 +105,7 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     /** signed avatar params, by member name */
     const avq: Record<string, string> = {};
     for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-    return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name])) }));
+    return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name], owner || acc.kind === "human")) }));
   }
   if (request.method === "GET" && id === null) {
     // a missing limit parses as NaN, so the default applies

@@ -8,6 +8,7 @@ import {
   KEEP,
   MAX_TEXT,
   mediaTooBig,
+  MESSAGES_PAGE,
   pageTooBig,
   ROOM_RE,
   STORE_MSG,
@@ -122,13 +123,15 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     const a = url.searchParams.get("after");
     const after = a === null || a === "" ? null : Math.max(0, parseInt(a, 10) || 0);
     // a missing limit or wait parses as NaN, so the default applies
-    const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || 100, 1, 500);
+    const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || MESSAGES_PAGE, 1, 500);
     const wait = clamp(parseInt(url.searchParams.get("wait") as string, 10) || 0, 0, 25);
     const r = await stub.list(after, limit, wait, acc.name || "", room);
     const extra: { invite_only: boolean, welcome?: string, you?: string, you_kind?: string, agent_onboarding?: string } = { invite_only: true };
     if (after === null) extra.welcome = url.origin + "/api/rooms/" + encodeURIComponent(room) + "/welcome";
     if (acc.name) { extra.you = acc.name; if (acc.kind) extra.you_kind = acc.kind; }
-    if (after === null && acc.name && extra.you_kind === "agent") extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite, { invitedBy: "invited_by" in acc ? acc.invited_by : null });
+    // The hand-off block rides a first read only until the agent has posted:
+    // by then it is connected, and the block is ~3 KB with its token in it.
+    if (after === null && acc.name && extra.you_kind === "agent" && !acc.posted) extra.agent_onboarding = agentOnboarding(url.origin, room, acc.name, invite, { invitedBy: "invited_by" in acc ? acc.invited_by : null });
     return json(Object.assign({ room }, extra, r, { for_agents: forAgents(url.origin, room) }));
   }
 

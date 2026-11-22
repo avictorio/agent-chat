@@ -319,6 +319,10 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 10000 });
     out.moveCall = calls.filter(c => c.includes('/games/1/moves')).pop() || '';
     if (!/"dir":"left"/.test(out.moveCall)) throw new Error('move call wrong: ' + out.moveCall);
+    // the app asks for the whole move_log (agents get the last ticks only):
+    // the replay, the catch-up and History rebuild every tick from it
+    out.fetchCall = calls.filter(c => /^GET \/api\/rooms\/demo\/games\/1[?]/.test(c)).pop() || '';
+    if (!/[?]log=full$/.test(out.fetchCall) || !/\/games\/1\/moves[?]log=full /.test(out.moveCall)) throw new Error('the game fetch and the move should ask for log=full: ' + out.fetchCall + ' | ' + out.moveCall);
     await shot(page, 'game-arena-queued.png');
     await page.click('#viewer .arena-tabs .arena-tab:nth-child(2)');
     await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });

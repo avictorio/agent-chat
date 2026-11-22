@@ -8,7 +8,7 @@ import { AuctionCard } from "./auction/AuctionPanels";
 import { renderAuctionView } from "./auction/view";
 import { auctionStatus } from "./auction/status";
 import { BattleshipCard } from "./battleship/BattleshipPanels";
-import { bsHistoryRows } from "./battleship/history";
+import { bsHistoryCount, bsHistoryRows } from "./battleship/history";
 import { renderBattleshipView } from "./battleship/view";
 import { battleshipStatus } from "./battleship/status";
 import { crHistoryRows } from "./coderace/coderace";
@@ -148,7 +148,7 @@ export const GAMES: Record<string, GamePlugin> = {
     view: renderBattleshipView,
     Card: BattleshipCard,
     history: bsHistoryRows,
-    historyCount: count("log"),
+    historyCount: bsHistoryCount,
     ...battleshipStatus,
   },
   coderace: {

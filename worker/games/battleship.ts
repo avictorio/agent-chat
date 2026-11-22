@@ -356,7 +356,12 @@ export const BattleshipMethods = {
     const out = this.battleshipSummary(g);
     const st = g.st;
     const ffa = this.bsFfa(st);
-    out.log = st.log.slice(-220);
+    // The History rebuilds every shot from shots, the whole record, so the
+    // narrative log is a short tail like every other game's. A match with
+    // no shots record keeps the long tail: one from before the record
+    // (2026-11-12) has only its log to rebuild from, and a new match's log
+    // is short until its first shot.
+    out.log = st.log.slice(st.shots ? -24 : -220);
     out.shots = st.shots || [];
     out.awaiting = g.status !== "running" ? [] : st.phase === "setup" ? st.players.filter((p) => !p.fleet).map((p) => p.name) : [st.turn_of as string]; // set in play
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];

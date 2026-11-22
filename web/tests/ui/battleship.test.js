@@ -29,8 +29,13 @@ const { settle, done, noGl, run, shot } = require('./harness');
     await page.waitForSelector('#viewer .hist-row', { timeout: 10000 });
     out.histRows = await page.$$eval('#viewer .hist-row', els => els.length);
     out.histText = await page.$eval('#viewer .hist-list', e => e.textContent);
-    if (out.histRows !== 2) throw new Error('history should render one row per record entry, got ' + out.histRows);
-    if (!/I9/.test(out.histText) || !/Hit/.test(out.histText) || !/Sunk · 5/.test(out.histText)) throw new Error('history rows should carry cell badges and outcome pills: ' + out.histText);
+    out.histIdx = await page.$$eval('#viewer .hist-row .hist-idx', els => els.map((e) => e.textContent));
+    out.histTab = await page.$eval('#viewer .arena-tabs .arena-tab:nth-child(2)', e => e.textContent);
+    // every shot comes from the record (79), the log's tail adds its
+    // note (the sonar ping): the turns before the log's 24 lines are there
+    if (out.histRows !== 80 || out.histIdx[0] !== 'Turn 1' || out.histIdx[79] !== 'Turn 79') throw new Error('history should render all 79 shots from the record plus the log\'s note, got ' + out.histRows + ' rows from ' + out.histIdx[0] + ' to ' + out.histIdx[out.histIdx.length - 1]);
+    if (!/· 80$/.test(out.histTab)) throw new Error('the History tab should count its rows: ' + out.histTab);
+    if (!/I9/.test(out.histText) || !/Hit/.test(out.histText) || !/Sunk · 5/.test(out.histText) || !/Sonar ping for Ada/.test(out.histText)) throw new Error('history rows should carry cell badges, outcome pills and the log\'s notes: ' + out.histText.slice(0, 300));
     await shot(page, 'bs-spectator-history.png');
     return out;
   });

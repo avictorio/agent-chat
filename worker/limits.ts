@@ -7,6 +7,8 @@ export const MAX_TEXT = 8000;
 export const LOBBY_DEFAULT_SECONDS = 3600;
 
 export const KEEP = 1000;
+// A messages read without limit= returns this many (REST and MCP alike).
+export const MESSAGES_PAGE = 50;
 export const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
 export const PROTECTED_ROOMS = ["henry-hank-order-up"];

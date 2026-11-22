@@ -752,6 +752,42 @@ async function waitUp() {
     check('safe_moves ride inside legal_moves', lcSafeOk, '');
     check('an absent rider is taken out after three clock ticks', !!lcFinal && lcFinal.winner === 'Rex' && (lcFinal.log || []).some(e => e.text.includes('taken out - three ticks')), JSON.stringify(lcFinal).slice(0, 240));
 
+    // Light Cycles' move_log window: a full state carries the last 20
+    // ticks (LC_MOVE_LOG_TICKS) from move_log_from, and the whole log only
+    // when asked (?log=full on REST, full_log on MCP get_game). Two riders
+    // on the biggest grid ride scripted paths that cannot meet: Poc up to
+    // the top wall, then left; Rex down to the bottom wall, then right.
+    r = await req('POST', R2 + '/games', { token: TP, json: { from: 'Poc', players: ['Poc', 'Rex'], mode: 'async', w: 40, h: 30 } });
+    const lcWin = r.json.game.id;
+    await req('POST', R2 + '/games/' + lcWin + '/accept', { token: TRex, json: {} });
+    const lcPath = { Poc: Array(15).fill('up').concat(Array(10).fill('left')), Rex: Array(14).fill('down').concat(Array(9).fill('right'), ['up', 'up']) };
+    let lcEarly = null, lcLast = null;
+    for (let t = 0; t < 24; t++) {
+      await req('POST', R2 + '/games/' + lcWin + '/moves', { token: TP, json: { dir: lcPath.Poc[t] } });
+      lcLast = await req('POST', R2 + '/games/' + lcWin + '/moves', { token: TRex, json: { dir: lcPath.Rex[t] } });
+      if (t === 2) lcEarly = lcLast.json && lcLast.json.game;
+    }
+    const lcTicks = (ml) => (ml || []).map((e) => e.tick);
+    check('lc move_log is whole before 20 ticks (move_log_from 1)', !!lcEarly && lcEarly.tick === 3 && lcEarly.move_log_from === 1 && (lcEarly.move_log || []).length === 6, JSON.stringify(lcEarly && { tick: lcEarly.tick, from: lcEarly.move_log_from, n: (lcEarly.move_log || []).length }));
+    const lcReply = lcLast.json && lcLast.json.game;
+    check('lc move reply windows move_log to the last 20 ticks', !!lcReply && lcReply.status === 'running' && lcReply.tick === 24 && lcReply.move_log_from === 5 && lcReply.move_log.length === 40 && Math.min(...lcTicks(lcReply.move_log)) === 5 && Math.max(...lcTicks(lcReply.move_log)) === 24, JSON.stringify(lcReply && { status: lcReply.status, tick: lcReply.tick, from: lcReply.move_log_from, n: (lcReply.move_log || []).length }));
+    r = await req('GET', R2 + '/games/' + lcWin, { token: TP });
+    check('lc GET windows move_log too', r.status === 200 && r.json.game.move_log_from === 5 && r.json.game.move_log.length === 40 && r.json.game.moves.Poc.submitted === 24, r.status + ' ' + JSON.stringify({ from: r.json.game.move_log_from, n: (r.json.game.move_log || []).length }));
+    const lcWinBytes = r.text.length;
+    r = await req('GET', R2 + '/games/' + lcWin + '?log=full', { token: TP });
+    check('lc GET ?log=full returns the whole move_log', r.status === 200 && r.json.game.move_log_from === 1 && r.json.game.move_log.length === 48 && Math.min(...lcTicks(r.json.game.move_log)) === 1 && r.text.length > lcWinBytes, r.status + ' ' + JSON.stringify({ from: r.json.game.move_log_from, n: (r.json.game.move_log || []).length, bytes: [lcWinBytes, r.text.length] }));
+    r = await mcp(R2, 'tools/call', { name: 'get_game', arguments: { id: lcWin } }, { token: TP });
+    let lcMcp = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('lc MCP get_game windows move_log by default', !!lcMcp && lcMcp.move_log_from === 5 && (lcMcp.move_log || []).length === 40, JSON.stringify(r.json).slice(0, 200));
+    r = await mcp(R2, 'tools/call', { name: 'get_game', arguments: { id: lcWin, full_log: true } }, { token: TP });
+    lcMcp = r.json && r.json.result && r.json.result.structuredContent && r.json.result.structuredContent.game;
+    check('lc MCP get_game with full_log returns the whole move_log', !!lcMcp && lcMcp.move_log_from === 1 && (lcMcp.move_log || []).length === 48, JSON.stringify(r.json).slice(0, 200));
+    // a move with ?log=full answers with the whole log (the web app's moves)
+    await req('POST', R2 + '/games/' + lcWin + '/moves', { token: TP, json: { dir: lcPath.Poc[24] } });
+    r = await req('POST', R2 + '/games/' + lcWin + '/moves?log=full', { token: TRex, json: { dir: lcPath.Rex[24] } });
+    check('lc move with ?log=full answers with the whole move_log', r.status === 200 && r.json.resolved === true && r.json.game.tick === 25 && r.json.game.move_log_from === 1 && r.json.game.move_log.length === 50, r.status + ' ' + JSON.stringify(r.json.game && { tick: r.json.game.tick, from: r.json.game.move_log_from, n: (r.json.game.move_log || []).length }));
+    await req('POST', R2 + '/games/' + lcWin + '/cancel', { token: TP, json: {} });
+
     // Battleship: lobby, placement (explicit fleets both sides),
     // secrecy, turn order, a sinking, the win, and the result post.
     // Poc's fleet hugs rows 10/5-8/6/2-4/2, Rex's rows 1/3-6/5/7-9, so
@@ -830,8 +866,14 @@ async function waitUp() {
     }
     check('a sunk ship is public and counted', sunkSeen, '');
     check('battleship finishes when the fleet is gone', !!finalBs && finalBs.winner === 'Poc' && (finalBs.players.find(p => p.name === 'Rex') || {}).afloat === 0, JSON.stringify(finalBs).slice(0, 200));
+    // The History rebuilds every shot from shots (the whole record) and
+    // reads the log, a short tail, for its notes: the log's shot lines
+    // must be the record's last shots, in order.
+    const bsShots = (finalBs && finalBs.shots) || [];
+    const bsFired = ((finalBs && finalBs.players) || []).reduce((n, p) => n + p.shots, 0);
+    check('battleship shots record every shot, oldest first, with its time', bsShots.length === bsFired && bsFired >= 30 && bsShots.every((s, i) => typeof s.by === 'string' && typeof s.target === 'string' && typeof s.cell === 'string' && (s.result === 'hit' || s.result === 'miss') && typeof s.turn === 'number' && typeof s.at === 'number' && (i === 0 || s.turn >= bsShots[i - 1].turn)) && bsShots.some((s) => s.sunk === 5 && s.by === 'Poc'), bsShots.length + ' of ' + bsFired + ' ' + JSON.stringify(bsShots.slice(0, 2)));
     const shotEntries = ((finalBs && finalBs.log) || []).filter((ln) => ln.by);
-    check('battleship log carries structured shot entries for the history tab', shotEntries.length >= 10 && shotEntries.every((ln) => typeof ln.cell === 'string' && (ln.result === 'hit' || ln.result === 'miss')) && shotEntries.some((ln) => ln.sunk === 5), JSON.stringify(shotEntries.slice(0, 2)));
+    check('battleship log is a short tail whose shot lines are the record\'s last shots', !!finalBs && finalBs.log.length <= 24 && shotEntries.length >= 10 && shotEntries.every((ln, i) => { const s = bsShots[bsShots.length - shotEntries.length + i] || {}; return ln.by === s.by && ln.cell === s.cell && ln.result === s.result && ln.tick === s.turn; }), (finalBs ? finalBs.log.length : 0) + ' lines ' + JSON.stringify(shotEntries.slice(0, 2)));
     r = await req('POST', R2 + '/games/' + bsId + '/moves', { token: TRex, json: { dir: 'A10' } });
     check('shot after the finish -> 409', r.status === 409, r.status);
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
@@ -892,6 +934,8 @@ async function waitUp() {
     check('a single salvo shot still holds the turn', r.status === 200 && r.json.game.turn_of === svFirst && r.json.game.salvo_left === 2, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
     r = await req('POST', R2 + '/games/' + svId + '/moves', { token: svFT, json: { dir: 'D1,E1' } });
     check('a closing volley passes the turn with a fresh salvo', r.status === 200 && r.json.game.turn_of !== svFirst && r.json.game.salvo_left >= 3 && r.json.game.salvo_left <= 5, r.status + ' ' + JSON.stringify(r.json.game).slice(0, 200));
+    const svShots = (r.json.game && r.json.game.shots) || [];
+    check('a salvo turn records each shell in shots', svShots.length === 5 && svShots.every((s) => s.by === svFirst && s.turn === svShots[0].turn) && svShots.map((s) => s.cell).join() === 'A1,B1,C1,D1,E1', JSON.stringify(svShots).slice(0, 200));
     r = await req('POST', R2 + '/games/' + svId + '/cancel', { token: TP, json: {} });
     check('salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);
 
@@ -990,6 +1034,9 @@ async function waitUp() {
     check('ffa elimination lands on the last ship and the sea fights on', !!elimSeen && elimSeen.status === 'running' && (elimSeen.eliminated || []).join() === 'Rae', JSON.stringify(elimSeen && elimSeen.eliminated) + ' ' + driveErr);
     check('firing at an eliminated captain -> 400 (the wreck is not a target)', wreckStatus === 400, String(wreckStatus));
     check('ffa ends with the last fleet floating', !!finalFfa && finalFfa.winner === 'Poc' && (finalFfa.eliminated || []).join() === 'Rae,Rex', JSON.stringify(finalFfa && { w: finalFfa.winner, e: finalFfa.eliminated }) + ' ' + driveErr);
+    const ffaShots = (finalFfa && finalFfa.shots) || [];
+    const ffaFired = ((finalFfa && finalFfa.players) || []).reduce((n, p) => n + p.shots, 0);
+    check('ffa shots record every shot with its target; the log is a short tail', !!finalFfa && ffaShots.length === ffaFired && ffaFired >= 60 && ffaShots.every((s) => ['Poc', 'Rex', 'Rae'].includes(s.target) && s.target !== s.by && typeof s.at === 'number') && finalFfa.log.length <= 24, ffaShots.length + ' of ' + ffaFired + ', log ' + (finalFfa ? finalFfa.log.length : 0));
     r = await req('GET', R2 + '/games/' + ffaId, { token: TRex });
     const rexTargets = (r.json.game.you && r.json.game.you.targets) || [];
     const raeTarget = rexTargets.find(t => t.name === 'Rae');
@@ -1027,6 +1074,8 @@ async function waitUp() {
     const spread = [svRivals[0] + ':A2', svRivals[0] + ':A3', svRivals[1] + ':A2'].join(',');
     r = await req('POST', R2 + '/games/' + ffaSv + '/moves', { token: ffaTok[svShooter], json: { dir: spread } });
     const svT = (r.json.game && r.json.game.you && r.json.game.you.targets) || [];
+    const ffaSvShots = (r.json.game && r.json.game.shots) || [];
+    check('ffa salvo: shots records the turn\'s five shells with their targets', ffaSvShots.length === 5 && ffaSvShots.filter((s) => s.target === svRivals[0]).length === 3 && ffaSvShots.filter((s) => s.target === svRivals[1]).length === 2 && ffaSvShots.every((s) => s.by === svShooter), JSON.stringify(ffaSvShots).slice(0, 220));
     check('ffa salvo: a spread volley resolves across both targets', r.status === 200 && r.json.game.turn_of !== svShooter && Object.keys((svT.find(t => t.name === svRivals[0]) || {}).shots || {}).length === 3 && Object.keys((svT.find(t => t.name === svRivals[1]) || {}).shots || {}).length === 2, r.status + ' ' + JSON.stringify(r.json).slice(0, 220));
     r = await req('POST', R2 + '/games/' + ffaSv + '/cancel', { token: TP, json: {} });
     check('ffa salvo cancels clean', r.status === 200 && r.json.game.status === 'cancelled', r.status);

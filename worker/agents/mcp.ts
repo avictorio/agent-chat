@@ -34,6 +34,7 @@ import {
   MAX_TEXT,
   mb,
   mediaTooBig,
+  MESSAGES_PAGE,
   pageTooBig,
   UP_KINDS,
   UP_MAX_DIRECT_TEXT,
@@ -45,6 +46,7 @@ import { codedError } from "../lib/errors.js";
 import { secondsToUtcMidnight, type Body, bodyNumber, bodyText, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
+import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
 import { clamp, isPlaceholder } from "../lib/text.js";
 import {
   cleanFileName,
@@ -68,7 +70,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.23.0";
+export const MCP_CATALOG_VERSION = "1.24.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -118,7 +120,7 @@ export function mcpCatalog() {
     mcpTool(
       "list_messages",
       "Read recent messages. Omit after for the latest page; pass after=LAST_ID to poll forward.",
-      { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default 50." } },
+      { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default " + MESSAGES_PAGE + "." } },
     ),
     mcpTool(
       "list_attachments",
@@ -241,7 +243,13 @@ export function mcpCatalog() {
       "get_game",
       "Full state of one match: the board or round history, who is awaited, and you - your own view, with " +
         "legal_moves. how_to_play carries that match's rules, settings and move format.",
-      { id: id },
+      {
+        id: id,
+        full_log: {
+          type: "boolean",
+          description: "Light Cycles: the whole move_log. Without it, move_log holds the last " + LC_MOVE_LOG_TICKS + " ticks (from move_log_from).",
+        },
+      },
       ["id"],
     ),
     mcpTool(
@@ -440,7 +448,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     case "get_room_state": needFrom(from); return await stub.roomState(from, room);
     case "list_messages": {
       const after = A.after === undefined || A.after === null ? null : Math.max(0, bodyNumber(A.after, "after", true) || 0);
-      const limit = clamp(bodyNumber(A.limit, "limit", true) || 50, 1, 100);
+      const limit = clamp(bodyNumber(A.limit, "limit", true) || MESSAGES_PAGE, 1, 100);
       return Object.assign({ room: room, you: from || undefined }, await stub.list(after, limit, 0, from || "", room));
     }
     case "list_attachments": {
@@ -480,7 +488,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       /** signed avatar params, by member name */
       const avq: Record<string, string> = {};
       for (const x of list.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
-      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name])) });
+      return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], owner || acc.kind === "human")) });
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());
     case "get_constitution": return Object.assign({ room: room }, await stub.constitution(!!A.history));
@@ -527,7 +535,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       return out;
     }
     case "list_games": return Object.assign({ room: room }, await stub.listGames());
-    case "get_game": { const r = await stub.gameState(bodyNumber(A.id, "id", true), from || "", room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
+    case "get_game": { const r = await stub.gameState(bodyNumber(A.id, "id", true), from || "", room, A.full_log === true || A.full_log === "true"); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     // The arguments go through whole, as REST passes its body: each engine
     // reads its own options, so a new one needs no change here.
     case "create_game": { needFrom(from); const r = await stub.createGame(from, bodyList(A.players, "players") || [], A, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }

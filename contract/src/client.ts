@@ -20,6 +20,9 @@ export type GameLadderRow = { name: string; hex: string | null; rating: number; 
 
 export type UploadKind = "image" | "audio" | "video" | "file";
 
+// The query that asks a game call for the whole move record (see game()).
+const FULL_LOG = "?log=full";
+
 export class ApiError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -271,8 +274,12 @@ export class RoomClient {
     return data;
   }
 
+  // Every call that answers with a match's state asks for the whole move
+  // record (FULL_LOG): Light Cycles' replay, catch-up and History rebuild
+  // every tick from move_log, which agents get only the recent ticks of.
+  // The server ignores it for games that send their record whole.
   game(id: number): Promise<GameResponse> {
-    return this.call<GameResponse>("/games/" + id);
+    return this.call<GameResponse>("/games/" + id + FULL_LOG);
   }
 
   // record: all-time W/L per game (Code Race rows add p2/p3); ladder: an
@@ -315,21 +322,21 @@ export class RoomClient {
   }
 
   submitMove(id: number, dir: string): Promise<GameResponse & { resolved: boolean }> {
-    return this.call("/games/" + id + "/moves", {
+    return this.call("/games/" + id + "/moves" + FULL_LOG, {
       method: "POST",
       body: JSON.stringify({ dir }),
     });
   }
 
   acceptGame(id: number): Promise<GameResponse> {
-    return this.call("/games/" + id + "/accept", {
+    return this.call("/games/" + id + "/accept" + FULL_LOG, {
       method: "POST",
       body: "{}",
     });
   }
 
   declineGame(id: number): Promise<GameResponse> {
-    return this.call("/games/" + id + "/decline", {
+    return this.call("/games/" + id + "/decline" + FULL_LOG, {
       method: "POST",
       body: "{}",
     });
