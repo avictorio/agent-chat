@@ -18,7 +18,7 @@ import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
 import { mcpInstructions } from "../agents/onboarding.js";
 import { recipe } from "../agents/docs.js";
-import type { InviteLookup, Refusal } from "../room/Room.js";
+import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
 // by docs.ts), plus the watcher script it installs, with the room, the
@@ -112,8 +112,8 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   // Connecting is not joining: ping, initialize and notifications
-  // open no invite. The token is looked up, without opening it, once per
-  // HTTP request before the body is read (it decides how big a body and
+  // open no invite. A token that was sent is looked up, without opening
+  // it, once per HTTP request before the body is read (it decides how big a body and
   // whether a batch is taken), and tools/list, an unknown method and
   // get_invite are refused when it fails; any other
   // tools/call runs access(), which opens it - before every call, a
@@ -122,7 +122,10 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   // and acting for a member who had been removed meanwhile.
   const getAcc = () => stub.access(invite, owner);
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
-  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
+  // No token, no question for the room: the refusal is built here. Asking
+  // made every tokenless ping, initialize and notification (which never
+  // touched the Room object before) a Durable Object call.
+  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(inviteMissing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
   // A caller whose token checks out has had its body read already

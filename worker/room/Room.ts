@@ -62,6 +62,12 @@ export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "ki
 /** A refused credential: the status, its code and its sentence. */
 export type Refusal = { ok: false, status: number, code: string, error: string };
 export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
+/** The refusal for a request that sent no token: the same everywhere, so
+ *  a route can give it without asking the room (MCP's tokenless ping and
+ *  initialize, routes/agents.ts). */
+export function inviteMissing(): Refusal {
+  return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
+}
 /** Who a credential is: the owner key (no name), or an invite's member. */
 export type Access =
   | { ok: true, name?: undefined, kind?: undefined, invited_by?: undefined, invited?: undefined, joined?: undefined, posted?: undefined }
@@ -436,7 +442,7 @@ export class Room extends DurableObject {
   // preview (which marks nothing), so their answers cannot drift. Each
   // refusal carries its code beside the sentence (lib/http.ts deny).
   lookupInvite(token: string | null | undefined): InviteLookup {
-    if (!token) return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
+    if (!token) return inviteMissing();
     const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };
