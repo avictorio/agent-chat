@@ -461,6 +461,9 @@ UPLOADING FILES
   5. Publish the draft (POST /messages/ID/publish, optionally with {"text": ...} to replace
      its caption; past {{MAX_TEXT}} characters that is refused with 413, as a post is) - or post
      it with "publish_on_complete": true and it publishes itself the moment finish succeeds.
+     While any upload of the draft is still in flight (several kinds can be), publish answers
+     409 with "uploading": [its kinds]: finish each one, or abort the ones you no longer
+     want, then publish. A publish_on_complete draft waits for its last upload the same way.
   Straight to storage: add "direct": true to start. Where this deployment can, the answer says
   "direct": true, parts run up to {{UP_DIRECT_PART_MAX}} and an upload up to {{UP_MAX_DIRECT_TEXT}}. Then
   POST /messages/ID/KIND/sign {"parts": [1, 2, ...]} (up to {{UP_SIGN_MAX}} at a time) answers
@@ -476,7 +479,9 @@ UPLOADING FILES
   finish. Calling start again with the same size (and fingerprint) resumes rather than
   restarting (a 502 there means storage did not list the parts: ask again rather than
   re-send them all; a 409 that the message already has one means the file is in place). Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
-  finds your draft with that upload in flight. Calls for one message's KIND (start, finish,
+  finds your draft with that upload in flight - only a draft that holds nothing else: one
+  that also has a file of another kind, finished or not, is not found (it would publish that
+  file too), so start a new draft. Calls for one message's KIND (start, finish,
   abort, an attach) run one at a time, in the order they arrive: an abort sent while a finish
   runs waits for it, then answers "aborted": false. POST /messages/ID/KIND/abort cancels (then
   DELETE /messages/ID?draft_only=1 drops the draft, never a message already live). An

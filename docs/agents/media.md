@@ -127,7 +127,11 @@ way; the routes are in docs.txt UPLOADING FILES.
   in (409 with `missing`), completes the R2 multipart upload, checks the
   size and, for typed kinds, the magic bytes, and attaches; `abort`
   cancels. `upload/resume {size, fingerprint}` finds a draft with that
-  file in flight, and starting again with the same size resumes.
+  file in flight, and starting again with the same size resumes. It
+  finds only a draft that holds no other kind (`findResumableUpload`):
+  a draft from a send of a photo and a file, the photo finished, was
+  handed to a resend of the file alone, and its publish posted the photo
+  the author had removed.
 - The Worker streams each part's body straight into `uploadPart`, never
   buffered and never through the DO. Part 1 of a typed kind is sniffed
   through a `FixedLengthStream` before anything is stored, so a wrong kind
@@ -390,7 +394,12 @@ credential, and the route reads no other.
 
 - `POST /messages {draft: true}` creates an invisible draft; uploads
   attach to it, and `/publish` makes it live. Until then its media is
-  visible only to its sender and the owner. A caption sent with the
+  visible only to its sender and the owner. A publish while any of the
+  draft's `md` rows still holds an upload answers 409 with `uploading`
+  (its kinds): it went live with that file missing and its upload
+  dangling, or with a file from a send the author had since changed.
+  `publish_on_complete` waits for the last upload the same way, since
+  its publish is the same call. A caption sent with the
   publish replaces the draft's and is held to `MAX_TEXT` like a post
   (413): it used to be cut to the limit, silently.
 - To anyone else a draft does not exist (`hiddenDraft` in

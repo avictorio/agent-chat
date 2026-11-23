@@ -622,3 +622,63 @@ test("revoke everyone aborts every member's direct uploads in flight", async () 
   assert.equal(h.multipart.has(up), false);
   assert.equal(h.all("SELECT msg FROM md").length, 0);
 });
+
+/** a file session of len bytes (fingerprint fp) with every part in; answers its upload id */
+async function fileSession(h, id, len, fp) {
+  const s = await h.room.uploadStart(id, "file", "Ada", false, R, len, "application/pdf", "report.pdf", fp, false);
+  assert.equal(s.status, 200, s.error);
+  const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'file'", id).upload_id;
+  h.multipart.get(up).data = bytes([0x25, 0x50, 0x44, 0x46], len);
+  for (let n = 1; n <= s.parts; n++) assert.equal(h.room.uploadPartDone(id, "file", up, n, "e" + n).status, 200);
+  return up;
+}
+
+// A photo and a file sent together: the photo finished, the file did not.
+// The person removes the photo and sends the file alone. The lookup used
+// to hand back the first draft, and its publish posted the photo too.
+test("the resume lookup does not hand back a draft that holds another kind as well", async () => {
+  const h = makeRoom();
+  const both = await draft(h);
+  await imageSession(h, both, 100);
+  assert.equal((await h.room.uploadFinish(both, "image", "Ada", false, R, null)).status, 200);
+  await fileSession(h, both, 300, "fp-file");
+  const r = await h.room.findResumableUpload("Ada", 300, "fp-file", false, null);
+  assert.equal(r.found, false, "the draft also carries a photo: a resend of the file alone starts afresh");
+  assert.equal((await h.room.findResumableUpload("Ada", 300, "fp-file", false, "file")).found, false, "narrowed to the kind too");
+  const alone = (await h.room.post("Ada", "only the file", R, false, null, null, null, true, false)).id;
+  await fileSession(h, alone, 300, "fp-file");
+  const r2 = await h.room.findResumableUpload("Ada", 300, "fp-file", false, null);
+  assert.equal(r2.found, true, "a draft holding only that file is still found");
+  assert.equal(r2.id, alone);
+});
+
+test("a publish waits for every upload of the draft: 409 while one is in flight", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).status, 200);
+  const up = await fileSession(h, id, 300, "fp-file");
+  const p = await h.room.publishMessage(id, "Ada", false, R, undefined);
+  assert.equal(p.status, 409, "the file is still on its way");
+  assert.deepEqual(p.uploading, ["file"]);
+  assert.match(p.error, /finish it, or abort it/);
+  assert.ok(h.one("SELECT draft FROM m WHERE id = ?", id).draft, "it stays a draft");
+  assert.ok(h.multipart.has(up), "and its upload goes on");
+  assert.equal((await h.room.uploadAbort(id, "file", "Ada", false)).status, 200);
+  assert.equal((await h.room.publishMessage(id, "Ada", false, R, undefined)).status, 200, "with the upload ended it publishes");
+});
+
+test("a publish_on_complete draft goes live when its last upload finishes, not its first", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const id = (await h.room.post("Ada", "two files", R, false, null, null, null, true, true)).id;
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  const first = await h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  assert.equal(first.status, 200);
+  assert.equal(first.published, false, "the file is still in flight");
+  assert.ok(h.one("SELECT draft FROM m WHERE id = ?", id).draft);
+  const last = await h.room.uploadFinish(id, "file", "Ada", false, R, null);
+  assert.equal(last.status, 200);
+  assert.equal(last.published, true, "the last one publishes it");
+});

@@ -727,12 +727,17 @@ export const UploadMethods = {
   // One of your drafts with an upload in flight for the same file (size
   // and fingerprint), of any kind unless kind narrows it: how a client
   // that lost its place - a reload, another device - picks it back up.
+  // Only a draft that holds nothing but that file: one from a send of a
+  // photo and this file, the photo done and the file not, was handed back
+  // to a resend of the file alone, and its publish posted the photo the
+  // author had removed meanwhile.
   async findResumableUpload(who: string | null | undefined, size: unknown, fp: unknown, owner: boolean, kind: string | null | undefined) {
     if (!fp || !size) return { status: 200, found: false };
     const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
       if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
+      if (this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND kind != ? LIMIT 1", r.msg, r.kind).toArray().length) continue;
       const st = await this.uploadStatus(r.msg, r.kind);
       if (st.status !== 200 || !st.uploading) continue;
       return { status: 200, found: true, id: r.msg, kind: r.kind, received: st.received, part_size: st.part_size, parts: st.parts, direct: !!st.direct };

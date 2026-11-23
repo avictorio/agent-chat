@@ -273,6 +273,13 @@ export const MessageMethods = {
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
+    // Not while one of its files is still on its way: published then, the
+    // message went live with that file missing and its upload dangling,
+    // or with a file from another send the author had dropped since (a
+    // resend that adopted the draft, another device). The upload's own
+    // finish publishes a publish_on_complete draft once nothing is left.
+    const flying = this.sql.exec<Pick<MdRow, "kind">>("SELECT kind FROM md WHERE msg = ? AND upload_id IS NOT NULL ORDER BY kind", id).toArray().map((x) => x.kind);
+    if (flying.length) return { status: 409, error: "An upload for this message is still in flight (" + flying.join(", ") + "): finish it, or abort it (POST /messages/" + id + "/KIND/abort), then publish", uploading: flying };
     // An over-long caption is refused, as a post with it is: cutting it to
     // MAX_TEXT here published a shortened message and told no one, when
     // the author could have split it.

@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.7";
+export const API_VERSION = "2026-11-23.8";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-uploads-media",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file.",
+  },
   {
     id: "2026-11-23-delete-gap-frames",
     date: "2026-11-23",

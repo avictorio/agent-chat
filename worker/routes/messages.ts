@@ -43,7 +43,7 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   const body = await readBody(request);
   const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? bodyText(body.text, "text") : undefined);
-  if (refused(r)) return json({ error: r.error }, r.status);
+  if (refused(r)) return json("uploading" in r ? { error: r.error, uploading: r.uploading } : { error: r.error }, r.status);
   return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
 }
 
