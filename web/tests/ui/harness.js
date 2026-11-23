@@ -544,7 +544,22 @@ async function setup(page, S, calls) {
         ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list. Call whoami and get_room_state first.' }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
-    if (p.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\nevent: state\ndata: ' + JSON.stringify({ type: 'state', room: 'demo', room_state: roomState(S) }) + '\n\n' });
+    // The stream answers with its frames and ends, as a dropped connection
+    // would. S.live holds the messages that go live (or are sent again,
+    // whole, under the same id) while it is open: each lands in S.msgs with
+    // its delivery number (S.dn) and goes out as a frame whose SSE id: line
+    // is that number, the way the server's does. S.streamRetry is the
+    // reconnect delay the stream hands out.
+    if (p.endsWith('/stream')) {
+      let frames = '';
+      for (const x of (S.live || []).splice(0)) {
+        const i = S.msgs.findIndex((y) => y.id === x.msg.id);
+        if (i >= 0) S.msgs[i] = x.msg; else S.msgs.push(x.msg);
+        if (x.dn) (S.dn = S.dn || {})[x.msg.id] = x.dn;
+        frames += 'id: ' + delivery(S, x.msg) + '\nevent: message\ndata: ' + JSON.stringify(x.msg) + '\n\n';
+      }
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: ' + (S.streamRetry || 600000) + '\n\nevent: state\ndata: ' + JSON.stringify({ type: 'state', room: 'demo', room_state: roomState(S) }) + '\n\n' + frames });
+    }
     // with state.artScript the posted page carries a script that announces itself with a request (S.artRan counts them): it must run in the opened viewer and never in the feed's preview
     if (p.endsWith('/__art_ran')) { S.artRan = (S.artRan || 0) + 1; return route.fulfill({ status: 204, body: '' }); }
     if (/\/messages\/\d+\/html$/.test(p)) return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Probe</title><p>artifact body</p>' + (S.artScript ? '<script>new Image().src = "/api/rooms/demo/__art_ran"</script>' : '') });

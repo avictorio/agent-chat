@@ -1,7 +1,7 @@
 // UI scenarios: the chat: markdown, voice and dictation, message actions, artifacts and reactions.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/chat.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, run, shot, ymd } = require('./harness');
+const { settle, done, must, run, shot, ymd } = require('./harness');
 
 (async () => {
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
@@ -472,6 +472,31 @@ const { settle, done, run, shot, ymd } = require('./harness');
     await page.waitForTimeout(650);
     out.dragNoBar = !(await page.$('.rx-bar'));
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    return out;
+  });
+
+  // The stream cursor is each message frame's SSE id: line, its delivery
+  // number. A message sent again (here: a file landed on row 8) comes
+  // under its old id with a number past the newest id; the reconnect must
+  // ask for after= that number. Before, the cursor was the highest id seen,
+  // so the reconnect asked for less and got row 8 again after every drop.
+  await run('stream-cursor-delivery', { state: { artifacts: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    const m8 = S.msgs.find((m) => m.id === 8);
+    const top = Math.max(...S.msgs.map((m) => m.id));
+    const dn = top + 40;
+    S.live = [{ msg: Object.assign({}, m8, { file: { type: 'application/zip', bytes: 2048, name: 'extra.zip', url: '/api/rooms/demo/messages/8/file?exp=2&sig=x' } }), dn }];
+    S.streamRetry = 300;
+    const from = calls.length;
+    await page.reload();
+    const streams = () => calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/stream\?/.test(c));
+    await page.waitForSelector('.msg[data-id="8"] .file-card', { timeout: 5000 });
+    for (let i = 0; i < 50 && streams().length < 2; i++) await page.waitForTimeout(100);
+    S.streamRetry = 0;
+    const out = { top, dn, streams: streams().slice(0, 2).map((c) => c.split('?')[1].split('&')[0]) };
+    must(out.streams.length === 2, 'the stream reconnected: ' + JSON.stringify(out));
+    must(out.streams[1] === 'after=' + dn, 'the reconnect resumes after the frame\'s id: line: ' + JSON.stringify(out));
+    must((await page.$$('.msg[data-id="8"]')).length === 1, 'the re-sent row is shown once');
+    await settle(page);
     return out;
   });
 

@@ -91,15 +91,15 @@ export function useRoomStream(opts: {
     // cannot send headers, and the invite token goes in the
     // X-Invite-Token header like every other call this client makes,
     // never in a URL. The reader below speaks just enough SSE —
-    // event/data framing plus the server's retry: hint — to carry the
-    // five frame kinds.
+    // event/data framing, the id: line (a message's delivery number) and
+    // the server's retry: hint — to carry the five frame kinds.
     const stream = () => {
       ctrlRef.current?.abort();
       if (deniedRef.current || cancelled) return;
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
       let retryMs = 3000;
-      const onFrame = (kind: string, data: string) => {
+      const onFrame = (kind: string, data: string, eventId: number | null) => {
         try {
           if (kind === "members") {
             window.clearTimeout(membersTimerRef.current);
@@ -121,7 +121,13 @@ export function useRoomStream(opts: {
           } else if (kind === "message") {
             const m = JSON.parse(data) as Message;
             feed.addMsg(m);
-            if (feed.lastRef.current === null || m.id > feed.lastRef.current) feed.lastRef.current = m.id;
+            // The cursor is the frame's delivery number (its id: line), not
+            // the message id: a draft published late, or a message sent
+            // again when its media landed, carries a number past the newest
+            // id. Keeping the highest message id instead, a reconnect asked
+            // for what it already had and could replay it after every drop.
+            const at = eventId ?? m.id;
+            if (feed.lastRef.current === null || at > feed.lastRef.current) feed.lastRef.current = at;
           }
         } catch {
           // malformed frame: ignore
@@ -167,17 +173,22 @@ export function useRoomStream(opts: {
               const block = buf.slice(0, cut);
               buf = buf.slice(cut + 2);
               let kind = "message";
+              let eventId: number | null = null;
               const dataLines: string[] = [];
               for (const line of block.split("\n")) {
                 if (line.startsWith("event:")) kind = line.slice(6).trim();
+                else if (line.startsWith("id:")) {
+                  const n = Number(line.slice(3).trim());
+                  if (Number.isSafeInteger(n) && n > 0) eventId = n;
+                }
                 else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
                 else if (line.startsWith("retry:")) {
                   const n = Number(line.slice(6).trim());
                   if (Number.isFinite(n) && n >= 0) retryMs = n;
                 }
               }
-              if (dataLines.length) onFrame(kind, dataLines.join("\n"));
-              else if (kind === "members") onFrame("members", "");
+              if (dataLines.length) onFrame(kind, dataLines.join("\n"), eventId);
+              else if (kind === "members") onFrame("members", "", null);
               cut = buf.indexOf("\n\n");
             }
           }
