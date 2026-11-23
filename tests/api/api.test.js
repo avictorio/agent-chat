@@ -1637,6 +1637,34 @@ function mp4() {
     check('the last die gone ends the 2-player match', rld.json.game.status === 'finished' && rld.json.game.winner === M2 && (rld.json.game.rounds[1] || {}).count === 0, JSON.stringify(rld.json.game).slice(0, 200));
     rld = await req('GET', R2 + '/games', { token: TP });
     check("the ladder rates Liar's Dice", ((rld.json.ladder || {}).liarsdice || []).length === 2 && rld.json.ladder.liarsdice[0].name === M2, JSON.stringify((rld.json.ladder || {}).liarsdice));
+    // Secrecy from the other viewers' side: what a seat or a spectator can
+    // read about a match by every path - the game frames its stream got
+    // (open from before the move), GET /games/ID, the games list, the
+    // match's card in the messages and MCP get_game. Only the holder's own
+    // view used to be checked for these secrets, so a field added to a
+    // summary, or a frame sent from a night act, left the suite green.
+    ldTok.Obs = (await req('POST', R2 + '/invites', { owner: true, json: { name: 'Obs', kind: 'agent' } })).json.token;
+    await req('GET', R2 + '/members', { token: ldTok.Obs });
+    const watchMatch = async (id, names) => {
+      const streams = {};
+      for (const n of names) streams[n] = await openStream(R2 + '/stream?events=game&game=' + id, ldTok[n]);
+      await sleep(300);
+      const frames = (n) => streams[n].frames.filter((f) => f.includes('event: game')).map((f) => JSON.parse(f.slice(f.indexOf('data: ') + 6)));
+      return {
+        frames,
+        // everything n can read, with JSON inside JSON (MCP's text) unescaped
+        async seen(n) {
+          await sleep(300);
+          const parts = [JSON.stringify(frames(n))];
+          parts.push((await req('GET', R2 + '/games/' + id, { token: ldTok[n] })).text);
+          parts.push(JSON.stringify(((await req('GET', R2 + '/games', { token: ldTok[n] })).json.games || []).find((x) => x.id === id) || null));
+          parts.push(JSON.stringify(((await req('GET', R2 + '/messages?limit=100', { token: ldTok[n] })).json.messages || []).filter((x) => x.game_id === id)));
+          parts.push(JSON.stringify((await mcp(R2, 'tools/call', { name: 'get_game', arguments: { id } }, { token: ldTok[n] })).json));
+          return parts.join('\n').replace(/\\+"/g, '"');
+        },
+        close() { for (const n of names) streams[n].close(); },
+      };
+    };
     // Two Truths and a Lie: a rotating storyteller, structured
     // moves (statements + lie), sealed votes, the lie kept secret.
     const ttExpire = (id) => req('POST', '/api/test-hooks/game-expire', { owner: true, json: { room: roomOf2, id } });
@@ -1661,8 +1689,16 @@ function mp4() {
     rtt = await ldMove(tt.id, T1, '1');
     check('the storyteller cannot vote -> 409', rtt.status === 409, rtt.status);
     const ttLie = ttTeller.you.lie;
+    let wm = await watchMatch(tt.id, [T3, 'Obs']);
     rtt = await ldMove(tt.id, T2, 'vote ' + ttLie);
     check('a vote is sealed until all are in', rtt.status === 200 && rtt.json.resolved === false && (rtt.json.game.players.find((p) => p.name === T2) || {}).committed === true, rtt.status + ' ' + rtt.text.slice(0, 160));
+    rtt = await ldMove(tt.id, T2, String(ttLie));
+    check('the same vote sent again changes nothing', rtt.status === 200 && rtt.json.resolved === false && rtt.json.game.you.vote === ttLie, rtt.status + ' ' + rtt.text.slice(0, 160));
+    for (const n of [T3, 'Obs']) {
+      const seen = await wm.seen(n);
+      check('two truths: ' + (n === 'Obs' ? 'a spectator' : 'the other voter') + ' reads no vote by any path, and one frame for the vote and its copy', !/"votes?":\s*\d/.test(seen) && wm.frames(n).length === 1 && wm.frames(n)[0].from === T2, wm.frames(n).length + ' ' + (seen.match(/"votes?":\s*\d[^,]*/) || [''])[0]);
+    }
+    wm.close();
     rtt = await ldMove(tt.id, T3, String((ttLie % 3) + 1));
     let ttR = ((rtt.json.game || {}).rounds || [])[0] || {};
     check('the reveal: a right vote scores 2, the storyteller 1 per player fooled', rtt.json.resolved === true && ttR.lie === ttLie && JSON.stringify(ttR.right) === JSON.stringify([T2]) && ttR.fooled === 1 && ttR.points[T2] === 2 && ttR.points[T1] === 1 && rtt.json.game.phase === 'write' && rtt.json.game.teller === T2, JSON.stringify(ttR) + ' ' + JSON.stringify(rtt.json.game).slice(0, 120));
@@ -1688,8 +1724,10 @@ function mp4() {
     const [W1, W2, W3] = ec.order || [];
     check('exquisite corpse is created in a lobby (the spelled-out name works)', rco.status === 201 && ec.type === 'corpse' && ec.status === 'lobby' && ec.turns_total === 3 && ec.variant === 'constraints' && ec.turn_seconds === 86400 && ec.story === null && typeof ec.you.constraint === 'string', rco.status + ' ' + rco.text.slice(0, 200));
     await req('POST', R2 + '/games/' + ec.id + '/accept', { token: TRex, json: {} });
+    wm = await watchMatch(ec.id, [W2, 'Obs']);
     await req('POST', R2 + '/games/' + ec.id + '/accept', { token: TRae, json: {} });
     rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W1] });
+    const ecCard = (rco.json.game.you || {}).constraint || '';
     check('the first writer sees only the seed line', rco.json.game.status === 'running' && rco.json.game.turn_of === W1 && rco.json.game.you.tail === 'The cat was late for the meeting.' && /only the segment before yours/i.test(rco.json.game.how_to_play || ''), rco.text.slice(0, 200));
     rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W2] });
     check('everyone else sees no text at all', !rco.text.includes('The cat was late') && rco.json.game.you.tail === undefined && rco.json.game.story === null, rco.text.slice(0, 200));
@@ -1703,6 +1741,11 @@ function mp4() {
     const ecW2 = rco.json.game.you.tail;
     rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W3] });
     check('the next writer sees only the segment before theirs; the rest see nothing', ecW2 === 'It had been a long day. The mice were unionising.' && !rco.text.includes('unionising') && !rco.text.includes('The cat was late'), ecW2 + ' | ' + rco.text.slice(0, 160));
+    for (const n of [W2, 'Obs']) {
+      const seen = await wm.seen(n);
+      check('corpse: ' + (n === 'Obs' ? 'a spectator' : 'another writer') + ' reads no one else\'s constraint card by any path before the reveal', ecCard.length > 5 && !seen.includes(ecCard) && !/"constraints":\s*\{/.test(seen), ecCard + ' | ' + (seen.match(/"constraints?":[^,]*/) || [''])[0]);
+    }
+    wm.close();
     await ttExpire(ec.id);
     rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W3] });
     check('a turn that runs out is a silent beat - the story goes on', rco.json.game.turn_of === W3 && rco.json.game.players.find((p) => p.name === W2).skips === 1 && rco.json.game.you.tail === 'It had been a long day. The mice were unionising.', JSON.stringify(rco.json.game).slice(0, 200));
@@ -1787,13 +1830,23 @@ function mp4() {
     check('the village does not talk at night -> 409', rww.status === 409, rww.status);
     rww = await ldMove(ww.id, WW, 'check ' + VS[0]);
     check('a werewolf kills, not checks -> 400', rww.status === 400 && /Tonight you kill/.test(rww.json.error), rww.status + ' ' + rww.text.slice(0, 120));
+    wm = await watchMatch(ww.id, [VS[0], 'Obs']);
     rww = await ldMove(ww.id, WW, 'den: the seer worries me');
     check('the den is the pack\'s own channel', rww.status === 200 && (rww.json.game.den || []).some((t) => t.text === 'the seer worries me'), rww.text.slice(0, 200));
     rww = await req('GET', R2 + '/games/' + ww.id, { token: ldTok[VS[0]] });
     check('nobody else hears the den', !rww.text.includes('the seer worries me'), rww.text.slice(0, 160));
     await ldMove(ww.id, SE, 'check ' + WW);
+    await ldMove(ww.id, SE, 'check ' + WW);
+    // a den line or a night act sends no frame: a frame names its actor
+    for (const n of [VS[0], 'Obs']) {
+      const seen = await wm.seen(n);
+      check('werewolf: ' + (n === 'Obs' ? 'a spectator' : 'a villager') + ' gets no frame from the den or a night act, and reads no pick or den line', wm.frames(n).length === 0 && !seen.includes('the seer worries me') && !/"(acts|pack_picks|checks|den)":/.test(seen) && !/"act":\s*"/.test(seen), wm.frames(n).length + ' ' + JSON.stringify(wm.frames(n)).slice(0, 160));
+    }
     rww = await ldMove(ww.id, WW, 'kill ' + VS[0]);
     let wwEv = ((rww.json.game || {}).events || [])[0] || {};
+    await sleep(300);
+    check('werewolf: dawn is the night\'s only frame, and it speaks as the Referee', [VS[0], 'Obs'].every((n) => wm.frames(n).length === 1 && wm.frames(n)[0].from === 'Referee'), JSON.stringify(wm.frames('Obs').map((f) => f.from)));
+    wm.close();
     check('the night resolves when every role has acted; dawn names the dead and the role', rww.json.resolved === true && wwEv.kind === 'death' && wwEv.who === VS[0] && wwEv.role === 'villager' && rww.json.game.phase === 'day' && rww.json.game.day === 1, JSON.stringify(wwEv) + ' ' + JSON.stringify(rww.json.game).slice(0, 120));
     rww = await req('GET', R2 + '/games/' + ww.id, { token: ldTok[SE] });
     check('the seer learns what they checked, privately', JSON.stringify(rww.json.game.you.checks) === JSON.stringify([{ night: 1, target: WW, wolf: true }]), JSON.stringify(rww.json.game.you.checks));
@@ -1908,12 +1961,26 @@ function mp4() {
     check('the quizmaster cannot answer -> 409', rtv.status === 409, rtv.status);
     rtv = await tvMove(Q1, { answer: 'biscuit!', wager: 30 });
     check('a wager over 25 -> 400', rtv.status === 400 && /at most 25/.test(rtv.json.error), rtv.status + ' ' + rtv.text.slice(0, 120));
+    wm = await watchMatch(tv.id, [Q2, 'Obs']);
     rtv = await tvMove(Q1, { answer: 'The Biscuit', wager: 20 });
     check('an answer and a wager are sealed', rtv.status === 200 && rtv.json.resolved === false && rtv.json.game.you.queued.wager === 20, rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await tvMove(Q1, { answer: 'The Biscuit', wager: 20 });
+    check('the same answer sent again changes nothing', rtv.status === 200 && rtv.json.game.you.queued.answer === 'The Biscuit', rtv.status + ' ' + rtv.text.slice(0, 160));
+    for (const n of [Q2, 'Obs']) {
+      const seen = await wm.seen(n);
+      check('trivia: ' + (n === 'Obs' ? 'a spectator' : 'the other answerer') + ' reads no answer or wager by any path, and one frame for the answer and its copy', !/"wager":\s*\d/.test(seen) && !seen.includes('The Biscuit') && wm.frames(n).length === 1, wm.frames(n).length + ' ' + (seen.match(/"wager":\s*\d+/) || [''])[0]);
+    }
     rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q2] });
     check('another answer stays hidden from the table', rtv.json.game.players.find((p) => p.name === Q1).committed === true && !/The Biscuit/.test(rtv.text), rtv.text.slice(0, 160));
     rtv = await tvMove(Q2, { dir: 'my cat Bisc @ 10' });
     check('an answer the match misses goes to the quizmaster to judge', rtv.status === 200 && rtv.json.resolved === false && rtv.json.game.phase === 'judge', rtv.status + ' ' + rtv.text.slice(0, 160));
+    // the judge phase's log line gave the number the match did not take:
+    // with committed public, each answerer learned whether theirs had
+    for (const n of [Q2, 'Obs']) {
+      const seen = await wm.seen(n);
+      check('trivia: the public log does not count the answers the match missed (' + n + ')', /is judging the answers the match did not take/.test(seen) && !/judging \d/.test(seen), (seen.match(/The answers are in[^"]*/) || [''])[0]);
+    }
+    wm.close();
     rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q0] });
     check('the quizmaster sees only the answers to judge', JSON.stringify(rtv.json.game.you.to_judge) === JSON.stringify([{ name: Q2, answer: 'my cat Bisc', accepted: false }]) && rtv.json.game.you.legal_moves.includes('accept ' + Q2), JSON.stringify(rtv.json.game.you));
     rtv = await tvMove(Q2, { dir: 'Biscuit @ 10' });
@@ -1973,8 +2040,16 @@ function mp4() {
     sgFetch = await fetch(BASE + R2 + '/games/' + sg.id + '/sketch/1');
     check('no signature and no credential -> refused', sgFetch.status === 401 || sgFetch.status === 403, sgFetch.status);
     await sgHook({ right: [A2sg], roast: '' });
+    wm = await watchMatch(sg.id, [A2sg, 'Obs']);
     rsg = await sgMove(A1sg, { guess: '  ' + prompt1.toUpperCase() + '!  ' });
     check('a sealed guess', rsg.status === 200 && rsg.json.resolved === false && rsg.json.game.you.queued === prompt1.toUpperCase() + '!', rsg.status + ' ' + rsg.text.slice(0, 160));
+    rsg = await sgMove(A1sg, { guess: prompt1.toUpperCase() + '!' });
+    check('the same guess sent again changes nothing', rsg.status === 200 && rsg.json.resolved === false, rsg.status + ' ' + rsg.text.slice(0, 160));
+    for (const n of [A2sg, 'Obs']) {
+      const seen = await wm.seen(n);
+      check('sketch: ' + (n === 'Obs' ? 'a spectator' : 'the other guesser') + ' reads no guess by any path, and one frame for the guess and its copy', !seen.includes(prompt1.toUpperCase() + '!') && !/"guesses":\s*\{\s*"/.test(seen) && wm.frames(n).length === 1, wm.frames(n).length);
+    }
+    wm.close();
     rsg = await sgMove(A2sg, { guess: 'something close' });
     let sgR = ((rsg.json.game || {}).rounds || [])[0] || {};
     check('round 1: the plain match and the Referee\'s verdict both count', rsg.json.resolved === true && sgR.prompt === prompt1 && sgR.guesses[A1sg].right === true && sgR.guesses[A1sg].exact === true && sgR.guesses[A1sg].how === 'match' && sgR.guesses[A2sg].right === true && sgR.guesses[A2sg].how === 'referee' && sgR.points[A1sg] === 2 && sgR.points[A2sg] === 2 && sgR.points[A0sg] === 2 && sgR.judge === 'referee' && /\/sketch\/1\?/.test((sgR.image || {}).url || '') && rsg.json.game.artist === A1sg, JSON.stringify(sgR).slice(0, 300));
