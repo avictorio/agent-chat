@@ -868,7 +868,13 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         notify();
         const me = (opts.meName() || "").toLowerCase();
         const playing = !!me && (game.players || []).some((p: GLPlayer) => String(p.name || "").toLowerCase() === me);
-        if (!prev || prev.__frameOnly || playing) {
+        // The frame that ends a match is fetched once in full, for
+        // spectators too: its last round (the face-off, the log, the
+        // h2h) is only in the full state, and the card poll skips
+        // finished matches, so a spectator's card kept the round before
+        // the finish until a reload.
+        const ended = !!prev && prev.status !== game.status && (game.status === "finished" || game.status === "cancelled");
+        if (!prev || prev.__frameOnly || playing || ended) {
           void fetchGame(game.id);
           return;
         }

@@ -1,7 +1,7 @@
 // UI scenarios: the Games tab, New game, the guide, the chat cards, the Duel and Light Cycles.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/games.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, ngOpen, run, shot } = require('./harness');
+const { settle, clockNow, done, ngOpen, run, shot } = require('./harness');
 
 (async () => {
   await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
@@ -490,6 +490,51 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
+
+  // A spectator's Duel card when the match finishes: the frame that ends
+  // it carries no rounds, so the store fetches the full state once and
+  // the card's face-off shows the finishing throws, not the round before.
+  for (const [label, o] of [['duel-spectator-finish', {}], ['duel-spectator-finish-mobile', { w: 390, h: 844, touch: true }]]) {
+    await run(label, Object.assign({ state: { duel: true } }, o), async (page, S, calls) => {
+      // the duel is Ada against Henry; the signed-in Anthony watches
+      const swap = (x) => JSON.parse(JSON.stringify(x).replace(/Anthony/g, 'Henry'));
+      S.duel = swap(S.duel);
+      S.duel.you = { playing: false };
+      const msg = S.msgs.find((m) => m.id === 10);
+      msg.game = swap(msg.game);
+      msg.text = msg.text.replace(/Anthony/g, 'Henry');
+      let release;
+      const gate = new Promise((r) => (release = r));
+      let streams = 0;
+      await page.route('**/stream*', async (route) => {
+        streams++;
+        if (streams > 1) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
+        return route.fulfill({ status: 200, contentType: 'text/event-stream', body: await gate });
+      });
+      await page.reload();
+      await settle(page);
+      await page.waitForSelector('.game-card .duel-faceoff-line', { timeout: 10000 });
+      const before = await page.$eval('.game-card .duel-faceoff-line', (e) => e.textContent);
+      // the server finishes it: round 4, Ada's paper over Henry's rock
+      const at = clockNow();
+      S.duel.rounds.push({ n: 4, throws: { Ada: 'paper', Henry: 'rock' }, winner: 'Ada', at, throws_at: { Ada: at, Henry: at } });
+      Object.assign(S.duel, { status: 'finished', winner: 'Ada', round: 4, score: { Ada: 3, Henry: 0 }, deadline: null });
+      S.duel.players.forEach((p) => { p.wins = S.duel.score[p.name]; p.thrown = false; });
+      // the frame is the public summary: no rounds, log, h2h or you
+      const pub = JSON.parse(JSON.stringify(S.duel));
+      for (const k of ['rounds', 'log', 'you', 'awaiting', 'awaiting_accept', 'h2h', 'how_to_play']) delete pub[k];
+      release('retry: 600000\n\nevent: game\ndata: ' + JSON.stringify({ type: 'game', room: 'demo', from: 'Ada', kind: 'agent', targets: [], game: pub }) + '\n\n');
+      // well inside the 20 s card poll, which skips finished matches anyway
+      await page.waitForFunction(() => /🪨/.test((document.querySelector('.game-card .duel-faceoff-line') || {}).textContent || ''), null, { timeout: 8000 })
+        .catch(() => { throw new Error('the card must show the finishing throws (paper over rock); still: ' + before); });
+      const out = { before, after: await page.$eval('.game-card .duel-faceoff-line', (e) => e.textContent) };
+      out.gets = calls.filter((c) => /GET \/api\/rooms\/demo\/games\/2(\?|$)/.test(c)).length;
+      await page.waitForTimeout(300);
+      await shot(page, label + '.png');
+      return out;
+    });
+  }
+
 
   done('games');
 })();
