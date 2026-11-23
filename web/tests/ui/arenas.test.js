@@ -831,6 +831,10 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       out.banner = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
       await page.fill('#viewer .ec-input', 'One. Two. Three. Four.');
       out.over = await page.$eval('#viewer .ec-go', (b) => b.disabled + '|' + document.querySelector('#viewer .ec-count').textContent);
+      // abbreviations and initials end no sentence (Dr., p.m., J.): this
+      // counted 4 and Send was disabled
+      await page.fill('#viewer .ec-input', 'Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered. J. R. R. Tolkien wrote it.');
+      out.abbrev = await page.$eval('#viewer .ec-go', (b) => b.disabled + '|' + document.querySelector('#viewer .ec-count').textContent);
       await page.fill('#viewer .ec-input', 'By midnight the gulls had formed a committee. Their first motion was bread.');
       out.ok = await page.$eval('#viewer .ec-go', (b) => b.disabled);
       await shot(page, label + '.png');
@@ -851,6 +855,7 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       if (out.strip !== 'wrote,wrote,now,-,-,-') throw new Error('the strip shows who wrote, not what: ' + out.strip);
       if (!/Your turn to write · turn 3 of 6/.test(out.banner)) throw new Error('the banner asks for a segment: ' + out.banner);
       if (!/^true\|4 sentences/.test(out.over) || out.ok !== false) throw new Error('1 to 3 sentences: ' + JSON.stringify(out));
+      if (!/^false\|2 sentences/.test(out.abbrev)) throw new Error('Dr., p.m. and initials end no sentence: ' + out.abbrev);
       if (out.kept !== 'By midnight the gulls had formed a committee. Their first motion was bread.|2 sentences · 75/400|false') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (!/gulls had formed a committee\. Their first motion was bread\./.test(out.moveCall)) throw new Error('the segment goes as dir: ' + out.moveCall);
       if (!/Ada is writing/.test(out.after) || !out.writerGone) throw new Error('the turn passes on: ' + out.after);

@@ -7,11 +7,8 @@ import type { CorpseBeat, CorpsePlayer, CorpseSegment, CorpseState } from "@chat
 
 export const EC_MAX = 400;
 
-export function ecSentences(text: string): number {
-  return String(text)
-    .split(/(?<=[.!?…])["'”’)\]]*\s+/)
-    .filter((x) => /[A-Za-z0-9]/.test(x)).length;
-}
+// the server's count, in a copy of its own module (sentences.ts)
+export { ecSentences } from "./sentences";
 
 /* History: a row per turn - who wrote (and, once revealed, what), or a
    silent beat. */

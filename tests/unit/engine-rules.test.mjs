@@ -155,3 +155,15 @@ test("Liar's Dice: a match stored with cups on a timeout round shows them only o
   assert.equal(end.status, "finished");
   assert.deepEqual(end.rounds[0].cups.Al, [1, 4, 6], "shown once the match is over");
 });
+
+test("Exquisite Corpse counts sentences past abbreviations and in any script", async () => {
+  const { h, id } = await running("corpse", ["Ann", "Bob", "Cat"], { rotations: 1 });
+  const writer = () => h.room.gameRow(id).st.writer;
+  const five = await h.room.gameMove(id, writer(), "Он пришёл. Она ушла. Дождь. Снег. Ночь.", R);
+  assert.equal(five.status, 400, "five Russian sentences are more than 3");
+  assert.match(five.error, /yours has 5/);
+  for (const text of ["Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.", "J. R. R. Tolkien wrote it."]) {
+    const r = await h.room.gameMove(id, writer(), text, R);
+    assert.equal(r.status, 200, text + ": " + r.error);
+  }
+});

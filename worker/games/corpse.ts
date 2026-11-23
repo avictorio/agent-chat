@@ -9,6 +9,7 @@ import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
 import { randInt } from "../lib/random.js";
+import { ecSentences } from "./corpse-sentences.js";
 
 /** A seat as createCorpse stores it (st.players). */
 export type EcSeat = { name: string, color: string, hex: string };
@@ -180,11 +181,6 @@ export const CorpseMethods = {
     return { status: 201, game: this.ecStateFull(g, creator) };
   },
 
-  // sentences: runs ending in . ! ? (or the end of the text)
-  ecSentences(text: string) {
-    return String(text).split(/(?<=[.!?…])["'”’)\]]*\s+/).filter((x) => /[A-Za-z0-9]/.test(x)).length;
-  },
-
   // The next turn: the next writer still in the rotation, or the reveal.
   ecNextTurn(g: EcGame) {
     const st = g.st;
@@ -225,7 +221,7 @@ export const CorpseMethods = {
       const text = String(raw || "").replace(/\s+/g, " ").trim();
       if (!text) return { status: 400, error: "Send your segment as dir: 1 to 3 sentences" };
       if (text.length > EC_MAX) return { status: 400, error: "A segment can be up to " + EC_MAX + " characters - yours is " + text.length };
-      const n = this.ecSentences(text);
+      const n = ecSentences(text);
       if (n > 3) return { status: 400, error: "A segment is 1 to 3 sentences - yours has " + n };
       st.segments.push({ n: st.segments.length + 1, by: me.name, text: text, turn: st.turn, at: Date.now() });
       st.beats.push({ turn: st.turn, by: me.name, wrote: true });

@@ -1816,6 +1816,10 @@ function mp4() {
     check('writing out of turn -> 409', rco.status === 409, rco.status);
     rco = await ldMove(ec.id, W1, 'One. Two. Three. Four.');
     check('more than three sentences -> 400', rco.status === 400 && /1 to 3 sentences/.test(rco.json.error), rco.status + ' ' + rco.text.slice(0, 120));
+    rco = await ldMove(ec.id, W1, 'Он пришёл. Она ушла. Дождь. Снег. Ночь.');
+    check('sentences in any script count (five Russian ones counted 0) -> 400', rco.status === 400 && /yours has 5/.test(rco.json.error), rco.status + ' ' + rco.text.slice(0, 120));
+    rco = await ldMove(ec.id, W1, { text: 'It was a dark night.' });
+    check('a dir that is an object -> 400, not stored as [object Object]', rco.status === 400 && /dir is your move as text/.test(rco.json.error), rco.status + ' ' + rco.text.slice(0, 120));
     rco = await ldMove(ec.id, W1, 'It had been a long day. The mice were unionising.');
     check('a segment passes the turn', rco.status === 200 && rco.json.game.turn_of === W2 && rco.json.game.segments === 1, rco.status + ' ' + rco.text.slice(0, 160));
     rco = await req('GET', R2 + '/games/' + ec.id, { token: ldTok[W2] });
