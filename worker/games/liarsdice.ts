@@ -46,7 +46,7 @@ export const LiarsDiceMethods = {
 
   /* ---------- games: Liar's Dice ----------
      Player rules: rules() below. Secrecy: a view shows only your own cup
-     and the cups of rounds already opened. On the turn-order helper, with
+     and the cups of rounds a liar call opened. On the turn-order helper, with
      its own clock (ldAdvance): every timeout costs a die, so a match
      always ends. st.order holds the seats still in, so turnsNext skips
      the eliminated. */
@@ -115,9 +115,20 @@ export const LiarsDiceMethods = {
     return (st.cups[nm] || []).slice().sort((a, b) => a - b);
   },
 
+  // A closed round as a view shows it. Only a liar call opens the cups: a
+  // round a timeout or forfeit closed stores none, and one stored before
+  // that rule shows its cups only once the match is over (they let
+  // rivals see whether the last bid was a bluff no one paid to call).
+  ldShownRound(g: LdGame, r: LiarsDiceRound): LiarsDiceRound {
+    if (r.reason === "call" || g.status === "finished" || !Object.keys(r.cups || {}).length) return r;
+    const held: Record<string, number> = {};
+    for (const n of Object.keys(r.cups)) held[n] = r.cups[n].length;
+    return Object.assign({}, r, { cups: {}, held: r.held || held });
+  },
+
   ldSummary(g: LdGame): LiarsDiceState {
     const st = g.st;
-    const last = st.rounds.length ? st.rounds[st.rounds.length - 1] : null;
+    const last = st.rounds.length ? this.ldShownRound(g, st.rounds[st.rounds.length - 1]) : null;
     return {
       id: g.id, type: "liarsdice", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
       turn: st.turn, round: st.round, turn_of: g.status === "running" ? st.turn_of : null, turn_seconds: st.turn_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
@@ -130,7 +141,7 @@ export const LiarsDiceMethods = {
   ldStateFull(g: LdGame, who: string | null | undefined): LiarsDiceState {
     const out = this.ldSummary(g);
     const st = g.st;
-    out.rounds = st.rounds;
+    out.rounds = st.rounds.map((r) => this.ldShownRound(g, r));
     out.log = st.log.slice(-24);
     out.awaiting = g.status === "running" && st.turn_of ? [st.turn_of] : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
@@ -194,13 +205,21 @@ export const LiarsDiceMethods = {
     st.out.push(nm);
   },
 
-  // Close the round: record it (every cup opened), take the loser's die
-  // (or their seat), then finish or deal the next round.
+  // Close the round: record it (every cup opened on a liar call; on a
+  // timeout or forfeit only how many dice each seat held), take the
+  // loser's die (or their seat), then finish or deal the next round.
   /** @param rec how the round closed */
   ldEndRound(g: LdGame, rec: Pick<LiarsDiceRound, "reason" | "call" | "face" | "count" | "stands">, loser: string, eliminate: boolean) {
     const st = g.st;
     const cups: Record<string, number[]> = {};
-    st.order.forEach((n) => (cups[n] = this.ldShow(st, n)));
+    const held: Record<string, number> = {};
+    st.order.forEach((n) => {
+      held[n] = (st.cups[n] || []).length;
+      // Nobody called, so nothing is opened: storing every cup here let
+      // rivals, spectators and the games list read a bluff that a
+      // timeout, not a call, ended.
+      if (rec.reason === "call") cups[n] = this.ldShow(st, n);
+    });
     const seat = st.order.indexOf(loser);
     if (eliminate) this.ldEliminate(st, loser);
     else {
@@ -208,7 +227,7 @@ export const LiarsDiceMethods = {
       if (!st.count[loser]) this.ldEliminate(st, loser);
     }
     const isOut = st.order.indexOf(loser) < 0;
-    st.rounds.push(Object.assign({ n: st.round, cups: cups, bids: st.bids.slice(), loser: loser, out: isOut, dice_left: st.count[loser] || 0, at: Date.now() }, rec));
+    st.rounds.push(Object.assign({ n: st.round, cups: cups, held: held, bids: st.bids.slice(), loser: loser, out: isOut, dice_left: st.count[loser] || 0, at: Date.now() }, rec));
     if (st.order.length <= 1) {
       g.status = "finished";
       st.winner = st.order[0] || null;
@@ -309,7 +328,7 @@ export const liarsdiceEngine = {
     "Liar's Dice: everyone has a cup of dice (" + st.dice_each + " each to start) that only they can see - your own are in you.dice. Turns go round the table (" + st.order.join(", ") + "). " +
     "On your turn, raise the bid or call liar. A bid says at least N dice on the whole table show face F; a raise is more dice, or the same count of a higher face. " +
     (st.ones_wild ? "Ones are wild: a 1 counts as every face, so bids name faces 2 to 6. " : "Ones are not wild: every face counts only itself. ") +
-    "Calling liar opens every cup: if the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round and everyone rolls again. No dice left and you are out; the last player with dice wins. " +
+    "Calling liar opens every cup (nothing else does): if the table holds at least the bid, the caller loses a die; if not, the bidder does. The loser opens the next round and everyone rolls again. No dice left and you are out; the last player with dice wins. " +
     "Each turn has " + clockWords(st.turn_seconds || 3600) + "; a turn that runs out costs you a die (a new round starts), and three timeouts in a row put you out. " +
     "Send: dir as a bid, NxF (e.g. 3x4: at least three 4s), or liar; you.legal_moves lists the lowest raise for each face, and liar.",
 } satisfies GameEngineOf<LdStored>;

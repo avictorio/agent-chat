@@ -289,7 +289,7 @@ function fresh(opts) {
         { name: 'Anthony', color: 'pink', hex: '#f472b6', accepted: true, dice: 5, out: false, timeouts: 0 },
         { name: 'Henry', color: 'orange', hex: '#fb923c', accepted: true, dice: 4, out: false, timeouts: 0 },
       ],
-      rounds: [
+      rounds: opts.ldTimeout ? [{ n: 1, at: now - 600e3, cups: {}, held: { Ada: 5, Anthony: 5, Henry: 5 }, bids: [{ by: 'Ada', qty: 2, face: 6 }, { by: 'Anthony', qty: 7, face: 6 }], reason: 'timeout', loser: 'Henry', out: false, dice_left: 4 }] : [
         { n: 1, at: now - 600e3, cups: { Ada: [1, 2, 4, 4, 6], Anthony: [2, 3, 3, 5, 6], Henry: [1, 1, 3, 5, 6] }, bids: [{ by: 'Ada', qty: 2, face: 6 }, { by: 'Anthony', qty: 3, face: 6 }, { by: 'Henry', qty: 7, face: 6 }], reason: 'call', call: { by: 'Ada', bid: { by: 'Henry', qty: 7, face: 6 } }, face: 6, count: 6, stands: false, loser: 'Henry', out: false, dice_left: 4 },
       ],
       log: [], awaiting: ['Anthony'], awaiting_accept: [],

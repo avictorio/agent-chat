@@ -334,6 +334,15 @@ function ClockStart({ onStart }: { onStart: (t: number) => void }) {
 }
 
 type Plan = { lifted: boolean; hits: number; step: number; countAt: number; verdictAt: number; breakAt: number; downAt: number; doneAt: number };
+/* How many dice a seat held in a closed round: its opened cup on a call;
+   on a timeout or forfeit the server opens no cup and sends held (the
+   counts) instead, so reading the cup alone showed every seat as out. */
+function heldIn(r: LiarsDiceRound, name: string): number {
+  const cup = (r.cups || {})[name];
+  if (cup) return cup.length;
+  return (r.held || {})[name] || 0;
+}
+
 function planOf(r: LiarsDiceRound, wild: boolean, last: boolean): Plan {
   const lifted = r.reason === "call" && !!r.call;
   let hits = 0;
@@ -684,7 +693,7 @@ export default function LiarsArena3D({
   // (until the loser's die breaks), the live counts otherwise
   const countOf = (name: string): number => {
     if (r) {
-      const n0 = ((r.cups || {})[name] || []).length;
+      const n0 = heldIn(r, name);
       return broke && name === r.loser ? Math.max(0, n0 - 1) : n0;
     }
     return ((players.find((p) => p.name === name) || {}).dice as number) || 0;
@@ -856,7 +865,7 @@ export default function LiarsArena3D({
                 } else if (k === "break") {
                   setBroke(true);
                   const s = seats.find((x) => x.name === r.loser);
-                  const n0 = ((r.cups || {})[r.loser] || []).length;
+                  const n0 = heldIn(r, r.loser);
                   if (s && n0 > 0 && !q.lite) {
                     const at = dieSpot(s, n0 - 1, true, n0, REVEAL);
                     setFx((l) => [...l.slice(-4), { id: ++fxId.current, at, hex: s.hex }]);

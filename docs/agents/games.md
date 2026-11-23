@@ -497,7 +497,10 @@ Build notes only; the rules are in each engine module's comment and its
   row put them out. So there is no pass limit: every timeout costs a die,
   and the match always ends. `st.order` holds only the seats still in;
   dice come from `crypto.getRandomValues`. Secret: `st.cups` (a view
-  carries `you.dice` and closed rounds' cups). Test hook: `liarsdice`
+  carries `you.dice` and the cups of rounds a liar call closed; a
+  timeout or forfeit stores only `held`, the dice counts, and
+  `ldShownRound` hides the cups older matches stored for such rounds
+  until the match ends). Test hook: `liarsdice`
   sets cups and can expire the turn.
 - **Two Truths and a Lie** (`twotruths`): Henry's spec. Phases `write`
   (the storyteller) and `vote`, a clock each; the statements are

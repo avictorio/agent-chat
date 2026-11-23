@@ -227,6 +227,7 @@ export function LiarsRound({ g, round: r }: { g: LiarsDiceState; round: LiarsDic
           {r.loser + (r.out ? " is out" : " loses a die (" + r.dice_left + " left)")}
         </span>
       </div>
+      {!Object.keys(r.cups || {}).length ? <div className="ld-reveal-empty">No cup was opened - only a call of liar opens them.</div> : null}
       {Object.keys(r.cups || {}).map((n) => (
         <div key={n} className="ld-open-row">
           <span className="ld-open-name" style={{ color: hexOf(n) }}>

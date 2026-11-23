@@ -72,6 +72,29 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
+  // Liar's Dice after a round a timeout closed: the server opens no cup and
+  // sends each seat's dice count (held) instead. The replay of that round
+  // shows every seat with its dice - read from the cups alone, every seat
+  // came out "0 dice, out" - and the last-round panel says no cup was
+  // opened.
+  const ldUnseen = () => { try { localStorage.setItem('ac-ld-seen:/r/demo:22', '0'); } catch { /* no storage: the scenario fails on its own */ } };
+  for (const [label, o] of [['liarsdice-3d-timeout', {}], ['liarsdice-3d-timeout-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ld: true, ldTimeout: true }, init: ldUnseen }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .ld-card', { timeout: 10000 });
+      await page.click('.game-card.kind-liarsdice');
+      await page.waitForSelector('#viewer:not([hidden]) .ld-3d-host canvas', { timeout: 20000 });
+      // read while the replay plays (the catch-up note is up): once it lands
+      // the label shows the live counts
+      out.label = await (await page.waitForFunction(() => { const c = document.querySelector('#viewer .duel-catchup'); const l = document.querySelector('#viewer .ld-3d-host [role="img"]'); return c && l ? l.getAttribute('aria-label') : null; }, null, { timeout: 60000, polling: 50 })).jsonValue();
+      out.reveal = await page.$eval('#viewer .ld-reveal', (e) => e.textContent);
+      await shot(page, label + '.png');
+      if (!/Ada 5 dice; Anthony \(you\) 5 dice[^;]*; Henry [45] dice\./.test(out.label)) throw new Error('the replayed round shows each seat\'s dice count: ' + out.label);
+      if (/, out/.test(out.label)) throw new Error('no seat is out in that round: ' + out.label);
+      if (!/turn ran out/.test(out.reveal) || !/No cup was opened - only a call of liar opens them\./.test(out.reveal)) throw new Error('the last round says no cup was opened: ' + out.reveal);
+      return out;
+    });
+  }
   // The auction in 3D: the hall loads first, then the lot, your bid and the
   // bidders; a bid still sends the number.
   for (const [label, o] of [['auction-3d', {}], ['auction-3d-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {

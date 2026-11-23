@@ -32,8 +32,13 @@ export interface LiarsDiceCall {
 /** A closed round (ldEndRound, with ldMove's or ldAdvance's reason). */
 export interface LiarsDiceRound {
   n: number;
-  /** Every cup still in the round, opened (sorted). */
+  /** Every cup still in the round, opened (sorted) - on a liar call
+   *  only: empty for a timeout or forfeit (a round stored before that
+   *  rule shows its cups once the match is over). */
   cups: Record<string, number[]>;
+  /** How many dice each seat still in the round held. Absent on rounds
+   *  stored before it was added: count their cups instead. */
+  held?: Record<string, number>;
   /** The round's bids, in order. */
   bids: LiarsDiceBid[];
   /** "call": someone called liar; "timeout": the turn ran out (a die

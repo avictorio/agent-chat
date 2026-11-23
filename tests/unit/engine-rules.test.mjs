@@ -103,3 +103,55 @@ test("Trust: a leader out for three missed rounds places below the player still 
   t.h.room.trStanding(st);
   assert.equal(st.places[2], "Bob", "last, with the top score");
 });
+
+test("Liar's Dice: a timeout opens no cup; only a liar call does", async () => {
+  const { h, id } = await running("liarsdice", ["Al", "Bo"], { dice: 2 });
+  h.member("Cy");
+  const st0 = h.room.gameRow(id).st;
+  const first = st0.turn_of, second = first === "Al" ? "Bo" : "Al";
+  edit(h, id, (st) => { st.cups = { Al: [6, 6], Bo: [2, 3] }; });
+  assert.equal((await h.room.gameMove(id, first, "4x6", R)).status, 200);
+  // the next player lets the clock run out
+  edit(h, id, (st) => { st.deadline = Date.now() - 1; });
+  for (const who of ["Cy", first, second, null]) {
+    const g = (await h.room.gameState(id, who, R)).game;
+    assert.equal(g.rounds.length, 1);
+    assert.equal(g.rounds[0].reason, "timeout");
+    assert.deepEqual(g.rounds[0].cups, {}, "no cup opened for " + who);
+    assert.deepEqual(g.rounds[0].held, { Al: 2, Bo: 2 }, "the dice counts still show");
+    assert.deepEqual(g.last_round.cups, {});
+  }
+  const listed = h.room.listGames().games.find((x) => x.id === id);
+  assert.deepEqual(listed.last_round.cups, {}, "nor in the games list");
+  assert.deepEqual(h.room.gameRow(id).st.rounds[0].cups, {}, "nor stored");
+  // a call opens every cup
+  const g1 = h.room.gameRow(id).st;
+  const opener = g1.turn_of, other = opener === "Al" ? "Bo" : "Al";
+  assert.equal((await h.room.gameMove(id, opener, "1x2", R)).status, 200);
+  const c = await h.room.gameMove(id, other, "liar", R);
+  assert.equal(c.status, 200, c.error);
+  const called = c.game.rounds[1];
+  assert.equal(called.reason, "call");
+  assert.deepEqual(Object.keys(called.cups).sort(), Object.keys(called.held).sort());
+});
+
+test("Liar's Dice: a match stored with cups on a timeout round shows them only once it is over", async () => {
+  const { h, id } = await running("liarsdice", ["Al", "Bo"], { dice: 3 });
+  // a round closed by a timeout under the old rule, every cup stored
+  edit(h, id, (st) => {
+    st.rounds.push({ n: 1, cups: { Al: [1, 4, 6], Bo: [2, 2, 5] }, bids: [], reason: "timeout", loser: "Bo", out: false, dice_left: 2, at: Date.now() });
+    st.round = 2;
+    st.count.Bo = 2;
+    st.cups.Bo = [3, 3];
+  });
+  const g = (await h.room.gameState(id, null, R)).game;
+  assert.deepEqual(g.rounds[0].cups, {});
+  assert.deepEqual(g.rounds[0].held, { Al: 3, Bo: 3 }, "counted from the stored cups");
+  assert.deepEqual(g.last_round.cups, {});
+  assert.deepEqual(h.room.gameRow(id).st.rounds[0].cups.Al, [1, 4, 6], "nothing stored is removed");
+  // the match still plays out and finishes
+  edit(h, id, (st) => { st.timeouts[st.turn_of] = 2; st.deadline = Date.now() - 1; });
+  const end = (await h.room.gameState(id, null, R)).game;
+  assert.equal(end.status, "finished");
+  assert.deepEqual(end.rounds[0].cups.Al, [1, 4, 6], "shown once the match is over");
+});

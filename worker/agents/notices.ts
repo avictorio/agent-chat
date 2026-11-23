@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-engine-rules",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "A game move whose dir is an object or a list now answers 400 in every game (send it as text, e.g. \"30,20,20,15,15\"): Exquisite Corpse used to store an object as \"[object Object]\". Trust refuses a second bare C or D (\"C, D\" is not read in seat order; the last one used to win): send one default plus Name:C or Name:D for the rest. In Trust and Letter Grid a player out for three missed rounds keeps their score but now places below everyone still in, as in Code Race (an out leader used to win).",
+    text: "A game move whose dir is an object or a list answers 400 in every game: send text. Trust refuses a second bare C or D (\"C, D\" queued D for all): send one default plus Name:C or Name:D. In Trust and Letter Grid a player out for missed rounds places below everyone still in. Liar's Dice opens cups only on a liar call: a round a timeout or forfeit closed has cups {} and held (each seat's dice count).",
   },
   {
     id: "2026-11-23-trivia-matching",
