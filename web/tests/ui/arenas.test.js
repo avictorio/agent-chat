@@ -1,7 +1,7 @@
 // UI scenarios: each game's arena: its controls, its moves and its finished state, desktop and phone.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
 
 (async () => {
   // Frontlines: the card shows the score and the last round on a compact
@@ -560,6 +560,29 @@ const { ARENA_KIDS, settle, done, noGl, run, shot } = require('./harness');
       if (!/Night 2 · your move: kill/.test(out.banner)) throw new Error('the banner asks for the kill: ' + out.banner);
       if (!/"dir":"kill Ada"/.test(out.killCall)) throw new Error('a tap picks the kill: ' + out.killCall);
       if (!/"dir":"den: agreed"/.test(out.denCall)) throw new Error('a whisper goes to the den: ' + out.denCall);
+      return out;
+    });
+  }
+  // Werewolf's town square past the server's window: the talk comes as the
+  // newest lines only, so a new line leaves the count the same. The poll
+  // must still repaint the square with it.
+  for (const [label, o] of [['werewolf-talk-full', {}], ['werewolf-talk-full-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ww: true } }, o), async (page, S) => {
+      const line = (n) => ({ n, by: n % 2 ? 'Ada' : 'Henry', text: 'line ' + n, ch: 'town', phase: 'day', day: 1, at: now - 40e3 + n * 100 });
+      S.ww.talk = Array.from({ length: 120 }, (_, i) => line(i + 1));
+      await page.waitForSelector('.game-card.kind-werewolf', { timeout: 10000 });
+      await page.click('.game-card.kind-werewolf');
+      await page.waitForSelector('#viewer .ww-talk', { timeout: 20000 });
+      const last = () => page.$$eval('#viewer .ww-talk-sec:not(.den) .ww-line-text', (e) => (e.length ? e[e.length - 1].textContent : ''));
+      const out = { start: await last() };
+      // line 121 arrives and the oldest drops off: still 120 lines
+      S.ww.talk = S.ww.talk.slice(1).concat([line(121)]);
+      await page.waitForFunction(() => { const e = document.querySelectorAll('#viewer .ww-talk-sec:not(.den) .ww-line-text'); return e.length && e[e.length - 1].textContent === 'line 121'; }, null, { timeout: 15000 })
+        .catch(async () => { throw new Error('the 8 s poll must show line 121 in a full square; still ' + (await last())); });
+      out.after = await last();
+      if (out.start !== 'line 120') throw new Error('the square starts at line 120: ' + out.start);
+      await page.$eval('#viewer .ww-talk', (e) => e.scrollIntoView({ block: 'center' }));
+      await shot(page, label + '.png');
       return out;
     });
   }
