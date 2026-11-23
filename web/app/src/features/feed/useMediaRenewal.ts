@@ -231,7 +231,11 @@ export function useMediaRenewal(opts: {
     // so a hold from reads that failed while it was out of reach is over
     // too. The browser fires no online event when it never thought it was
     // offline (the server down, a captive wifi), and links stayed dead for
-    // up to HOLD_MAX after the room was back.
+    // up to HOLD_MAX after the room was back. Every open ends the hold,
+    // also on a stream that flaps while reads still fail: an open cannot
+    // tell "still down" from "back", and letting only the first open of
+    // a hold end it left links dead for the rest of that hold once the
+    // room was back. The cost is one renewal read per reconnect.
     window.addEventListener("ac-stream-open", onOnline);
     return () => {
       window.clearInterval(timer);
