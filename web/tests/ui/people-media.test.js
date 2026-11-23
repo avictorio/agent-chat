@@ -182,6 +182,41 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     must(calls.some((c) => /\/101\/file\/finish/.test(c)) && calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
     return { r2: r2.length, signs: S.signs };
   });
+  await run('upload-finish-names-file', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // Every finish, the retry after a lost answer included, names the file
+    // by the size and fingerprint start gave, so the server can refuse one
+    // whose upload another file has replaced.
+    const finishes = [];
+    await page.route('**/messages/101/file/finish', async (route) => {
+      finishes.push(JSON.parse(route.request().postData() || '{}'));
+      if (finishes.length === 1) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"upstream connect error"}' });
+      return route.fallback();
+    });
+    await page.setInputFiles('#anyFile', { name: 'ledger.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(150000, 5) });
+    await page.click('#send');
+    await page.locator('.file-card', { hasText: 'ledger.bin' }).waitFor({ timeout: 20000 });
+    const startCall = calls.find((c) => /^POST .*\/101\/file\/start /.test(c)) || '';
+    const start = JSON.parse(startCall.slice(startCall.indexOf('{')));
+    must(typeof start.fingerprint === 'string' && start.size === 150000, 'start names the file: ' + startCall);
+    must(finishes.length === 2 && finishes.every((f) => f.size === start.size && f.fp === start.fingerprint), 'each finish carries start\'s size and fingerprint: ' + JSON.stringify({ start, finishes }));
+    return { finishes: finishes.length };
+  });
+  await run('upload-replaced', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // Another file took this upload's place and finished first: finish is
+    // refused, and the status (complete, but of another size) must not be
+    // read as this file being done, or the message goes out with that file.
+    S.replacedBy = 4321;
+    await page.setInputFiles('#anyFile', { name: 'mine.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100000, 4) });
+    await page.fill('#text', 'my file');
+    await page.click('#send');
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /replaced by a different file/.test(t.textContent || ''); }, null, { timeout: 10000 });
+    const toast = await page.$eval('#toast', (t) => t.textContent || '');
+    const published = calls.some((c) => /\/messages\/101\/publish/.test(c));
+    const resent = calls.filter((c) => /\/101\/file\/part\?n=/.test(c)).length;
+    must(!published, 'nothing is published with the other file: ' + toast);
+    must(resent === 2, 'no part is sent into the other file\'s upload: ' + resent);
+    return { toast };
+  });
   await run('upload-cancel', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     S.partDelay = 900;
     await page.setInputFiles('#anyFile', { name: 'big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(400000, 1) });

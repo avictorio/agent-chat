@@ -201,7 +201,7 @@ export class RoomClient {
   uploadStatus(
     id: number,
     kind: UploadKind
-  ): Promise<{ uploading: boolean; complete?: boolean; direct?: boolean; received: number[]; part_size?: number | null; parts?: number | null }> {
+  ): Promise<{ uploading: boolean; complete?: boolean; direct?: boolean; received: number[]; size?: number | null; part_size?: number | null; parts?: number | null }> {
     return this.call("/messages/" + id + "/" + kind + "/status");
   }
 
@@ -217,7 +217,10 @@ export class RoomClient {
   uploadFinish(
     id: number,
     kind: UploadKind,
-    extra?: { transcript?: string | null }
+    // size and fp (the fingerprint given at start) let the server refuse,
+    // with a 409, a finish whose upload another file has replaced, instead
+    // of answering 200 with that other file
+    extra?: { transcript?: string | null; size?: number; fp?: string }
   ): Promise<{ published?: boolean } & Record<string, unknown>> {
     return this.call("/messages/" + id + "/" + kind + "/finish", { method: "POST", body: JSON.stringify(extra || {}) });
   }

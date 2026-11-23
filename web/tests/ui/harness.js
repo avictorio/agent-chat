@@ -616,9 +616,9 @@ async function setup(page, S, calls) {
     if ((am = p.match(/\/messages\/(\d+)\/(image|audio|video|file)\/(start|part|sign|status|finish|abort)$/))) {
       const id = +am[1], kind = am[2], step = am[3], key = id + ':' + kind;
       S.ups = S.ups || {};
-      if (step === 'start') { const ps = 65536; S.ups[key] = { size: body.size, name: body.name, type: body.type, ps, parts: Math.max(1, Math.ceil(body.size / ps)), got: new Set() }; return J({ room: 'demo', id, kind, part_size: ps, parts: S.ups[key].parts, resumed: false, received: [], direct: !!(S.direct && body.direct), expires_at: new Date(clockNow() + 7 * D).toISOString() }); }
+      if (step === 'start') { const ps = 65536; S.ups[key] = { size: body.size, fp: body.fingerprint, name: body.name, type: body.type, ps, parts: Math.max(1, Math.ceil(body.size / ps)), got: new Set() }; return J({ room: 'demo', id, kind, part_size: ps, parts: S.ups[key].parts, resumed: false, received: [], direct: !!(S.direct && body.direct), expires_at: new Date(clockNow() + 7 * D).toISOString() }); }
       const u0 = S.ups[key];
-      if (step === 'status') return J({ room: 'demo', id, kind, uploading: !!u0 && !u0.done, complete: !!(u0 && u0.done), received: u0 ? [...u0.got] : [] });
+      if (step === 'status') return J({ room: 'demo', id, kind, uploading: !!u0 && !u0.done, complete: !!(u0 && u0.done), size: u0 ? u0.size : null, received: u0 ? [...u0.got] : [] });
       if (step === 'abort') { delete S.ups[key]; return J({ room: 'demo', id, kind, aborted: true }); }
       if (step === 'sign') { S.signs = (S.signs || 0) + 1; const urls = {}; for (const n of body.parts || []) urls[n] = 'https://acct.r2.cloudflarestorage.com/victorio-chat-media/demo/' + id + '/' + kind + '?partNumber=' + n + '&uploadId=up1&X-Amz-Signature=sig' + S.signs; return J({ room: 'demo', id, kind, method: 'PUT', urls, expires_at: new Date(clockNow() + 3600e3).toISOString() }); }
       if (!u0) return J({ error: 'No upload in progress for that message' }, 409);
@@ -630,6 +630,9 @@ async function setup(page, S, calls) {
         if (len !== want) return J({ error: 'wrong length', expected_bytes: want }, 400);
         u0.got.add(n); return J({ room: 'demo', id, kind, part: n });
       }
+      // S.replacedBy: another file (that size) took this upload's place and finished before this finish; a finish naming a size or fp other than the session's is refused like the server's
+      if (step === 'finish' && S.replacedBy) { Object.assign(u0, { size: S.replacedBy, fp: 'other-file', done: true }); S.replacedBy = 0; }
+      if (step === 'finish' && ((body.size != null && body.size !== u0.size) || (body.fp != null && u0.fp != null && body.fp !== u0.fp))) return J({ error: 'This upload was replaced by a different file' }, 409);
       if (u0.got.size < u0.parts) return J({ error: 'parts missing', missing: [] }, 409);
       u0.done = true;
       const ref = { type: kind === 'file' ? (u0.type || 'application/octet-stream') : kind + '/x', bytes: u0.size, url: '/api/rooms/demo/messages/' + id + '/' + kind + '?exp=1&sig=x' };

@@ -420,10 +420,18 @@ async function uploadItem(
   const todo: number[] = [];
   for (let n = 1; n <= plan.parts; n++) if (!have.has(n)) todo.push(n);
   await sendAll(todo);
-  // finish checks every part arrived; any it names as missing go again
+  // finish checks every part arrived; any it names as missing go again.
+  // It names this file (its size and start's fingerprint) every time, so a
+  // finish whose upload another file has replaced is refused instead of
+  // answering 200 with that other file.
+  const finishBody = {
+    size: blob.size,
+    fp: fp || undefined,
+    transcript: kind === "audio" && item.transcript ? item.transcript : undefined,
+  };
   for (let round = 0; ; round++) {
     try {
-      await net(() => client.uploadFinish(id, kind, kind === "audio" && item.transcript ? { transcript: item.transcript } : undefined), signal, meter);
+      await net(() => client.uploadFinish(id, kind, finishBody), signal, meter);
       return;
     } catch (e) {
       if (e instanceof UploadCancelled) throw e;
@@ -431,10 +439,15 @@ async function uploadItem(
       let missing: number[] = [];
       if (e instanceof ApiError && e.status === 409) {
         const st = await net(() => client.uploadStatus(id, kind), signal, meter).catch(() => null);
+        // The status is about whatever upload the message holds now. Of
+        // another size, it is another file's: its "complete" said this one
+        // was done (and the message went out with that file), and sending
+        // our parts into its session would mix the two.
+        const ours = !!st && (st.size == null || st.size === blob.size);
         // an earlier finish landed and only its answer was lost
-        if (st && st.complete) return;
-        const got = new Set((st && st.received) || []);
-        for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
+        if (ours && st.complete) return;
+        const got = new Set((ours && st.received) || []);
+        if (ours) for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
       }
       if (!missing.length || round >= 2) throw new Error(errText(e), { cause: e });
       for (const n of missing) meter.add(-partBlob(n).size);

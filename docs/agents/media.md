@@ -149,8 +149,12 @@ way; the routes are in docs.txt UPLOADING FILES.
   publish landed with its answer lost); on the 409 the composer forgets
   the note and says the message was already posted. Every control call
   rides out offline and transient errors, and a 409 after a retry means
-  "already done, the answer was lost". A pick is routed by its bytes: a
-  photo type the chat can't show (HEIC, SVG) attaches as a file. The
+  "already done, the answer was lost". Finish names the file (`size`,
+  and `fp`, start's fingerprint) every time, so the server refuses one
+  whose upload another file replaced; the status read after that 409
+  counts only when its `size` is this file's, so the send stops with the
+  server's reason instead of posting the other file. A pick is routed by
+  its bytes: a photo type the chat can't show (HEIC, SVG) attaches as a file. The
   composer stays open during a send: what the send carries has no Remove
   until it ends, and anything picked or recorded meanwhile stays for the
   next message (a send clears only the items it posted).
