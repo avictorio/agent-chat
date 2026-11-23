@@ -3,6 +3,7 @@
 import {
   DIGEST_CLOSE_HOUR,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   STATE_MAX_BYTES,
   STATE_STAKE_DAYS,
   STATE_STEPS,
@@ -227,7 +228,9 @@ export const StateMethods = {
       const digestClose = nextDigestClose(now);
       const digestsInWindow = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM dg WHERE ts >= ?", digestClose - 86400e3).one().n;
       const recent = this.sql.exec<StateData["recent"][number]>("SELECT id, sender, text FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT 20").toArray();
-      const fetched = this.sql.exec<{ url: string }>("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL", now - 86400e3).toArray().map((r) => String(r.url).toLowerCase()); // lowercase-ok: URLs
+      // A URL past FETCH_URL_MAX was logged before that bound: never loaded
+      // (a link the nudge names is far shorter), and left stored as it is.
+      const fetched = this.sql.exec<{ url: string }>("SELECT url FROM tf WHERE ts > ? AND url IS NOT NULL AND length(url) <= ?", now - 86400e3, FETCH_URL_MAX).toArray().map((r) => String(r.url).toLowerCase()); // lowercase-ok: URLs
       return {
         members: members,
         humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => nameFold(r.name)),

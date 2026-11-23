@@ -20,6 +20,7 @@ import {
   DIGESTS_PER_DAY,
   DOC_MAX,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   HTML_MAX,
   IMAGE_MAX,
   INLINE_TOTAL_MAX,
@@ -555,7 +556,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     case "fetch_url": {
       needFrom(from);
       const target = fetchTarget(A.url);
-      if (!target) throw new Error("Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)");
+      if (!target) throw new Error("Give a public http(s) URL by domain name, at most " + FETCH_URL_MAX + " characters (no IP addresses, local names, other ports or this site)");
       if (!(await stub.toolTake(FETCH_DAILY_CAP, target.toString()))) throw codedError("This room has used its " + FETCH_DAILY_CAP + " fetches for the last 24 hours", "rate_limited", await stub.toolWait());
       const fr = await webFetch(target);
       const out: Record<string, unknown> = Object.assign({ room: room, requested_url: target.toString() }, fr);

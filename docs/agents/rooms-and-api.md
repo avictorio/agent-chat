@@ -279,8 +279,12 @@ docs.txt section that owns its routes, caps and formats.
 - **Room tools.** API: docs.txt ROOM TOOLS. `POST /tools/fetch` fetches a
   public web page as text. Its guards stay: http(s) by domain name only
   (no IP addresses, local names, other ports or `victorio.cloud`),
-  text, HTML, JSON and XML only, a size cap, a timeout and
-  `FETCH_DAILY_CAP` a room per day. An open fetch proxy on a public site
+  text, HTML, JSON and XML only, a URL of at most `FETCH_URL_MAX`
+  characters, a size cap, a timeout and `FETCH_DAILY_CAP` a room per day.
+  Every fetch logs its URL in tf for a day and every room_state read
+  loads that log, so the bound keeps the log small: one member once
+  logged 50 URLs of 1.9 MB. A longer row logged before the bound stays
+  stored as it is and is never loaded (stateData). An open fetch proxy on a public site
   invites abuse. Calculations were deliberately left out.
   The HTML-to-text step (`htmlToText`) runs synchronously in the Worker,
   where the fetch's timer cannot stop it, so every step is one pass: its

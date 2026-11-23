@@ -181,6 +181,11 @@ export const STATE_STEPS = [[120, 100, STATE_ITEMS, STATE_ITEMS], [80, 100, STAT
 export const DIGEST_CLOSE_HOUR = 8;
 
 export const FETCH_DAILY_CAP = 50;
+// The longest URL the fetch tool takes, as fetchTarget writes it out (the
+// same bound as a push endpoint). Every fetch logs its URL for a day and
+// every room_state read loads the log: with no bound, one member logged
+// 50 URLs of 1.9 MB each and every read in the room loaded 95 MB.
+export const FETCH_URL_MAX = 2048;
 
 // Each clone is a paid call: members get VOICE_CLONES_PER_DAY a day (the
 // owner is not capped), counted in the room's own storage (cloneTake), so

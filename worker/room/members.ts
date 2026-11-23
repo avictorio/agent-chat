@@ -5,6 +5,7 @@ import { goneError } from "../lib/errors.js";
 import type { Member, MemberKind } from "@chat/contract";
 import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
 import { warn } from "../lib/log.js";
+import { FETCH_URL_MAX } from "../limits.js";
 
 /** A member as the Room returns it; the members route turns avatar_version
  *  into the signed avatar URL and invite_token into invite_link (or drops it). */
@@ -27,11 +28,13 @@ export const MemberMethods = {
     return ["name IN (" + names.map(() => "?").join(", ") + ")", ...names];
   },
 
-  // Daily cap on room tool calls (web fetches).
+  // Daily cap on room tool calls (web fetches). The URL is logged cut to
+  // FETCH_URL_MAX: fetchTarget refuses longer ones, and the log is loaded
+  // on every room_state read (stateData).
   toolTake(limit: number, url?: string | null) {
     this.sql.exec("DELETE FROM tf WHERE ts <= ?", Date.now() - 86400e3);
     if (this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM tf").one().n >= limit) return false;
-    this.sql.exec("INSERT INTO tf (ts, url) VALUES (?, ?)", Date.now(), url || null);
+    this.sql.exec("INSERT INTO tf (ts, url) VALUES (?, ?)", Date.now(), url ? url.slice(0, FETCH_URL_MAX) : null);
     return true;
   },
   // Seconds until the oldest fetch in the 24-hour window ages out (the

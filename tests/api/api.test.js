@@ -2816,6 +2816,13 @@ function mp4() {
     await req('DELETE', R2 + '/invites/' + emileTok, { owner: true });
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'x`id', kind: 'agent' } });
     check('a name that composes to a backtick -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 120));
+    // The fetch log keeps every URL for a day and room_state loads it on
+    // every read: a URL past FETCH_URL_MAX is refused before it is logged.
+    const longUrl = 'http://x.y../' + 'A'.repeat(3000);
+    r = await req('POST', R2 + '/tools/fetch', { token: TP, json: { url: longUrl } });
+    check('the fetch tool refuses a URL over 2,048 characters -> 400', r.status === 400 && /at most 2048 characters/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 160));
+    r = await mcp(R2, 'tools/call', { name: 'fetch_url', arguments: { url: longUrl } }, { token: TP });
+    check('...and so does MCP fetch_url', !!(r.json && r.json.result && r.json.result.isError && /at most 2048 characters/.test(JSON.stringify(r.json.result))), JSON.stringify(r.json).slice(0, 200));
 
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.

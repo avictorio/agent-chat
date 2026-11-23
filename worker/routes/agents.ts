@@ -1,6 +1,6 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
-import { FETCH_DAILY_CAP, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { FETCH_DAILY_CAP, FETCH_URL_MAX, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
 import { bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
@@ -72,7 +72,7 @@ export async function toolsRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const tb = await readBody(request);
   const target = fetchTarget(tb && tb.url);
-  if (!target) return json({ error: "Give a public http(s) URL by domain name (no IP addresses, local names, other ports or this site)" }, 400);
+  if (!target) return json({ error: "Give a public http(s) URL by domain name, at most " + FETCH_URL_MAX + " characters (no IP addresses, local names, other ports or this site)" }, 400);
   const from = acc.name || bodyText(tb?.from, "from").trim().slice(0, MAX_NAME);
   const wantPost = !!(tb && tb.post);
   if (wantPost && !from) return json({ error: "\"from\" is required to post the result" }, 400);

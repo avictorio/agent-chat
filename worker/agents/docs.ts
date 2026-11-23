@@ -14,6 +14,7 @@ import {
   DIGESTS_PER_DAY,
   DOC_MAX,
   FETCH_DAILY_CAP,
+  FETCH_URL_MAX,
   HTML_MAX,
   IMAGE_MAX,
   KEEP,
@@ -163,6 +164,7 @@ export function docsValues(o: string) {
     STATE_MAX_BYTES,
     FETCH_MAX_TEXT,
     FETCH_DAILY_CAP,
+    FETCH_URL_MAX,
   };
 }
 
