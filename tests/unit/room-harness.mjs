@@ -5,7 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 import { Room } from "../../worker/room/Room.ts";
 
 /**
- * @param {{ put?: (key: string) => Promise<void> | void }} [hooks] put runs inside every MEDIA.put, before the object is stored
+ * @param {{ put?: (key: string) => Promise<void> | void, before?: (op: string, key: string) => Promise<void> | void, after?: (op: string, key: string) => Promise<void> | void, env?: object }} [hooks]
+ *   put runs inside every MEDIA.put, before the object is stored; before and
+ *   after run around every storage call (op: put, get, head, delete, create,
+ *   abort, complete), so a test can hold one call while others run, or make
+ *   it throw; env adds bindings and variables to the Room's env
  */
 export function makeRoom(hooks = {}) {
   const db = new DatabaseSync(":memory:");
@@ -25,17 +29,37 @@ export function makeRoom(hooks = {}) {
   /** uploads in flight: id -> { key, data } */
   const multipart = new Map();
   let uploads = 0;
+  /** a storage call: the hooks run around it */
+  const call = async (op, key, fn) => {
+    if (hooks.before) await hooks.before(op, key);
+    const r = await fn();
+    if (hooks.after) await hooks.after(op, key);
+    return r;
+  };
   const MEDIA = {
-    async put(key, value) { if (hooks.put) await hooks.put(key); objects.set(key, new Uint8Array(value)); },
-    async get(key) { const d = objects.get(key); return d ? { arrayBuffer: async () => d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) } : null; },
-    async head(key) { const d = objects.get(key); return d ? { size: d.byteLength } : null; },
-    async delete(keys) { for (const k of Array.isArray(keys) ? keys : [keys]) objects.delete(k); },
+    async put(key, value) { return call("put", key, async () => { if (hooks.put) await hooks.put(key); objects.set(key, new Uint8Array(value)); }); },
+    async get(key, opts) {
+      return call("get", key, async () => {
+        const d = objects.get(key);
+        if (!d) return null;
+        const r = opts && opts.range ? d.subarray(opts.range.offset || 0, (opts.range.offset || 0) + (opts.range.length ?? d.byteLength)) : d;
+        return { arrayBuffer: async () => r.buffer.slice(r.byteOffset, r.byteOffset + r.byteLength) };
+      });
+    },
+    async head(key) { return call("head", key, async () => { const d = objects.get(key); return d ? { size: d.byteLength } : null; }); },
+    async delete(keys) { return call("delete", String(keys), async () => { for (const k of Array.isArray(keys) ? keys : [keys]) objects.delete(k); }); },
     async list() { return { objects: [...objects.keys()].map((key) => ({ key })), truncated: false }; },
-    async createMultipartUpload(key) { const id = "U" + (++uploads); multipart.set(id, { key, data: new Uint8Array(1) }); return { uploadId: id, key, abort: async () => { multipart.delete(id); } }; },
+    async createMultipartUpload(key) {
+      return call("create", key, async () => {
+        const id = "U" + (++uploads);
+        multipart.set(id, { key, data: new Uint8Array(1) });
+        return { uploadId: id, key, abort: async () => { multipart.delete(id); } };
+      });
+    },
     resumeMultipartUpload(key, id) {
       return {
-        async abort() { if (!multipart.delete(id)) throw new Error("NoSuchUpload"); },
-        async complete() { const m = multipart.get(id); if (!m) throw new Error("NoSuchUpload"); objects.set(key, m.data); multipart.delete(id); return {}; },
+        async abort() { return call("abort", key, async () => { if (!multipart.delete(id)) throw new Error("NoSuchUpload"); }); },
+        async complete() { return call("complete", key, async () => { const m = multipart.get(id); if (!m) throw new Error("NoSuchUpload"); objects.set(key, m.data); multipart.delete(id); return {}; }); },
       };
     },
   };
@@ -45,7 +69,7 @@ export function makeRoom(hooks = {}) {
     storage: { sql, deleteAll: async () => {}, setAlarm: async () => {}, getAlarm: async () => null, deleteAlarm: async () => {} },
     waitUntil: (p) => { pending.push(Promise.resolve(p).catch(() => {})); },
   };
-  const room = new Room(ctx, { MEDIA });
+  const room = new Room(ctx, { ...(hooks.env || {}), MEDIA });
   room.create();
   const one = (q, ...p) => db.prepare(q).get(...p);
   const all = (q, ...p) => db.prepare(q).all(...p);

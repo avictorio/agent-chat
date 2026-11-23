@@ -43,6 +43,36 @@ export const PUSH_MAX_PER_MEMBER = 10;
 // Samsung/Opera via FCM, Firefox autopush, Edge/Windows WNS, Safari/Apple),
 // so a member cannot point the room's fan-out at arbitrary hosts.
 export const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com)$/;
+// The longest subscription values a browser makes, with room to spare:
+// endpoints run 200 to 700 characters, p256dh is 87 (65 bytes) and auth 22
+// (16 bytes). With no maximum a member stored ten endpoints of megabytes
+// each, and every post read them all into the room's memory. Subscribe
+// refuses longer ones; a row an older room kept over them stays stored
+// (nothing deletes stored data unasked) but the fan-out and push status
+// never read it.
+export const PUSH_ENDPOINT_MAX = 2048;
+export const PUSH_P256DH_MAX = 96;
+export const PUSH_AUTH_MAX = 64;
+// A subscription whose sends have all failed, at least PUSH_FAIL_MAX times
+// and for at least PUSH_FAIL_MS, rests: no send to it for PUSH_REST_MS,
+// then one try, and another rest if that fails too. Before, a junk
+// registration cost a send on every post forever (only a 404 or 410 ends
+// one). It rests rather than being deleted because the failure can be
+// ours - a broken signing key fails every send to every phone - and
+// deleting would then wipe every member's registration for good; a
+// resting one wakes on its first success, or when the browser subscribes
+// again. Both conditions, so an hour's outage at one push service does
+// not even rest anything.
+export const PUSH_FAIL_MAX = 5;
+export const PUSH_FAIL_MS = 86400000;
+export const PUSH_REST_MS = 86400000;
+// A post's fan-out: this many sends at a time (a Worker keeps six
+// connections open at once), each given up after PUSH_SEND_MS. They used
+// to go one after another with no timeout, so one push service that never
+// answered held back every member after it. A fan-out has at most
+// (MAX_ACTIVE_INVITES + 1) x PUSH_MAX_PER_MEMBER targets.
+export const PUSH_PARALLEL = 6;
+export const PUSH_SEND_MS = 10000;
 export const AVATAR_MAX = 2000000;
 // Media storage failures are all-or-nothing: an R2 failure fails the whole
 // request with this message and leaves nothing behind - no message without
@@ -59,7 +89,11 @@ export const DOC_MAX = 1000000;
 export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes
 export const TICKET_MAX_PER_MEMBER = 20;
 export const TICKET_MAX_TRIES = 5;
-export const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
+// The server-side part size when ingesting a streamed upload. Kept off a
+// whole MiB on purpose: the engine's plans are always whole MiB, and a
+// finish sent again tells an engine-finished file from a streamed one by
+// it (upFinishNow, room/uploads.ts).
+export const STREAM_PART = 10000000;
 export const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // ---- The resumable upload engine ----
 // Every attachment past its single-request cap - images, audio, video,
@@ -76,6 +110,12 @@ export const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // days after it starts (the bucket's default abort rule), so a session
 // lasts that long too.
 export const MIB = 1048576;
+/** The largest body taken from a request that carries no file and no
+ *  credential the Worker trusts yet: an upload link's steps, public room
+ *  creation, and MCP for a caller without a good token. Their real bodies
+ *  are a few hundred bytes; with no cap they were read whole, whatever
+ *  their size, before anything was checked. */
+export const SMALL_BODY_MAX = MIB;
 /** The largest body read whole before a member's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
 export const SETTLED_BODY_MAX = 48 * MIB;
 export const UP_KINDS = ["image", "audio", "video", "file"];

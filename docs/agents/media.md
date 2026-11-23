@@ -131,6 +131,49 @@ way; the routes are in docs.txt UPLOADING FILES.
   Plans). An unfinished R2 multipart upload dies 7 days after it starts
   (the bucket's default abort rule), so a session lasts as long
   (`UP_SESSION_MS`).
+- **One writer per message and kind at a time.** Every writer of a
+  message's media kind shares its R2 key and its `md` row: an attach
+  (`putMedia`), the engine's start, finish and abort, and a stream's
+  begin, finish and abort. Each takes its turn (`withMediaLock` in
+  `worker/room/media.ts`, an in-memory chain per `msg:kind`), so none
+  runs between another's read of the row and its write. Unlocked, a
+  start replaced a file attached meanwhile with an upload in flight
+  (listed, answering 404), an abort deleted the row a finish was
+  completing, and a stream that had lost the row completed over the
+  published video. A message delete takes no turn (rows first, storage
+  after), so every write after a storage await is conditioned on the
+  session's `upload_id` (`upStill`, `upDrop`), and a finish whose message
+  went meanwhile deletes the object it made.
+- A start replaces a session by creating the new multipart upload
+  first, then swapping the row and clearing the old receipts in one
+  step, then aborting the old upload: a failed create leaves the old
+  session as it was, and a late part of the old upload is refused
+  instead of counting in the new one. A resume whose part list storage
+  will not give answers 502 (not an empty list, which sent the client
+  to re-send everything); one storage no longer has starts afresh,
+  unless the object is at the key at its size: an earlier finish
+  completed it and never recorded so, and the start indexes it as that
+  finish would have and answers 409 "already has" (the file is in place).
+- **Finish is safe to repeat.** One sent while another runs gets that
+  finish's answer (`_finishing` holds the promise), which can be a
+  refusal; one sent after a finish succeeded answers 200 with the file
+  the message's kind now holds (the caller compares bytes and name).
+  Only a file an engine finish made counts: the row tells (an engine
+  session's `part_size` is a whole MiB; an attach leaves it NULL, a
+  stream writes `STREAM_PART`), so a finish for an upload an attach or
+  a stream replaced answers 409, as one with no upload does, after a
+  restart too. Another engine upload that replaced the caller's and
+  finished leaves a row just as engine-made, so the finish takes two
+  optional fields, `size` (bytes) and `fp` (the start's fingerprint):
+  either one differing from the row's answers 409. An upload link's
+  finish also compares the link's expiry, which is its session's start
+  plus `UP_SESSION_MS` (`upBegan`), so a link opened for a replaced
+  upload gets 409 without sending either. Storage answering NoSuchUpload
+  is checked against the key first: an object of the declared size is
+  an earlier finish that completed and never recorded so (an instance
+  restart between the two), and it is checked and indexed. The stream
+  endpoint completes in the Room too (`streamFinish`), only while its
+  upload still owns the row.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
@@ -292,7 +335,17 @@ credential, and the route reads no other.
 
 - `POST /messages {draft: true}` creates an invisible draft; uploads
   attach to it, and `/publish` makes it live. Until then its media is
-  visible only to its sender and the owner.
+  visible only to its sender and the owner. A caption sent with the
+  publish replaces the draft's and is held to `MAX_TEXT` like a post
+  (413): it used to be cut to the limit, silently.
+- To anyone else a draft does not exist (`hiddenDraft` in
+  `worker/room/media.ts`): publish, delete, the attach routes, the
+  upload-ticket route, every upload step and the video stream answer
+  another member's draft with the same 404 as an id that holds nothing.
+  They answered 403 "only your own", and since ids are consecutive any
+  member could sweep the gaps in the listing to see when someone was
+  preparing a post. Another member's live message keeps its 403: it is
+  in the listing anyway.
 - An abandoned draft is swept after 24 hours, or, while an upload for it
   is in flight, `UP_SESSION_MS` after that upload's start (`sweepDrafts`,
   run on post and on upload start, throttled per instance). The day also

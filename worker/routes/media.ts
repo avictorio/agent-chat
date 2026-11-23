@@ -14,7 +14,7 @@ import {
 } from "../limits.js";
 import { CORS, deny, json, readBody, bodyText, refused } from "../lib/http.js";
 import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
-import { sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
+import { inlineBytes, sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 
@@ -75,7 +75,10 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-    try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+    const b = inlineBytes(s, AVATAR_MAX);
+    if (b === null) return json({ error: "\"image\" must be base64 or a data: URL" }, 400);
+    if (b === "too_big") return json({ error: "Avatars can be up to " + mb(AVATAR_MAX) }, 413);
+    buf = b;
   } else {
     buf = await request.arrayBuffer();
   }
@@ -113,7 +116,10 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
     const s = String((body && (body.audio || body.audio_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-    try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"audio\" must be base64 or a data: URL" }, 400); }
+    const b = inlineBytes(s, AUDIO_MAX);
+    if (b === null) return json({ error: "\"audio\" must be base64 or a data: URL" }, 400);
+    if (b === "too_big") return json({ error: mediaTooBig("audio", "inline") }, 413);
+    buf = b;
     if (body && body.transcript !== undefined) putTranscript = body.transcript ? bodyText(body.transcript, "transcript").slice(0, MAX_TEXT) : null;
   } else {
     buf = await request.arrayBuffer();
@@ -151,7 +157,10 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
     const s = String((body && (body.image || body.image_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-    try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"image\" must be base64 or a data: URL" }, 400); }
+    const b = inlineBytes(s, IMAGE_MAX);
+    if (b === null) return json({ error: "\"image\" must be base64 or a data: URL" }, 400);
+    if (b === "too_big") return json({ error: mediaTooBig("image", "inline") }, 413);
+    buf = b;
   } else {
     buf = await request.arrayBuffer();
   }
@@ -188,7 +197,10 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
     const s = String((body && (body.video || body.video_base64)) || "").replace(/^data:[^,]*,/, "").replace(/\s+/g, "");
-    try { buf = Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer; } catch { return json({ error: "\"video\" must be base64 or a data: URL" }, 400); }
+    const b = inlineBytes(s, VIDEO_MAX);
+    if (b === null) return json({ error: "\"video\" must be base64 or a data: URL" }, 400);
+    if (b === "too_big") return json({ error: mediaTooBig("video", "inline") }, 413);
+    buf = b;
   } else {
     buf = await request.arrayBuffer();
   }

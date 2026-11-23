@@ -65,6 +65,29 @@ function parkedPost(p, token, bodyText) {
   return { send: () => { rq.end(bodyText); return done; } };
 }
 
+// A request body sent chunked (no Content-Length), so the Worker learns
+// its size only by reading it: head, then filler bytes up to size, then tail.
+function chunked(size, head, tail) {
+  const h = Buffer.from(head || ''), t = Buffer.from(tail || '');
+  let left = size - h.length - t.length;
+  let first = true;
+  return new ReadableStream({
+    pull(c) {
+      if (first) { first = false; if (h.length) { c.enqueue(new Uint8Array(h)); return; } }
+      if (left > 0) { const n = Math.min(left, 1 << 20); left -= n; c.enqueue(new Uint8Array(n).fill(97)); return; }
+      if (t.length) c.enqueue(new Uint8Array(t));
+      c.close();
+    },
+  });
+}
+async function putChunked(p, method, body, headers) {
+  const r = await fetch(BASE + p, { method, headers: headers || {}, body, duplex: 'half' });
+  const text = await r.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  return { status: r.status, json, text };
+}
+
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 function mp4() {
   const b = Buffer.alloc(48);
@@ -186,6 +209,48 @@ function mp4() {
     r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: 'constructor' } });
     check('reaction "constructor" (not an alias) -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 80));
 
+    // Every write path answers another member's draft exactly like an id
+    // that holds nothing: a 403 there told any member a draft sat under an
+    // id the listings skip, and when it published or went.
+    const dr3 = await req('POST', R + '/messages', { token: TA, json: { text: 'hidden draft', draft: true } });
+    const D3 = dr3.json.id, NONE = D3 + 100000;
+    const probes = [
+      ['delete', (id) => req('DELETE', R + '/messages/' + id, { token: TB })],
+      ['publish', (id) => req('POST', R + '/messages/' + id + '/publish', { token: TB, json: { text: 'x' } })],
+      ['attach', (id) => req('PUT', R + '/messages/' + id + '/image', { token: TB, headers: { 'Content-Type': 'image/png' }, body: PNG })],
+      ['upload-ticket', (id) => req('POST', R + '/messages/' + id + '/upload-ticket', { token: TB, json: { kind: 'image' } })],
+      ['upload start', (id) => req('POST', R + '/messages/' + id + '/image/start', { token: TB, json: { size: PNG.length } })],
+      ['video stream', (id) => req('PUT', R + '/messages/' + id + '/video/stream', { token: TB, headers: { 'Content-Type': 'video/mp4' }, body: mp4() })],
+    ];
+    for (const [what, call] of probes) {
+      const a = await call(D3), b = await call(NONE);
+      check('another member\'s draft answers like a missing id: ' + what, a.status === 404 && a.status === b.status && a.text === b.text, a.status + ' ' + a.text.slice(0, 80) + ' vs ' + b.status + ' ' + b.text.slice(0, 80));
+    }
+    r = await req('POST', R + '/messages/' + D3 + '/publish', { token: TA, json: {} });
+    check('the probed draft is untouched: its sender publishes it', r.status === 200 && r.json.text === 'hidden draft', r.status + ' ' + r.text.slice(0, 80));
+    r = await req('DELETE', R + '/messages/' + D3, { token: TB });
+    check('another member\'s live message keeps its 403', r.status === 403, r.status + ' ' + r.text.slice(0, 80));
+
+    // A draft is not a first post: it used to put its sender into the digest
+    // rotation every member sees (awaiting_digest_from), deleted or not.
+    {
+      const RD = '/api/rooms/apitest-digestdraft-' + SUF;
+      await req('POST', RD, { owner: true });
+      const ta = (await req('POST', RD + '/invites', { owner: true, json: { name: 'Aaron', kind: 'agent' } })).json.token;
+      const tz = (await req('POST', RD + '/invites', { owner: true, json: { name: 'Zed', kind: 'agent' } })).json.token;
+      await req('GET', RD + '/messages?limit=1', { token: ta });
+      await req('POST', RD + '/messages', { token: tz, json: { text: 'hello' } });
+      const due = async () => { const x = await req('GET', RD + '/messages?limit=1', { token: tz }); return x.json && x.json.room_state && x.json.room_state.memory && x.json.room_state.memory.awaiting_digest_from; };
+      const before = await due();
+      const ad = await req('POST', RD + '/messages', { token: ta, json: { text: 'drafting', draft: true } });
+      const withDraft = await due();
+      await req('DELETE', RD + '/messages/' + ad.json.id, { token: ta });
+      const afterDelete = await due();
+      check('a draft (or a deleted one) leaves the digest rotation alone', before === 'Zed' && withDraft === 'Zed' && afterDelete === 'Zed', [before, withDraft, afterDelete].join(' / '));
+      await req('DELETE', RD + '/invites', { owner: true });
+      await req('DELETE', RD + '?confirm=apitest-digestdraft-' + SUF, { owner: true });
+    }
+
     // ?draft_only=1 throws away a draft but never a live message: a client
     // discarding an upload that another device had published got 200 and
     // took the live message, and its media, from everyone.
@@ -213,6 +278,16 @@ function mp4() {
     check('push endpoint off the push services -> 400', r.status === 400 && /push service/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com.evil.example/x', keys: { p256dh: P65, auth: AUTH16 } } } });
     check('look-alike push host -> 400', r.status === 400, r.status);
+    // Every stored value is read back on every post: no megabyte endpoints
+    // or secrets, and no port (push services answer on 443 only).
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/' + 'A'.repeat(10000), keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('a 10 KB push endpoint -> 400', r.status === 400 && /endpoint is longer/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/big-auth', keys: { p256dh: P65, auth: Buffer.alloc(3000, 9).toString('base64url') } } } });
+    check('an oversized push auth secret -> 400', r.status === 400 && /auth is longer/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com:81/fcm/send/port', keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('a push endpoint with a port -> 400', r.status === 400 && /push service/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('GET', R + '/push/status', { token: TA });
+    check('no refused registration was stored', r.status === 200 && r.json.count === 0, r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF, keys: { p256dh: P65, auth: AUTH16 } } } });
     check('push service endpoint accepted', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
     await req('POST', R + '/push/unsubscribe', { token: TA, json: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF } });
@@ -493,6 +568,10 @@ function mp4() {
     check('create existing -> 409', r.status === 409, r.status);
     r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '2' }, json: { room: 'Bad Name!', name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create bad name -> 400', r.status === 400, r.status);
+    // Anyone may call create-room: a body past SMALL_BODY_MAX is refused
+    // while it is read, not parsed whole (a 40 MB one used to be).
+    r = await putChunked('/api/create-room', 'POST', chunked(2 * 1048576, '{"room":"Bad Name!","pad":"', '"}'), { 'Content-Type': 'application/json', 'CF-Connecting-IP': IPO + '7' });
+    check('create-room with a 2 MiB chunked body -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 120));
     r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '3' }, json: { room: 'apitest-rb-' + SUF, name: 'Rb', email: 'rb-' + SUF + '@example.com' } });
     check('send failure -> 502', r.status === 502, r.status);
     r = await req('GET', '/api/rooms/apitest-rb-' + SUF + '/members', { owner: true });
@@ -2117,6 +2196,19 @@ function mp4() {
     check('mcp GET -> 405', r.status === 405, r.status);
     r = await req('POST', R2 + '/mcp', { headers: { 'Content-Type': 'application/json' }, body: 'not json' });
     check('mcp garbage -> -32700', r.status === 400 && r.json && r.json.error && r.json.error.code === -32700, r.status + ' ' + r.text.slice(0, 80));
+    // Without a valid token MCP takes one small request: a batch of
+    // tokenless initialize calls once came back 75 times the size it went in.
+    const initCall = (n) => ({ jsonrpc: '2.0', id: n, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {} } });
+    r = await req('POST', R2 + '/mcp', { json: initCall(1) });
+    check('mcp tokenless initialize still answers', r.status === 200 && !!(r.json && r.json.result && r.json.result.serverInfo), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R2 + '/mcp', { json: [initCall(1), initCall(2)] });
+    check('mcp tokenless batch -> -32600 with the token code, nothing run', r.status === 400 && !Array.isArray(r.json) && !!(r.json && r.json.error && r.json.error.code === -32600 && r.json.error.data && r.json.error.data.code === 'invite_missing'), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/mcp', { token: 'not-a-token', json: [initCall(1), initCall(2)] });
+    check('mcp batch with a wrong token -> -32600 invite_invalid', r.status === 400 && !!(r.json && r.json.error && r.json.error.code === -32600 && r.json.error.data && r.json.error.data.code === 'invite_invalid'), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/mcp', { token: TP, json: [{ jsonrpc: '2.0', id: 1, method: 'ping' }, initCall(2)] });
+    check('mcp member batch still answers each item', r.status === 200 && Array.isArray(r.json) && r.json.length === 2 && r.json.every(x => x.result), r.status + ' ' + r.text.slice(0, 120));
+    r = await putChunked(R2 + '/mcp', 'POST', chunked(1048576 + 1000, '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pad":"', '"}}'), { 'Content-Type': 'application/json' });
+    check('mcp tokenless body over 1 MiB -> 413', r.status === 413 && !!(r.json && r.json.error && r.json.error.code === -32600), r.status + ' ' + r.text.slice(0, 120));
     r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} });
     check('mcp unauthenticated tools/call -> -32001', !!(r.json && r.json.error && r.json.error.code === -32001), JSON.stringify(r.json).slice(0, 120));
     r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });
@@ -2226,8 +2318,16 @@ function mp4() {
     r = await putTicket(tk2.upload.url, Buffer.alloc(5000001, 7));
     const bigText = await r.text();
     check('oversize on a ticket -> 413, naming begin_upload and its ceiling', r.status === 413 && /begin_upload/.test(bigText) && /TB/.test(bigText), r.status + ' ' + bigText.slice(0, 200));
+    // The ticket is looked up before the body is read, and the body read
+    // only up to the ticket's max_bytes: a chunked body (no
+    // Content-Length) used to be held whole first, whatever its size, and
+    // past 32 MiB the hand-off to the room failed with a 500.
+    r = await putChunked('/api/uploads/' + room2Name + '/' + 'C'.repeat(43), 'PUT', chunked(34000000));
+    check('unknown ticket with a 34 MB chunked body -> 404, not held whole', r.status === 404, r.status + ' ' + r.text.slice(0, 120));
+    for (let i = 0; i < 5; i++) r = await putChunked(new URL(tk2.upload.url).pathname, 'PUT', chunked(5000001), { 'Content-Type': 'image/png' });
+    check('chunked oversize on a ticket -> 413, naming begin_upload', r.status === 413 && /begin_upload/.test(r.text), r.status + ' ' + r.text.slice(0, 160));
     r = await putTicket(tk2.upload.url, PNG);
-    check('the same ticket still works after a 413', r.status === 200, r.status);
+    check('the same ticket still works after a 413 (oversize spends no attempt)', r.status === 200, r.status);
     // Ticket media on a draft stays private until publish, as on every other path.
     r = await req('GET', R2 + '/messages/' + tk2.message_id + '/image', { token: TRex });
     check('ticket-uploaded draft media is private before publish', r.status === 404, r.status);
@@ -2452,6 +2552,17 @@ function mp4() {
     check('empty draft cannot publish', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upE.message_id, text: 'captioned at publish' } }, { token: TP });
     check('publish with a caption completes the empty draft', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    // A caption past the limit is refused, over REST and MCP, as posting it
+    // is; it used to publish cut to the limit without a word.
+    r = await req('POST', R2 + '/messages', { token: TP, json: { text: 'long caption draft', draft: true } });
+    const upL = { message_id: r.json && r.json.id };
+    const LONG = 'a'.repeat(20000);
+    r = await req('POST', R2 + '/messages/' + upL.message_id + '/publish', { token: TP, json: { text: LONG } });
+    check('REST publish with an over-long caption -> 413, as a post', r.status === 413 && /limited to \d+ characters/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upL.message_id, text: LONG } }, { token: TP });
+    check('MCP publish_message with an over-long caption is a tool error', !!(r.json && r.json.result && r.json.result.isError && /limited to \d+ characters/.test(JSON.stringify(r.json.result))), JSON.stringify(r.json).slice(0, 200));
+    r = await req('POST', R2 + '/messages/' + upL.message_id + '/publish', { token: TP, json: {} });
+    check('the refused draft kept its caption and stayed a draft', r.status === 200 && r.json.text === 'long caption draft', r.status + ' ' + r.text.slice(0, 120));
 
     // The upload engine: one resumable flow for every kind, general files
     // included. A fresh member keeps these clear of Poc's open-link cap.
@@ -2479,7 +2590,7 @@ function mp4() {
     r = await putPart(1, slice(1));
     check('parts land in any order', r.status === 200, r.status);
     r = await putPart(1, slice(1), TP);
-    check('another member cannot send parts -> 403', r.status === 403, r.status);
+    check('another member cannot send parts to a draft -> 404, as for no message', r.status === 404 && r.json && r.json.error === 'No message with that id', r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
     check('finish with a part missing -> 409 naming it', r.status === 409 && JSON.stringify(r.json && r.json.missing) === '[2]', r.status + ' ' + r.text.slice(0, 160));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TU });
@@ -2494,10 +2605,29 @@ function mp4() {
     check('start again resumes with the parts kept', !!(r.json && r.json.resumed === true && JSON.stringify(r.json.received) === '[1,3]'), JSON.stringify(r.json));
     r = await putPart(2, slice(2));
     check('the missing part lands', r.status === 200, r.status);
-    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    // Two finishes at once (a client retrying while the first runs) both
+    // answer the upload's result; storage is held open so they overlap.
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: R2.slice('/api/rooms/'.length), ms: 600 } });
+    const fin1 = req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    await new Promise((res) => setTimeout(res, 150));
+    const fin2 = req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    r = await fin1;
+    const r2nd = await fin2;
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: R2.slice('/api/rooms/'.length), ms: 0 } });
     check('finish assembles and attaches the file', r.status === 200 && !!(r.json && r.json.file && r.json.file.bytes === BIG.length && r.json.file.name === 'résumé data.bin' && /sig=/.test(r.json.file.url) && r.json.published === false), r.status + ' ' + r.text.slice(0, 200));
-    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
-    check('a second finish -> 409', r.status === 409, r.status);
+    check('a finish sent again while the first runs gets the same answer', r2nd.status === 200 && !!(r2nd.json && r.json && r2nd.json.file && r2nd.json.file.url === r.json.file.url && r2nd.json.file.bytes === BIG.length), r2nd.status + ' ' + r2nd.text.slice(0, 200));
+    const r3rd = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    check('a finish sent again after it ended answers 200 with the same url', r3rd.status === 200 && !!(r3rd.json && r.json && r3rd.json.file && r3rd.json.file.url === r.json.file.url && r3rd.json.file.name === 'résumé data.bin' && r3rd.json.published === false), r3rd.status + ' ' + r3rd.text.slice(0, 200));
+    // A finish may name the file it means (size, and the fingerprint given
+    // at start as fp): a different file answers 409, a wrong type 400.
+    let rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: true } });
+    check('a finish with a size that is not a number -> 400 naming it', rf.status === 400 && /"size"/.test((rf.json && rf.json.error) || ''), rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { fp: { x: 1 } } });
+    check('a finish with an fp that is not text -> 400 naming it', rf.status === 400 && /"fp"/.test((rf.json && rf.json.error) || ''), rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: BIG.length + 1, fp: FP } });
+    check('a finish naming another file after one ended -> 409', rf.status === 409, rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: BIG.length, fp: FP } });
+    check('a finish naming the stored file after one ended -> 200', rf.status === 200 && !!(rf.json && rf.json.file && rf.json.file.bytes === BIG.length), rf.status + ' ' + rf.text.slice(0, 120));
     r = await req('GET', R2 + '/messages/' + fid + '/file', { token: TP });
     check('a draft file stays private before publish', r.status === 404, r.status);
     r = await req('POST', R2 + '/messages/' + fid + '/publish', { token: TU, json: {} });

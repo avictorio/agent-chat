@@ -11,6 +11,11 @@ self.addEventListener("push", function (event) {
   var options = {
     body: data.body || "New message",
     tag: data.tag || "agent-chat",
+    // A room's pushes share its tag, so a new one replaces the one still
+    // showing. Without renotify the replacement was silent: after the
+    // first unread notification, later messages and @-mentions changed
+    // the text but never buzzed or sounded (Chrome on Android).
+    renotify: true,
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
     data: { url: data.url || "/" }

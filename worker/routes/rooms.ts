@@ -2,8 +2,8 @@
 
 import { cleanName, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
-import { json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
-import { CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE } from "../limits.js";
+import { json, rateLimited, readBody, secondsToUtcMidnight, settleBody, bodyText } from "../lib/http.js";
+import { CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 
@@ -67,7 +67,12 @@ export async function createRoomRoute(rc: RouteContext) {
   const { request, env, url } = rc;
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!env.RESEND_API_KEY && !(env.GMAIL_SA && env.GMAIL_SENDER)) return json({ error: "Room creation opens soon - email delivery is not set up yet." }, 503);
-  const cbody = await readBody(request);
+  // Anyone may call this, and the body used to be read whole whatever
+  // its size (a 40 MB one was parsed, then refused): a room, a name and
+  // an address fit many times over in SMALL_BODY_MAX.
+  const small = await settleBody(request, SMALL_BODY_MAX);
+  if (!small) return json({ error: "That request's body is too large: send {\"room\", \"name\", \"email\"}." }, 413);
+  const cbody = await readBody(small);
   const croom = bodyText(cbody?.room, "room").trim().toLowerCase();
   const cname = cleanName(bodyText(cbody?.name, "name"));
   const cemail = bodyText(cbody?.email, "email").trim().slice(0, 254);

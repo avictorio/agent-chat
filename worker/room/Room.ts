@@ -36,6 +36,7 @@ import { GameMachineryMethods } from "./games.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
+import type { UpFinish } from "./uploads.js";
 import { warn } from "../lib/log.js";
 
 /* ---------- storage rows ----------
@@ -61,6 +62,12 @@ export type InviteCols = Pick<InvRow, "name" | "revoked" | "used" | "seen" | "ki
 /** A refused credential: the status, its code and its sentence. */
 export type Refusal = { ok: false, status: number, code: string, error: string };
 export type InviteLookup = { ok: true, row: InviteCols } | Refusal;
+/** The refusal for a request that sent no token: the same everywhere, so
+ *  a route can give it without asking the room (MCP's tokenless ping and
+ *  initialize, routes/agents.ts). */
+export function inviteMissing(): Refusal {
+  return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
+}
 /** Who a credential is: the owner key (no name), or an invite's member. */
 export type Access =
   | { ok: true, name?: undefined, kind?: undefined, invited_by?: undefined, invited?: undefined, joined?: undefined, posted?: undefined }
@@ -90,7 +97,8 @@ export type UppRow = { msg: number, kind: string, n: number, etag: string };
 export type UtRow = { h: string, msg: number, kind: string, member: string, created: number, expires: number, max_bytes: number, used: number | null,
   tries: number, owner: number | null, sess: number | null };
 /** push: a member's Web Push subscription. */
-export type PushRow = { member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null };
+export type PushRow = { member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null,
+  fails: number | null, fail_ts: number | null, rest_ts: number | null };
 /** mv: a member's voice (name lowercased). */
 export type MvRow = { name: string, provider: string | null, voice_id: string | null, sample_key: string | null, sample_type: string | null,
   sample_ts: number | null, ts: number | null };
@@ -261,8 +269,22 @@ function schemaDeliveryNumber(sql: SqlStorage) {
   addColumn(sql, "m", "seq", "INTEGER");
 }
 
+// Step 4. push.fails, push.fail_ts and push.rest_ts: how many sends in a
+// row have failed, when the first of them did, and the time before which
+// the fan-out sends nothing to the row (all NULL once a send gets
+// through). A subscription that keeps failing rests (PUSH_FAIL_MAX,
+// PUSH_FAIL_MS, PUSH_REST_MS in limits.ts); only a 404 or 410 used to end
+// one, so a junk registration cost a send on every post forever. Rows
+// over the bounds subscribe now refuses are kept: the fan-out and push
+// status filter them out in SQL instead.
+function schemaPushFailures(sql: SqlStorage) {
+  addColumn(sql, "push", "fails", "INTEGER");
+  addColumn(sql, "push", "fail_ts", "INTEGER");
+  addColumn(sql, "push", "rest_ts", "INTEGER");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
@@ -285,6 +307,10 @@ export class Room extends DurableObject {
   destroying = false;
   /** Upload links being minted right now, by folded member name (room/uploads.ts, mintUploadTicket). */
   utMinting: Map<string, number> = new Map();
+  /** The writer of each message's media kind holding its turn, by "msg:kind" (room/media.ts, withMediaLock). */
+  mediaLocks: Map<string, Promise<void>> = new Map();
+  /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
+  _finishing: Map<string, Promise<UpFinish>> = new Map();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -416,7 +442,7 @@ export class Room extends DurableObject {
   // preview (which marks nothing), so their answers cannot drift. Each
   // refusal carries its code beside the sentence (lib/http.ts deny).
   lookupInvite(token: string | null | undefined): InviteLookup {
-    if (!token) return { ok: false, status: 401, code: "invite_missing", error: "This room is invite-only. Open your invite link to join." };
+    if (!token) return inviteMissing();
     const row = this.sql.exec<InviteCols>("SELECT name, revoked, used, seen, kind, invited_by, created, posted FROM inv WHERE token = ?", token).toArray()[0];
     if (!row) return { ok: false, status: 403, code: "invite_invalid", error: "This invite link isn't valid for this room." };
     if (row.revoked) return { ok: false, status: 403, code: "invite_revoked", error: "This invite link has been revoked. Ask the room owner for a new one." };

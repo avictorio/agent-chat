@@ -7,7 +7,7 @@ ROOM_TS = os.path.join(os.path.dirname(__file__), '..', '..', 'worker', 'room', 
 steps = re.search(r'const SCHEMA_STEPS\b.*?= \[([^\]]*)\];', open(ROOM_TS).read()).group(1)
 LATEST = str(len([x for x in steps.split(',') if x.strip()]))
 state = sys.argv[1]
-want = {'m': ['game_id', 'file_name', 'pub_ts', 'draft', 'seq'], 'md': ['mode', 'began'], 'push': ['mode'], 'ut': ['sess'], 'inv': ['invited_by', 'posted', 'avatar_key']}
+want = {'m': ['game_id', 'file_name', 'pub_ts', 'draft', 'seq'], 'md': ['mode', 'began'], 'push': ['mode', 'fails', 'fail_ts', 'rest_ts'], 'ut': ['sess'], 'inv': ['invited_by', 'posted', 'avatar_key']}
 bad = 0
 for f in glob.glob(state + '/**/*.sqlite', recursive=True):
     c = sqlite3.connect(f)

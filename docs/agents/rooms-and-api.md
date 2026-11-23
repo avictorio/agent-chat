@@ -115,7 +115,14 @@ docs.txt section that owns its routes, caps and formats.
      exempt and look the invite up again when the stream ends; the
      upload-link steps read their small bodies before looking up the
      link; MCP runs `access` before every `tools/call`, a batch's
-     included.
+     included. A request with no credential the Worker trusts is never
+     read whole without a cap either: create-room, the link steps and
+     tokenless MCP take up to `SMALL_BODY_MAX` (413 beyond; tokenless MCP
+     takes no batch), and a single-shot upload link is looked up first
+     (`uploadTicketLimit`) and its body read only up to the ticket's
+     `max_bytes`. Before this, anyone could make the Worker hold a
+     body up to the edge's 100 MB, and 1 MB of tokenless MCP
+     `initialize` calls in one batch came back as 75 MB.
   2. **What outlives the request is checked again inside the call that
      creates it**, with the token, not the name (`inviteStill`): a
      stream's registration (`Room.fetch`; the 15-second ping also closes
@@ -258,11 +265,31 @@ docs.txt section that owns its routes, caps and formats.
   [vars] (why: `AGENTS.md` section 7, About `wrangler.toml`).
 
 - **Push.** API: docs.txt PHONE NOTIFICATIONS (WEB PUSH). A subscription
-  endpoint must be on a browser push service host (`PUSH_HOST_RE`), and
-  each member keeps their newest `PUSH_MAX_PER_MEMBER`. Revoking a
+  endpoint must be on a browser push service host (`PUSH_HOST_RE`) with
+  no port, its values within `PUSH_ENDPOINT_MAX`, `PUSH_P256DH_MAX` and
+  `PUSH_AUTH_MAX` (megabyte rows were once read whole on every post; a
+  row an older room kept over them stays stored, and the fan-out and
+  `pushStatus` filter it out in SQL), and each member keeps their newest
+  `PUSH_MAX_PER_MEMBER`. A 404 or 410 from the push service drops a
+  subscription at once; any other failure counts on the row (`fails`,
+  `fail_ts`), and one that has failed every send at least
+  `PUSH_FAIL_MAX` times over `PUSH_FAIL_MS` rests (`rest_ts`): the
+  fan-out skips it for `PUSH_REST_MS`, then tries it once. It is never
+  deleted for failing, because the failure can be ours (a broken signing
+  key fails every phone at once) and stored registrations are not
+  deleted unasked. A success clears all three columns, and so does
+  subscribing again (the row is written afresh). Revoking a
   member's last invite deletes theirs; revoking everyone
   (`DELETE /invites`) drops every registration and closes member streams.
-  `notifyPush` targets only the owner and active members. In the web
+  `notifyPush` targets only the owner and active members, and checks
+  each send again just before it leaves, so a member removed or a
+  message deleted while the fan-out runs gets no more of it. Sends go
+  `PUSH_PARALLEL` at a time, each timed out after `PUSH_SEND_MS`, and
+  `platform/webpush.ts` keeps the signed VAPID header per push service
+  origin for an hour instead of asking `__vapid` on every send. A room's
+  pushes share the tag `room-<room>`, so each replaces the last on the
+  phone; the service worker (`worker/push-sw.txt`) sets `renotify` so the
+  replacement still alerts. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device. A refused Off says so and leaves the bell on; Forget on
   Home unsubscribes the room before it deletes the invite. Both clear the
@@ -297,10 +324,10 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. `seq` is the delivery number when it is not the id (Messages, Delivery numbers). |
 | `rx` | reactions: message, emoji, who, time |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
-| `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |
+| `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
 | `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
-| `push` | Web Push subscriptions per member |
+| `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (`FETCH_DAILY_CAP` per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |

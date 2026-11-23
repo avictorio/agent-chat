@@ -1,7 +1,7 @@
 // The agent surfaces: the wake recipe and watcher, room tools, MCP.
 
-import { FETCH_DAILY_CAP, MAX_TEXT, ROOM_RE } from "../limits.js";
-import { bodyText, deny, isObject, json, rateLimited, readBody, type Body } from "../lib/http.js";
+import { FETCH_DAILY_CAP, MAX_TEXT, MIB, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { bodyText, deny, isObject, json, rateLimited, readBody, settleBody, type Body } from "../lib/http.js";
 import AGENT_WATCH from "../agents/agent-watch.sh";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { MAX_NAME, shellQuote } from "../lib/text.js";
@@ -18,7 +18,7 @@ import { API_VERSION, activeNotices } from "../agents/notices.js";
 import { invitePreviewBody } from "./members.js";
 import { mcpInstructions } from "../agents/onboarding.js";
 import { recipe } from "../agents/docs.js";
-import type { InviteLookup, Refusal } from "../room/Room.js";
+import { inviteMissing, type InviteLookup, type Refusal } from "../room/Room.js";
 
 // The wake recipe (Muse harnesses): a text document (its limits filled in
 // by docs.ts), plus the watcher script it installs, with the room, the
@@ -112,18 +112,32 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (request.method !== "POST") return json({ error: "Method not allowed. POST JSON-RPC here; call tools/list for the catalog." }, 405);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   // Connecting is not joining: ping, initialize and notifications
-  // touch no invite; tools/list, an unknown method and get_invite check the
-  // token without opening it (once per HTTP request); any other
+  // open no invite. A token that was sent is looked up, without opening
+  // it, once per HTTP request before the body is read (it decides how big a body and
+  // whether a batch is taken), and tools/list, an unknown method and
+  // get_invite are refused when it fails; any other
   // tools/call runs access(), which opens it - before every call, a
   // batch's included. A batch can take a while (a call may fetch a page or
   // wait on storage), and one checked only at its start went on reading
   // and acting for a member who had been removed meanwhile.
   const getAcc = () => stub.access(invite, owner);
   let checkP: Promise<{ ok: true } | Refusal> | null = null;
-  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
+  // No token, no question for the room: the refusal is built here. Asking
+  // made every tokenless ping, initialize and notification (which never
+  // touched the Room object before) a Durable Object call.
+  const checkToken = () => checkP || (checkP = owner ? Promise.resolve({ ok: true as const }) : !invite ? Promise.resolve(inviteMissing()) : stub.lookupInvite(invite).then((l: InviteLookup) => (l.ok ? { ok: true as const } : l)));
   /** the request's JSON body: one JSON-RPC request, or a batch */
   let rpcBody: unknown = null;
-  try { rpcBody = await request.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
+  // A caller whose token checks out has had its body read already
+  // (index.ts settleMemberBody, up to SETTLED_BODY_MAX). Anyone else may
+  // only ping, initialize or be told the token is wrong: one small request.
+  // The body used to be parsed whatever its size, and a batch had no end,
+  // so 1 MB of tokenless initialize calls came back as a 75 MB answer.
+  const tokenOk = await checkToken();
+  let body: Request | null = request;
+  if (!tokenOk.ok) body = await settleBody(request, SMALL_BODY_MAX);
+  if (!body) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large: without a valid invite token a request can be up to " + Math.floor(SMALL_BODY_MAX / MIB) + " MiB" } }, 413);
+  try { rpcBody = await body.json(); } catch { return json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error: send one JSON-RPC request object" } }, 400); }
   const handleRpc = async (/** one JSON-RPC request, as sent */ raw: unknown) => {
     const req = isObject(raw) ? raw : null;
     if (!req || typeof req.method !== "string") return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
@@ -161,6 +175,9 @@ export async function mcpRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     return fail(-32601, "Method not found: " + method);
   };
+  if (Array.isArray(rpcBody) && !tokenOk.ok) {
+    return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request: a batch (a JSON array of requests) is answered only for a valid invite token. " + tokenOk.error + " Without one, send ping or initialize as a single request.", data: { code: tokenOk.code } } }, 400);
+  }
   if (Array.isArray(rpcBody)) {
     const out: unknown[] = [];
     for (const item of rpcBody) { const r = await handleRpc(item); if (r) out.push(r); }

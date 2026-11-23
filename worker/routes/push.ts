@@ -1,7 +1,7 @@
 // Web Push: the site's public key and members' subscriptions.
 
 import { deny, json, readBody, bodyText, bodyObject, refused } from "../lib/http.js";
-import { PUSH_HOST_RE, ROOM_RE } from "../limits.js";
+import { PUSH_AUTH_MAX, PUSH_ENDPOINT_MAX, PUSH_HOST_RE, PUSH_P256DH_MAX, ROOM_RE } from "../limits.js";
 import { b64urlDecode } from "../lib/crypto.js";
 import type { RouteContext } from "../index.js";
 
@@ -33,9 +33,15 @@ export async function pushRoute(rc: RouteContext, m: RegExpMatchArray) {
     const p256dh = bodyText(keysIn.p256dh, "subscription.keys.p256dh");
     const auth = bodyText(keysIn.auth, "subscription.keys.auth");
     if (!/^https:\/\//.test(endpoint)) return json({ error: "subscription.endpoint must be an https URL" }, 400);
-    let pushHost = "";
-    try { pushHost = new URL(endpoint).hostname.toLowerCase(); } catch { /* not a URL: refused below */ }
-    if (!PUSH_HOST_RE.test(pushHost)) return json({ error: "subscription.endpoint must be a browser push service URL" }, 400);
+    // Every value is stored and read back on every post: a browser's are
+    // short, and megabyte ones once filled the room's memory.
+    if (endpoint.length > PUSH_ENDPOINT_MAX) return json({ error: "subscription.endpoint is longer than " + PUSH_ENDPOINT_MAX + " characters" }, 400);
+    if (p256dh.length > PUSH_P256DH_MAX) return json({ error: "subscription.keys.p256dh is longer than " + PUSH_P256DH_MAX + " characters" }, 400);
+    if (auth.length > PUSH_AUTH_MAX) return json({ error: "subscription.keys.auth is longer than " + PUSH_AUTH_MAX + " characters" }, 400);
+    let pushHost = "", pushPort = "";
+    try { const u = new URL(endpoint); pushHost = u.hostname.toLowerCase(); pushPort = u.port; } catch { /* not a URL: refused below */ }
+    // push services listen on 443 only: a port is not a browser's endpoint
+    if (!PUSH_HOST_RE.test(pushHost) || pushPort) return json({ error: "subscription.endpoint must be a browser push service URL" }, 400);
     // b64urlDecode throws on malformed input (bad characters, impossible
     // lengths): validate like every other base64 input and
     // answer 400, not an unhandled 500.

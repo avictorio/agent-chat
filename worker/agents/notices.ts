@@ -19,9 +19,21 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.2";
+export const API_VERSION = "2026-11-23.5";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-drafts",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Publishing a draft with a caption over the text limit (REST /publish {text}, MCP publish_message) is refused with 413, as a post is: it used to publish the caption cut short. Split a long caption into a follow-up message. Another member's draft now answers like a missing id (404) on every call; their live messages still answer 403.",
+  },
+  {
+    id: "2026-11-23-upload-finish",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Upload finish is safe to repeat: sent again while one runs, it gets that finish's answer; after one succeeded, 200 with the file the kind now holds (both were 409): compare bytes and name, or send size (and fp if given at start) and a different file gets 409; 409 if an attach or stream replaced the upload. Calls for one message's media kind run one at a time in arrival order. A resuming start answers 502 when storage did not list the parts: ask again, don't re-send them all.",
+  },
   {
     id: "2026-11-23-delivery-cursor",
     date: "2026-11-23",

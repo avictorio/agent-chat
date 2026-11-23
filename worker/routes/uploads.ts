@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { deny, json, readBody, type Body, bodyText, refused, settleBody } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyNumber, bodyText, refused, settleBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
@@ -8,19 +8,17 @@ import {
   mediaTooBig,
   MIB,
   ROOM_RE,
+  SMALL_BODY_MAX,
   STREAM_PART,
   UP_PART_MAX,
   UP_KINDS,
   UP_SIGN_MAX,
   UP_SIGN_TTL,
-  VIDEO_MAX,
   VIDEO_MAX_HARD,
   VIDEO_STREAM_TOO_BIG,
 } from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
-import { sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
-import { warn } from "../lib/log.js";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
@@ -85,8 +83,9 @@ export async function streamUploadPart(up: R2MultipartUpload, n: number, body: R
  * @param stub the room
  * @param step start, part, sign, status, finish or abort
  */
-/** @param still asked once a streamed part has arrived: the refusal if the caller's credential has gone meanwhile */
-export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean, still?: () => Promise<{ status: number, error: string, code?: string } | null>) {
+/** @param still asked once a streamed part has arrived: the refusal if the caller's credential has gone meanwhile
+ *  @param linkExpires an upload link's expiry, which names the session it was opened for (a finish compares it) */
+export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean, still?: () => Promise<{ status: number, error: string, code?: string } | null>, linkExpires?: number) {
   if (step === "part") {
     // A refused part is read away before the answer goes back: a client
     // still sending its body would otherwise see the connection drop
@@ -153,7 +152,12 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, direct: !!r.direct, expires_at: new Date(r.expires_at).toISOString() });
   }
   if (step === "finish") {
-    const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
+    // Optional: the file this finish means, so a repeat after another
+    // upload replaced this one and finished is told so (upFinishNow).
+    const size = body && body.size !== undefined && body.size !== null ? bodyNumber(body.size, "size", true) : null;
+    if (size !== null && !(size >= 1)) return json({ error: "\"size\" must be the file's exact length in bytes" }, 400);
+    const fp = body ? bodyText(body.fp, "fp") || null : null;
+    const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined, size: size, fp: fp, expires: linkExpires ?? null });
     if (refused(r)) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
     /** the answer, with the media under its kind */
     const media: { type: string, bytes: number, url: string, name?: string | null } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
@@ -234,7 +238,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   // the link is looked up, so a body held back cannot carry a step (a
   // finish that publishes, say) past the link's end (settleBody).
   let asked: Request | null = request;
-  if (usm[3] !== "part") asked = await settleBody(request, MIB);
+  if (usm[3] !== "part") asked = await settleBody(request, SMALL_BODY_MAX);
   if (!asked) return json({ error: "That request's body is too large for this step" }, 413);
   const st = await ustub.uploadSessionTicket(link);
   if (refused(st)) {
@@ -242,7 +246,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
     return json({ error: st.error }, st.status);
   }
   const still = async () => { const again = await ustub.uploadSessionTicket(link); return refused(again) ? again : null; };
-  return uploadStep(asked, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false, still);
+  return uploadStep(asked, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false, still, st.expires);
 }
 
 // Upload tickets: PUT /api/uploads/ROOM/TICKET redeems a
@@ -254,10 +258,27 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
   const uroom = decodeURIComponent(um[1]).toLowerCase();
   if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("video", "single-shot") }, 413);
-  const ubuf = await request.arrayBuffer();
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
-  const ur = await ustub.redeemUpload(decodeURIComponent(um[2]), ubuf, uroom);
+  const ticket = decodeURIComponent(um[2]);
+  // The ticket first, then a body no bigger than it allows. This route
+  // takes anyone's request, and it used to hold the whole body before
+  // asking whether the ticket existed: with no Content-Length (chunked)
+  // nothing stopped it short of the edge's 100 MB, a few such requests
+  // filled the isolate's memory, and over 32 MiB the hand-off to the room
+  // failed with a 500.
+  const lim = await ustub.uploadTicketLimit(ticket);
+  const refuse = async (status: number, error: string) => {
+    // read away, not held: a client still sending sees the reason, not a dropped connection
+    if (request.body && !request.bodyUsed) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
+    return json({ error: error }, status);
+  };
+  if (refused(lim)) return refuse(lim.status, lim.error);
+  const tooBig = mediaTooBig(lim.kind as "image" | "audio" | "video", "single-shot");
+  if (+(request.headers.get("Content-Length") || 0) > lim.max_bytes) return refuse(413, tooBig);
+  const held = await settleBody(request, lim.max_bytes);
+  if (!held) return json({ error: tooBig }, 413);
+  const ubuf = await held.arrayBuffer();
+  const ur = await ustub.redeemUpload(ticket, ubuf, uroom);
   if (ur.status !== 200) return json({ error: ur.error }, ur.status);
   return json({ room: uroom, ok: true, type: ur.type, bytes: ur.bytes, published: ur.published });
 }
@@ -285,8 +306,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
   const fail = async (status: number, error: string) => {
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
-    // streamAbort deletes the object too, but only while this upload
-    // still owns the message's row: the key is shared with any newer one
+    // streamAbort drops the row only while this upload still owns it
     await stub.streamAbort(id, uploadId);
     return json({ error: error }, status);
   };
@@ -319,24 +339,19 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     if (buflen > 0) { const p = await up.uploadPart(++n, take(buflen)); parts.push({ partNumber: n, etag: p.etag }); }
     if (!parts.length) return await fail(400, "Empty upload");
-    await up.complete(parts);
   } catch (e) {
     return await fail(502, "Upload stream failed: " + String((e && (e as Error).message) || e));
   }
-  let head = null as { size: number } | null, sniffed = null as string | null;
-  try { head = await env.MEDIA.head(key); } catch (e) { warn("upload.head", e, { room, id }); }
-  if (head && head.size === counted) {
-    try { const obj = await env.MEDIA.get(key, { range: { offset: 0, length: 16 } }); if (obj) sniffed = sniffVideo(await obj.arrayBuffer()); } catch (e) { warn("upload.sniff", e, { room, id }); }
+  // The Room completes the upload, only while it still owns the
+  // message's row and only while its sender is still in the room (the
+  // stream can take minutes), then checks and indexes it (streamFinish).
+  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room, owner ? null : { token: invite, member: acc.name || "" });
+  if (refused(doneRes)) {
+    // replaced meanwhile: this upload is nobody's now
+    try { await up.abort(); } catch { /* already completed, aborted or expired */ }
+    return json({ error: doneRes.error }, doneRes.status);
   }
-  if (!head || head.size !== counted || !sniffed) return await fail(400, "The uploaded bytes do not check out as that video; upload discarded");
-  // the stream can take minutes: its sender must still be welcome when the video is attached
-  if (!owner) {
-    const l = await stub.lookupInvite(invite);
-    if (!l.ok) return await fail(l.status, l.error);
-  }
-  const doneRes = await stub.streamComplete(id, counted, sniffed, room, uploadId);
-  if (doneRes.status !== 200) return json({ error: doneRes.error }, doneRes.status);
-  return json({ room: room, id: id, video: { type: sniffed, bytes: counted, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
+  return json({ room: room, id: id, video: { type: doneRes.type, bytes: doneRes.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
 }
 
 // The upload engine (UP_KINDS): start / part / sign / status / finish / abort

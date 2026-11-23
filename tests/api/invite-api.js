@@ -77,6 +77,11 @@ async function codes(ctx) {
   for (let i = 0; i < 20; i++) await rpc(A, { jsonrpc: '2.0', id: 10 + i, method: 'tools/call', params: { name: 'begin_upload', arguments: { kind: 'image' } } });
   r = await rpc(A, { jsonrpc: '2.0', id: 40, method: 'tools/call', params: { name: 'begin_upload', arguments: { kind: 'image' } } });
   check('code: MCP upload ticket cap -> structuredContent limit_reached', toolErr(r).isError === true && (toolErr(r).structuredContent || {}).code === 'limit_reached', JSON.stringify(toolErr(r)).slice(0, 200));
+  // the refused begin_upload took back the draft it made for that ticket
+  // (it used to linger a day, unseen): the next id is one past it
+  const after = await req('POST', R + '/messages', { token: A, json: { text: 'after the cap' } });
+  r = await req('DELETE', R + '/messages/' + (after.json.id - 1), { owner: true });
+  check('MCP begin_upload refused at the cap leaves no draft behind', after.status === 201 && r.status === 404, after.status + ' ' + r.status + ' ' + r.text.slice(0, 80));
 
   // room creation: rate_limited until UTC midnight
   const email = 'codes-' + SUF + '@example.test';

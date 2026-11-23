@@ -62,8 +62,6 @@ declare module "../worker/room/Room.js" {
     // In-memory locks the method objects set on the instance (not storage).
     /** Sketch & Guess matches whose Referee is judging right now (sgJudgeNow). */
     sgJudging?: Set<number>;
-    /** Upload sessions ("msg:kind") with a finish in flight (uploadFinish). */
-    _finishing?: Set<string>;
   }
 }
 
