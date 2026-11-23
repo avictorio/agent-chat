@@ -531,5 +531,55 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     return out;
   });
 
+  // A forward read comes back in delivery order: a row published late, or
+  // sent again when its media landed, sits after higher ids. Here row 8
+  // went live after sixty newer rows. Its link dies; the re-read follows
+  // the cursor past them and finds it, and so does the hourly renewal,
+  // never sending the same query twice. Before, a page was taken to cover
+  // every id up to its last row's, so row 8 never got a new link.
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('media-links-late-row' + tag, { state: { artifacts: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag, allowConsole: /status of 403/ }, async (page, S, calls) => {
+      const base = S.msgs[S.msgs.length - 1].ts;
+      for (let i = 0; i < 60; i++) S.msgs.push({ id: 200 + i, ts: base + 1000 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Catching up, line ' + (i + 1) + '.' });
+      S.dn = { 8: 300 };
+      const m8 = S.msgs.find((m) => m.id === 8);
+      m8.image = Object.assign({}, m8.image, { url: m8.image.url + '?exp=1&sig=dead' });
+      const sigs = [];
+      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c));
+      await page.route(/\/messages\/8\/image\?/, (route) => {
+        const sig = new URL(route.request().url()).searchParams.get('sig');
+        sigs.push(sig);
+        if (sig !== 'dead') return route.fallback();
+        // the server signs anew from here on
+        m8.image = Object.assign({}, m8.image, { url: m8.image.url.replace('sig=dead', 'sig=live') });
+        return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
+      });
+      await page.reload();
+      await settle(page);
+      await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'center' }));
+      await page.waitForFunction(() => /sig=live/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 8000 })
+        .catch(() => { throw new Error('the late row\'s image never got its new link: ' + JSON.stringify({ sigs, reads: reads() })); });
+      // the lazy image loads once it is in view
+      await page.evaluate(() => document.querySelector('.msg[data-id="8"] img.msg-img').scrollIntoView({ block: 'center' }));
+      await page.waitForFunction(() => { const i = document.querySelector('.msg[data-id="8"] img.msg-img'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 });
+      await settle(page);
+      const first = reads();
+      must(sigs.join() === 'dead,live', 'the image is retried once, with the new link: ' + JSON.stringify(sigs));
+      must(new Set(first).size === first.length && first.length >= 2, 'the re-read pages on past the newer rows, never repeating a query: ' + JSON.stringify(first));
+      await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'start' }));
+      await shot(page, 'media-links-late-row' + tag + '.png');
+      // an hour on, the renewal finds the late row the same way
+      m8.image = Object.assign({}, m8.image, { url: m8.image.url.replace('sig=live', 'sig=fresh') });
+      await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 51 * 60e3; });
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
+        .catch(() => { throw new Error('the renewal missed the late row: ' + JSON.stringify(reads())); });
+      await settle(page);
+      const later = reads().slice(first.length);
+      must(later.length >= 1 && new Set(later).size === later.length, 'the renewal never repeats a query: ' + JSON.stringify(later));
+      return { first, later };
+    });
+  }
+
   done('people-media');
 })();

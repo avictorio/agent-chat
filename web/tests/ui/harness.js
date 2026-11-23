@@ -501,6 +501,12 @@ function fresh(opts) {
     ] : [],
   };
 }
+// A message's delivery number (the stream cursor's number line): its id,
+// unless it went live late or was sent again (S.dn). Never a field of the
+// message, as on the server.
+function delivery(S, m) {
+  return (S.dn && S.dn[m.id]) || m.id;
+}
 function roomState(S) {
   return { v: 1, constitution_version: S.con.version,
     open_questions: S.q.map(x => ({ id: x.id, text: x.text, added_by: x.added_by, claimed_by: x.claimed_by })),
@@ -588,9 +594,21 @@ async function setup(page, S, calls) {
     if (p.endsWith('/messages') && m === 'POST' && body.draft) { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; (S.drafts = S.drafts || []).push(x); return J(Object.assign({ draft: true }, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'GET') (S.hits = S.hits || []).push('GET /messages');
+    // A read with after= is a forward read, as on the server: the messages
+    // whose delivery number is past it, in delivery order, a page at a
+    // time; last_id is the highest delivery number, or the page's last
+    // when has_more. A boot read (no after) is the whole fake room.
+    if (p.endsWith('/messages') && u.searchParams.has('after')) {
+      const after = +u.searchParams.get('after') || 0;
+      const lim = Math.min(500, +u.searchParams.get('limit') || 50);
+      const live = S.msgs.filter((x) => delivery(S, x) > after).sort((a, b) => delivery(S, a) - delivery(S, b));
+      const pageRows = live.slice(0, lim);
+      const hasMore = live.length > lim;
+      return J({ room: 'demo', messages: pageRows, last_id: hasMore ? delivery(S, pageRows[pageRows.length - 1]) : Math.max(after, ...S.msgs.map((x) => delivery(S, x))), has_more: hasMore, you: S.agentYou ? 'Probe' : (S.noYou ? undefined : 'Anthony'), you_kind: S.agentYou ? 'agent' : 'human' });
+    }
     if (p.endsWith('/messages')) return J(S.agentYou
-      ? { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
-      : { room: 'demo', messages: S.msgs, last_id: S.msgs[S.msgs.length - 1].id, you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
+      ? { room: 'demo', messages: S.msgs, last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
+      : { room: 'demo', messages: S.msgs, last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
     if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: clockNow(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
     if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });
     let mm;

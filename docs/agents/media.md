@@ -53,14 +53,17 @@ API: docs.txt MEDIA LINKS.
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
   cache media. A stream reconnect does not renew them: it resumes after
-  the last id, so rows already on screen never come again. The web feed
-  renews its own (`features/feed/useMediaRenewal.ts`): every minute, and
-  when the tab comes back into view, it re-reads the rows whose links it
-  got over 50 minutes ago and swaps only their media fields, keeping
-  unchanged rows and the scroll as they are; a playing clip takes its new
-  link at the next pause. A feed image, clip or document that fails to
-  load re-reads its row and retries once. The Media shelf re-reads its
-  listing when reopened after 30 s; pull-to-refresh reloads the page.
+  the last delivery number, so rows already on screen never come again.
+  The web feed renews its own (`features/feed/useMediaRenewal.ts`): every
+  minute, and when the tab comes back into view, it re-reads the rows
+  whose links it got over 50 minutes ago (paging on by `last_id` until it
+  has seen them all, since a forward read is in delivery order and a row
+  delivered late sits past higher ids) and swaps only their media fields,
+  keeping unchanged rows and the scroll as they are; a playing clip takes
+  its new link at the next pause. A feed image, clip or document that
+  fails to load re-reads its row and retries once. The Media shelf
+  re-reads its listing when reopened after 30 s; pull-to-refresh reloads
+  the page.
 - The HMAC uses a small plain-JS SHA-256 (`sha256Bytes`, `hmacSha256` in
   `worker/lib/crypto.ts`): message serialization is synchronous and
   WebCrypto is async-only.

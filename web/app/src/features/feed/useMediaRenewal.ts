@@ -23,10 +23,15 @@ type Feed = ReturnType<typeof useMessages>;
 // device clock that is off does not matter.
 const RENEW_AFTER = 50 * 60e3;
 const CHECK_EVERY = 60e3;
-// The re-read pages through the loaded window; history paged in by the
-// media shelf can leave gaps, which the reader jumps, so this only stops
-// a runaway.
+// A forward read comes back in delivery order, not id order (a draft
+// published late, or a message sent again when its media landed, comes
+// after higher ids), so the re-read follows the server's cursor until it
+// has seen every wanted row or reached the newest message. This only
+// stops a runaway.
 const MAX_PAGES = 10;
+// A page asked for one row may still have to step past the rows
+// delivered between that row's id and its delivery number.
+const MIN_PAGE = 50;
 
 function hasMedia(m: Message): boolean {
   return MEDIA_FIELDS.some((k) => !!(m[k] && m[k]!.url));
@@ -42,27 +47,41 @@ export function useMediaRenewal(opts: {
   const busyRef = useRef(false);
   const queueRef = useRef<{ ids: Set<number>; done: Promise<void> } | null>(null);
 
-  // Read these rows again, jumping from one wanted id to the next so a gap
-  // in the window costs no pages, and hand the fresh links to the feed.
+  // Read these rows again and hand the fresh links to the feed. A row's
+  // delivery number is never below its id, so a page may start just under
+  // the lowest id still wanted: what that jumps over is not wanted, and a
+  // gap in the window costs no pages. Before, a page was taken to cover
+  // every id up to its last row's; a row delivered late sat past that, was
+  // never renewed, and the same query went out ten times.
   const reread = useCallback(
     async (ids: number[]) => {
       const { client, feed, deny, deniedRef } = live.current;
       if (deniedRef.current || !ids.length) return;
-      let want = [...new Set(ids)].sort((a, b) => a - b);
+      const want = new Set(ids);
       const rows: Message[] = [];
       const covered: number[] = [];
       try {
-        for (let page = 0; want.length && page < MAX_PAGES; page++) {
-          const after = want[0]! - 1;
-          const last = want[want.length - 1]!;
-          const d = await client.messages(after, Math.min(500, last - after));
-          const got = d.messages || [];
-          rows.push(...got);
-          // A short page reached the room's newest message: every wanted
-          // id is covered, returned or not.
-          const reach = got.length && d.has_more ? got[got.length - 1]!.id : last;
-          covered.push(...want.filter((id) => id <= reach));
-          want = want.filter((id) => id > reach);
+        let cursor = 0;
+        let prev = -1;
+        for (let page = 0; want.size && page < MAX_PAGES; page++) {
+          const sorted = [...want].sort((a, b) => a - b);
+          const after = Math.max(cursor, sorted[0]! - 1);
+          // no progress: the same query would bring the same page
+          if (after <= prev) break;
+          prev = after;
+          const d = await client.messages(after, Math.min(500, Math.max(MIN_PAGE, sorted[sorted.length - 1]! - after)));
+          for (const m of d.messages || []) {
+            if (!want.delete(m.id)) continue;
+            rows.push(m);
+            covered.push(m.id);
+          }
+          // The newest message was reached: a row still wanted is no longer
+          // live, and asking again every minute would not change that.
+          if (!d.has_more) {
+            covered.push(...want);
+            break;
+          }
+          cursor = d.last_id;
         }
       } catch (e) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
