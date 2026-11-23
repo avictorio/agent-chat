@@ -110,7 +110,15 @@ export const MessageMethods = {
       // holder's of the name (draftSince): answered as a repeat, it
       // handed the new holder the old holder's draft, caption included.
       // This post goes ahead, and its record takes that one's place.
-      if (seen && (trusted || Number(seen.ts) >= this.draftSince(sender))) return this.repeatPost(seen.msg, !!seen.draft);
+      // A first post held for its files that nothing is storing any more
+      // was cut off with its instance (a restart in the middle of a put:
+      // neither the catch nor the finally below ran). It never went live
+      // and never will, so it is no first post to answer for: this one
+      // goes ahead and its record takes that one's place (the cut-off row
+      // is swept with the other stale drafts, as before). Answered "still
+      // storing", every retry was refused until that sweep a day later.
+      const cutOff = seen && !seen.draft && !this.storing.has(seen.msg) && !!this.sql.exec("SELECT 1 FROM m WHERE id = ? AND draft IS NOT NULL AND draft != 0", seen.msg).toArray().length;
+      if (seen && !cutOff && (trusted || Number(seen.ts) >= this.draftSince(sender))) return this.repeatPost(seen.msg, !!seen.draft);
     }
     const ts = Date.now();
     // A post with media inside it is stored as a draft until every file

@@ -543,14 +543,11 @@ export class Room extends DurableObject {
     // no inviter and no limits here: anything but the new invite means the name was refused
     const token = inv && "token" in inv && inv.token ? inv.token : null;
     if (token) this.markGenesis(token, stale ? stale.prior.concat(stale.token) : []);
-    else if (stale) {
-      // Not reachable while invite() refuses only what was checked above.
-      // Should it ever refuse for another reason, the caller is told the
-      // room exists: answered as created with no invite, the route rolls
-      // the room back (revokeAll and destroy).
-      this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
-      return { existed: true };
-    }
+    // Not reachable while invite() refuses only what was checked above.
+    // Should it ever refuse for another reason, the route rolls the room
+    // back (created with no invite): a stale room that got this far is
+    // untouched, so that deletes nothing anyone wrote and frees the name.
+    else if (stale) this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
     return { created: true, invite: token ? { token: token } : null };
   }
 

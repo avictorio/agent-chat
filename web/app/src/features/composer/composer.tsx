@@ -58,7 +58,7 @@ const LOST_WAITS = [600, 1500, 3000];
 const STORING_WAITS = [500, 1000, 2000, 4000];
 const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 class FirstPostGone extends Error {}
-async function postRetrying<T>(post: () => Promise<T>, inlineMedia: boolean): Promise<T> {
+async function postRetrying<T>(post: () => Promise<T>): Promise<T> {
   let lost = 0;
   let storing = 0;
   for (;;) {
@@ -71,11 +71,12 @@ async function postRetrying<T>(post: () => Promise<T>, inlineMedia: boolean): Pr
       if (refusal && typeof refusal.id === "number") {
         // Which of the two the server means is its code. A room object
         // still on older code (a few minutes after a deploy) sends none:
-        // then a post with files is taken as still storing - the safe
-        // reading, since posting it again under a new id while the first
-        // copy is being stored would show the message and store its files
-        // twice - and a post without files, which is never held, as gone.
-        const stillStoring = refusal.code === "still_storing" || (refusal.code !== "post_gone" && inlineMedia);
+        // that code's two sentences tell them apart. Going by what was
+        // sent instead (files or none) took a post with files whose first
+        // copy was still being stored for deleted once the waits ran out,
+        // and posted it again under a new id: the message showed twice
+        // and its files were stored twice.
+        const stillStoring = refusal.code ? refusal.code === "still_storing" : /still storing/.test(e instanceof Error ? e.message : "");
         if (!stillStoring) throw new FirstPostGone("This message was already posted and has since been deleted.");
         if (storing < STORING_WAITS.length) {
           await wait(STORING_WAITS[storing++]!);
@@ -445,11 +446,10 @@ export function Composer(p: ComposerProps) {
         payload.doc_name = art.name;
       }
       payload.client_msg_id = cid.id;
-      const inlineMedia = !!(clip || image || art);
       // repeat: true is this message's first post, answered again: success
       let d: Awaited<ReturnType<typeof client.postPayload>>;
       try {
-        d = await postRetrying(() => client.postPayload(payload), inlineMedia);
+        d = await postRetrying(() => client.postPayload(payload));
       } catch (postErr) {
         if (!(postErr instanceof FirstPostGone)) throw postErr;
         // The first post of this id went live and was deleted since: what
@@ -457,7 +457,7 @@ export function Composer(p: ComposerProps) {
         // to be posted. A new id makes it a new message, posted once.
         cid.id = newClientMsgId();
         payload.client_msg_id = cid.id;
-        d = await postRetrying(() => client.postPayload(payload), inlineMedia);
+        d = await postRetrying(() => client.postPayload(payload));
       }
       cidRef.current = null;
       clearSent(textEl, typed);

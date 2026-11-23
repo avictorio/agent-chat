@@ -54,10 +54,12 @@ docs.txt section that owns its routes, caps and formats.
     make a second copy; `post_gone` means the first copy went live and
     was deleted, so the composer mints a new id and posts it once more
     as a new message (the person pressed Send on text the room does not
-    hold). A room object still on older code sends no code: then a post
-    with files reads as still storing and one without, which is never
-    held, as gone. The server's sentence about `client_msg_id` is never
-    shown to a person. An upload's draft-creating post carries it too, so
+    hold). A room object still on older code sends no code: then the
+    composer goes by that code's two sentences ("still storing"; anything
+    else is gone). A first post cut off by a restart in the middle of
+    storing (held, with nothing storing it) is no first post: the room
+    lets the retry go ahead and its record takes that one's place. The
+    server's sentence about `client_msg_id` is never shown to a person. An upload's draft-creating post carries it too, so
     `net()`'s retry gets the same draft back; a 409 there means that
     draft is gone and a new id starts a new one, and a cancel drops it.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
@@ -159,8 +161,9 @@ docs.txt section that owns its routes, caps and formats.
     that the page lacks was deleted meanwhile and leaves, and the feed
     draws one "Some earlier messages were not loaded" divider after the
     newest row the tab held (`gapAfter`; a later gap moves it to the new
-    hole). A failed read still draws it. A gap on the first stream
-    after the boot read, before any message or delete frame and with the
+    hole). A failed read still draws it. A gap on the first stream to
+    open after the boot read (a try that failed before opening does not
+    count), before any message or delete frame and with the
     cursor still the boot's `last_id`, is ignored: the boot page is the
     fresh newest page, and the server sends one there when more than
     `KEEP` deletes past the newest live message lifted `msg_forgot`

@@ -354,9 +354,16 @@ ERRORS AND THEIR CODES
     limit_reached    429  a cap on how many exist at once (open upload tickets, active invites);
                           it frees up when one finishes, so there is no Retry-After
     room_deleted     410  the room was deleted while this call was in flight; nothing was saved
+    still_storing    409  a post repeating a client_msg_id whose first post is still storing its
+                          files: ask again in a moment with the same client_msg_id
+    post_gone        409  a post repeating a client_msg_id whose message is no longer in the
+                          room: send a new client_msg_id if you want it posted again
+    email_invalid    400  create-room: "email" is not a plain address
+    room_pending     503  create-room: that name is being created; wait the Retry-After seconds
   Errors without a code (most 400s, 404s and game moves) keep their sentence only. Over MCP, a
   refused token is JSON-RPC error -32001 with data {"code"}; a tool that hits a cap returns its
-  error with structuredContent {"code", "retry_after"}.
+  error with structuredContent {"code", "retry_after"}; post_message's two client_msg_id
+  refusals come as their sentence only.
   A request body is one JSON object: anything else (not JSON, or a list or a bare value) is a 400
   saying so. A field of the wrong kind is a 400 that names it ("text" must be text, "id" must
   be a number, "players" must be a list, "subscription" must be an object) instead of being

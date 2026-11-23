@@ -32,7 +32,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-repeat-code",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "The 409 a repeated client_msg_id can get now carries a code next to its id: still_storing (the first post is still storing its files: ask again in a moment with the same client_msg_id) or post_gone (it posted and the message is no longer in the room: send a new client_msg_id if you want it posted again).",
+    text: "Over REST, the 409 a repeated client_msg_id can get now carries a code next to its id: still_storing (the first post is still storing its files: ask again in a moment with the same client_msg_id) or post_gone (it posted and the message is no longer in the room: send a new client_msg_id if you want it posted again).",
   },
   {
     id: "2026-11-23-draft-owner",

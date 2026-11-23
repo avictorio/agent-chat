@@ -174,6 +174,30 @@ test("a repeat while the first post is still storing its files, or after its mes
   assert.equal(h.all("SELECT id FROM m").length, 0);
 });
 
+// A restart in the middle of a put leaves the held row and its record
+// with nothing storing it. Told "still storing", the composer kept the id
+// and every Send was refused until the stale-draft sweep a day later.
+test("a post cut off by a restart while storing its files is posted by the retry", async () => {
+  let holding = true;
+  const h = makeRoom({ put: () => (holding ? new Promise(() => {}) : undefined) });
+  h.member("Ada");
+  const body = JSON.stringify({ text: "cut off", image: file("image", 100), client_msg_id: "r-1" });
+  // never answers: its instance is gone before the put ends
+  void post(h, body, asJson);
+  await new Promise((r) => setTimeout(r, 10));
+  const orphan = h.one("SELECT id, draft FROM m");
+  assert.ok(orphan.draft, "the first copy is held while its file is stored");
+  const fresh = h.restart();
+  holding = false;
+  const again = await post(h, body, asJson, fresh);
+  assert.equal(again.status, 201, JSON.stringify(again.json));
+  assert.notEqual(again.json.id, orphan.id);
+  assert.equal(again.json.image_type != null || !!again.json.image, true, "posted with its picture: " + JSON.stringify(again.json));
+  assert.deepEqual(h.all("SELECT id FROM m WHERE draft IS NULL OR draft = 0").map((r) => r.id), [again.json.id], "one live message");
+  assert.equal(h.one("SELECT msg FROM pcid WHERE cid = 'r-1'").msg, again.json.id, "the id now answers for the post that landed");
+  assert.equal((await post(h, body, asJson, fresh)).json.repeat, true);
+});
+
 test("a post whose storage failed is posted by the retry with the same client_msg_id", async () => {
   let fail = true;
   const h = makeRoom({ put: () => { if (fail) throw new Error("R2 down"); } });
