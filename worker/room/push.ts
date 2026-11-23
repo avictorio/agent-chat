@@ -81,9 +81,20 @@ export const PushMethods = {
     // Web push (browser subscriptions).
     const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">>("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
     const targets = rows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
+    // The targets are fixed here, but the sends take a while: each is
+    // checked again just before it leaves. A member removed meanwhile has
+    // no push rows left (revoke, revokeAll and a re-issued name drop
+    // them), and a deleted message has no row in m. Without this the
+    // fan-out went on sending the text to members revoked while it ran,
+    // and a message deleted at once still reached every phone after DELETE
+    // had answered.
+    const wanted = (r: Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth">) => () =>
+      this.sql.exec("SELECT 1 FROM m WHERE id = ?", msg.id).toArray().length > 0 &&
+      this.sql.exec("SELECT 1 FROM push WHERE endpoint = ? AND member = ? AND p256dh = ? AND auth = ?", r.endpoint, r.member, r.p256dh, r.auth).toArray().length > 0;
     for (const r of targets) {
       try {
-        const status = await sendWebPush(this.env, r, payload);
+        const status = await sendWebPush(this.env, r, payload, wanted(r));
+        if (status === null) continue;
         if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
         else if (status >= 400) warn("push.send", "HTTP " + status, { room });
       } catch (e) {

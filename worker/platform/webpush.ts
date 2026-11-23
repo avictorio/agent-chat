@@ -44,12 +44,18 @@ export async function encryptPushPayload(p256dh: string, auth: string, payloadTe
   return concatBytes(header, asPublic, ct);
 }
 
-/** @returns the push service's status */
-export async function sendWebPush(env: Env, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string): Promise<number> {
+/**
+ * @param wanted asked last, after every await and just before the request
+ *   leaves: false sends nothing (the message was deleted or the member
+ *   removed while the fan-out ran)
+ * @returns the push service's status, or null when not sent
+ */
+export async function sendWebPush(env: Env, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string, wanted?: () => boolean): Promise<number | null> {
   const aud = new URL(sub.endpoint).origin;
   const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
   const authorization = await keys.vapidAuth(aud);
   const body = await encryptPushPayload(sub.p256dh, sub.auth, payloadText);
+  if (wanted && !wanted()) return null;
   const resp = await fetch(sub.endpoint, {
     method: "POST",
     headers: { "Authorization": authorization, "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", "TTL": "86400" },

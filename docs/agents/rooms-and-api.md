@@ -269,7 +269,9 @@ docs.txt section that owns its routes, caps and formats.
   each member keeps their newest `PUSH_MAX_PER_MEMBER`. Revoking a
   member's last invite deletes theirs; revoking everyone
   (`DELETE /invites`) drops every registration and closes member streams.
-  `notifyPush` targets only the owner and active members. In the web
+  `notifyPush` targets only the owner and active members, and checks
+  each send again just before it leaves, so a member removed or a
+  message deleted while the fan-out runs gets no more of it. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device.
 
