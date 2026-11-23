@@ -218,5 +218,32 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
+  /* A context lost while the scene was still loading (after the first
+     frame's compile, before it reported ready): the ready report hid the
+     status layer, so the later "was lost" note and Restore went into a
+     hidden layer and the box stayed blank. The test browser cannot lose
+     the context at that exact moment, so the host hears the scene's loss
+     event as soon as it is made, before the scene reports ready. */
+  const loseOnMount = () => {
+    new MutationObserver((_, mo) => {
+      const h = document.querySelector('#viewer .c4-3d-host');
+      if (!h) return;
+      mo.disconnect();
+      h.dispatchEvent(new CustomEvent('arena3d-context', { detail: { lost: true } }));
+    }).observe(document, { childList: true, subtree: true });
+  };
+  await run('arena-context-lost-loading', { state: { c4: true }, reducedMotion: 'reduce', init: loseOnMount }, async (page) => {
+    await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer:not([hidden]) .c4-3d-host canvas', { timeout: 20000 });
+    await statusIs(page, 'was lost');
+    const out = await page.$eval('#viewer .c4-3d-host .arena3d-status', (s) => ({ text: s.textContent, button: !!(s.querySelector('button') || {}).offsetParent }));
+    if (!out.button) throw new Error('a context lost while loading must still offer Restore: ' + JSON.stringify(out));
+    const old = await page.$('#viewer .c4-3d-host canvas');
+    await page.click('#viewer .c4-3d-host .arena3d-status button');
+    await page.waitForFunction((o) => { const c = document.querySelector('#viewer .c4-3d-host canvas'); return c && c !== o; }, old, { timeout: 20000 });
+    await statusIs(page, null);
+    return out;
+  });
   done('arenas-3d');
 })();

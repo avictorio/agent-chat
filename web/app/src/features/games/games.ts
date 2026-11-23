@@ -679,7 +679,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   }
   function ready3d(h: Host3d) {
     h.ready = true;
-    if (!h.failed) h.status.hidden = true;
+    // a context lost after the first frame's compile but before it
+    // reported ready: the note stays, or the "was lost" text and Restore
+    // later went into a hidden layer and the box was blank
+    if (!h.failed && !h.lost) h.status.hidden = true;
   }
   /* A scene whose WebGL context is lost (FirstFrame tells its host) was
      a blank box with no word. Now the box says it paused; a context the
@@ -693,6 +696,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       if (h.failed) return;
       const lost = !!(e as CustomEvent<{ lost: boolean }>).detail?.lost;
       clearTimeout(timer);
+      h.lost = lost;
       h.status.textContent = "";
       h.host.classList.toggle("ctx-lost", lost);
       if (!lost) {

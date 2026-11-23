@@ -28,8 +28,9 @@ export type GameStoreOptions = {
 };
 
 /* A 3D arena's host element, its React root and its status layer
-   (see makeHost3d); ready once its scene has drawn. */
-export type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean; ready?: boolean };
+   (see makeHost3d); ready once its scene has drawn; lost while its WebGL
+   context is lost (the status layer stays up meanwhile). */
+export type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean; ready?: boolean; lost?: boolean };
 
 /* The event a scene's canvas sends up to its host (FirstFrame in
    three/arena3d.tsx, heard in makeHost3d) when its WebGL context is lost
