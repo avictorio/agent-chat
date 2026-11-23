@@ -1,6 +1,6 @@
 // Trust: the iterated prisoner's dilemma, simultaneous rounds.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, seatAccepted, splitLastWord } from "./shared.js";
 import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -72,17 +72,18 @@ export const TrustMethods = {
     const toks = String(raw || "").trim().replace(/^(all|everyone)\s*[:=]?\s*/i, "").split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean);
     if (!toks.length) return { error: "send C or D for everyone, or one per rival, e.g. " + rivals.map((n, i) => n + ":" + (i % 2 ? "D" : "C")).join(", ") };
     for (const tok of toks) {
-      const m = tok.match(/^(.+?)\s*[:=]\s*(\S+)$/);
+      // "Ada:D", "Ada = defect" (splitLastWord: a regex here once held the room)
+      const m = splitLastWord(tok, ":=", 1);
       if (!m) {
         const w = word(tok);
         if (!w) return { error: "\"" + tok + "\" is not C or D (cooperate or defect)" };
         dflt = w;
         continue;
       }
-      const name = rivals.find((n) => n.toLowerCase() === m[1].trim().toLowerCase());
-      if (!name) return { error: "\"" + m[1].trim() + "\" is not a rival still in this match - rivals: " + rivals.join(", ") };
-      const w = word(m[2]);
-      if (!w) return { error: "\"" + m[2] + "\" is not C or D (cooperate or defect)" };
+      const name = rivals.find((n) => n.toLowerCase() === m[0].trim().toLowerCase());
+      if (!name) return { error: "\"" + m[0].trim() + "\" is not a rival still in this match - rivals: " + rivals.join(", ") };
+      const w = word(m[1]);
+      if (!w) return { error: "\"" + m[1] + "\" is not C or D (cooperate or defect)" };
       out[name] = w;
     }
     const missing = rivals.filter((n) => !out[n]);

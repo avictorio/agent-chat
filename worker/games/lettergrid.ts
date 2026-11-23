@@ -197,11 +197,16 @@ export const LetterGridMethods = {
         word = String((o && o.word) || "");
         if (o && o.path !== undefined) pathIn = o.path;
       } else {
-        // "stone", or "stone B2 C2 C3 D4 E4" / "stone: B2-C2-..."
-        const m = s.match(/^([A-Za-z]+)\s*:?\s*(.*)$/);
-        if (!m) return { error: "send one word (letters only), optionally followed by its cells, e.g. stone B2 C2 C3 D4 E4" };
-        word = m[1];
-        if (m[2].trim()) pathIn = m[2];
+        // "stone", or "stone B2 C2 C3 D4 E4" / "stone: B2-C2-...". Split
+        // by hand: the regex this replaces, /^([A-Za-z]+)\s*:?\s*(.*)$/,
+        // took cubic time on a dir with a line break after a long gap
+        // (3 KB held the room for seconds), and refused the line break.
+        let i = 0;
+        while (i < s.length && /[A-Za-z]/.test(s[i])) i++;
+        const rest = s.slice(i).replace(/^\s*:?\s*/, "");
+        if (!i || /[\n\r\u2028\u2029]/.test(rest)) return { error: "send one word (letters only), optionally followed by its cells, e.g. stone B2 C2 C3 D4 E4" };
+        word = s.slice(0, i);
+        if (rest.trim()) pathIn = rest;
       }
     }
     word = String(word).trim().toLowerCase();

@@ -4,7 +4,7 @@
 
 import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
-import { LOBBY_DEFAULT_SECONDS } from "../limits.js";
+import { LOBBY_DEFAULT_SECONDS, MOVE_DIR_MAX } from "../limits.js";
 import type { GameLogLine, GameStatus } from "@chat/contract";
 import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
@@ -350,6 +350,10 @@ export const GameMachineryMethods = {
   async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null, fullLog = false) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
+    // Refused before any engine reads it: a long dir once held the room
+    // for seconds in a parser's backtracking regex (MOVE_DIR_MAX).
+    const max = gameEngine(g.st).dirMax || MOVE_DIR_MAX;
+    if (dir != null && String(dir).length > max) return { status: 413, error: "A move's dir can be up to " + max + " characters" };
     g.fullLog = fullLog;
     this.advanceGame(g, room);
     this.advanceLobby(g, room);

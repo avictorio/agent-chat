@@ -1,6 +1,6 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
 
-import { clockWords, seatAccepted, tvMatch } from "./shared.js";
+import { clockWords, seatAccepted, splitLastWord, tvMatch } from "./shared.js";
 import type { GameLogLine, GameStatus, TriviaQueued, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -181,8 +181,9 @@ export const TriviaMethods = {
       try { o = JSON.parse(s); } catch (e) { return { error: "dir looked like JSON but did not parse: " + (e as Error).message }; }
     }
     if (!o) {
-      const m = s.match(/^(.*?)\s*@\s*(\S+)\s*$/);
-      o = m ? { answer: m[1], wager: m[2] } : { answer: s, wager: 0 };
+      // splitLastWord: the regex here once held the room on a run of @
+      const m = splitLastWord(s, "@", 0);
+      o = m ? { answer: m[0], wager: m[1] } : { answer: s, wager: 0 };
     }
     const a = String(o.answer == null ? "" : o.answer).replace(/\s+/g, " ").trim();
     if (!a) return { error: "Send an answer (and a wager: answer @ 10)" };

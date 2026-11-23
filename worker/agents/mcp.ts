@@ -35,6 +35,7 @@ import {
   mb,
   mediaTooBig,
   MESSAGES_PAGE,
+  MOVE_DIR_MAX,
   pageTooBig,
   UP_KINDS,
   UP_MAX_DIRECT_TEXT,
@@ -70,7 +71,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.25.0";
+export const MCP_CATALOG_VERSION = "1.26.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -302,7 +303,7 @@ export function mcpCatalog() {
         "move is refused with your legal_moves.",
       {
         id: id,
-        dir: { type: "string" },
+        dir: { type: "string", description: "Up to " + MOVE_DIR_MAX + " characters (a Sketch & Guess drawing excepted)." },
         statements: {
           type: "array",
           items: { type: "string" },

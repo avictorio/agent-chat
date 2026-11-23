@@ -14,7 +14,7 @@ import { werewolfEngine } from "./werewolf.js";
 import { twentyEngine } from "./twenty.js";
 import { corpseEngine } from "./corpse.js";
 import { lettergridEngine } from "./lettergrid.js";
-import { SG_IMAGE_MAX, sketchEngine } from "./sketch.js";
+import { SG_IMAGE_TEXT_MAX, sketchEngine } from "./sketch.js";
 import { triviaEngine } from "./trivia.js";
 import type { GameType } from "@chat/contract";
 import type { Room } from "../room/Room.js";
@@ -54,6 +54,8 @@ export type GameEngineOf<S extends StoredBase> = {
   turnWord: string,
   /** The current step number (tick, round, turn). */
   logTick(st: S): number,
+  /** The longest dir a move may carry, when more than MOVE_DIR_MAX (Sketch's drawing). */
+  dirMax?: number,
   /** The first deadline's length once the lobby fills. */
   clockSeconds(st: S): number,
   /** Validate the options, store the match in its lobby, post its card. */
@@ -141,7 +143,7 @@ export function moveFields(src: Body | null | undefined) {
   else if (typeof src.accept === "string") out.accept = src.accept.slice(0, 400);
   if (src.wager !== undefined && src.wager !== null) out.wager = src.wager;
   // Sketch & Guess: the artist's image (a data URL) and a guess
-  if (typeof src.image === "string") out.image = src.image.slice(0, Math.ceil((SG_IMAGE_MAX * 4) / 3) + 200);
+  if (typeof src.image === "string") out.image = src.image.slice(0, SG_IMAGE_TEXT_MAX);
   if (typeof src.guess === "string") out.guess = src.guess.slice(0, 200);
   return Object.keys(out).length ? out : null;
 }

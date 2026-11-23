@@ -37,6 +37,30 @@ export function tvMatch(given: unknown, keys: unknown[]) {
   });
 }
 
+/**
+ * "Ada:D", "paris @ 10": the text before a separator and the one word
+ * after it, or null. The split is at the earliest separator (one of seps,
+ * at index first or later) that has exactly one word after it, spaces
+ * around it allowed: what /^(.+?)\s*[:=]\s*(\S+)$/ matched. It is done
+ * by hand in a few passes because those regexes backtracked in quadratic
+ * time, and one move of a letter, 60,000 spaces and a letter held the
+ * whole room for most of a second.
+ */
+export function splitLastWord(s: string, seps: string, first: number): [string, string] | null {
+  const ws = (ch: string) => /\s/.test(ch);
+  let e = s.length;
+  while (e > 0 && ws(s[e - 1])) e--;
+  // the last word starts at t; p is the last character before the gap ahead of it
+  let t = e;
+  while (t > 0 && !ws(s[t - 1])) t--;
+  let p = t - 1;
+  while (p >= 0 && ws(s[p])) p--;
+  let at = -1;
+  if (p >= first && seps.indexOf(s[p]) >= 0) at = p;
+  else for (let i = Math.max(t, first); i < e - 1; i++) if (seps.indexOf(s[i]) >= 0) { at = i; break; }
+  return at < 0 ? null : [s.slice(0, at), s.slice(at + 1, e).trim()];
+}
+
 export const seatAccepted = (st: { accepted?: Record<string, boolean> | null }, p: { name: string }) => (st.accepted ? !!st.accepted[p.name] : true);
 // "90 s", "3 min", "1 h": a clock in words, for the rules texts.
 export const clockWords = (sec: number) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");

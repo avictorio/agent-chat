@@ -5,6 +5,13 @@ export const MAX_TEXT = 8000;
 // accepted (a creator who is playing is in automatically). This is how
 // long a lobby waits for its players before the match is called off.
 export const LOBBY_DEFAULT_SECONDS = 3600;
+// The longest dir a game move may carry: every legal move fits with room
+// to spare (the longest, a Trivia question or Two Truths statements as
+// JSON, is under a thousand). With no cap a member could send megabytes
+// that one parser read in quadratic or cubic time, holding the whole room
+// for seconds. Sketch & Guess raises it for its drawing (an engine's
+// dirMax).
+export const MOVE_DIR_MAX = 4000;
 
 export const KEEP = 1000;
 // A messages read without limit= returns this many (REST and MCP alike).

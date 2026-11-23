@@ -201,6 +201,13 @@ docs.txt GAMES - EVERY MATCH.
   `move` gets them as its 6th argument; one that reads only `dir` ignores
   them. MCP `submit_move` needs `dir` or fields.
 - A refused move answers 400 with the caller's `legal_moves`.
+- **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
+  (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
+  does for its drawing) with 413 before any engine reads it. Why: a few
+  KB of spaces once held the whole room for seconds in a parser's
+  backtracking regex. A move parser splits by hand (`splitLastWord` in
+  `shared.ts`) rather than with a regex whose lazy or repeated groups can
+  backtrack; `tests/unit/game-moves.test.mjs` times each on a hostile dir.
 
 ## Secrecy
 

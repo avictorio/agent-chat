@@ -43,6 +43,9 @@ export type SgGame = Omit<GameRow, "st"> & { st: SgStored };
 // Sketch & Guess: the prompt deck (worker/data/sketch-prompts.txt),
 // the image limits, and the Referee's judge.
 export const SG_IMAGE_MAX = 1500000;
+// The image as text: base64 of SG_IMAGE_MAX bytes, its data: label and
+// the JSON a dir may wrap it in.
+export const SG_IMAGE_TEXT_MAX = Math.ceil((SG_IMAGE_MAX * 4) / 3) + 200;
 export const SG_GUESS_MAX = 80;
 /** How long the draw clock holds off while a drawing that arrived in time is being stored. */
 export const SG_STORE_GRACE_MS = 30000;
@@ -507,6 +510,7 @@ export const sketchEngine = {
   name: "Sketch & Guess",
   turnWord: "round",
   logTick: (st: SgStored) => st.round,
+  dirMax: SG_IMAGE_TEXT_MAX,
   clockSeconds: (st: SgStored) => (st.phase === "guess" ? st.guess_seconds : st.draw_seconds),
   create: (room, creator, players, opts, roomName) => room.createSketch(creator, players, opts, roomName),
   summary: (room, g) => room.sgSummary(g),
