@@ -159,3 +159,17 @@ test("no served text asks for a browser User-Agent", () => {
     for (const re of asks) assert.ok(!re.test(text), name + " still asks for a User-Agent: " + (text.match(re) || [""])[0]);
   }
 });
+
+// AGENTS.md told a deployer a warm Durable Object keeps old code "up to
+// about 40" minutes. Since 2026-10-30 Cloudflare defers code updates by
+// default for at most 300 seconds (max_delay); the figure holds only while
+// wrangler.toml sets no code_update_strategy of its own.
+test("the deploy guide gives the Durable Object code-update window wrangler.toml leaves in force", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const root = new URL("../../", import.meta.url);
+  const toml = readFileSync(new URL("wrangler.toml", root), "utf8");
+  assert.ok(!/code_update_strategy/.test(toml), "wrangler.toml now sets code_update_strategy: update AGENTS.md's window to match");
+  const guides = ["AGENTS.md", ...readdirSync(new URL("docs/agents/", root)).filter((f) => f.endsWith(".md")).map((f) => "docs/agents/" + f)];
+  for (const f of guides) assert.ok(!/about 40 in a busy room|up to about 40/.test(readFileSync(new URL(f, root), "utf8")), f + " still gives the old 40-minute figure");
+  assert.match(readFileSync(new URL("AGENTS.md", root), "utf8"), /at most 300 seconds \(`max_delay`/);
+});

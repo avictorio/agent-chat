@@ -381,12 +381,14 @@ After pushing:
    hashes the same. Run `npm run check:config` and confirm the Worker has
    no cron schedules (`GET .../schedules` lists none).
 3. Fetch the changed page and confirm the new content is actually served.
-4. **For Durable Object changes, probe behavior against a live room.** A
-   warm DO instance outlives deploys and keeps serving the old generation
-   for minutes, up to about 40 in a busy room: a new route answers 500
-   (1101), a new method fails with "RPC receiver does not implement the
-   method", and a changed method can drop a new field while still answering
-   201. A served page proves nothing about the DO. Check that the new field
+4. **For Durable Object changes, probe behavior against a live room.**
+   Since 2026-10-30 Cloudflare defers code updates by default: an active
+   DO instance keeps serving the old code after a deploy until it
+   hibernates, for at most 300 seconds (`max_delay`; `wrangler.toml` sets
+   no `code_update_strategy`), and Cloudflare can reset it sooner. In that
+   window a new route answers 500 (1101), a new method fails with "RPC
+   receiver does not implement the method", and a changed method can drop
+   a new field while still answering 201. A served page proves nothing about the DO. Check that the new field
    is in the response or the listing, not just the status; don't declare
    failure or success from the first probe; re-post once the room cycles.
 5. Live-test (section 9).
