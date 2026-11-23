@@ -54,7 +54,10 @@ export const battleshipStatus: GameStatus<BattleshipState> = {
   turnLine(g: BattleshipState, me: string): TurnLine {
     const you: Partial<BattleshipYou> = g.you || {};
     const players: BattleshipPlayer[] = g.players || [];
-    const opp = players.filter((p: BattleshipPlayer) => p.name !== me)[0];
+    // Name who the game is really waiting on: the first other seat was
+    // named before, so in a free-for-all the banner blamed Ada while it
+    // was Bob's shot, or Bob still placing.
+    const rivals = players.filter((p: BattleshipPlayer) => p.name !== me && !p.eliminated);
     let text = "";
     let sub = "";
     let mine = false;
@@ -62,7 +65,10 @@ export const battleshipStatus: GameStatus<BattleshipState> = {
       if (you.playing && !you.fleet) {
         mine = true;
         text = "Place your fleet";
-      } else if (you.playing) text = "Fleet placed · waiting on " + (opp ? opp.name : "your rival");
+      } else if (you.playing) {
+        const placing = rivals.filter((p: BattleshipPlayer) => !p.placed).map((p: BattleshipPlayer) => p.name);
+        text = "Fleet placed · waiting on " + (placing.join(", ") || "the first shot");
+      }
       else text = players.map((p: BattleshipPlayer) => p.name + (p.placed ? " placed ✓" : " placing…")).join(" · ");
     } else if (you.playing && you.your_turn) {
       mine = true;
@@ -70,11 +76,17 @@ export const battleshipStatus: GameStatus<BattleshipState> = {
         g.variant === "salvo" && g.salvo_left != null
           ? "Your salvo · " + g.salvo_left + " shot" + (g.salvo_left === 1 ? "" : "s") + " left"
           : "Your shot · turn " + g.turn;
-      // the stakes only once they are real: your own missed turns
-      const missed = (g.misses || {})[me] || 0;
-      if (missed >= 2) sub = "You've missed " + missed + " turns in a row - one more forfeits the match.";
-      else if (missed === 1) sub = "You missed a turn - three in a row forfeits the match.";
-    } else if (you.playing) text = "Waiting on " + (opp ? opp.name + "'s shot" : "the next shot") + " · turn " + g.turn;
+      // the stakes only once they are real: your own missed turns. What a
+      // third miss does follows the engine: with one rival left it is a
+      // forfeit, with more you are eliminated and the sea fights on, and
+      // if every rival has missed two as well the match ends with no winner.
+      const misses = g.misses || {};
+      const missed = misses[me] || 0;
+      const ffa = rivals.length > 1;
+      const allSilent = rivals.length > 0 && rivals.every((p: BattleshipPlayer) => (misses[p.name] || 0) >= 2);
+      if (missed >= 2) sub = "You've missed " + missed + " turns in a row - one more " + (allSilent ? "ends the match with no winner." : ffa ? "and you're eliminated." : "forfeits the match.");
+      else if (missed === 1) sub = "You missed a turn - three in a row " + (ffa ? "eliminates you." : "forfeits the match.");
+    } else if (you.playing) text = "Waiting on " + (g.turn_of ? g.turn_of + "'s shot" : "the next shot") + " · turn " + g.turn;
     else text = (g.turn_of ? g.turn_of + " to fire · " : "") + "turn " + g.turn;
     return { text, sub, mine };
   },

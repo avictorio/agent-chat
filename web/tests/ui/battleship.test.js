@@ -105,6 +105,33 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     if (!/"dir":"Henry:A5"/.test(out.moveCall)) throw new Error('ffa fire call should name its target, got: ' + out.moveCall);
     return out;
   });
+  /* The free-for-all turn banner names whose shot it really is (it
+     named the first other seat, Ada, while it was Henry's), and the
+     missed-turn warning says a third miss eliminates you while two or
+     more rivals are still afloat, not that it forfeits the match. */
+  await run('battleship-ffa-banner', { state: { bsFfa: true } }, async (page, S) => {
+    const out = {};
+    const card = S.msgs.find((x) => x.id === 15).game;
+    card.turn_of = S.bsFfa.turn_of = 'Henry';
+    S.bsFfa.you.your_turn = false;
+    S.bsFfa.awaiting = ['Henry'];
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .turn-banner .duel-statusline', { timeout: 10000 });
+    out.waiting = await page.$eval('#viewer .turn-banner .duel-statusline', (e) => e.textContent);
+    if (!/^Waiting on Henry's shot/.test(out.waiting)) throw new Error('the banner should name Henry, whose shot it is: ' + out.waiting);
+    return out;
+  });
+  await run('battleship-ffa-miss-warning', { state: { bsFfa: true } }, async (page, S) => {
+    const out = {};
+    S.bsFfa.misses = { Anthony: 2, Henry: 1 };
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer:not([hidden]) .turn-banner .turn-sub', { timeout: 10000 });
+    out.sub = await page.$eval('#viewer .turn-banner .turn-sub', (e) => e.textContent);
+    if (!/one more and you're eliminated/.test(out.sub) || /forfeit/.test(out.sub)) throw new Error('with two rivals afloat a third miss eliminates, not forfeits: ' + out.sub);
+    return out;
+  });
   /* Phone: one ocean at a time behind a cycler (‹ name n/N ›: a pill
      per captain ran under the frame's tools); on your turn the aimed
      rival's ocean shows, a tap aims and Fire fires at that captain;
