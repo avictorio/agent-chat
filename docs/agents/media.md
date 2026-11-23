@@ -184,7 +184,12 @@ way; the routes are in docs.txt UPLOADING FILES.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
-  the edge's 100 MB request cap. From its reservation (`streamBegin`) to
+  the edge's 100 MB request cap. Its Content-Type is lower-cased and
+  stripped of parameters; one that names no kind of file
+  (`application/octet-stream`, curl's form type, none) is replaced by the
+  type its first bytes show (`UNTYPED` in `worker/routes/uploads.ts`),
+  read before the upload is reserved, so a non-video costs no storage.
+  From its reservation (`streamBegin`) to
   its answer the stream's work is also handed to `ctx.waitUntil`
   (`RouteContext.ctx`): Cloudflare may cancel a request's work when its
   client disconnects, awaits included, and a phone that dropped mid-body

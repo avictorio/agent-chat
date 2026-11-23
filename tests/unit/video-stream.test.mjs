@@ -75,3 +75,35 @@ test("a stream's finish and publish run under waitUntil", async () => {
   assert.deepEqual({ ...md }, { type: "video/mp4", size: 100, upload_id: null });
   assert.ok(!h.one("SELECT draft FROM m WHERE id = ?", id).draft, "the publish_on_complete draft is posted");
 });
+
+test("a real video sent with a generic, upper-case or parameterised type is taken", async () => {
+  const WEBM_HEAD = [0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0];
+  const cases = [
+    ["application/octet-stream", MP4_HEAD, "video/mp4"],
+    ["application/x-www-form-urlencoded", MP4_HEAD, "video/mp4"],
+    ["Video/MP4; codecs=\"avc1.42E01E\"", MP4_HEAD, "video/mp4"],
+    ["application/octet-stream", WEBM_HEAD, "video/webm"],
+    [null, MP4_HEAD, "video/mp4"],
+  ];
+  for (const [ct, head, want] of cases) {
+    const h = roomWatched();
+    const id = await draft(h);
+    // the head split over two chunks: the sniff reads on until it has enough
+    const file = bytes(head, 100);
+    const { res } = await put(h, id, body([file.slice(0, 7), file.slice(7)], false), ct ? { "Content-Type": ct } : {});
+    const j = await res.json();
+    assert.equal(res.status, 200, ct + ": " + JSON.stringify(j));
+    assert.equal(j.video.type, want, String(ct));
+    assert.equal(j.video.bytes, 100);
+    assert.deepEqual([...h.objects.values()].map((o) => o.byteLength), [100], "every byte stored, the sniffed ones included");
+  }
+});
+
+test("a stream with no video type that is no video is refused before anything is stored", async () => {
+  const h = roomWatched();
+  const id = await draft(h);
+  const { res } = await put(h, id, body([new TextEncoder().encode("just some text, not a video at all")], false), { "Content-Type": "application/octet-stream" });
+  assert.equal(res.status, 415);
+  assert.equal(h.all("SELECT 1 FROM md WHERE msg = ?", id).length, 0);
+  assert.equal(h.multipart.size, 0);
+});

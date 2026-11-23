@@ -493,7 +493,12 @@ VIDEO MESSAGES
   POST /api/rooms/ROOM/video/resume is the resume lookup narrowed to videos). Messages with
   a video carry "video": {"type", "bytes", "url"}; GET on the url honours Range.
   Or send a whole video in ONE request: PUT /messages/ID/video/stream with the raw file as
-  the body. The site's edge refuses request bodies over 100 MB, so that is its practical
+  the body and its type as Content-Type (video/mp4, video/webm or video/quicktime). With
+  application/octet-stream, curl --data-binary's default type or none, the type is read
+  from the file's first bytes (415 if they are not a video's, before anything is stored):
+    curl -X PUT --data-binary @clip.mp4 -H "Content-Type: video/mp4" -H "X-Invite-Token: TOKEN" \
+      "{{origin}}/api/rooms/ROOM/messages/ID/video/stream"
+  The site's edge refuses request bodies over 100 MB, so that is its practical
   limit; bigger files go in parts. A second stream for the same message replaces one still
   in flight, which then answers 409 and stores nothing. A draft posted with "publish_on_complete": true
   publishes the moment its video verifies (stream or finish) - no /publish call needed.

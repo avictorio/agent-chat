@@ -1,7 +1,8 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
 import { deny, json, readBody, type Body, bodyNumber, bodyText, refused, settleBody } from "../lib/http.js";
-import { upSniff, upTypeError } from "../uploads/plan.js";
+import { cleanMediaType, upSniff, upTypeError } from "../uploads/plan.js";
+import { sniffVideo } from "../lib/sniff.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
 import {
@@ -285,6 +286,10 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
   return json({ room: uroom, ok: true, type: ur.type, bytes: ur.bytes, published: ur.published });
 }
 
+// Content-Types that name no kind of file: a stream sent with one of these
+// (or none) is typed by its first bytes.
+const UNTYPED = ["application/octet-stream", "binary/octet-stream", "application/x-www-form-urlencoded"];
+
 // Whole-file streaming ingest: ONE PUT carrying the entire video (the edge
 // refuses request bodies over 100 MB, so in practice up to that; bigger
 // files use the upload engine), for a client that can send a file in one
@@ -319,7 +324,36 @@ async function videoStreamIngest(rc: RouteContext, stub: DurableObjectStub, room
   const { request, env, url, owner, invite } = rc;
   const media = env.MEDIA as R2Bucket;
   const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
-  const begun = await stub.streamBegin(id, member, request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
+  const reader = body.getReader();
+  // The type, lower-cased and without parameters ("Video/MP4; codecs=...").
+  // None, or one that says only "bytes" (application/octet-stream, or the
+  // form type curl --data-binary sends), is read from the file's first
+  // bytes instead: those used to be refused as "must be MP4, WebM or MOV"
+  // with a real MP4 in the body. The chunks read for that go into storage
+  // first, below.
+  const ahead: Uint8Array[] = [];
+  let type = cleanMediaType(request.headers.get("Content-Type"));
+  if (!type || UNTYPED.indexOf(type) >= 0) {
+    let got = 0;
+    try {
+      while (got < 16) {
+        const c = await reader.read();
+        if (c.done) break;
+        if (c.value && c.value.byteLength) { ahead.push(c.value); got += c.value.byteLength; }
+      }
+    } catch (e) { return json({ error: "Upload stream failed: " + String((e && (e as Error).message) || e) }, 502); }
+    if (!got) return json({ error: "Empty upload" }, 400);
+    const first = new Uint8Array(got);
+    let off = 0;
+    for (const a of ahead) { first.set(a, off); off += a.byteLength; }
+    type = sniffVideo(first.buffer);
+    if (!type) {
+      // read the rest away, so the client gets the refusal as a clean answer
+      try { for (;;) { const c = await reader.read(); if (c.done) break; } } catch { /* the client went away mid-body */ }
+      return json({ error: upTypeError("video") + " (checked from the file's first bytes, as no video type was sent); nothing was stored" }, 415);
+    }
+  }
+  const begun = await stub.streamBegin(id, member, type, declared, owner, room);
   if (refused(begun)) return json({ error: begun.error }, begun.status);
   const key = begun.key, uploadId = begun.uploadId;
   const up = media.resumeMultipartUpload(key, uploadId);
@@ -342,10 +376,9 @@ async function videoStreamIngest(rc: RouteContext, stub: DurableObjectStub, room
     buflen -= amount;
     return out;
   };
-  const reader = body.getReader();
   try {
     for (;;) {
-      const chunk = await reader.read();
+      const chunk = ahead.length ? { done: false, value: ahead.shift() } : await reader.read();
       if (chunk.done) break;
       const value = chunk.value;
       if (value && value.byteLength) {

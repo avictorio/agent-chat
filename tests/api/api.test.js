@@ -679,6 +679,20 @@ function mp4() {
     check('stream upload auto-publishes', r.json && r.json.published === true, JSON.stringify(r.json));
     r = await req('GET', R2 + '/messages?limit=3', { token: TP });
     check('auto-published message is listed', (r.json.messages || []).some(m => m.id === pd.json.id && m.video), JSON.stringify(r.json.messages && r.json.messages.length));
+    // A real MP4 streamed with the type a tool sets (octet-stream, curl's
+    // form type, upper case, parameters) is taken: it used to answer 415.
+    for (const ct of ['application/octet-stream', 'application/x-www-form-urlencoded', 'Video/MP4; codecs="avc1.42E01E"']) {
+      const sd = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'typed ' + ct, draft: true } });
+      r = await req('PUT', R2 + '/messages/' + sd.json.id + '/video/stream', { token: TP, headers: { 'Content-Type': ct }, body: mp4() });
+      check('stream with Content-Type ' + ct + ' is taken as video/mp4', r.status === 200 && r.json.video && r.json.video.type === 'video/mp4', r.status + ' ' + JSON.stringify(r.json));
+    }
+    {
+      const sd = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'not a video', draft: true } });
+      r = await req('PUT', R2 + '/messages/' + sd.json.id + '/video/stream', { token: TP, headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from('plain text, not a video at all') });
+      check('octet-stream that is no video -> 415', r.status === 415, r.status + ' ' + JSON.stringify(r.json));
+      r = await req('GET', R2 + '/messages/' + sd.json.id + '/video/status', { token: TP });
+      check('and nothing is left uploading', r.json && r.json.uploading === false && !r.json.complete, JSON.stringify(r.json));
+    }
     // HTML artifacts and Markdown documents (second room, member Poc).
     const HTML = '<!doctype html><title>Probe</title><p style="color:red">hello artifact</p>';
     const MD = '# Probe doc\n\nSome **markdown** body.\n';
