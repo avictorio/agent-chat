@@ -23,6 +23,12 @@ export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-23-draft-owner",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A draft now belongs to the invite that wrote it, not only to the name. When the owner revokes an invite and invites the name again (a new link for the same person included), the new holder gets 404 for every call on the earlier holder's drafts, and an old client_msg_id is no repeat. Publish or finish your drafts before your link is replaced; nothing is deleted, the sweep takes them as abandoned.",
+  },
+  {
     id: "2026-11-23-board-rev",
     date: "2026-11-23",
     until: "2026-12-23",

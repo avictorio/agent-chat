@@ -404,8 +404,9 @@ credential, and the route reads no other.
   the name's new invite (a revoke and re-invite is how a leaked link is
   rotated). Uploads through the site in flight stay: their link went with
   `dropUploadLinks` and every step checks the invite, so the removed
-  holder is shut out already, and the name's next holder can resume them.
-  Files already in place, and the drafts, stay.
+  holder is shut out already; they stay in storage, but the draft is the
+  earlier invite's, so the name's next holder cannot resume them (see
+  Drafts). Files already in place, and the drafts, stay.
 - **A resumable link** comes from the same mint given a `size` (any
   kind, small files too, in one part; kind `file` must give one; only a
   call without `size` gets a single-shot ticket): it starts an upload-engine session and returns
@@ -446,6 +447,19 @@ credential, and the route reads no other.
   member could sweep the gaps in the listing to see when someone was
   preparing a post. Another member's live message keeps its 403: it is
   in the listing anyway.
+- A draft belongs to the invite that wrote it, not only to the name: one
+  written before the caller's active invite was created (`draftSince`)
+  is hidden from them the same way, on every path above, in reactions,
+  media reads, `upload/resume` (`findResumableUpload`) and the
+  `client_msg_id` repeat lookup (a `pcid` record from before the invite
+  is no repeat, and the new post's record takes its place). Checked by
+  name alone, an owner who revoked Bob and invited someone new as "bob"
+  within the day handed the new holder Bob's captions, pictures and
+  uploads in flight, to read, continue and publish. Nothing is deleted:
+  the sweep takes such a draft like any abandoned one. The same holds
+  when the owner replaces a leaked link of the same person (there is no
+  route that rotates a token while keeping the `inv` row): their unsent
+  drafts become unreachable to them. The owner key is unaffected.
 - An abandoned draft is swept after 24 hours, or, while an upload for it
   is in flight, `UP_SESSION_MS` after that upload's start (`sweepDrafts`,
   run on post and on upload start, throttled per instance). The day also

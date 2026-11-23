@@ -10,7 +10,7 @@ import type { CfgRow, MdRow, MsgRow, Room } from "./Room.js";
 import type { MediaBytes } from "../lib/media.js";
 import { warn } from "../lib/log.js";
 
-export type DraftCols = Pick<MsgRow, "sender" | "draft">;
+export type DraftCols = Pick<MsgRow, "sender" | "draft" | "ts">;
 /** Who is asking for a message's media: drafts are their sender's (and
  *  the owner's) alone. */
 export type MediaViewer = { name?: string | null, owner?: boolean };
@@ -19,9 +19,16 @@ export type MediaViewer = { name?: string | null, owner?: boolean };
  *  answers such a row exactly like a missing id (404 "No message with that
  *  id"): a 403 there told any member that a draft sat under an id the
  *  listings skip, and when it appeared, published or went. A live message
- *  is everyone's to see, so it keeps its honest 403. */
-export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner: boolean | undefined) {
-  return !!r.draft && !owner && !sameName(r.sender, who);
+ *  is everyone's to see, so it keeps its honest 403.
+ *
+ *  A draft belongs to the invite that wrote it, not only to the name: one
+ *  written before `since` (the caller's invite was made: draftSince) is a
+ *  previous holder's. The owner revokes a name and invites someone new
+ *  under it, and the new holder used to read, continue and publish the
+ *  old holder's drafts, caption and pictures included. The sweeps take
+ *  such a draft after a day, as any abandoned draft. */
+export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner: boolean | undefined, since: number) {
+  return !!r.draft && !owner && (!sameName(r.sender, who) || Number(r.ts) < since);
 }
 
 // One stored file's row for serving it. A page's name is on its message
@@ -30,6 +37,24 @@ export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner:
 const MEDIA_ROW_SQL = "SELECT md.type AS type, md.r2key AS r2key, md.size AS size, COALESCE(md.name, CASE WHEN md.kind = 'html' THEN m.html_name END) AS name FROM md LEFT JOIN m ON m.id = md.msg WHERE md.msg = ? AND md.kind = ? AND md.upload_id IS NULL";
 
 export const MediaMethods = {
+  /** hiddenDraft for this caller: since is when their invite was made (draftSince). */
+  draftHidden(r: DraftCols, who: string | null | undefined, owner: boolean | undefined): boolean {
+    return hiddenDraft(r, who, owner, r.draft && !owner ? this.draftSince(who) : 0);
+  },
+
+  // When the caller's hold on the name began: the created time of the
+  // oldest active invite under it (active names are unique, so there is
+  // one), or 0 when no active invite holds it - the owner key posting
+  // under a name, or the room's own paths acting for a sender. A draft
+  // written before it is a previous holder's (hiddenDraft).
+  draftSince(who: string | null | undefined): number {
+    if (!who) return 0;
+    const names = this.invNames(who, true);
+    if (!names.length) return 0;
+    const r = this.sql.exec<{ c: number | null }>("SELECT MIN(created) AS c FROM inv WHERE revoked IS NULL AND name IN (" + names.map(() => "?").join(", ") + ")", ...names).one();
+    return Number(r.c) || 0;
+  },
+
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
   // md maps (msg, kind) to an R2 key. An R2 failure fails the request:
   // there is no other store to fall back to (see STORE_MSG).
@@ -161,9 +186,9 @@ export const MediaMethods = {
   // was then served for a message nobody could see or delete. The draft
   // sweep collects such leftovers.) A draft's media is its sender's alone.
   mediaShown(id: number, viewer?: MediaViewer) {
-    const m = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    const m = this.sql.exec<DraftCols>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
     if (!m) return false;
-    return !(viewer && !viewer.owner && m.draft && !sameName(m.sender, viewer.name));
+    return !(viewer && this.draftHidden(m, viewer.name, viewer.owner));
   },
 
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
@@ -195,8 +220,8 @@ export const MediaMethods = {
 
   /** @param transcript undefined keeps the current one */
   async attachAudio(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, transcript: string | null | undefined, room: string) {
-    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach audio to your own messages" };
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
@@ -206,8 +231,8 @@ export const MediaMethods = {
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
@@ -216,8 +241,8 @@ export const MediaMethods = {
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft, ts FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || this.draftHidden(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);

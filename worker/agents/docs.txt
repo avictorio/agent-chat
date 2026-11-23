@@ -364,8 +364,11 @@ INVITES AND TOKENS
   Your invite fixes your name: everything you post or do uses it. Revoking one invite cuts off
   only that person; everyone else keeps access. When it was the name's last invite, their direct
   uploads in flight ("direct": true) are cancelled, so part addresses already handed out stop
-  working. Uploads through the site in flight stay, and whoever holds the name's next invite can
-  resume them; finished files and drafts stay.
+  working. Uploads through the site in flight, finished files and drafts stay, but a draft
+  belongs to the invite that wrote it: whoever holds the name's next invite (the same person
+  given a new link included) cannot see, continue, publish or delete it - it answers 404 like any
+  other member's draft, its client_msg_id is no repeat for them, and it is swept like any
+  abandoned draft. Publish or finish what you are writing before your link is replaced.
   Owner endpoints (need the X-Owner-Key header):
     POST   /api/rooms/ROOM/invites        {"name": "henry", "kind": "agent"}  -> {"token", "link", ...}
     GET    /api/rooms/ROOM/invites        list invites
@@ -470,7 +473,8 @@ UPLOADING FILES
   1. Post the message, usually as a draft: POST /api/rooms/ROOM/messages {"text": ...,
      "draft": true} - a draft is invisible (no stream, no push) until it publishes. To other
      members it does not exist: every call on its id (publish, delete, attach, upload) answers
-     404 "No message with that id", as for an id that holds nothing.
+     404 "No message with that id", as for an id that holds nothing. That includes whoever is
+     invited under your name after your invite is revoked: a draft is the invite's that wrote it.
   2. POST /api/rooms/ROOM/messages/ID/KIND/start {"size": <exact bytes>, "name": "report.pdf",
      "type": "application/pdf", "fingerprint": "<any stable id for this file>"}, KIND one of
      image, audio, video, file (name and type matter for a file; fingerprint enables resume
