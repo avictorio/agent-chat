@@ -2,7 +2,7 @@
 
 import { b64urlDecode, b64urlEncode, concatBytes } from "../lib/crypto.js";
 import { sendWebPush, vapidSubject } from "../platform/webpush.js";
-import { PUSH_MAX_PER_MEMBER } from "../limits.js";
+import { PUSH_MAX_PER_MEMBER, PUSH_PARALLEL } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 import type { ApiMessage } from "./messages.js";
@@ -91,17 +91,24 @@ export const PushMethods = {
     const wanted = (r: Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth">) => () =>
       this.sql.exec("SELECT 1 FROM m WHERE id = ?", msg.id).toArray().length > 0 &&
       this.sql.exec("SELECT 1 FROM push WHERE endpoint = ? AND member = ? AND p256dh = ? AND auth = ?", r.endpoint, r.member, r.p256dh, r.auth).toArray().length > 0;
-    for (const r of targets) {
-      try {
-        const status = await sendWebPush(this.env, r, payload, wanted(r));
-        if (status === null) continue;
-        if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
-        else if (status >= 400) warn("push.send", "HTTP " + status, { room });
-      } catch (e) {
-        // the error's name only: a fetch error's message can quote the endpoint
-        warn("push.send", e instanceof Error ? e.name : "Error", { room });
+    // PUSH_PARALLEL sends at a time, each taking the next target when it
+    // is done (sendWebPush times every send out).
+    let next = 0;
+    const lane = async () => {
+      while (next < targets.length) {
+        const r = targets[next++]!;
+        try {
+          const status = await sendWebPush(this.env, r, payload, wanted(r));
+          if (status === null) continue;
+          if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
+          else if (status >= 300) warn("push.send", "HTTP " + status, { room });
+        } catch (e) {
+          // the error's name only: a fetch error's message can quote the endpoint
+          warn("push.send", e instanceof Error ? e.name : "Error", { room });
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(PUSH_PARALLEL, targets.length) }, lane));
   },
 
   notifyMembers(name: string | null | undefined) {

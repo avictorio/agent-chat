@@ -85,3 +85,28 @@ test("a message deleted while its fan-out runs is not pushed to the members stil
   assert.equal(net.sent.length, before, "no send started after the delete");
   assert.ok(before < 8);
 });
+
+test("a fan-out sends several at a time, each with a timeout, and signs once per push service", async (t) => {
+  const h = pushRoom();
+  h.member("Ada"); h.member("Bob"); h.member("Cy");
+  // an origin no other test uses: the signed header is kept per origin for the whole process
+  const ep = (who, i) => "https://wns2-unit.notify.windows.com/w/?token=" + who + i;
+  for (let i = 0; i < 7; i++) await subscribe(h, "Bob", ep("bob", i));
+  for (let i = 0; i < 5; i++) await subscribe(h, "Cy", ep("cy", i));
+  const net = pushServices(t, (url) => { if (url.endsWith("bob0")) throw new TypeError("network down"); return 201; });
+  t.mock.method(console, "warn", () => {});
+  await h.room.post("Ada", "hello all", R, false);
+  await net.waitFor(6);
+  assert.equal(net.maxInFlight, 6, "six sends in flight at once, not one after another");
+  net.release();
+  await h.settled();
+  assert.equal(net.sent.length, 12, "every subscription got its push, after one failed");
+  for (const x of net.sent) {
+    assert.ok(x.init.signal instanceof AbortSignal, "every send can be given up");
+    assert.equal(x.init.redirect, "manual");
+  }
+  assert.equal(h.signed.filter((a) => a === "https://wns2-unit.notify.windows.com").length, 1, "one VAPID signing for twelve sends");
+  await h.room.post("Ada", "and again", R, false);
+  await h.settled();
+  assert.equal(h.signed.filter((a) => a === "https://wns2-unit.notify.windows.com").length, 1, "the next post reuses it");
+});

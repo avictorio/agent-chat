@@ -4,6 +4,7 @@
 
 import { b64urlDecode, concatBytes, hkdf } from "../lib/crypto.js";
 import type { PushRow } from "../room/Room.js";
+import { PUSH_SEND_MS } from "../limits.js";
 
 // VAPID (RFC 8292): one keypair for the whole site, generated on first use and kept by a
 // dedicated Durable Object instance named __vapid; the private half never
@@ -44,6 +45,30 @@ export async function encryptPushPayload(p256dh: string, auth: string, payloadTe
   return concatBytes(header, asPublic, ct);
 }
 
+// The signed VAPID header per push service origin, kept for an hour (the
+// JWT itself is good for twelve). Every send used to call the one __vapid
+// object, which imported the key and signed a fresh JWT, so every post in
+// every room queued on that single object once per subscription.
+const VAPID_REUSE_MS = 3600000;
+const vapidHeaders = new Map<string, { header: Promise<string>, until: number }>();
+
+function vapidHeader(env: Env, aud: string): Promise<string> {
+  const now = Date.now();
+  const kept = vapidHeaders.get(aud);
+  if (kept && kept.until > now) return kept.header;
+  // The promise is kept, not the answer, so the sends a fan-out starts
+  // together share one signing instead of each asking for its own.
+  const header = env.ROOM.get(env.ROOM.idFromName("__vapid")).vapidAuth(aud);
+  // Origins are push service hosts, but Windows ones vary by subdomain:
+  // a bound keeps the map small whatever is registered.
+  if (vapidHeaders.size >= 64) vapidHeaders.clear();
+  const entry = { header, until: now + VAPID_REUSE_MS };
+  vapidHeaders.set(aud, entry);
+  // a failed signing is not kept: the next send asks again
+  header.catch(() => { if (vapidHeaders.get(aud) === entry) vapidHeaders.delete(aud); });
+  return header;
+}
+
 /**
  * @param wanted asked last, after every await and just before the request
  *   leaves: false sends nothing (the message was deleted or the member
@@ -52,14 +77,20 @@ export async function encryptPushPayload(p256dh: string, auth: string, payloadTe
  */
 export async function sendWebPush(env: Env, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, payloadText: string, wanted?: () => boolean): Promise<number | null> {
   const aud = new URL(sub.endpoint).origin;
-  const keys = env.ROOM.get(env.ROOM.idFromName("__vapid"));
-  const authorization = await keys.vapidAuth(aud);
+  const authorization = await vapidHeader(env, aud);
   const body = await encryptPushPayload(sub.p256dh, sub.auth, payloadText);
   if (wanted && !wanted()) return null;
   const resp = await fetch(sub.endpoint, {
     method: "POST",
     headers: { "Authorization": authorization, "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", "TTL": "86400" },
     body: body,
+    // A push service answers; it never redirects. A redirect is not
+    // followed to wherever it points, and a service that does not answer
+    // is given up on rather than holding the fan-out.
+    redirect: "manual",
+    signal: AbortSignal.timeout(PUSH_SEND_MS),
   });
+  // the answer's body is never read: let the connection go
+  await resp.body?.cancel();
   return resp.status;
 }

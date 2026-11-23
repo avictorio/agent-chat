@@ -43,6 +43,13 @@ export const PUSH_MAX_PER_MEMBER = 10;
 // Samsung/Opera via FCM, Firefox autopush, Edge/Windows WNS, Safari/Apple),
 // so a member cannot point the room's fan-out at arbitrary hosts.
 export const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com)$/;
+// A post's fan-out: this many sends at a time (a Worker keeps six
+// connections open at once), each given up after PUSH_SEND_MS. They used
+// to go one after another with no timeout, so one push service that never
+// answered held back every member after it. A fan-out has at most
+// (MAX_ACTIVE_INVITES + 1) x PUSH_MAX_PER_MEMBER targets.
+export const PUSH_PARALLEL = 6;
+export const PUSH_SEND_MS = 10000;
 export const AVATAR_MAX = 2000000;
 // Media storage failures are all-or-nothing: an R2 failure fails the whole
 // request with this message and leaves nothing behind - no message without

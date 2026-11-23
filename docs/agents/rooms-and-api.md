@@ -271,7 +271,10 @@ docs.txt section that owns its routes, caps and formats.
   (`DELETE /invites`) drops every registration and closes member streams.
   `notifyPush` targets only the owner and active members, and checks
   each send again just before it leaves, so a member removed or a
-  message deleted while the fan-out runs gets no more of it. In the web
+  message deleted while the fan-out runs gets no more of it. Sends go
+  `PUSH_PARALLEL` at a time, each timed out after `PUSH_SEND_MS`, and
+  `platform/webpush.ts` keeps the signed VAPID header per push service
+  origin for an hour instead of asking `__vapid` on every send. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device.
 
