@@ -166,10 +166,29 @@ export default function HomeApp() {
   // If that fails the room stays, unless the person chose Forget anyway.
   const doForget = async (r: SavedRoom, anyway: boolean) => {
     if (!anyway) {
+      // The bell's saved mode goes before the server call, as bell Off
+      // does: a tab with this room open re-registers it quietly when its
+      // status check hears "not registered" and still finds a mode. Deleted
+      // after the unsubscribe, the mode let that tab sign the device up
+      // again, and notifications kept coming after Forget. It comes back if
+      // the server refuses and the room stays.
+      const modeKey = "chat-push-mode:/api/rooms/" + r.room;
+      let saved: string | null = null;
+      try {
+        saved = localStorage.getItem(modeKey);
+        localStorage.removeItem(modeKey);
+      } catch {
+        // storage unavailable
+      }
       setForgetBusy(true);
       try {
         await forgetRoomPush(r.room, r.token);
       } catch (e) {
+        try {
+          if (saved) localStorage.setItem(modeKey, saved);
+        } catch {
+          // storage unavailable
+        }
         setForgetErr(
           "Couldn't turn off this room's notifications on this device (" +
             (e instanceof Error ? e.message : String(e)) +

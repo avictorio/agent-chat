@@ -558,9 +558,10 @@ async function setup(page, S, calls) {
     // Web Push: the room's registry of this device's subscription (S.push:
     // endpoint -> mode), with the token each call carried (S.pushLog);
     // S.pushFail refuses subscribe and unsubscribe, S.statusGate holds
-    // status answers until it resolves.
+    // status answers until it resolves, S.unsubGate holds an unsubscribe's
+    // answer (the registration is already gone) until it resolves.
     if (p === '/api/push/key') return J({ key: 'B' + 'A'.repeat(86) });
-    if ((am = p.match(/^\/api\/rooms\/[^/]+\/push\/(status|subscribe|unsubscribe)$/))) { S.push = S.push || {}; const act = am[1]; const ep = act === 'status' ? u.searchParams.get('endpoint') : act === 'subscribe' ? body.subscription && body.subscription.endpoint : body.endpoint; (S.pushLog = S.pushLog || []).push(act + ' ' + (req.headers()['x-invite-token'] || '-')); if (act === 'status') { if (S.statusGate) await S.statusGate; return J(S.push[ep] ? { room: 'demo', registered: true, mode: S.push[ep] } : { room: 'demo', registered: false }); } if (S.pushFail) return J({ error: 'upstream connect error' }, S.pushFail); if (act === 'subscribe') { S.push[ep] = body.mode === 'mentions' ? 'mentions' : 'all'; return J({ room: 'demo', subscribed: true, mode: S.push[ep] }); } delete S.push[ep]; return J({ room: 'demo', subscribed: false }); }
+    if ((am = p.match(/^\/api\/rooms\/[^/]+\/push\/(status|subscribe|unsubscribe)$/))) { S.push = S.push || {}; const act = am[1]; const ep = act === 'status' ? u.searchParams.get('endpoint') : act === 'subscribe' ? body.subscription && body.subscription.endpoint : body.endpoint; (S.pushLog = S.pushLog || []).push(act + ' ' + (req.headers()['x-invite-token'] || '-')); if (act === 'status') { if (S.statusGate) await S.statusGate; return J(S.push[ep] ? { room: 'demo', registered: true, mode: S.push[ep] } : { room: 'demo', registered: false }); } if (S.pushFail) return J({ error: 'upstream connect error' }, S.pushFail); if (act === 'subscribe') { S.push[ep] = body.mode === 'mentions' ? 'mentions' : 'all'; return J({ room: 'demo', subscribed: true, mode: S.push[ep] }); } delete S.push[ep]; if (S.unsubGate) await S.unsubGate; return J({ room: 'demo', subscribed: false }); }
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');

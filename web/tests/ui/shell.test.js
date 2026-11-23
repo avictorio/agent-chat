@@ -326,6 +326,49 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       return out;
     });
   }
+  // Forget while the room is open in another tab with the bell on, whose
+  // status check is in flight: Home's unsubscribe lands first, the tab hears
+  // "not registered", and it re-registers quietly if it still finds the
+  // bell's saved mode. Forget used to delete that mode only after the
+  // unsubscribe answered, so the tab signed the device up again and
+  // notifications kept coming after Forget.
+  await run('push-forget-open-tab', { init: pushInitSrc }, async (page, S, calls) => {
+    S.push = { [EP]: 'all' };
+    const b = await page.context().newPage();
+    await installClock(b);
+    await setup(b, S, calls);
+    await b.addInitScript(pushInitSrc);
+    await b.goto('https://chat.victorio.cloud/r/demo');
+    await b.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].some((x) => x.getAttribute('title') === 'Notifications on'), null, { timeout: 10000 });
+    await page.goto('https://chat.victorio.cloud/');
+    await settle(page);
+    // tab B starts a status check that the server holds
+    let openStatus, openUnsub;
+    S.statusGate = new Promise((r) => (openStatus = r));
+    const held = S.pushLog.length;
+    await b.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    for (let i = 0; i < 100 && S.pushLog.length === held; i++) await new Promise((r) => setTimeout(r, 20));
+    // Home forgets; the server drops the registration and holds its answer
+    S.unsubGate = new Promise((r) => (openUnsub = r));
+    await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+    await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 });
+    await page.click('#forgetYes');
+    for (let i = 0; i < 100 && S.push[EP]; i++) await new Promise((r) => setTimeout(r, 20));
+    // tab B hears "not registered" before Home has its answer
+    S.statusGate = null;
+    openStatus();
+    await new Promise((r) => setTimeout(r, 300));
+    await settle(b);
+    S.unsubGate = null;
+    openUnsub();
+    await settle(page);
+    await new Promise((r) => setTimeout(r, 300));
+    await settle(b);
+    const out = { push: S.push, log: S.pushLog.slice(held), keys: await forgetKeys(page), b: await bellLabel(b) };
+    must(!Object.keys(S.push).length, 'the open tab registered the room again after Forget: ' + JSON.stringify(out));
+    must(!out.keys.some((k) => /[:/]demo($|:)/.test(k)), 'Forget must remove the room\'s keys: ' + JSON.stringify(out));
+    return out;
+  });
   // Bell Off that the server refuses says it failed and keeps the bell
   // on; it used to toast "Notifications off" while the room went on
   // notifying this device.
