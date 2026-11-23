@@ -53,7 +53,9 @@ const ROLE: Record<string, RoleInfo> = {
   villager: VILLAGER,
 };
 const roleInfo = (r?: string | null): RoleInfo => (r && ROLE[r]) || VILLAGER;
-const PICK_HEX: Record<string, string> = { kill: "#ef4444", check: "#a78bfa", guard: "#60a5fa" };
+// The seer's check ring wears the seer's colour: it was the violet of seat
+// 5, so checking that player drew a violet ring on a violet seat.
+const PICK_HEX: Record<string, string> = { kill: "#ef4444", check: "#c4b5fd", guard: "#60a5fa" };
 
 type Seat = { name: string; hex: string; you: boolean; x: number; z: number; a: number };
 

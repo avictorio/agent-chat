@@ -68,8 +68,8 @@ fs.mkdirSync(OUT, { recursive: true });
 const now = clockNow(), H = 3600e3, D = 86400e3;
 // The extra seats of the largest tables (state.ww9: a 9-seat Werewolf,
 // state.tr8: an 8-seat Trust), in the server's seat colours from the 6th on.
-const WW9 = [['Kip', 'yellow', '#facc15'], ['Lou', 'blue', '#60a5fa'], ['Mo', 'red', '#f87171'], ['Ned', 'emerald', '#34d399']].map(([name, color, hex]) => ({ name, color, hex, accepted: true, alive: true, role: null, voted: false }));
-const TR8 = [['Ivy', 'lime', '#a3e635'], ['Jax', 'violet', '#a78bfa'], ['Kip', 'yellow', '#facc15'], ['Lou', 'blue', '#60a5fa'], ['Mo', 'red', '#f87171']].map(([name, color, hex], i) => ({ name, color, hex, accepted: true, committed: i % 2 === 0, score: 8 + i, out: false, coop: 0.5 }));
+const WW9 = [['Kip', 'yellow', '#facc15'], ['Lou', 'white', '#f8fafc'], ['Mo', 'sand', '#d9b98c'], ['Ned', 'blush', '#fbcfe8']].map(([name, color, hex]) => ({ name, color, hex, accepted: true, alive: true, role: null, voted: false }));
+const TR8 = [['Ivy', 'lime', '#a3e635'], ['Jax', 'violet', '#a78bfa'], ['Kip', 'yellow', '#facc15'], ['Lou', 'white', '#f8fafc'], ['Mo', 'sand', '#d9b98c']].map(([name, color, hex], i) => ({ name, color, hex, accepted: true, committed: i % 2 === 0, score: 8 + i, out: false, coop: 0.5 }));
 function ymd(off) { const d = new Date(now + off * D); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 // A two-captain Battleship fixture's record, as the server sends it:
 // shots, every shot oldest first, read off the boards (each captain's fire

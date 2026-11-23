@@ -69,9 +69,15 @@ export const GameMachineryMethods = {
      deadline arithmetic (deadline += tick) keeps cadence honest regardless. */
   // One colour per seat, so there are as many as the largest game seats
   // (Werewolf's 9). With six, a Werewolf of 7 to 9 and a Trust of 7 or 8
-  // answered 500 (the seventh seat read a colour that was not there). The
-  // last three are the 400 tones of hues the first six leave free; like
-  // them each is at least 7:1 on the arenas' dark ground (--gbg).
+  // answered 500 (the seventh seat read a colour that was not there). Like
+  // the first six, each is at least 7:1 on the arenas' dark ground (--gbg).
+  // A seat colour must never be one an arena uses to mean something: the
+  // last three were first blue and red, which are exactly Werewolf's guard
+  // pick and werewolf role and Trust's "red = defected", so the eighth
+  // player of a Trust was drawn as a defector. White, sand and blush stand
+  // apart from the first six by lightness for colour-blind eyes, and from
+  // the roles, picks and outcomes (no red, rose, teal or green);
+  // tests/unit/seat-colors.test.mjs holds them to that.
   gameColors() {
     return [
       { color: "cyan", hex: "#22d3ee" },
@@ -80,9 +86,9 @@ export const GameMachineryMethods = {
       { color: "lime", hex: "#a3e635" },
       { color: "violet", hex: "#a78bfa" },
       { color: "yellow", hex: "#facc15" },
-      { color: "blue", hex: "#60a5fa" },
-      { color: "red", hex: "#f87171" },
-      { color: "emerald", hex: "#34d399" },
+      { color: "white", hex: "#f8fafc" },
+      { color: "sand", hex: "#d9b98c" },
+      { color: "blush", hex: "#fbcfe8" },
     ];
   },
 
