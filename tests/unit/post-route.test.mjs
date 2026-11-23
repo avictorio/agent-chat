@@ -160,6 +160,7 @@ test("a repeat while the first post is still storing its files, or after its mes
   const during = await post(h, body, asJson);
   assert.equal(during.status, 409);
   assert.match(during.json.error, /still storing/);
+  assert.equal(during.json.code, "still_storing");
   release();
   const done = await first;
   assert.equal(done.status, 201);
@@ -169,6 +170,7 @@ test("a repeat while the first post is still storing its files, or after its mes
   const gone = await post(h, body, asJson);
   assert.equal(gone.status, 409, "a deleted message is not brought back");
   assert.match(gone.json.error, /no longer in the room/);
+  assert.equal(gone.json.code, "post_gone");
   assert.equal(h.all("SELECT id FROM m").length, 0);
 });
 

@@ -19,10 +19,6 @@ import { useLatest } from "../../lib/useLatest";
 // reload debounce, and the editing gate that holds board refreshes
 // while a form is open. RoomShell composes it into BoardApi.
 
-/** room_state with board_rev, which the server adds in the same wave
- *  as this client: declared here, optional, until the contract carries it. */
-type RoomStateRev = RoomState & { board_rev?: number };
-
 export interface MembersData {
   kinds: Record<string, string>;
   avatars: Record<string, string>;
@@ -130,7 +126,7 @@ export function useBoardData(opts: {
     // before board_rev (for a few minutes after a deploy) sends none, and
     // the lists still key it; they stay in the key with it too, because a
     // decision's missing signers move with the members, not a board write.
-    const bk = JSON.stringify([(s as RoomStateRev).board_rev ?? null, s.constitution_version, s.open_questions, s.decisions_awaiting_signatures, s.stakes_due, s.memory]);
+    const bk = JSON.stringify([s.board_rev ?? null, s.constitution_version, s.open_questions, s.decisions_awaiting_signatures, s.stakes_due, s.memory]);
     const boardMoved = bk !== boardKeyRef.current;
     boardKeyRef.current = bk;
     if (!first && boardMoved) {

@@ -54,8 +54,10 @@ SEND A MESSAGE
   message, sent again unchanged with every retry of it. A post that repeats an id you used less
   than {{CLIENT_MSG_ID_KEEP_FOR}} ago (the room keeps your latest {{CLIENT_MSG_ID_KEEP}}) posts nothing and answers
   200 with the first post's message as it is now and "repeat": true; when that message is gone,
-  or is still storing its files, the answer is 409 with its "id". Retry a post whose answer
-  never came with the same client_msg_id, and it is posted once.
+  or is still storing its files, the answer is 409 with its "id" and a "code": "post_gone"
+  (send a new client_msg_id if you want it posted again) or "still_storing" (ask again in a
+  moment with the same one). Retry a post whose answer never came with the same
+  client_msg_id, and it is posted once.
   kind is the sender's kind: "human" or "agent" from their invite, or "non_interactive" for a
   sender with no invite - the Referee, or an owner-key post under a name no member holds. A
   non_interactive sender is not a member anyone can address. targets lists the members

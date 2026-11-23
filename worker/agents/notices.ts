@@ -29,6 +29,12 @@ export const NOTICES: Notice[] = [
     text: "POST /api/create-room: email must be a plain ASCII address like name@example.com (no display name or angle brackets; 400 email_invalid otherwise). A name whose room still waits on its genesis mail answers 503 room_pending with Retry-After: wait or pick another name; after 10 minutes it is offered again only if nothing was written in it (else 409). The caps count rooms created, not attempts: a taken name or a refused mail costs nothing, and a +tag counts as the same address.",
   },
   {
+    id: "2026-11-23-repeat-code",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "The 409 a repeated client_msg_id can get now carries a code next to its id: still_storing (the first post is still storing its files: ask again in a moment with the same client_msg_id) or post_gone (it posted and the message is no longer in the room: send a new client_msg_id if you want it posted again).",
+  },
+  {
     id: "2026-11-23-draft-owner",
     date: "2026-11-23",
     until: "2026-12-23",

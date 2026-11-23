@@ -94,7 +94,7 @@ export const MessageMethods = {
    * @returns the message; null when it was deleted while its media was
    *   stored; a repeat, or a refusal of one
    */
-  async postKeyed(cid: string | null, sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | PostRepeat | { status: 409, error: string, id: number } | null> {
+  async postKeyed(cid: string | null, sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | PostRepeat | { status: 409, error: string, id: number, code: "post_gone" | "still_storing" } | null> {
     // the room the post was sent to: deleted during the sweep, it takes no message (Room.fence)
     const gen = this.gen;
     this.fence(gen);
@@ -225,10 +225,15 @@ export const MessageMethods = {
    * posting again would bring back a message its sender deleted.
    * @param asDraft the first post asked to be a draft
    */
-  repeatPost(id: number, asDraft: boolean): PostRepeat | { status: 409, error: string, id: number } {
+  // The two refusals carry a code, since a client must act differently on
+  // each: wait and ask again with the same id (still_storing), or send a
+  // new id if it wants the message posted again (post_gone). They used to
+  // differ only in their wording, and the web app, guessing from what it
+  // had sent, could post a slow upload a second time.
+  repeatPost(id: number, asDraft: boolean): PostRepeat | { status: 409, error: string, id: number, code: "post_gone" | "still_storing" } {
     const r = this.sql.exec<MsgListRow & Pick<MsgRow, "draft" | "pubauto">>("SELECT " + MSG_COLS + ", draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 409, error: "This client_msg_id already posted message " + id + ", which is no longer in the room; nothing was posted. Send a new client_msg_id to post it again.", id };
-    if (r.draft && !asDraft) return { status: 409, error: "This client_msg_id's first post (message " + id + ") is still storing its files; nothing was posted. Ask again in a moment.", id };
+    if (!r) return { status: 409, error: "This client_msg_id already posted message " + id + ", which is no longer in the room; nothing was posted. Send a new client_msg_id to post it again.", id, code: "post_gone" };
+    if (r.draft && !asDraft) return { status: 409, error: "This client_msg_id's first post (message " + id + ") is still storing its files; nothing was posted. Ask again in a moment.", id, code: "still_storing" };
     const { draft, pubauto, ...row } = r;
     return { repeat: true, msg: this.withKinds([row])[0], draft: !!draft, pubauto: !!(draft && pubauto) };
   },

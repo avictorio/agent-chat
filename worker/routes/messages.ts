@@ -279,7 +279,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     try { msg = await stub.postKeyed(cid, from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
     catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }
     if (!msg) return json({ error: "That message was deleted while its attachment was being stored; nothing was posted" }, 409);
-    if ("status" in msg) return json({ error: msg.error, id: msg.id }, msg.status);
+    if ("status" in msg) return json({ error: msg.error, id: msg.id, code: msg.code }, msg.status);
     // a repeat: 200, not 201, since nothing new was posted
     if ("repeat" in msg) return json(Object.assign({ room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: await stateAfterWrite(stub, from, room), for_agents: forAgents(url.origin, room) }));
     return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room), for_agents: forAgents(url.origin, room) }), 201);

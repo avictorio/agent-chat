@@ -5,6 +5,7 @@ import type { DuelH2H, DuelRound, DuelState, DuelThrow, GameLogLine } from "@cha
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
 import type { GameEngineOf } from "./engine.js";
+import { PAIR_SEP } from "../lib/text.js";
 import type { Body } from "../lib/http.js";
 
 /** A duellist's seat. */
@@ -73,7 +74,7 @@ export const DuelMethods = {
     const tally: Record<string, number> = {};
     let total = 0;
     // seat order is either way round; tallied in the order each name first won
-    for (const r of this.sql.exec<{ winner: string, n: number }>("SELECT winner, COUNT(*) AS n FROM gr WHERE pair IN (?, ?) AND type = 'duel' AND status = 'finished' AND winner IS NOT NULL AND winner != '' GROUP BY winner ORDER BY MIN(id)", a + "|" + b, b + "|" + a)) {
+    for (const r of this.sql.exec<{ winner: string, n: number }>("SELECT winner, COUNT(*) AS n FROM gr WHERE pair IN (?, ?) AND type = 'duel' AND status = 'finished' AND winner IS NOT NULL AND winner != '' GROUP BY winner ORDER BY MIN(id)", a + PAIR_SEP + b, b + PAIR_SEP + a)) {
       tally[r.winner] = r.n;
       total += r.n;
     }

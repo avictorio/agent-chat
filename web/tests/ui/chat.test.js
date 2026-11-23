@@ -1270,5 +1270,53 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     return out;
   });
 
+  // A post with files whose first copy is still being stored when the
+  // waits run out is not posted again under a new id: that showed the
+  // message twice and stored its files twice once the first copy went
+  // live. The composer says the files are still being stored and keeps the
+  // id, so Send again asks for the same message.
+  await run('send-409-media-still-storing', {}, async (page, S, calls) => {
+    S.postAnswers = ['409', '409', '409', '409', '409'];
+    const from = calls.length;
+    await page.setInputFiles('#imgFile', TESTS + '/../../tests/fixtures/photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.fill('#text', 'A slow picture.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 20000 });
+    await idle(page);
+    const first = { posts: posts(calls, from), err: await page.$eval('#err', (e) => e.textContent), box: await page.$eval('#text', (t) => t.value) };
+    must(first.posts.length === 5 && first.posts.every((x) => x[0] && x[0] === first.posts[0][0]), 'five asks, one id: ' + JSON.stringify(first.posts));
+    must(/still being stored/.test(first.err) && !/client_msg_id/.test(first.err), 'a plain line: ' + first.err);
+    must(first.box === 'A slow picture.', 'the text stays in the box');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { first, posts: posts(calls, from), rows: await rowsWith(page, 'A slow picture.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)) };
+    must(out.posts.length === 6 && out.posts[5][0] === out.posts[0][0], 'Send again keeps the id: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err, 'one row, no error: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // A room object still on older code sends no code with these 409s: a
+  // post with no files is never held, so its 409 can only mean "gone".
+  await run('send-409-gone-text-no-code', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.noPostCodes = true;
+    S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
+    await page.fill('#text', 'Old code, deleted.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 15000 });
+    await idle(page);
+    const firstId = S.msgs[S.msgs.length - 1].id;
+    S.msgs = S.msgs.filter((m) => m.id !== firstId);
+    const from = calls.length;
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { posts: posts(calls, from), rows: await rowsWith(page, 'Old code, deleted.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)) };
+    must(out.posts.length === 2 && out.posts[1][0] && out.posts[1][0] !== out.posts[0][0], 'posted once more under a new id: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err, 'one row, no error: ' + JSON.stringify(out));
+    return out;
+  });
+
   done('chat');
 })();

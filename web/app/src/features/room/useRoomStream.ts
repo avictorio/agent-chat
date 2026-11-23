@@ -191,18 +191,23 @@ export function useRoomStream(opts: {
     // end. Before, a tab that slept past the room's kept history joined the
     // old history straight onto the new with no sign of the hole. A feed
     // with no rows has nothing out of date: the gap is ignored.
-    // A gap on the first stream, before any message or delete frame and
-    // with the cursor still where the boot read left it, is not a hole:
+    // A gap on the boot read's own stream - the first one to open - before
+    // any message or delete frame and with the cursor still where the boot
+    // read left it, is not a hole:
     // the boot page is the room's newest page, read a moment ago. The
     // server can still send one there, as its forgotten mark can sit above
     // the boot read's last_id (over 1,000 messages posted and deleted after
     // the newest live one). Taken as a hole, every page load drew a false
-    // divider and read the page again until somebody posted.
+    // divider and read the page again until somebody posted. "The first to
+    // open", not "the first asked for": when the first try failed before it
+    // delivered anything, the retry from the same cursor is still the boot's
+    // stream, and counting tries drew the false divider there.
     let bootLast: number | null = null;
     let sinceBoot = false;
+    let openedOnce = false;
     let gapRunning = false;
-    const afterGap = async (first: boolean) => {
-      if (first && !sinceBoot && bootLast !== null && feed.lastRef.current === bootLast) return;
+    const afterGap = async (bootStream: boolean) => {
+      if (bootStream && !sinceBoot && bootLast !== null && feed.lastRef.current === bootLast) return;
       if (gapRunning || cancelled || deniedRef.current) return;
       const held = new Set(feed.messagesRef.current.map((m) => m.id));
       if (!held.size) return;
@@ -252,6 +257,8 @@ export function useRoomStream(opts: {
       cur = s;
       const later = asked;
       asked = true;
+      // set when this stream opens: whether none had opened before it
+      let bootStream = false;
       let retryMs = 3000;
       const onFrame = (kind: string, data: string, eventId: number | null) => {
         try {
@@ -282,7 +289,7 @@ export function useRoomStream(opts: {
             const d = JSON.parse(data) as { id?: number };
             if (typeof d.id === "number") dropMessage(d.id);
           } else if (kind === "gap") {
-            void afterGap(!later);
+            void afterGap(bootStream);
           } else if (kind === "message") {
             sinceBoot = true;
             const m = JSON.parse(data) as Message;
@@ -332,6 +339,8 @@ export function useRoomStream(opts: {
             }
           );
           if (!res.ok || !res.body) throw new Error("stream " + res.status);
+          bootStream = !openedOnce;
+          openedOnce = true;
           s.at = Date.now();
           setStatus("live");
           window.dispatchEvent(new Event("ac-stream-open"));

@@ -220,8 +220,11 @@ export function useMessages(opts: {
     const at = Date.now();
     const fresh = new Set(page.map((m) => m.id));
     const rows = page.filter((m) => !deletedRef.current.has(m.id));
-    const lo = rows.length ? Math.min(...fresh) : Infinity;
-    const hi = rows.length ? Math.max(...fresh) : -Infinity;
+    // the range the server's page covers, not what is left of it once the
+    // rows deleted meanwhile are taken out: with every row of a small page
+    // deleted while the read was out, nothing held was dropped
+    const lo = page.length ? Math.min(...fresh) : Infinity;
+    const hi = page.length ? Math.max(...fresh) : -Infinity;
     const gone = new Set<number>();
     for (const id of held) {
       if (id >= lo && id <= hi && !fresh.has(id)) {

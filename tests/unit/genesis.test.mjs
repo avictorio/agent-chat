@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
 import { GENESIS_PENDING_MS } from "../../worker/limits.ts";
+import { GENESIS_EMPTY_TABLES } from "../../worker/room/Room.ts";
 import { addressKey, networkKey, plainAddress } from "../../worker/lib/address.ts";
 
 const R = "unit";
@@ -197,4 +198,17 @@ test("the per-address cap counts one mailbox, the per-IP cap one /64", () => {
   assert.equal(networkKey("203.0.113.7"), "203.0.113.7");
   assert.equal(networkKey("::ffff:203.0.113.7"), "203.0.113.7");
   assert.equal(networkKey(""), "unknown");
+});
+
+// The list is kept by hand. A table a later schema step adds and members
+// write, left off it, would not count as "someone wrote here": a stale
+// pending room holding its rows could be handed to a new creator, or
+// rolled back with them.
+test("every table but the invites and the settings counts as written-to for a pending room", () => {
+  const h = makeRoom();
+  const tables = h.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").map((r) => r.name).sort();
+  const listed = new Set(GENESIS_EMPTY_TABLES);
+  const missing = tables.filter((t) => t !== "inv" && t !== "cfg" && !listed.has(t));
+  assert.deepEqual(missing, [], "add these to GENESIS_EMPTY_TABLES in worker/room/Room.ts (or say here why a table holds nothing a member or the owner wrote)");
+  for (const t of GENESIS_EMPTY_TABLES) assert.ok(tables.includes(t), t + " is listed but is not a table");
 });

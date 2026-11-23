@@ -32,8 +32,11 @@ docs.txt section that owns its routes, caps and formats.
     the first is still storing its media. A repeat answers 200 with the
     first post's message as it is now and `repeat: true`; a first post
     still storing its files, or a message since deleted or trimmed, is a
-    409 with its `id` (answered as posted, the first could still fail;
-    posted again, a deleted message would come back). A post that fails
+    409 with its `id` and a `code`, `still_storing` or `post_gone`
+    (answered as posted, the first could still fail; posted again, a
+    deleted message would come back; the two once differed only in their
+    wording, and the web app, guessing from what it had sent, could post a
+    slow upload twice). A post that fails
     while storing its files, whatever the error, drops the row with the
     message, so the retry posts. Each sender's
     newest `CLIENT_MSG_ID_KEEP` ids from the last `CLIENT_MSG_ID_MS` are
@@ -44,15 +47,17 @@ docs.txt section that owns its routes, caps and formats.
     the person pressing Send again, until the message is sent or changed
     (text, name or an attachment). A text or inline-media post retries a
     network failure or a 5xx after `LOST_WAITS`, then shows the error;
-    `repeat: true` is success. The server's two 409s with an `id` (still
-    storing, since deleted) differ only in their wording, so the
-    composer goes by what it sent (`postRetrying`): only a post with
-    inline media is ever held, so only it asks again after
-    `STORING_WAITS`. A text-only post's 409, or a media post's still
-    refused after those waits, means the first copy went live and was
-    deleted: the composer mints a new id and posts it once more as a new
-    message (the person pressed Send on text the room does not hold),
-    and never shows the server's sentence about `client_msg_id`. An upload's draft-creating post carries it too, so
+    `repeat: true` is success. On a 409 with an `id` the composer goes
+    by its `code` (`postRetrying`): `still_storing` asks again with the
+    same id after `STORING_WAITS`, and when those run out says the files
+    are still being stored and keeps the id, so Send again can never
+    make a second copy; `post_gone` means the first copy went live and
+    was deleted, so the composer mints a new id and posts it once more
+    as a new message (the person pressed Send on text the room does not
+    hold). A room object still on older code sends no code: then a post
+    with files reads as still storing and one without, which is never
+    held, as gone. The server's sentence about `client_msg_id` is never
+    shown to a person. An upload's draft-creating post carries it too, so
     `net()`'s retry gets the same draft back; a 409 there means that
     draft is gone and a new id starts a new one, and a cancel drops it.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
@@ -478,7 +483,8 @@ docs.txt section that owns its routes, caps and formats.
     unopened genesis invite and the revoked ones of earlier start-overs,
     no row in any table a member or the owner writes
     (`GENESIS_EMPTY_TABLES` in `Room.ts`, which a new such table joins),
-    no clone taken, and the message and board counters where the mark
+    no clone taken or clone delete owed since the mark, and the message
+    and board counters where the mark
     recorded them. Then the unopened invite is revoked (its row kept) and
     a new one made; the name is checked first, so a refused start-over
     changes nothing. A stale room that is touched is an ordinary room:

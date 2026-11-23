@@ -25,6 +25,14 @@ export const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype
 // reaches HTML-built strings, game moves ("Ada:C5", volleys split on
 // commas) and push titles, so new names may not carry those characters.
 // Older names keep working; the web app escapes them anyway.
+/** Between the two names of a seat pair's key (gr.pair). A name cannot
+ *  hold a control character (memberNameProblem), so two different pairs
+ *  never share a key; joined with "|", which a name may contain, the pair
+ *  ("a|b", "c") read as ("a", "b|c") and their duel records were counted
+ *  together. The schema step that fills gr writes the same character as
+ *  char(31). */
+export const PAIR_SEP = "\u001f";
+
 export function memberNameProblem(name: string) {
   if (hasControlChar(name) || /[<>"'&`]/.test(name)) return "Names can't contain < > \" ' & ` or control characters";
   // Half of a character (a lone surrogate) is stored as U+FFFD, so the

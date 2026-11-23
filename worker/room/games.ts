@@ -10,7 +10,7 @@ import type { CfgRow, GmRow, GrRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
-import { RESERVED_KEYS, nameFold } from "../lib/text.js";
+import { PAIR_SEP, RESERVED_KEYS, nameFold } from "../lib/text.js";
 import { gameRev, sameMove } from "../games/shared.js";
 
 // A seat's name keys plain objects in every engine's state (roles, scores,
@@ -172,7 +172,7 @@ export const GameMachineryMethods = {
     this.sql.exec("INSERT INTO gr (id, type, status, ended, winner, winners, draw, places, players, pair, pub) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
       "ON CONFLICT (id) DO UPDATE SET type = excluded.type, status = excluded.status, ended = excluded.ended, winner = excluded.winner, winners = excluded.winners, draw = excluded.draw, places = excluded.places, players = excluded.players, pair = excluded.pair, pub = excluded.pub",
     g.id, typeof st.type === "string" ? st.type : null, g.status, st.ended || null, st.winner ?? null, json(st.winners), st.draw == null ? null : st.draw ? 1 : 0, json(st.places), JSON.stringify(players),
-    players.length === 2 ? players[0].name + "|" + players[1].name : null, pub);
+    players.length === 2 ? players[0].name + PAIR_SEP + players[1].name : null, pub);
   },
 
   /** A match as the games list carries it: its summary without boards

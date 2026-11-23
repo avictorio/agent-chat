@@ -115,8 +115,8 @@ export type GmRow = { id: number, status: GameStatus, created: number, created_b
  *  record, the ladder and Duel's head-to-head read in place of the state.
  *  type is the state's as stored (a match from before types carries null:
  *  read it as Light Cycles); winners, places and players are JSON lists
- *  (players: {name, hex}); pair names the two seats ("a|b", in seat
- *  order) of a 2-seat match; pub is the match's games-list entry, null on
+ *  (players: {name, hex}); pair names the two seats (in seat order,
+ *  joined with PAIR_SEP) of a 2-seat match; pub is the match's games-list entry, null on
  *  a row the step backfilled until the list first shows it. */
 export type GrRow = { id: number, type: string | null, status: GameStatus, ended: number | null, winner: string | null, winners: string | null,
   draw: number | null, places: string | null, players: string, pair: string | null, pub: string | null };
@@ -343,7 +343,7 @@ function schemaMatchResults(sql: SqlStorage) {
   sql.exec("CREATE INDEX IF NOT EXISTS gr_pair ON gr (pair)");
   sql.exec("INSERT OR IGNORE INTO gr (id, type, status, ended, winner, winners, draw, places, players, pair) SELECT id, json_extract(state, '$.type'), status, json_extract(state, '$.ended'), json_extract(state, '$.winner'), json_extract(state, '$.winners'), json_extract(state, '$.draw'), json_extract(state, '$.places'), " +
     "(SELECT json_group_array(json_object('name', json_extract(p.value, '$.name'), 'hex', json_extract(p.value, '$.hex'))) FROM json_each(gm.state, '$.players') AS p), " +
-    "CASE WHEN json_type(state, '$.players') = 'array' AND json_array_length(state, '$.players') = 2 THEN json_extract(state, '$.players[0].name') || '|' || json_extract(state, '$.players[1].name') END " +
+    "CASE WHEN json_type(state, '$.players') = 'array' AND json_array_length(state, '$.players') = 2 THEN json_extract(state, '$.players[0].name') || char(31) || json_extract(state, '$.players[1].name') END " +
     "FROM gm WHERE status NOT IN ('lobby', 'running') AND json_valid(state)");
 }
 
@@ -353,7 +353,7 @@ const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMe
 /** Every table a member or the owner writes, inv aside: one row in any of
  *  them and a pending room is not untouched (Room.genesisUntouched). A new
  *  table of that kind belongs here too. */
-const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc"];
+export const GENESIS_EMPTY_TABLES = ["m", "rx", "md", "upp", "ut", "mdel", "pcid", "push", "mv", "tf", "gm", "gr", "con", "oq", "dg", "sk", "dc"];
 
 /** cfg "genesis" (Room.genesisPending). */
 type GenesisMark = { at: number, token: string, prior: string[], hwm: number, rev: number };
@@ -543,7 +543,14 @@ export class Room extends DurableObject {
     // no inviter and no limits here: anything but the new invite means the name was refused
     const token = inv && "token" in inv && inv.token ? inv.token : null;
     if (token) this.markGenesis(token, stale ? stale.prior.concat(stale.token) : []);
-    else if (stale) this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+    else if (stale) {
+      // Not reachable while invite() refuses only what was checked above.
+      // Should it ever refuse for another reason, the caller is told the
+      // room exists: answered as created with no invite, the route rolls
+      // the room back (revokeAll and destroy).
+      this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+      return { existed: true };
+    }
     return { created: true, invite: token ? { token: token } : null };
   }
 

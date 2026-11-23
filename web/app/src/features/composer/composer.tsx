@@ -47,13 +47,13 @@ function escHTML(t: string): string {
 // same client_msg_id, and the server answers a repeat with the first post
 // (repeat: true) instead of posting twice. A network failure or a server
 // error waits LOST_WAITS between tries. A 409 that names the id's first
-// post is one of two things the server tells apart only in its wording:
-// that post is still storing its files, or it posted and its message has
-// since been deleted. Only a post with inline media is ever held while
-// its files store, so only such a post waits STORING_WAITS and asks again;
-// a text-only post, or one still refused when the waits run out, throws
-// FirstPostGone. Before, every such 409 waited about 7.5 s and then showed
-// the server's sentence about client_msg_id, written for agents.
+// post is one of two things, told apart by the answer's code: that post
+// is still storing its files (still_storing: wait STORING_WAITS and ask
+// again with the same id; when the waits run out, say so and keep the
+// id), or it posted and its message has since been deleted (post_gone:
+// FirstPostGone, and the caller posts it once more under a new id).
+// Before, every such 409 waited about 7.5 s and then showed the server's
+// sentence about client_msg_id, written for agents.
 const LOST_WAITS = [600, 1500, 3000];
 const STORING_WAITS = [500, 1000, 2000, 4000];
 const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
@@ -67,13 +67,22 @@ async function postRetrying<T>(post: () => Promise<T>, inlineMedia: boolean): Pr
     } catch (e) {
       // a 409 without an id is a refusal (the message was deleted while
       // its files were stored): posting it again would bring it back
-      const named = e instanceof ApiError && e.status === 409 && typeof (e.body as { id?: unknown } | null)?.id === "number";
-      if (named) {
-        if (inlineMedia && storing < STORING_WAITS.length) {
+      const refusal = e instanceof ApiError && e.status === 409 ? (e.body as { id?: unknown; code?: unknown } | null) : null;
+      if (refusal && typeof refusal.id === "number") {
+        // Which of the two the server means is its code. A room object
+        // still on older code (a few minutes after a deploy) sends none:
+        // then a post with files is taken as still storing - the safe
+        // reading, since posting it again under a new id while the first
+        // copy is being stored would show the message and store its files
+        // twice - and a post without files, which is never held, as gone.
+        const stillStoring = refusal.code === "still_storing" || (refusal.code !== "post_gone" && inlineMedia);
+        if (!stillStoring) throw new FirstPostGone("This message was already posted and has since been deleted.");
+        if (storing < STORING_WAITS.length) {
           await wait(STORING_WAITS[storing++]!);
           continue;
         }
-        throw new FirstPostGone("This message was already posted and has since been deleted.");
+        // same id kept: Send again asks for the same message, never a second copy
+        throw new Error("Your files are still being stored. Press Send again in a moment.", { cause: e });
       }
       const transient = !(e instanceof ApiError) || e.status >= 500;
       if (transient && lost < LOST_WAITS.length) {
