@@ -35,6 +35,9 @@ docs.txt section that owns its routes, caps and formats.
   field). `events=` (wire kinds, or `all`) and `game=` (match ids)
   narrow a subscription; the DO's stream handler parses both and answers
   400 to an unknown kind or a malformed list before the stream opens. The
+  route passes the caller's invite to the DO in `X-Invite-Token`, never in
+  the URL of that fetch: Workers Logs records it, and a token in the query
+  stayed readable there whenever it missed the logs' masking. The
   default is `all` on purpose: extra frames are filterable noise, missing
   frames are silent starvation. Only message frames replay from the
   cursor; the other kinds are live-only, and consumers re-sync from

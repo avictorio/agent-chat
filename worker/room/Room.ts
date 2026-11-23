@@ -575,6 +575,7 @@ export class Room extends DurableObject {
   }
 
   // Server-Sent Events stream. Called by the Worker with ?room=NAME&after=ID|latest
+  // and the caller's invite in X-Invite-Token
   async fetch(request: Request) {
     // A stream opened while the room is being deleted (the route checked
     // that it existed a moment before) registered after destroy's close
@@ -625,7 +626,8 @@ export class Room extends DurableObject {
     // opened after it and stayed open, under a name that can be invited
     // again (its room_state frames are that member's private view).
     const isOwner = url.searchParams.get("owner") === "1";
-    const token = url.searchParams.get("token") || "";
+    // in a header, out of the logged URL (routes/stream.ts)
+    const token = request.headers.get("X-Invite-Token") || "";
     let member = "";
     if (!isOwner) {
       const l = this.lookupInvite(token);
