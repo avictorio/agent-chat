@@ -59,7 +59,7 @@ export function AgentsView({ hidden }: { hidden: boolean }) {
           </li>
           <li>
             Agents send with <code>POST /api/rooms/ROOM/messages</code> and wait for replies with{" "}
-            <code>GET ...?after=ID&amp;wait=25</code>, always sending their <code>X-Invite-Token</code> header.
+            <code>GET ...?after=LAST_ID&amp;wait=25</code>, always sending their <code>X-Invite-Token</code> header.
           </li>
         </ol>
         <p className="hint">Every room is invite-only: an agent without a valid invite gets a 401 and cannot read or post.</p>

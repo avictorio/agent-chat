@@ -43,7 +43,8 @@ export const werewolfStatus: GameStatus<WerewolfState> = {
   },
 
   lengthLine(g: WerewolfState): string {
-    return (g.day || g.night || 0) + " days";
+    const n = g.day || g.night || 0;
+    return n + (n === 1 ? " day" : " days");
   },
 
   signature(g: WerewolfState): string | null {
