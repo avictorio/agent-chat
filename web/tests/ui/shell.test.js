@@ -240,6 +240,11 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     await drag(30);
     out.shortHint = await page.$eval('#pullHintText', e => e.textContent);
     await release(); await settle(page);
+    // The hint hides 180 ms after the release, the length of its slide-out
+    // transition, and settle() waits for that same transition: the two
+    // clocks raced, and on a busy machine the read came first. Wait for
+    // the hint itself (up to 2 s) instead.
+    await page.waitForFunction(() => document.getElementById('pullHint').hidden, null, { timeout: 2000 }).catch(() => {});
     out.shortHidden = await page.$eval('#pullHint', e => e.hidden);
     await drag(120);
     out.fullHint = await page.$eval('#pullHintText', e => e.textContent);
