@@ -264,7 +264,8 @@ docs.txt section that owns its routes, caps and formats.
   (`DELETE /invites`) drops every registration and closes member streams.
   `notifyPush` targets only the owner and active members. In the web
   app, Off is per room: the browser subscription is shared by every room
-  on the device.
+  on the device. A refused Off says so and leaves the bell on; Forget on
+  Home unsubscribes the room before it deletes the invite.
 
 ## Storage
 

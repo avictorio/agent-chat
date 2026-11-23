@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RoomClient } from "@chat/contract";
+import { ApiError, RoomClient } from "@chat/contract";
 import { useLatest } from "../../lib/useLatest";
 
 // Phone notifications: Web Push (service worker + the room's
@@ -29,6 +29,33 @@ function b64ToBytes(text: string): Uint8Array {
   let t = String(text).replace(/-/g, "+").replace(/_/g, "/");
   while (t.length % 4) t += "=";
   return Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+}
+
+function savedMode(key: string): PushMode | null {
+  try {
+    const s = localStorage.getItem(key);
+    return s === "all" || s === "mentions" ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget on Home: drop this device's registration in the room while the
+ *  invite that the server asks for is still on the device. Forget used to
+ *  delete only the invite, so the room kept notifying whoever held the
+ *  device and nothing on it could stop that any more. Resolves when the
+ *  room will not notify this device; throws when that is not certain. */
+export async function forgetRoomPush(room: string, token: string): Promise<void> {
+  if (!pushSupported()) return;
+  const reg = await navigator.serviceWorker.getRegistration("/");
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+  try {
+    if (sub) await new RoomClient(room, token || null).pushUnsubscribe(sub.endpoint);
+  } catch (e) {
+    // a revoked invite (its registrations went with it), a token the room
+    // never knew, or a deleted room: nothing there notifies this device
+    if (!(e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404))) throw e;
+  }
 }
 
 export interface PushApi {
@@ -139,6 +166,9 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   );
 
   const pushOff = useCallback(async () => {
+    // The saved mode is cleared before the server call and comes back
+    // if the server refuses.
+    const saved = savedMode(modeKey);
     try {
       localStorage.removeItem(modeKey);
     } catch {
@@ -148,7 +178,21 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     // browser subscription, which other rooms on this device still use.
     const reg = await navigator.serviceWorker.getRegistration("/");
     const sub = reg ? await reg.pushManager.getSubscription() : null;
-    if (sub) await client.pushUnsubscribe(sub.endpoint).catch(() => {});
+    if (sub) {
+      try {
+        await client.pushUnsubscribe(sub.endpoint);
+      } catch (e) {
+        // A refused Off used to toast success while the room went on
+        // notifying this device: keep the bell on and say it failed.
+        try {
+          if (saved) localStorage.setItem(modeKey, saved);
+        } catch {
+          // storage unavailable
+        }
+        void paintPushState();
+        throw e;
+      }
+    }
     toast("Notifications off for this room on this device.");
     void paintPushState();
   }, [client, modeKey, paintPushState, toast]);

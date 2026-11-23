@@ -265,8 +265,13 @@ The home page and the room page share one on-device identity model.
 - The home page builds "Your rooms" by scanning for `chat-invite:*` keys:
   each room is a tappable row (letter tile, room name, cached identity
   resolved live via the API when missing) with a **Forget** pill on its
-  left, clear of the row's link; Forget asks first (a dialog) and deletes
-  `chat-invite:<room>` and `chat-you:<room>` from this device.
+  left, clear of the row's link; Forget asks first (a dialog). It first
+  drops this device's push registration in the room (`/push/unsubscribe`
+  needs the invite it is about to delete; if that fails the dialog says so
+  and offers Forget anyway), then deletes every key the device kept for
+  the room: `chat-invite:`, `chat-you:`, `chat-push-mode:/api/rooms/`,
+  `ac-members:`, `ac:agent-app:`, `chat-upl:` and `chat-draft:<room>:*`.
+  A key added per room belongs in that list too.
 - Opening by link stores first, then enters. There is no open-by-name.
 - Wrap all `localStorage` access in `try/catch`.
 - The theme (`chat-theme`) is shared by both pages; the room sidebar and the

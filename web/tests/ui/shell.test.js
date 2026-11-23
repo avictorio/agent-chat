@@ -1,7 +1,7 @@
 // UI scenarios: the room shell: error boundaries, the agent gate, layout, update banner, pull to refresh, the bell, access, unread, and the home page.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/shell.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
+const { settle, installClock, fakePush, must, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
 (async () => {
   // Error boundaries: a message the feed can't render (here malformed
@@ -227,6 +227,86 @@ const { settle, installClock, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, d
     await settle(page);
     out.vis = await page.$$eval('.pushBtn', bs => bs.map(b => !b.hidden));
     if (!out.vis.some(Boolean)) throw new Error('push bell never became visible: ' + JSON.stringify(out));
+    return out;
+  });
+  // The bell on a device with push (the browser's push machinery faked,
+  // the room's registry in S.push). seedPush: this device's subscription,
+  // registered in the room in "every message" mode, as after turning the
+  // bell on; seeded once, so a reload or navigation keeps what changed.
+  const EP = 'https://fcm.googleapis.com/fcm/send/fake-seeded';
+  const seedPush = () => {
+    try {
+      if (!sessionStorage.getItem('seeded')) {
+        sessionStorage.setItem('seeded', '1');
+        localStorage.setItem('chat-invite:demo', 'tok_Anthony');
+        localStorage.setItem('__fake_push_sub', 'https://fcm.googleapis.com/fcm/send/fake-seeded');
+        localStorage.setItem('chat-push-mode:/api/rooms/demo', 'all');
+        localStorage.setItem('ac-members:demo', '{"names":[],"kinds":{},"avatars":{}}');
+        localStorage.setItem('chat-upl:demo', '[]');
+        localStorage.setItem('chat-draft:demo:abc-12', '{"id":4}');
+        localStorage.setItem('chat-draft:demo-two:abc-12', '{"id":5}');
+        localStorage.setItem('chat-invite:demo-two', 'tok_two');
+      }
+    } catch {}
+  };
+  const pushInitSrc = '(' + fakePush.toString() + ')(); (' + seedPush.toString() + ')();';
+  const bellLabel = (page) => page.$$eval('.pushBtn', (bs) => bs.filter((b) => b.offsetParent).map((b) => b.getAttribute('title'))[0]);
+  const bellOff = async (page) => {
+    await page.$$eval('.pushBtn', (bs) => bs.filter((b) => b.offsetParent)[0].click());
+    await page.waitForSelector('.pushMenu button[data-mode="off"]', { timeout: 4000 });
+    await page.click('.pushMenu button[data-mode="off"]');
+    await settle(page);
+  };
+  const forgetKeys = (page) => page.evaluate(() => Object.keys(localStorage).filter((k) => /demo/.test(k) && k !== '__fake_push_sub').sort());
+  // Forget on Home turns the room's notifications off on this device
+  // first, with the invite it is about to delete (the server asks for
+  // it), then removes every key the device kept for the room. It used to
+  // delete only the invite and the name: the room went on notifying the
+  // device, and nothing on it could stop that any more.
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) {
+    await run('push-forget-' + vp.tag, { init: pushInitSrc, w: vp.w, h: vp.h, touch: vp.touch }, async (page, S) => {
+      S.push = { [EP]: 'all' };
+      await page.goto('https://chat.victorio.cloud/');
+      await settle(page);
+      const forget = async () => { await page.click('.roomrow:has(.rn:text-is("demo")) .forget'); await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 }); await page.click('#forgetYes'); await settle(page); };
+      // the room's server refuses: the room stays, the dialog says so and
+      // offers Forget anyway
+      S.pushFail = 503;
+      await forget();
+      const refused = await page.evaluate(() => ({ open: document.getElementById('forgetDlg').open, err: (document.getElementById('forgetErr') || {}).textContent || '', shown: !!(document.getElementById('forgetErr') || {}).offsetParent, yes: document.getElementById('forgetYes').textContent, invite: localStorage.getItem('chat-invite:demo') }));
+      must(refused.open && refused.shown && /Couldn't turn off this room's notifications/.test(refused.err) && refused.yes === 'Forget anyway' && refused.invite === 'tok_Anthony', 'a refused unsubscribe must keep the room and say so: ' + JSON.stringify(refused));
+      await page.screenshot({ path: OUT + 'push-forget-refused-' + vp.tag + '.png' });
+      await page.click('#forgetNo');
+      await settle(page);
+      // the server answers: the device leaves the room's registry, with
+      // the room's own token
+      S.pushFail = 0;
+      await forget();
+      const out = { push: S.push, log: S.pushLog.filter((l) => l.startsWith('unsubscribe')), keys: await forgetKeys(page), rows: await page.$$eval('.roomrow .rn', (rs) => rs.map((r) => r.textContent)), open: await page.$eval('#forgetDlg', (d) => d.open) };
+      must(!Object.keys(S.push).length, 'after Forget the room still holds this device: ' + JSON.stringify(out));
+      must(out.log[out.log.length - 1] === 'unsubscribe tok_Anthony', 'the unsubscribe must carry the room\'s token: ' + JSON.stringify(out));
+      must(JSON.stringify(out.keys) === JSON.stringify(['chat-draft:demo-two:abc-12', 'chat-invite:demo-two', 'chat-you:demo-two']), 'Forget must remove every key of the room, and only its: ' + JSON.stringify(out));
+      must(!out.open && JSON.stringify(out.rows) === '["demo-two"]', 'the room must leave the list: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  // Bell Off that the server refuses says it failed and keeps the bell
+  // on; it used to toast "Notifications off" while the room went on
+  // notifying this device.
+  await run('push-off-refused', { init: pushInitSrc }, async (page, S) => {
+    S.push = { [EP]: 'all' };
+    await page.reload();
+    await settle(page);
+    const before = await bellLabel(page);
+    must(before === 'Notifications on', 'the bell must start on: ' + before);
+    S.pushFail = 503;
+    await bellOff(page);
+    const out = { toast: await page.$eval('#toast', (t) => t.textContent), bell: await bellLabel(page), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
+    must(/Couldn't change notifications/.test(out.toast) && out.bell === 'Notifications on' && out.mode === 'all' && S.push[EP] === 'all', 'a refused Off must say so and leave the bell on: ' + JSON.stringify(out));
+    S.pushFail = 0;
+    await bellOff(page);
+    out.after = { toast: await page.$eval('#toast', (t) => t.textContent), bell: await bellLabel(page), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
+    must(/Notifications off for this room/.test(out.after.toast) && out.after.bell === 'Notifications off' && out.after.mode === null && !S.push[EP], 'Off must turn the room off: ' + JSON.stringify(out.after));
     return out;
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });

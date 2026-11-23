@@ -549,6 +549,12 @@ async function setup(page, S, calls) {
     if (p.startsWith('/r/') || p === '/') return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
     if (p === '/api/build') return J({ build: S.behind ? 'uitestbuild2' : 'uitestbuild1' });
     if (p === '/api/changes') return J({ api_version: '2026-11-21', catalog_version: '1.21.0', url: 'https://chat.victorio.cloud/api/changes', notices: S.notices || [] });
+    // Web Push: the room's registry of this device's subscription (S.push:
+    // endpoint -> mode), with the token each call carried (S.pushLog);
+    // S.pushFail refuses subscribe and unsubscribe, S.statusGate holds
+    // status answers until it resolves.
+    if (p === '/api/push/key') return J({ key: 'B' + 'A'.repeat(86) });
+    if ((am = p.match(/^\/api\/rooms\/[^/]+\/push\/(status|subscribe|unsubscribe)$/))) { S.push = S.push || {}; const act = am[1]; const ep = act === 'status' ? u.searchParams.get('endpoint') : act === 'subscribe' ? body.subscription && body.subscription.endpoint : body.endpoint; (S.pushLog = S.pushLog || []).push(act + ' ' + (req.headers()['x-invite-token'] || '-')); if (act === 'status') { if (S.statusGate) await S.statusGate; return J(S.push[ep] ? { room: 'demo', registered: true, mode: S.push[ep] } : { room: 'demo', registered: false }); } if (S.pushFail) return J({ error: 'upstream connect error' }, S.pushFail); if (act === 'subscribe') { S.push[ep] = body.mode === 'mentions' ? 'mentions' : 'all'; return J({ room: 'demo', subscribed: true, mode: S.push[ep] }); } delete S.push[ep]; return J({ room: 'demo', subscribed: false }); }
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');
@@ -814,6 +820,21 @@ const ngOpen = async (page) => {
   await page.click('#view-games .gm-start-btn');
   await page.waitForSelector('#newGameDlg[open]', { timeout: 4000 });
 };
+// A stand-in for the browser's push machinery (the test browsers block
+// service workers): a registration whose one subscription lives in
+// localStorage (__fake_push_sub, so it outlives a navigation), and
+// notification permission granted.
+const fakePush = () => {
+  const K = '__fake_push_sub';
+  const mk = (ep) => ({ endpoint: ep, toJSON: () => ({ endpoint: ep, keys: { p256dh: 'B' + 'A'.repeat(86), auth: 'AAAAAAAAAAAAAAAAAAAAAA' } }), unsubscribe: async () => { localStorage.removeItem(K); return true; } });
+  const pushManager = { getSubscription: async () => { const ep = localStorage.getItem(K); return ep ? mk(ep) : null; }, subscribe: async () => { const ep = 'https://fcm.googleapis.com/fcm/send/fake-' + Math.random().toString(36).slice(2); localStorage.setItem(K, ep); return mk(ep); } };
+  const reg = { scope: '/', pushManager };
+  const sw = { ready: Promise.resolve(reg), getRegistration: async () => reg, register: async () => reg, addEventListener() {}, removeEventListener() {}, controller: null };
+  Object.defineProperty(navigator, 'serviceWorker', { get: () => sw, configurable: true });
+  if (!('PushManager' in window)) window.PushManager = function () {};
+  Object.defineProperty(Notification, 'permission', { get: () => 'granted', configurable: true });
+  Notification.requestPermission = async () => 'granted';
+};
 const must = (c, msg) => { if (!c) throw new Error(msg); };
 // A scenario with its own harness (the home page) counts its failure here.
 function failed() {
@@ -826,4 +847,4 @@ function done(file) {
   process.exit(FAILURES ? 1 : 0);
 }
 
-module.exports = { ARENA_KIDS, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };
+module.exports = { ARENA_KIDS, fakePush, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };

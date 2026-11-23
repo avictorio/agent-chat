@@ -5,6 +5,7 @@ import { AgentsView, HowView } from "./StaticViews";
 import { HomeInstallStrip, HomeUpdateStrip, useHomeInstall } from "./install";
 import { store } from "../../lib/index";
 import { registerServiceWorker } from "../shell/shell";
+import { forgetRoomPush } from "../shell/push";
 import { usePullToRefresh } from "../shell/strips";
 import "./home.css";
 import { Button } from "../../ui/Button";
@@ -69,6 +70,10 @@ export default function HomeApp() {
     bad: false,
   });
   const [forgetRoom, setForgetRoom] = useState<SavedRoom | null>(null);
+  // Forget waits on the room's server (notifications off for this
+  // device); its failure is shown in the dialog
+  const [forgetBusy, setForgetBusy] = useState(false);
+  const [forgetErr, setForgetErr] = useState("");
   const forgetDlgRef = useRef<HTMLDialogElement | null>(null);
   const resolvingRef = useRef<Set<string>>(new Set());
 
@@ -146,18 +151,60 @@ export default function HomeApp() {
 
   const askForget = (r: SavedRoom) => {
     setForgetRoom(r);
+    setForgetErr("");
     const dlg = forgetDlgRef.current;
     if (dlg && dlg.showModal) dlg.showModal();
-    else if (window.confirm("Forget " + r.room + "? It will be removed from this device.")) doForget(r);
+    else if (window.confirm("Forget " + r.room + "? It will be removed from this device.")) void doForget(r, true);
   };
-  const doForget = (r: SavedRoom) => {
+  const closeForget = () => {
+    setForgetRoom(null);
+    setForgetErr("");
+    forgetDlgRef.current?.close();
+  };
+  // Notifications go off first, while the invite the server asks for is
+  // still here; once it is deleted nothing on this device can stop them.
+  // If that fails the room stays, unless the person chose Forget anyway.
+  const doForget = async (r: SavedRoom, anyway: boolean) => {
+    if (!anyway) {
+      setForgetBusy(true);
+      try {
+        await forgetRoomPush(r.room, r.token);
+      } catch (e) {
+        setForgetErr(
+          "Couldn't turn off this room's notifications on this device (" +
+            (e instanceof Error ? e.message : String(e)) +
+            "). Try again, or forget it anyway: they then keep coming until you block notifications for this site."
+        );
+        return;
+      } finally {
+        setForgetBusy(false);
+      }
+    }
     try {
-      localStorage.removeItem("chat-invite:" + r.room);
-      localStorage.removeItem("chat-you:" + r.room);
+      // everything the device kept for the room: the invite and name, the
+      // bell's mode, the cached roster (names and avatar links), the agent
+      // app flag, and the pointers to interrupted uploads (they need the
+      // invite to resume)
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (
+          k &&
+          (k === "chat-invite:" + r.room ||
+            k === "chat-you:" + r.room ||
+            k === "chat-push-mode:/api/rooms/" + r.room ||
+            k === "ac-members:" + r.room ||
+            k === "ac:agent-app:" + r.room ||
+            k === "chat-upl:" + r.room ||
+            k.indexOf("chat-draft:" + r.room + ":") === 0)
+        )
+          doomed.push(k);
+      }
+      doomed.forEach((k) => localStorage.removeItem(k));
     } catch {
       // storage unavailable
     }
-    setForgetRoom(null);
+    closeForget();
     setRooms(savedRooms());
   };
 
@@ -334,27 +381,30 @@ export default function HomeApp() {
               aria-labelledby="forgetTitle"
               ref={forgetDlgRef}
               onClick={(e) => {
-                if (e.target === forgetDlgRef.current) {
-                  setForgetRoom(null);
-                  forgetDlgRef.current?.close();
-                }
+                if (e.target === forgetDlgRef.current && !forgetBusy) closeForget();
               }}
-              onCancel={() => setForgetRoom(null)}
+              onCancel={() => {
+                setForgetRoom(null);
+                setForgetErr("");
+              }}
             >
               <h3 id="forgetTitle">Forget this room?</h3>
               <p>
                 <strong id="forgetName">{forgetRoom?.room}</strong> will be removed from this device, along with your
                 invite for it. You will need the invite link again to get back in. The room itself is not deleted.
               </p>
+              {forgetErr ? (
+                <p className="forget-err" id="forgetErr" role="alert">
+                  {forgetErr}
+                </p>
+              ) : null}
               <div className="dlg-actions">
                 <Button
                   type="button"
                  
                   id="forgetNo"
-                  onClick={() => {
-                    setForgetRoom(null);
-                    forgetDlgRef.current?.close();
-                  }}
+                  disabled={forgetBusy}
+                  onClick={closeForget}
                 >
                   Cancel
                 </Button>
@@ -362,12 +412,12 @@ export default function HomeApp() {
                   type="button"
                   className="danger-solid"
                   id="forgetYes"
+                  disabled={forgetBusy}
                   onClick={() => {
-                    if (forgetRoom) doForget(forgetRoom);
-                    forgetDlgRef.current?.close();
+                    if (forgetRoom) void doForget(forgetRoom, !!forgetErr);
                   }}
                 >
-                  Forget
+                  {forgetBusy ? "Forgetting…" : forgetErr ? "Forget anyway" : "Forget"}
                 </Button>
               </div>
             </dialog>
