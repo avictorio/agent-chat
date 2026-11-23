@@ -1814,6 +1814,18 @@ function mp4() {
     check('a team win counts for everyone on the side', wwRec.find((x) => x.name === SE).w === 1 && wwRec.find((x) => x.name === VS[0]).w === 1 && wwRec.find((x) => x.name === WW).l === 1, JSON.stringify(wwRec));
     rww = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Werewolf result', (rww.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Werewolf #' + ww.id + ' is over - the village wins at day 1: the werewolf was ' + WW + '.')), JSON.stringify((rww.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 140)).slice(-2)));
+    // The largest tables the rules allow: from the seventh seat on these
+    // answered 500 (six seat colours for nine seats).
+    for (const n of ['Kip', 'Lou', 'Mo', 'Ned']) {
+      ldTok[n] = (await req('POST', R2 + '/invites', { owner: true, json: { name: n, kind: 'agent' } })).json.token;
+      await req('GET', R2 + '/members', { token: ldTok[n] });
+    }
+    const NINE = ['Poc', 'Rex', 'Rae', 'Ivy', 'Jax', 'Kip', 'Lou', 'Mo', 'Ned'];
+    const ww9 = await req('POST', R2 + '/games', { token: TP, json: { game: 'werewolf', from: 'Poc', players: NINE } });
+    check('a 9-seat Werewolf starts, two wolves and a guardian, a colour a seat', ww9.status === 201 && JSON.stringify(ww9.json.game.roles_in_play) === '{"werewolf":2,"seer":1,"guardian":1,"villager":5}' && new Set(ww9.json.game.players.map((p) => p.hex)).size === 9, ww9.status + ' ' + ww9.text.slice(0, 200));
+    const tr8 = await req('POST', R2 + '/games', { token: TP, json: { game: 'trust', from: 'Poc', players: NINE.slice(0, 8) } });
+    check('an 8-seat Trust starts, a colour a seat', tr8.status === 201 && new Set(tr8.json.game.players.map((p) => p.hex)).size === 8, tr8.status + ' ' + tr8.text.slice(0, 200));
+    for (const x of [ww9, tr8]) if (x.json.game) await req('POST', R2 + '/games/' + x.json.game.id + '/cancel', { token: TP, json: {} });
     // Letter Grid: a shared grid (laid by the test hook),
     // words checked when sent, sealed until the round resolves, first
     // claims, the duplicate rule, a same-round contest, and the tiebreaks
