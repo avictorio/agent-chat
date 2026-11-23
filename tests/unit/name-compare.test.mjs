@@ -7,7 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
-import { cleanName, memberNameProblem, nameKey, sameName } from "../../worker/lib/text.ts";
+import { cleanName, memberNameProblem, nameKey, sameName, sqlLowerSame } from "../../worker/lib/text.ts";
 
 const R = "unit";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer;
@@ -44,14 +44,15 @@ test("the newest invite gives the kind when a name was invited again", async () 
   assert.equal(h.room.memberKind("ÉMILE"), "human");
 });
 
-test("a member's kind, avatar and reaction are found under any case of their name", async () => {
+test("a member's kind and reaction are found under any case of their name, an avatar under A-Z case", async () => {
   const h = roomWith([["Émile", "agent"]]);
   assert.equal(h.room.setKind("émile", "human"), true);
   assert.equal(h.room.memberKind("Émile"), "human");
   const ver = await h.room.setAvatar("ÉMILE", PNG, "image/png", R);
   assert.equal(typeof ver, "number");
-  assert.equal(h.room.getAvatar("émile").ver, ver);
-  assert.equal(await h.room.clearAvatar("émile"), true);
+  assert.equal(h.room.getAvatar("Émile").ver, ver);
+  assert.equal(h.room.getAvatar("émile"), null, "avatars keep SQL lower()'s reach (sqlLowerSame)");
+  assert.equal(await h.room.clearAvatar("ÉMILE"), true);
   assert.equal(h.room.getAvatar("Émile"), null);
   const msg = await h.room.post("Ada", "react to me", R, false);
   h.room.react(msg.id, "Émile", "👍", R, false);
@@ -81,4 +82,49 @@ test("sameName folds; nameKey is the plain key stored rows were filed under", ()
   assert.ok(sameName("Ｂob", "bob"), "full-width letters fold");
   assert.ok(!sameName("Ann", "Anne"));
   assert.equal(nameKey("Émile"), "émile");
+});
+
+// Avatars pick their invite rows as SQL lower() did, A-Z case only: a set
+// or clear deletes the picture of every row it reaches, and by sameName
+// "Émile" clearing hers deleted the picture stored on a revoked "émile"
+// row, which the room never deleted before (the owner's call).
+test("a member's avatar set and clear leave the picture of a revoked row under another non-ASCII case", async () => {
+  const h = makeRoom();
+  const theirs = "avatars/" + R + "/émile/1";
+  h.objects.set(theirs, new Uint8Array(PNG));
+  h.db.prepare("INSERT INTO inv (token, name, created, used, revoked, avatar_type, avatar_ver, avatar_key) VALUES ('t1', 'émile', 1, 1, 2, 'image/png', 1, ?)").run(theirs);
+  h.db.prepare("INSERT INTO inv (token, name, created, used) VALUES ('t2', 'Émile', 3, 3)").run();
+  assert.equal(h.room.getAvatar("Émile"), null, "the revoked row's picture is not Émile's");
+  const ver = await h.room.setAvatar("Émile", PNG, "image/png", R);
+  assert.equal(typeof ver, "number");
+  assert.equal(h.room.getAvatar("Émile").ver, ver);
+  assert.notEqual(h.room.getAvatar("Émile").key, theirs);
+  assert.equal(h.one("SELECT avatar_key FROM inv WHERE token = 't1'").avatar_key, theirs, "the set left the other row's pointer");
+  assert.ok(h.objects.has(theirs), "and its object");
+  assert.equal(await h.room.clearAvatar("Émile"), true);
+  assert.equal(h.room.getAvatar("Émile"), null, "cleared, Émile gets no picture, not the other row's");
+  assert.equal(h.one("SELECT avatar_key FROM inv WHERE token = 't1'").avatar_key, theirs, "the clear left the other row's pointer");
+  assert.ok(h.objects.has(theirs), "and its object");
+  assert.equal(h.room.getAvatar("émile").key, theirs, "which is still read under its own spelling");
+});
+
+test("names that differ in A-Z case still share one avatar, as before", async () => {
+  const h = makeRoom();
+  h.db.prepare("INSERT INTO inv (token, name, created, used, revoked) VALUES ('t1', 'emile', 1, 1, 2)").run();
+  h.db.prepare("INSERT INTO inv (token, name, created, used) VALUES ('t2', 'Emile', 3, 3)").run();
+  const ver = await h.room.setAvatar("Emile", PNG, "image/png", R);
+  assert.equal(h.room.getAvatar("emile").ver, ver);
+  assert.equal(h.room.getAvatar("EMILE").ver, ver);
+  assert.deepEqual(h.all("SELECT avatar_ver FROM inv ORDER BY token").map((r) => r.avatar_ver), [ver, ver], "both rows point at it");
+  const key = h.room.getAvatar("Emile").key;
+  assert.equal(await h.room.clearAvatar("emile"), true);
+  assert.equal(h.room.getAvatar("Emile"), null);
+  assert.ok(!h.objects.has(key), "the clear deleted it");
+});
+
+test("sqlLowerSame folds A-Z only, as SQLite's lower()", () => {
+  assert.ok(sqlLowerSame("Emile", "eMILE"));
+  assert.ok(sqlLowerSame("ÉMILE", "Émile"));
+  assert.ok(!sqlLowerSame("Émile", "émile"));
+  assert.ok(!sqlLowerSame("Иван", "иван"));
 });

@@ -91,6 +91,18 @@ export function nameKey(name: string | null | undefined) {
   return String(name || "").toLowerCase();
 }
 
+// Whether two names are equal once A-Z are lower-cased and nothing else:
+// SQLite's lower(), which every name test used before sameName. Avatars
+// still pick their invite rows this way (avatarMatch, room/members.ts),
+// since a set or clear deletes the R2 picture of every row it reaches: by
+// sameName, "Émile" clearing hers would delete the picture stored on a
+// revoked "émile" row, which the room never deleted before, and widening
+// what is deleted is the owner's call.
+export function sqlLowerSame(a: string | null | undefined, b: string | null | undefined) {
+  const low = (s: string | null | undefined) => String(s || "").replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+  return low(a) === low(b);
+}
+
 /**
  * @param fromDay YYYY-MM-DD
  * @param toDay YYYY-MM-DD

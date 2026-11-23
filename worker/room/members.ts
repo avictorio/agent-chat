@@ -1,6 +1,6 @@
 // Room methods: members and invites (kinds, reserved names, revocation), avatars.
 
-import { nameFold, nameKey, sameName } from "../lib/text.js";
+import { nameFold, nameKey, sameName, sqlLowerSame } from "../lib/text.js";
 import { goneError } from "../lib/errors.js";
 import type { Member, MemberKind } from "@chat/contract";
 import type { CountRow, InvRow, MvRow, Refusal, Room } from "./Room.js";
@@ -25,6 +25,13 @@ export const MemberMethods = {
   /** "name IN (...)" over this member's inv rows (invNames), and its parameters */
   invMatch(name: string | null | undefined, activeOnly?: boolean): [string, ...string[]] {
     const names = this.invNames(name, activeOnly);
+    return ["name IN (" + names.map(() => "?").join(", ") + ")", ...names];
+  },
+  /** invMatch narrowed to the rows an avatar set, clear or read reaches:
+   *  the spellings equal to the name but for A-Z case (sqlLowerSame, which
+   *  says why) */
+  avatarMatch(name: string): [string, ...string[]] {
+    const names = this.invNames(name).filter((n) => sqlLowerSame(n, name));
     return ["name IN (" + names.map(() => "?").join(", ") + ")", ...names];
   },
 
@@ -72,7 +79,7 @@ export const MemberMethods = {
 
   async setAvatar(name: string, data: ArrayBuffer, type: string, room: string) {
     const gen = this.gen;
-    if (!this.invNames(name).length) return null;
+    if (!this.invNames(name).some((n) => sqlLowerSame(n, name))) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
     const ver = Date.now();
     const key = this.avatarKey(room, name, ver);
@@ -94,7 +101,7 @@ export const MemberMethods = {
     // the other object goes, this request's own when a later one has
     // already been recorded; that request's answer then names the picture
     // that stays.
-    const [who, ...names] = this.invMatch(name);
+    const [who, ...names] = this.avatarMatch(name);
     const prev = this.sql.exec<Pick<InvRow, "avatar_key" | "avatar_ver">>("SELECT avatar_key, avatar_ver FROM inv WHERE " + who + " AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", ...names).toArray()[0];
     if (prev && prev.avatar_key !== key && prev.avatar_ver != null && prev.avatar_ver > ver) {
       try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
@@ -107,7 +114,7 @@ export const MemberMethods = {
   },
 
   async clearAvatar(name: string) {
-    const [who, ...names] = this.invMatch(name);
+    const [who, ...names] = this.avatarMatch(name);
     const rows = this.sql.exec<Pick<InvRow, "avatar_key">>("SELECT avatar_key FROM inv WHERE " + who + " AND avatar_ver IS NOT NULL", ...names).toArray();
     if (!rows.length) return false;
     this.sql.exec("UPDATE inv SET avatar_type = NULL, avatar_ver = NULL, avatar_key = NULL WHERE " + who, ...names);
@@ -121,7 +128,7 @@ export const MemberMethods = {
   // The member's avatar pointer, or null; the route streams the bytes
   // from R2.
   getAvatar(name: string) {
-    const [who, ...names] = this.invMatch(name);
+    const [who, ...names] = this.avatarMatch(name);
     const r = this.sql.exec<{ avatar_type: string | null, avatar_ver: number, avatar_key: string }>("SELECT avatar_type, avatar_ver, avatar_key FROM inv WHERE " + who + " AND avatar_ver IS NOT NULL AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", ...names).toArray()[0];
     return r ? { key: r.avatar_key, type: r.avatar_type, ver: r.avatar_ver } : null;
   },

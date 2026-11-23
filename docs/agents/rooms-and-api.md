@@ -255,7 +255,12 @@ docs.txt section that owns its routes, caps and formats.
   `lower()` folds ASCII only: "Émile" matched no invite there and every
   message of theirs read as a system actor's (`non_interactive`).
   `nameKey` (a plain `toLowerCase`) is only the key rows are filed under
-  (mv, push, avatar paths), kept because stored rows use it. The name is
+  (mv, push, avatar paths), kept because stored rows use it. Avatars
+  alone still pick their `inv` rows as `lower()` did, A-Z case only
+  (`avatarMatch`, `sqlLowerSame`): a set or clear deletes the picture of
+  every row it reaches, and by the fold "Émile" clearing hers would delete
+  one stored on a revoked "émile" row, which the room never deleted; that
+  widening waits on the owner. The name is
   NFC'd in `cleanName`, before `memberNameProblem` checks it: `invite()`
   composed it after, and U+1FEF composed to a backtick past the check.
 
