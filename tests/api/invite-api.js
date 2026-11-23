@@ -355,6 +355,10 @@ async function bodies(ctx) {
   check('bodies: a JSON list as the body -> 400 that says to send an object', r.status === 400 && /must be a JSON object/.test((r.json || {}).error || ''), r.status + ' ' + r.text.slice(0, 120));
   r = await req('POST', R + '/messages', { token: A, headers: { 'Content-Type': 'application/json' }, body: '["hi"]' });
   check('bodies: ... and a message post says to send JSON like its example', r.status === 400 && /Send JSON like/.test((r.json || {}).error || ''), r.status + ' ' + r.text.slice(0, 120));
+  // fetch sends a string body as text/plain when no type is set: the JSON
+  // in it is read, not posted as the message
+  r = await req('POST', R + '/messages', { token: A, body: JSON.stringify({ text: 'plain-typed json', draft: true }) });
+  check('bodies: a JSON body sent as text/plain is read as JSON', r.status === 201 && r.json.text === 'plain-typed json' && r.json.draft === true, r.status + ' ' + r.text.slice(0, 120));
   r = await req('POST', R + '/messages', { token: A, json: { text: { a: 1 } } });
   check('bodies: an object where text belongs -> 400 naming the field', r.status === 400 && (r.json || {}).error === '"text" must be text', r.status + ' ' + r.text.slice(0, 120));
   r = await req('POST', R + '/messages', { token: A, json: { text: 42 } });

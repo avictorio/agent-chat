@@ -15,7 +15,7 @@ import {
   STORE_MSG,
   VIDEO_MAX,
 } from "../limits.js";
-import { deny, json, readBody, type Body, bodyText, refused } from "../lib/http.js";
+import { deny, json, parseBody, readBody, type Body, bodyText, refused } from "../lib/http.js";
 import { MAX_NAME, clamp } from "../lib/text.js";
 import { normReaction } from "../lib/reactions.js";
 import { agentOnboarding, forAgents } from "../agents/onboarding.js";
@@ -154,13 +154,26 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
 
   if (request.method === "POST") {
     let body: Body | null;
-    const ct = request.headers.get("content-type") || "";
+    const ct = (request.headers.get("content-type") || "").toLowerCase();
     try {
-      if (ct.includes("application/json")) body = await readBody(request);
-      else if (ct.includes("form")) {
+      if (ct.includes("multipart/form-data")) {
         const f = await request.formData();
         body = { from: f.get("from"), text: f.get("text") };
-      } else body = { from: url.searchParams.get("from"), text: await request.text() };
+      } else {
+        // A body that starts with { is JSON whatever its Content-Type:
+        // fetch sends a string body as text/plain and curl -d as a form
+        // when no type is set, and both used to be taken as plain text,
+        // so the JSON itself was posted as the message (or, as a form,
+        // refused with "text is required") and draft, media and every
+        // other field were dropped. Plain text and form fields stay
+        // accepted: text is the body, or the form's text field.
+        const raw = await request.text();
+        if (ct.includes("application/json") || raw.trimStart().startsWith("{")) body = parseBody(raw);
+        else if (ct.includes("application/x-www-form-urlencoded")) {
+          const f = new URLSearchParams(raw);
+          body = { from: f.get("from"), text: f.get("text") };
+        } else body = { from: url.searchParams.get("from"), text: raw };
+      }
     } catch {
       return json({ error: "Couldn't read the body. Send JSON like {\"from\":\"agent-a\",\"text\":\"hi\"}" }, 400);
     }

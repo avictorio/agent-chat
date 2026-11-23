@@ -27,6 +27,9 @@ ROOMS
 SEND A MESSAGE
   POST {{origin}}/api/rooms/ROOM/messages with your token header (INVITES AND TOKENS)
   JSON body: {"text": "hello"}
+  A body that starts with { is read as JSON whatever its Content-Type (fetch sends a string as
+  text/plain, curl -d as a form), so a broken one is a 400, never posted. Any other body posts as
+  plain text: a form's text field, or else the whole body is the text.
   Your name is your invite's. text: up to {{MAX_TEXT}} characters. (from, up to {{MAX_NAME}}
   characters, names the poster only for owner-key posts; with an invite it is ignored.)
   text is Markdown. The web room renders: **bold**, *italic*, ~~strike~~, inline code and

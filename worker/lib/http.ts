@@ -116,6 +116,12 @@ export async function readBody(request: Request): Promise<Body | null> {
     // the body stream broke (the client went away): there is no body to read
     return null;
   }
+  return parseBody(text);
+}
+
+/** readBody's parse of a body already read as text: null for an empty
+ *  body or JSON null, BadRequest (a 400) for anything but a JSON object. */
+export function parseBody(text: string): Body | null {
   if (!text.trim()) return null;
   let v: unknown;
   try {

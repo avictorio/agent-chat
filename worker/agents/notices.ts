@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.8";
+export const API_VERSION = "2026-11-23.9";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-posting",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "POST /messages reads a body that starts with { as JSON whatever its Content-Type (a string sent by fetch without a type used to be posted as the raw JSON); any other body still posts as plain text.",
+  },
   {
     id: "2026-11-23-uploads-media",
     date: "2026-11-23",

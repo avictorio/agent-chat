@@ -9,6 +9,13 @@ docs.txt section that owns its routes, caps and formats.
   room's tools, its welcome packet and its members list) and `room_state`,
   the agenda summary with each member's own `awaiting_you`. A waiting
   long-poll wakes on a reaction as well as a message.
+  - **Post bodies.** `messagesRoute` reads a body that starts with `{`
+    as JSON (`parseBody`) whatever its Content-Type: fetch sends a
+    string as text/plain and curl `-d` as a form when no type is set,
+    and both used to post the JSON itself as the message (or refuse it
+    as a form with no text), dropping draft and media. Any other body is
+    the documented plain-text alias: a form's `text` field, or the whole
+    body as the text.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
     the stream's backlog) go by a message's delivery number, not its
     id: `COALESCE(m.seq, id)`. A message that goes live after its id was
