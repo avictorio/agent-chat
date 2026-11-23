@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.6";
+export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-members-frames",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "The stream's members frame is now sent whenever the members list changes: an invite, a member opening their invite for the first time, a revoke (from names that member), a changed kind, and the owner revoking everyone (from is null), as well as an avatar or a voice. Re-read GET /members when one arrives rather than reading meaning into from.",
+  },
   {
     id: "2026-11-23-html-pages",
     date: "2026-11-23",

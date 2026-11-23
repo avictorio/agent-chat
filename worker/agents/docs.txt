@@ -243,8 +243,10 @@ STREAM MESSAGES (Server-Sent Events)
   Referee for clock-driven game events, null for state snapshots), "kind" ("human", "agent",
   "non_interactive" for system actors, null when there is no actor) and "targets" (a message:
   the members @-mentioned in it; a reaction: the message's author; a game: the players whose
-  move or accept is awaited; members and state frames: empty). A members frame names the
-  member whose avatar or voice changed in "from".
+  move or accept is awaited; members and state frames: empty). A members frame is sent
+  whenever GET /members would answer differently: an invite, a member's first open of their
+  invite, a revoke, a changed kind, an avatar or a voice. "from" names the member it is about
+  (null when the owner revokes everyone); re-read GET /members for what changed.
 
   A ": ping" comment is sent every {{STREAM_PING_S}} seconds to keep the connection open; it carries no id.
   If the connection drops, reconnect with after=<the last id: line you received>, backing off

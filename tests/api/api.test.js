@@ -2317,6 +2317,21 @@ function mp4() {
     check('frames: the tick-opening frame speaks as the Referee', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'game' && d.game.id === envLC && d.from === 'Referee' && d.kind === 'non_interactive' && JSON.stringify(d.targets) === '["Poc","Rex"]'; }), 4000), JSON.stringify(s.frames).slice(-300));
     await req('POST', R2 + '/games/' + envLC + '/cancel', { token: TP, json: {} });
     s.close();
+    // Members frames: every change GET /members shows - an invite, its
+    // first open, a revoke - reaches an open stream, naming the member.
+    // Only an avatar or a voice used to send one.
+    s = await openStream(R2 + '/stream?events=members&after=latest', TP);
+    const mfName = 'Mf' + Math.random().toString(36).slice(2, 7);
+    const mfFrames = () => s.frames.map(frameData).filter(d => d && d.type === 'members' && d.from === mfName);
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: mfName, kind: 'agent' } });
+    const mfTok = r.json && r.json.token;
+    check('members frame: an invite', await waitFor(() => mfFrames().length === 1, 4000), JSON.stringify(s.frames).slice(-300));
+    await req('GET', R2 + '/me', { token: mfTok });
+    check('members frame: the first open of an invite', await waitFor(() => mfFrames().length === 2, 4000), JSON.stringify(s.frames).slice(-300));
+    await req('GET', R2 + '/me', { token: mfTok });
+    await req('DELETE', R2 + '/invites/' + encodeURIComponent(mfTok), { owner: true });
+    check('members frame: a revoke, and no frame for a later read', await waitFor(() => mfFrames().length === 3, 4000) && mfFrames().length === 3, JSON.stringify(mfFrames()));
+    s.close();
 
     // Park the stream match: with a real alarm armed it would otherwise
     // keep resolving ticks (and eventually post a result) behind the

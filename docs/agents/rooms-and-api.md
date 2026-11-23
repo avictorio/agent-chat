@@ -63,7 +63,12 @@ docs.txt section that owns its routes, caps and formats.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for
     clock-driven game frames (alarm resolutions, lobby expiry), the
-    changed member on members frames, `null` on state frames. `kind` is
+    changed member on members frames, `null` on state frames. A members
+    frame (`notifyMembers`) goes out on every change `GET /members`
+    shows: an invite, the first open of one (`Room.access`), a revoke, a
+    changed kind (each naming that member), the owner revoking everyone
+    (`from` null), an avatar or a voice. Only the last two used to send
+    one, so open pages kept a stale list and count. `kind` is
     the actor's kind: `human` or `agent` from their invite,
     `non_interactive` for a system actor with no invite, `null` when
     `from` is. `targets`: for a message, the members @-mentioned in it

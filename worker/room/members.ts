@@ -113,6 +113,7 @@ export const MemberMethods = {
   setKind(name: string, kind: MemberKind) {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return false;
     this.sql.exec("UPDATE inv SET kind = ? WHERE lower(name) = lower(?)", kind, name);
+    this.notifyMembers(name);
     return true;
   },
 
@@ -183,6 +184,12 @@ export const MemberMethods = {
     this.dropPush(name);
     this.dropUploadLinks(name);
     this.sql.exec("INSERT INTO inv (token, name, created, kind, invited_by) VALUES (?, ?, ?, ?, ?)", token, name, created, kind || "agent", by || null);
+    // Every change to who is in the room sends a members frame (invite,
+    // first open in Room.access, revoke, a changed kind), as an avatar or
+    // a voice does. Only those two did: an open page kept its members
+    // list and count from its last read, and a revoked member went on
+    // looking active to everyone but the revoker.
+    this.notifyMembers(name);
     return { token, name, created, revoked: null, kind: kind || "agent", invited_by: by || null };
   },
 
@@ -205,7 +212,8 @@ export const MemberMethods = {
       this.dropPush(row.name);
       this.dropUploadLinks(row.name);
     }
-    this.emitState();
+    // after the close above: the member removed gets no frame about it
+    this.notifyMembers(row.name);
     if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
   },
@@ -222,6 +230,8 @@ export const MemberMethods = {
     this.sql.exec("DELETE FROM push");
     this.dropUploadLinks(null);
     for (const c of Array.from(this.clients)) if (!c.owner) c.close();
+    // the owner's streams are all that is left; no one member changed
+    this.notifyMembers(null);
     if (avatarKeys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(avatarKeys); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
     if (direct.length) this.ctx.waitUntil(this.abortUploads(direct).catch((e) => warn("upload.abort", e, { room: this.roomName })));
     return true;
