@@ -1,13 +1,14 @@
-// Unit tests for Trust's home framing on a phone
-// (web/app/src/features/games/trust/trframe.ts): with 7 or 8 seats every
-// name plate must land whole inside the frame, clear of the frame's
-// controls, and read at one size. The camera and the projection are
+// Unit tests for Trust's home framing
+// (web/app/src/features/games/trust/trframe.ts): with 2 to 8 seats, on a
+// phone and on a desktop, every name plate must land whole inside the
+// frame, its score line included, clear of the frame's controls; a crowded
+// phone table's plates must read at one size. The camera and the projection are
 // three.js's own, so the check does not reuse the framing's own maths.
 // Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PerspectiveCamera, Vector3 } from "../../web/node_modules/three/build/three.module.js";
-import { PLATE_BIG, PLATE_PX, plateK, tableR, trHome } from "../../web/app/src/features/games/trust/trframe.ts";
+import { PHONE_BELOW, PLATE, PLATE_BIG, PLATE_PX, plateK, tableR, trHome } from "../../web/app/src/features/games/trust/trframe.ts";
 
 // Seats as TrustArena3D places them: the viewer at the front (+z).
 function seats(n) {
@@ -37,34 +38,40 @@ function plates(n, W, H) {
     const y = ((1 - p.y) / 2) * H;
     // a sprite without size attenuation is scale * H / (2 tan(fov/2)) px
     // tall; with it, scale / depth of that
-    const [w, h] = k ? [PLATE_PX[0] * k, PLATE_PX[1] * k].map((v) => (v * H) / (2 * tv)) : PLATE_BIG.map((v) => (v * H) / (2 * tv * depth));
+    const [w, h] = k ? [PLATE_PX[0] * k, PLATE_PX[1] * k].map((v) => (v * H) / (2 * tv)) : (W < PHONE_BELOW ? PLATE_BIG : PLATE).map((v) => (v * H) / (2 * tv * depth));
     return { l: x - w / 2, r: x + w / 2, t: y - h / 2, b: y + h / 2, h };
   });
 }
 
-// The frame's controls in a phone frame (games.css): Move bottom-left
-// (left 8, bottom 10, 40 tall, about 86 wide), Reset view and the sound
-// toggle top-right (top 8, 34 tall, about 130 wide), the caption top-left
-// (up to three lines at this width: about 62 tall).
+// The frame's controls (games.css): Move bottom-left (left 8, bottom 10, 40
+// tall, about 86 wide; touch screens only, and a touch screen can be wide),
+// Reset view and the sound toggle top-right (top 8, 34 tall, about 130
+// wide), the caption top-left (up to three lines on a phone, about 62 tall;
+// one line of about 275 px on a desktop).
 const hits = (a, b) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
 
-for (const n of [7, 8]) {
-  for (const W of [362, 332]) {
-    test(`Trust with ${n} seats in a ${W} x 310 phone frame: every plate whole, clear of the controls, one size`, () => {
-      const H = 310;
+// The whole sprite counts as the plate (its score line ends about 10 px
+// above the sprite's bottom on a phone), with SPARE px more to the edge:
+// the viewer's own "8 (+0) · you" used to run off the bottom.
+const SPARE = 2;
+const FRAMES = [[362, 310], [332, 310], [692, 396]];
+for (let n = 2; n <= 8; n++) {
+  for (const [W, H] of FRAMES) {
+    test(`Trust with ${n} seats in a ${W} x ${H} frame: every plate whole, clear of the controls`, () => {
+      const phone = W < PHONE_BELOW;
       const move = { l: 8, r: 94, t: H - 50, b: H - 10 };
       const tools = { l: W - 138, r: W - 8, t: 8, b: 42 };
-      const caption = { l: 8, r: W - 182, t: 8, b: 70 };
+      const caption = phone ? { l: 8, r: W - 182, t: 8, b: 70 } : { l: 8, r: 284, t: 8, b: 38 };
       const ps = plates(n, W, H);
       ps.forEach((p, i) => {
         const at = `seat ${i} ${JSON.stringify(p)}`;
-        assert.ok(p.l >= 0 && p.r <= W && p.t >= 0 && p.b <= H, "inside the frame: " + at);
+        assert.ok(p.l >= SPARE && p.r <= W - SPARE && p.t >= SPARE && p.b <= H - SPARE, "inside the frame: " + at);
         assert.ok(!hits(p, move), "clear of Move: " + at);
         assert.ok(!hits(p, tools), "clear of Reset view and the sound toggle: " + at);
         assert.ok(!hits(p, caption), "clear of the caption: " + at);
       });
-      // the far plates read as well as the viewer's own
-      assert.ok(Math.min(...ps.map((p) => p.h)) >= 34, "every plate at least 34 px tall: " + ps.map((p) => Math.round(p.h)));
+      // a crowded phone table: the far plates read as well as the viewer's own
+      if (phone && n >= 7) assert.ok(Math.min(...ps.map((p) => p.h)) >= 34, "every plate at least 34 px tall: " + ps.map((p) => Math.round(p.h)));
     });
   }
 }

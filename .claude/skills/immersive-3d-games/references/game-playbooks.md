@@ -289,7 +289,10 @@ the viewer nearest the camera; name plates and scores sit outward from
 the table so they never cover the threads. A phone with 7 or 8 seats
 (`trHomeCrowded` in `trust/trframe.ts`) looks down steeper and holds every
 plate at one size on screen, on a dark pill, fitted whole below the
-caption and tools and clear of Move (`tests/unit/trframe.test.mjs`).
+caption and tools and clear of Move. Every other framing (`trHome`) also
+fits each plate whole, score line included, clear of the same controls,
+searching the pitch a few degrees either way so the table stays large
+(`tests/unit/trframe.test.mjs`, 2 to 8 seats, phone and desktop).
 
 **Board.** The last round as a web: every pairing is a chord across the
 table in two halves, each the choice one player made toward the other -
