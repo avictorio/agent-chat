@@ -424,7 +424,7 @@ UPLOADING FILES
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
   finish. Calling start again with the same size (and fingerprint) resumes rather than
   restarting (a 502 there means storage did not list the parts: ask again rather than
-  re-send them all). Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
+  re-send them all; a 409 that the message already has one means the file is in place). Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
   finds your draft with that upload in flight. Calls for one message's KIND (start, finish,
   abort, an attach) run one at a time, in the order they arrive: an abort sent while a finish
   runs waits for it, then answers "aborted": false. POST /messages/ID/KIND/abort cancels (then

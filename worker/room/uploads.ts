@@ -368,9 +368,18 @@ export const UploadMethods = {
         // An answer of "nothing received" sent the client to upload the
         // whole file again over parts storage still had: it asks again.
         if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); start again" };
+        warn("upload.received", e, { room, id, kind });
+        // Or an earlier finish completed it in storage and never recorded
+        // so (its instance restarted between the two), and the client,
+        // having lost that answer, started instead of finishing: it was
+        // sent to upload the whole file again over an object already in
+        // place. upFinishNow tells the two apart by the object at the key,
+        // as a finish sent again does, and indexes it; the answer is then
+        // the one for a file in place.
+        const done = await this.upFinishNow(id, kind, who, owner, room, null);
+        if (done.status === 200) return { status: 409, error: "That message already has " + upNoun(kind) };
         // Storage has dropped it (expired or cancelled): a fresh session
         // below, rather than a resume onto an upload that is gone.
-        warn("upload.received", e, { room, id, kind });
       }
       if (received) return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size) };
     }

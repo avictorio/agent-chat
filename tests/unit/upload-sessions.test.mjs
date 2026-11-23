@@ -364,6 +364,19 @@ test("a resume of an upload storage no longer has starts a fresh one", async () 
   assert.ok(h.multipart.has(row(h, id, "image").upload_id));
 });
 
+test("a start whose upload storage already completed indexes the file instead of starting over", async () => {
+  const h = makeRoom({ env: DIRECT_ENV });
+  const id = await draft(h);
+  const up = await directSession(h, id, 100);
+  await h.room.env.MEDIA.resumeMultipartUpload(row(h, id, "image").r2key, up).complete([]);
+  const r = await withFetch(() => new Response("<Error><Code>NoSuchUpload</Code></Error>", { status: 404 }),
+    () => h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "pic.png", "fp-100", false));
+  assert.equal(r.status, 409, "answered as for a file in place, not a fresh session");
+  assert.equal(row(h, id, "image").upload_id, null);
+  assert.equal(h.multipart.size, 0, "no new upload opened");
+  assert.ok(h.room.mediaMeta(id, "image"), "the file is listed");
+});
+
 test("a direct finish retried after storage completed the upload indexes it", async () => {
   const h = makeRoom({ env: DIRECT_ENV });
   const id = await draft(h);

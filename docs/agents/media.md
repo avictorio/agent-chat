@@ -150,7 +150,10 @@ way; the routes are in docs.txt UPLOADING FILES.
   session as it was, and a late part of the old upload is refused
   instead of counting in the new one. A resume whose part list storage
   will not give answers 502 (not an empty list, which sent the client
-  to re-send everything); one storage no longer has starts afresh.
+  to re-send everything); one storage no longer has starts afresh,
+  unless the object is at the key at its size: an earlier finish
+  completed it and never recorded so, and the start indexes it as that
+  finish would have and answers 409 "already has" (the file is in place).
 - **Finish is safe to repeat.** One sent while another runs gets that
   finish's answer (`_finishing` holds the promise), which can be a
   refusal; one sent after a finish succeeded answers 200 with the
