@@ -162,7 +162,12 @@ test("Exquisite Corpse counts sentences past abbreviations and in any script", a
   const five = await h.room.gameMove(id, writer(), "Он пришёл. Она ушла. Дождь. Снег. Ночь.", R);
   assert.equal(five.status, 400, "five Russian sentences are more than 3");
   assert.match(five.error, /yours has 5/);
-  for (const text of ["Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.", "J. R. R. Tolkien wrote it."]) {
+  // a sentence ending on a one-letter word is not an initial: this
+  // counted 1 and was taken
+  const plans = await h.room.gameMove(id, writer(), "Plan A. Plan B. Plan C. Plan D. Plan E. Plan F.", R);
+  assert.equal(plans.status, 400, "six sentences that end on a letter");
+  assert.match(plans.error, /yours has 6/);
+  for (const text of ["Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.", "J. R. R. Tolkien wrote it.", "I saw George W. Bush. He waved."]) {
     const r = await h.room.gameMove(id, writer(), text, R);
     assert.equal(r.status, 200, text + ": " + r.error);
   }

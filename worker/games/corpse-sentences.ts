@@ -14,6 +14,16 @@
 // abbreviation or an initial runs on into the next, and any letter or
 // digit counts. Where a full stop is ambiguous ("Baker St. Nobody") it
 // counts fewer: a segment is capped by length too.
+//
+// A one-letter word before a full stop is an initial only in two shapes,
+// and only before a capital: a piece of nothing but initials ("J. R. R.
+// Tolkien", "J. K. Rowling"), or one capital after a capitalised word that
+// does not open its piece ("I saw George W. Bush"), the second at most
+// once a segment. An earlier version let every piece that ended on a
+// one-letter word run on, so "Plan A. Plan B. Plan C. Plan D. Plan E.
+// Plan F." and "I took vitamin C. Then D. Then E." counted 1 and a writer
+// could send six sentences; now the most the middle-initial shape can
+// hide is one.
 
 // Words that end in a full stop without ending the sentence.
 const EC_ABBREVIATIONS = new Set([
@@ -44,13 +54,30 @@ export function ecSentences(text: string, seg: SentenceSplitter | null = sentenc
   const pieces = seg ? Array.from(seg.segment(s), (x) => x.segment) : s.split(/(?<=[.!?…])["'”’)\]]*\s+|(?<=[。！？])/);
   let n = 0;
   let runsOn = false;
-  for (const piece of pieces) {
-    const t = piece.trim();
+  let middleInitialUsed = false;
+  for (let i = 0; i < pieces.length; i++) {
+    const t = (pieces[i] ?? "").trim();
     if (!/[\p{L}\p{N}]/u.test(t)) continue;
     if (!runsOn) n++;
-    const last = t.split(/\s+/).pop() || "";
-    // "J." "U.S." "p.m." or "Dr." - the sentence goes on in the next piece
-    runsOn = /^(\p{L}\.)+$/u.test(last) || (last.endsWith(".") && EC_ABBREVIATIONS.has(last.slice(0, -1).toLowerCase()));
+    const words = t.split(/\s+/);
+    const last = words[words.length - 1] || "";
+    runsOn = false;
+    if (/^\p{Lu}\.$/u.test(last)) {
+      // "J." or the "W." of "George W. Bush": the sentence goes on only
+      // into a piece that starts with a capital
+      const next = pieces.slice(i + 1).find((p) => /[\p{L}\p{N}]/u.test(p)) || "";
+      if (/^["'“‘([]*\p{Lu}/u.test(next.trim())) {
+        const before = words.slice(0, -1);
+        if (before.every((w) => /^\p{Lu}\.$/u.test(w))) runsOn = true;
+        else if (!middleInitialUsed && before.length >= 2 && /^\p{Lu}/u.test(before[before.length - 1] ?? "")) {
+          runsOn = true;
+          middleInitialUsed = true;
+        }
+      }
+    } else {
+      // "U.S." "p.m." or "Dr." - the sentence goes on in the next piece
+      runsOn = /^(\p{L}\.){2,}$/u.test(last) || (last.endsWith(".") && EC_ABBREVIATIONS.has(last.slice(0, -1).toLowerCase()));
+    }
   }
   return n;
 }

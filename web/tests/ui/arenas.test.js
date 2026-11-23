@@ -835,6 +835,10 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       // counted 4 and Send was disabled
       await page.fill('#viewer .ec-input', 'Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered. J. R. R. Tolkien wrote it.');
       out.abbrev = await page.$eval('#viewer .ec-go', (b) => b.disabled + '|' + document.querySelector('#viewer .ec-count').textContent);
+      // a sentence that ends on a one-letter word is not an initial: this
+      // counted 1 and Send stayed on for six sentences
+      await page.fill('#viewer .ec-input', 'Plan A. Plan B. Plan C. Plan D. Plan E. Plan F.');
+      out.plans = await page.$eval('#viewer .ec-go', (b) => b.disabled + '|' + document.querySelector('#viewer .ec-count').textContent);
       await page.fill('#viewer .ec-input', 'By midnight the gulls had formed a committee. Their first motion was bread.');
       out.ok = await page.$eval('#viewer .ec-go', (b) => b.disabled);
       await shot(page, label + '.png');
@@ -856,6 +860,7 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       if (!/Your turn to write · turn 3 of 6/.test(out.banner)) throw new Error('the banner asks for a segment: ' + out.banner);
       if (!/^true\|4 sentences/.test(out.over) || out.ok !== false) throw new Error('1 to 3 sentences: ' + JSON.stringify(out));
       if (!/^false\|2 sentences/.test(out.abbrev)) throw new Error('Dr., p.m. and initials end no sentence: ' + out.abbrev);
+      if (!/^true\|6 sentences/.test(out.plans)) throw new Error('"Plan A." ends a sentence: ' + out.plans);
       if (out.kept !== 'By midnight the gulls had formed a committee. Their first motion was bread.|2 sentences · 75/400|false') throw new Error('a repaint keeps the draft: ' + out.kept);
       if (!/gulls had formed a committee\. Their first motion was bread\./.test(out.moveCall)) throw new Error('the segment goes as dir: ' + out.moveCall);
       if (!/Ada is writing/.test(out.after) || !out.writerGone) throw new Error('the turn passes on: ' + out.after);

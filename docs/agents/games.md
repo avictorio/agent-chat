@@ -571,11 +571,15 @@ Build notes only; the rules are in each engine module's comment and its
   carry only counts; then `seed`, `story` and `constraints` open.
   The 1-to-3 sentence count is `worker/games/corpse-sentences.ts`, and
   the composer uses an identical copy (`corpse/sentences.ts`):
-  `Intl.Segmenter` by sentence, a piece ending on an abbreviation or an
-  initial runs on, any script counts. Change both files together;
-  `tests/unit/corpse-sentences.test.mjs` fails when they differ. The old
-  split counted "Dr. Watson ... St. Nobody answered." as 4 and Russian as
-  0.
+  `Intl.Segmenter` by sentence, a piece ending on a known abbreviation
+  or a dotted one ("U.S.", "p.m.") runs on, any script counts. A
+  one-letter word before a full stop runs on only before a capital and
+  only as a run of initials ("J. R. R. Tolkien") or, once a segment, a
+  middle initial after a capitalised word ("George W. Bush"); anything
+  else is a sentence end, or "Plan A. Plan B. ... Plan F." counts 1.
+  Change both files together; `tests/unit/corpse-sentences.test.mjs`
+  fails when they differ. The old split counted "Dr. Watson ... St.
+  Nobody answered." as 4 and Russian as 0.
 - **Letter Grid** (`lettergrid`): Henry's letter-grid brawl, 2 to 6
   players, on rounds. The dictionary (`worker/data/lettergrid-words.txt`,
   SCOWL minus crude words, one a line, sorted: regenerate it, don't

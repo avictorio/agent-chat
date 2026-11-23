@@ -27,6 +27,19 @@ const CORPUS = [
   ["What was that? \"Run!\" She ran.", 3],
   ["No full stop at the end", 1],
   ["...", 0],
+  // a one-letter word ends the sentence unless it is an initial: a piece of
+  // initials only, or one middle initial a segment, and only before a
+  // capital (six "Plan X." sentences used to count 1)
+  ["Plan A. Plan B. Plan C. Plan D.", 4],
+  ["Plan A. Plan B. Plan C. Plan D. Plan E. Plan F.", 6],
+  ["I took vitamin C. Then D. Then E. Then K. Then B.", 5],
+  ["We like Plan A. We like Plan B. We like Plan C. We like Plan D.", 3],
+  ["I saw George W. Bush. He waved.", 2],
+  ["J. K. Rowling wrote it. Then she rested.", 2],
+  ["We ate at noon and left at e. Then we slept.", 2],
+  // 2 by grammar, but "St." is a known abbreviation and runs on into
+  // "Nobody" (the "St. Louis" reading): ambiguous stops count fewer
+  ["Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.", 1],
 ];
 
 test("the server and web copies are the same file", () => {
