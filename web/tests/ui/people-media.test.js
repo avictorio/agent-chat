@@ -742,6 +742,76 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     return { reads: reads.length, limits };
   });
 
+  // With the network gone, the minute's check sends nothing while the
+  // browser says it is offline and runs when it comes back; with the
+  // network failing behind an online browser, each failed read doubles
+  // the wait before the next. A failed image still retries at once.
+  // Before, every check failed at its first read and the next went out a
+  // minute later, for as long as the tab was open.
+  await run('media-links-offline', { state: { artifacts: true }, hash: '#invite=tok_Anthony', allowConsole: /status of 403|ERR_INTERNET_DISCONNECTED/ }, async (page, S) => {
+    let down = false;
+    const tried = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?/, (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/api/rooms/demo/messages' || /^(1|200)$/.test(u.searchParams.get('limit') || '')) return route.fallback();
+      tried.push(u.search);
+      return down ? route.abort('internetdisconnected') : route.fallback();
+    });
+    await page.route(/\/messages\/95\/image\?/, (route) => {
+      const u = new URL(route.request().url());
+      if (u.searchParams.get('sig') !== 'dead') return route.fallback();
+      const row = S.msgs.find((m) => m.id === 95);
+      row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=dead', 'sig=live') });
+      return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
+    });
+    S.streamRetry = 150;
+    await page.reload();
+    await settle(page);
+    const online = (on) => page.evaluate((v) => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => v }), on);
+    const src = () => page.$eval('.msg[data-id="8"] img.msg-img', (i) => i.getAttribute('src'));
+    // the browser says it is offline: three checks send nothing
+    await online(false);
+    down = true;
+    for (const t of [51, 52, 53]) {
+      await skew(page, t * 60e3);
+      await nudge(page);
+      await settle(page);
+    }
+    const offline = tried.length;
+    must(offline === 0, 'nothing is sent while the browser is offline: ' + JSON.stringify(tried));
+    // back online: the check runs at once, with no wait for the next minute
+    for (const m of S.msgs) for (const k of ['image', 'html', 'doc']) if (m[k]) m[k] = Object.assign({}, m[k], { url: m[k].url.split('?')[0] + '?exp=2&sig=fresh' });
+    down = false;
+    await online(true);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
+      .catch(() => { throw new Error('coming back online did not renew: ' + JSON.stringify(tried)); });
+    await settle(page);
+    const back = tried.length;
+    // an hour on, the network fails behind an online browser: a check a
+    // minute for eleven minutes reads at 0, +2 and +6 minutes
+    down = true;
+    const failFrom = tried.length;
+    for (let t = 104; t <= 114; t++) {
+      await skew(page, t * 60e3);
+      await nudge(page);
+      await settle(page);
+    }
+    const failing = tried.slice(failFrom);
+    must(failing.length >= 2 && failing.length <= 4, 'failed reads back off: ' + JSON.stringify(failing));
+    // still within the wait: a photo whose link is dead retries at once
+    down = false;
+    const retryFrom = tried.length;
+    S.msgs.push({ id: 95, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'A late photo.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/95/image?exp=1&sig=dead' } });
+    await page.waitForSelector('.msg[data-id="95"] img.msg-img', { state: 'attached', timeout: 5000 });
+    await page.evaluate(() => document.querySelector('.msg[data-id="95"]').scrollIntoView({ block: 'center' }));
+    await page.waitForFunction(() => /sig=live/.test(document.querySelector('.msg[data-id="95"] img.msg-img').getAttribute('src')), null, { timeout: 8000 })
+      .catch(() => { throw new Error('the failed photo was not retried during the wait: ' + JSON.stringify(tried.slice(retryFrom))); });
+    S.streamRetry = 0;
+    must(/sig=fresh/.test(await src()), 'row 8 kept its renewed link');
+    return { offline, back: back - offline, failing: failing.length, retry: tried.length - retryFrom };
+  });
+
   // A row a walk could not reach is held for 50 minutes; once a page has
   // read it the hold is forgotten. Here row 8 is out of reach at minute 51,
   // the room is cleared and its failed image reads it in the latest page,

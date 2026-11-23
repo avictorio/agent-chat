@@ -66,8 +66,8 @@ API: docs.txt MEDIA LINKS.
   message frame that follows does. A stream reconnect does not renew them: it resumes after
   the last delivery number, so rows already on screen come again only
   when media landed on them. The web feed renews its own
-  (`features/feed/useMediaRenewal.ts`): every minute, and when the tab
-  comes back into view, it checks
+  (`features/feed/useMediaRenewal.ts`): every minute, when the tab
+  comes back into view and when the browser comes back online, it checks
   for a row whose links it got longer ago than `RENEW_AFTER`; if there
   is one, it re-reads that row with every row past `BATCH_AFTER`, so a
   room with steady media renews in batches rather than every minute
@@ -81,9 +81,12 @@ API: docs.txt MEDIA LINKS.
   following `last_id` (a forward read is in delivery order, and a row
   delivered late sits past every message sent while it uploaded), for at
   most `MAX_PAGES`. A row the walk does not reach is not walked for again
-  for `RENEW_AFTER`, unless a page reads it meanwhile. One re-read runs
-  at a time: others join it or queue behind it. A feed image, clip or
-  document that fails to load re-reads its row and retries once. The Media shelf re-reads its listing when
+  for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
+  nothing while the browser says it is offline, and after a failed
+  re-read it waits twice as long as before, up to `RENEW_AFTER` (a
+  re-read that gets through clears it). One re-read runs at a time:
+  others join it or queue behind it. A feed image, clip or document that
+  fails to load re-reads its row and retries once, wait or not. The Media shelf re-reads its listing when
   reopened after 30 s; pull-to-refresh reloads the page.
 - The HMAC uses a small plain-JS SHA-256 (`sha256Bytes`, `hmacSha256` in
   `worker/lib/crypto.ts`): message serialization is synchronous and

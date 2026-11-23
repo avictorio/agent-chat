@@ -13,9 +13,9 @@ import { MEDIA_FIELDS, type useMessages } from "./useMessages";
 // 403 until a reload. Once any row's links are older than RENEW_AFTER -
 // before any of them can have died - this re-reads it with every row past
 // BATCH_AFTER and swaps only their media fields in. Timers barely run in a
-// hidden tab, so the check also runs when the tab comes back into view. A
-// media element that fails to load asks for its own row (renewMedia) and
-// retries once.
+// hidden tab, so the check also runs when the tab comes back into view,
+// and when the browser comes back online. A media element that fails to
+// load asks for its own row (renewMedia) and retries once.
 
 type Feed = ReturnType<typeof useMessages>;
 
@@ -68,6 +68,12 @@ export function useMediaRenewal(opts: {
   // Before, it only grew, and a row that a page had reached since was
   // still skipped, unread, when its link came due again within the hour.
   const farRef = useRef<Map<number, number>>(new Map());
+  // After a failed re-read the minute's check waits, twice as long after
+  // each failure in a row, up to RENEW_AFTER; a re-read that gets through
+  // clears it. With the network down every check failed at its first read
+  // and the next went out a minute later, for as long as the tab was open.
+  // A failed image's own retry (renewMedia) is not held.
+  const holdRef = useRef({ until: 0, wait: 0 });
 
   // Read these rows again and hand the fresh links to the feed.
   //
@@ -140,10 +146,13 @@ export function useMediaRenewal(opts: {
           far.set(id, now);
           covered.push(id);
         }
+        holdRef.current = { until: 0, wait: 0 };
       } catch (e) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
         // a network error: what was read still lands; the rest is asked
-        // for again at the next check
+        // for again once the hold is over
+        const wait = Math.min(RENEW_AFTER, holdRef.current.wait * 2 || CHECK_EVERY * 2);
+        holdRef.current = { until: Date.now() + wait, wait };
       }
       feed.renewLinks(rows, covered);
     },
@@ -185,6 +194,8 @@ export function useMediaRenewal(opts: {
   const renewStale = useCallback(() => {
     const { feed, deniedRef } = live.current;
     if (runRef.current || nextRef.current || deniedRef.current || document.hidden || feed.lastRef.current === null) return;
+    // the browser knows it is offline: the online event runs the check
+    if (navigator.onLine === false || Date.now() < holdRef.current.until) return;
     const now = Date.now();
     const at = feed.linksAtRef.current;
     const media = feed.messagesRef.current.filter(hasMedia);
@@ -200,12 +211,19 @@ export function useMediaRenewal(opts: {
     const onVisible = () => {
       if (!document.hidden) renewStale();
     };
+    // back online: a hold from reads that failed while it was down is over
+    const onOnline = () => {
+      holdRef.current.until = 0;
+      renewStale();
+    };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("pageshow", onVisible);
+    window.addEventListener("online", onOnline);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pageshow", onVisible);
+      window.removeEventListener("online", onOnline);
     };
   }, [renewStale]);
 
