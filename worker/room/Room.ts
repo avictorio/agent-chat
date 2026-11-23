@@ -349,6 +349,9 @@ export class Room extends DurableObject {
   mediaLocks: Map<string, Promise<void>> = new Map();
   /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
   _finishing: Map<string, Promise<UpFinish>> = new Map();
+  /** Messages whose post is still storing its inline files (room/messages.ts, postKeyed). Nothing publishes or sweeps one of these: published
+   *  between two puts, it went out with half its files, and a later put's failure then deleted a live message with no delete frame. */
+  storing: Set<number> = new Set();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);

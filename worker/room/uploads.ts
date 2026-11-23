@@ -306,6 +306,8 @@ export const UploadMethods = {
     // publish, or before the message's second file could start.
     const stale = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND ((md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?) OR md.at > ?))", now - 86400000, now - UP_SESSION_MS, now - 86400000).toArray();
     for (const d of stale) {
+      // a post still storing its files is not done with its rows (Room.storing)
+      if (this.storing.has(d.id)) continue;
       // rows first, storage after (see deleteMessage)
       const media = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ?", d.id).toArray();
       this.sql.exec("DELETE FROM upp WHERE msg = ?", d.id);

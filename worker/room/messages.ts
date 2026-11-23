@@ -123,6 +123,8 @@ export const MessageMethods = {
     // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
     // already written - no message, no frame, no push survives a failed post.
+    // Nothing publishes or sweeps it until every file is in (Room.storing).
+    if (audio || image || video || html || doc) this.storing.add(id);
     try {
       if (audio) {
         await this.putMedia(id, "audio", audio.data, audio.type, room);
@@ -159,6 +161,8 @@ export const MessageMethods = {
       if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
       if (isStoreError(e)) throw storeError();
       throw e;
+    } finally {
+      this.storing.delete(id);
     }
     // The message was deleted while its media was being stored (its
     // sender, or the owner, got there first): nothing is announced, and
@@ -349,6 +353,10 @@ export const MessageMethods = {
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
+    // Its post is still storing its files (Room.storing): published now it
+    // went out with half of them, and a later file's failure then deleted
+    // the live message without telling anyone.
+    if (this.storing.has(id)) return { status: 409, error: "Message " + id + " is still storing its files; nothing was published. Publish it once its post has answered." };
     // Not while one of its files is still on its way: published then, the
     // message went live with that file missing and its upload dangling,
     // or with a file from another send the author had dropped since (a
@@ -396,7 +404,7 @@ export const MessageMethods = {
   // stays a draft.
   async maybeAutoPublish(id: number, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "pubauto">>("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
-    if (!r || !r.draft || !r.pubauto) return null;
+    if (!r || !r.draft || !r.pubauto || this.storing.has(id)) return null;
     if (!this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND upload_id IS NULL LIMIT 1", id).toArray().length) return null;
     if (this.upsLive(id).length) return null;
     const res = await this.publishMessage(id, r.sender, false, room, undefined);

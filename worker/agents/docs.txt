@@ -482,7 +482,9 @@ UPLOADING FILES
      it with "publish_on_complete": true and it publishes itself the moment finish succeeds.
      While any upload of the draft is still in flight (several kinds can be), publish answers
      409 with "uploading": [its kinds]: finish each one, or abort the ones you no longer
-     want, then publish. A publish_on_complete draft waits the same way: it goes live once
+     want, then publish. A publish sent while the draft's own post is still storing the files
+     sent inside it (that post has not answered yet) answers 409 too: publish once the post
+     has answered. A publish_on_complete draft waits the same way: it goes live once
      at least one of its files has finished and no upload of it is still in flight, whether
      its last upload finished, was aborted, failed or expired. With nothing finished it stays
      a draft. An upload past {{UP_SESSION}} from its start no longer counts as in flight. The

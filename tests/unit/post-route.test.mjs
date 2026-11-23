@@ -205,6 +205,56 @@ test("a post that fails for any reason while storing its files is posted by the 
   assert.equal(h.all("SELECT id FROM m WHERE draft IS NULL").length, 1);
 });
 
+// A post's files are stored one put at a time, with the first file's row
+// in place while the next is stored. Nothing publishes or sweeps the
+// message meanwhile (Room.storing): a sweep, an upload's auto-publish or
+// the sender's own publish sent it out with half its files, and when the
+// next put failed the post's cleanup deleted a live message unannounced.
+test("a draft still storing its files is not published by a sweep or its sender, and a failed put leaves nothing", async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer;
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0]).buffer;
+  let puts = 0, reached, fail;
+  const at = new Promise((r) => { reached = r; });
+  const gate = new Promise((_, rej) => { fail = rej; });
+  const h = makeRoom({ before: async (op) => { if (op === "put" && ++puts === 2) { reached(); await gate; } } });
+  h.member("Ada");
+  const frames = [];
+  h.room.clients.add({ token: "t", owner: true, name: "", kinds: null, games: null, stateSub: false, stateKey: null, send: (f) => frames.push(f), close: () => {} });
+  const first = h.room.postKeyed("s-1", "Ada", "two files", R, false, { data: mp3, type: "audio/mpeg" }, { data: png, type: "image/png" }, null, true, true).then(() => "posted", (e) => "failed: " + e.message);
+  await at;
+  const id = h.one("SELECT max(id) AS id FROM m").id;
+  assert.ok(h.one("SELECT 1 AS x FROM md WHERE msg = ? AND kind = 'audio'", id), "the first file's row is in");
+  await h.sweepNow();
+  assert.equal(await h.room.maybeAutoPublish(id, R), null);
+  const p = await h.room.publishMessage(id, "Ada", false, R, undefined);
+  assert.equal(p.status, 409);
+  assert.match(p.error, /still storing its files/);
+  assert.equal(h.one("SELECT draft FROM m WHERE id = ?", id).draft, 1, "still a draft");
+  fail(new Error("R2 down"));
+  assert.match(await first, /^failed/);
+  assert.equal(h.one("SELECT id FROM m WHERE id = ?", id), undefined, "no row");
+  assert.deepEqual(frames.filter((f) => f.startsWith("event: message") || f.startsWith("event: delete")), [], "and no frame");
+  assert.equal(h.room.storing.size, 0);
+  const retry = await h.room.postKeyed("s-1", "Ada", "two files", R, false, { data: mp3, type: "audio/mpeg" }, { data: png, type: "image/png" }, null, true, true);
+  assert.ok(retry && !("repeat" in retry) && !("status" in retry), JSON.stringify(retry));
+  assert.ok(retry.audio && retry.image, "the retry posts, with both files");
+});
+
+test("a post with two files goes live with both, and its draft publishes once the post has answered", async () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer;
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0]).buffer;
+  const h = makeRoom();
+  h.member("Ada");
+  const live = await h.room.postKeyed("o-1", "Ada", "live", R, false, { data: mp3, type: "audio/mpeg" }, { data: png, type: "image/png" });
+  assert.ok(live.audio && live.image);
+  assert.ok(!h.one("SELECT draft FROM m WHERE id = ?", live.id).draft, "live");
+  const d = await h.room.postKeyed("o-2", "Ada", "draft", R, false, { data: mp3, type: "audio/mpeg" }, { data: png, type: "image/png" }, null, true);
+  const p = await h.room.publishMessage(d.id, "Ada", false, R, undefined);
+  assert.equal(p.status, 200, p.error);
+  assert.ok(p.msg.audio && p.msg.image);
+  assert.equal(h.room.storing.size, 0);
+});
+
 // The owner key posts under any name: its client_msg_ids are kept apart
 // from the member's own, so neither is answered with the other's post.
 test("an owner-key post as a member and that member's own post with the same client_msg_id are two posts", async () => {

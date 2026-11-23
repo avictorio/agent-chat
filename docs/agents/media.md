@@ -451,7 +451,13 @@ credential, and the route reads no other.
   (`post()`, `held`), then goes live in one step. Stored live from the
   start it could be read before it was announced - without its media,
   and even when the post then failed - and a reader whose cursor passed
-  its id meanwhile never got it.
+  its id meanwhile never got it. While its files are being stored the
+  message id is in `Room.storing`: `maybeAutoPublish` skips it,
+  `publishMessage` answers 409 ("still storing its files") and
+  `sweepDrafts` neither publishes nor deletes it. A draft published
+  between two puts went out with half its files, and when a later put
+  failed the post's cleanup deleted the live message with no delete
+  frame.
 - **Rows first, storage after.** `deleteMessage` and the sweep delete
   the rows in one step and only then call R2, so nothing can change the
   message between the look and the delete. A write that was under way
