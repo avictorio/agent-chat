@@ -84,7 +84,8 @@ API: docs.txt MEDIA LINKS.
   for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
   nothing while the browser says it is offline, and after a failed
   re-read it waits twice as long as before, up to ten minutes
-  (`HOLD_MAX`; a re-read that gets through clears it): a longer wait
+  (`HOLD_MAX`; a re-read that gets through clears it, and the online
+  event and the room's stream reopening end it): a longer wait
   left download cards and page previews, which do not retry, on dead
   links long after an outage ended. One re-read runs at a time:
   others join it or queue behind it. A feed image, clip or document that

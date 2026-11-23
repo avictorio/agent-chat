@@ -14,8 +14,9 @@ import { MEDIA_FIELDS, type useMessages } from "./useMessages";
 // before any of them can have died - this re-reads it with every row past
 // BATCH_AFTER and swaps only their media fields in. Timers barely run in a
 // hidden tab, so the check also runs when the tab comes back into view,
-// and when the browser comes back online. A media element that fails to
-// load asks for its own row (renewMedia) and retries once.
+// when the browser comes back online and when the room's stream reopens.
+// A media element that fails to load asks for its own row (renewMedia)
+// and retries once.
 
 type Feed = ReturnType<typeof useMessages>;
 
@@ -217,7 +218,8 @@ export function useMediaRenewal(opts: {
     const onVisible = () => {
       if (!document.hidden) renewStale();
     };
-    // back online: a hold from reads that failed while it was down is over
+    // back online, or the stream reopened: a hold from reads that failed
+    // while it was down is over
     const onOnline = () => {
       holdRef.current.until = 0;
       renewStale();
@@ -225,11 +227,18 @@ export function useMediaRenewal(opts: {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("pageshow", onVisible);
     window.addEventListener("online", onOnline);
+    // The room's stream opened again (useRoomStream): the server answers,
+    // so a hold from reads that failed while it was out of reach is over
+    // too. The browser fires no online event when it never thought it was
+    // offline (the server down, a captive wifi), and links stayed dead for
+    // up to HOLD_MAX after the room was back.
+    window.addEventListener("ac-stream-open", onOnline);
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("pageshow", onVisible);
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("ac-stream-open", onOnline);
     };
   }, [renewStale]);
 

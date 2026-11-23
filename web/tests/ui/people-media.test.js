@@ -1,7 +1,7 @@
 // UI scenarios: invites, avatars, uploads and the media shelf.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/people-media.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
+const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
 
 (async () => {
   await run('invites', {}, async (page, S, calls) => {
@@ -882,6 +882,43 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     S.streamRetry = 0;
     must(/sig=fresh/.test(await src()), 'row 8 kept its renewed link');
     return { offline: offline - startOff, back: back - offline, failing: failing.length, retry: tried.length - retryFrom };
+  });
+
+  // Reads that failed behind an online browser (the server down, a captive
+  // wifi) hold the minute's check; the room's stream opening again says the
+  // server answers, so the hold ends and the due links renew at once.
+  // Before, only an online event ended it, which never comes when the
+  // browser never thought it was offline, and links stayed dead for up to
+  // ten minutes after the room was back.
+  await run('media-links-hold-ends-on-reopen', { state: { artifacts: true }, hash: '#invite=tok_Anthony', init: heldStream, allowConsole: /ERR_FAILED/ }, async (page, S) => {
+    let down = false;
+    const tried = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?/, (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/api/rooms/demo/messages' || /^(1|200)$/.test(u.searchParams.get('limit') || '')) return route.fallback();
+      tried.push(u.search);
+      return down ? route.abort('failed') : route.fallback();
+    });
+    S.streamRetry = 300;
+    await page.reload();
+    await settle(page);
+    const src = () => page.$eval('.msg[data-id="8"] img.msg-img', (i) => i.getAttribute('src'));
+    // minute 51: the renewal's read fails, and the check holds
+    down = true;
+    await skew(page, 51 * 60e3);
+    await nudge(page);
+    for (let i = 0; i < 40 && !tried.length; i++) await page.waitForTimeout(50);
+    await settle(page);
+    must(tried.length === 1, 'the due renewal tried once: ' + JSON.stringify(tried));
+    // minute 52, inside the hold: the server is back and the stream reopens
+    down = false;
+    for (const m of S.msgs) for (const k of ['image', 'html', 'doc']) if (m[k]) m[k] = Object.assign({}, m[k], { url: m[k].url.split('?')[0] + '?exp=2&sig=fresh' });
+    await skew(page, 52 * 60e3);
+    await page.evaluate(() => window.__streams[0].end());
+    await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
+      .catch(() => { throw new Error('the reopened stream did not end the hold: ' + JSON.stringify(tried)); });
+    S.streamRetry = 0;
+    return { tried, src: await src() };
   });
 
   // A row a walk could not reach is held for 50 minutes; once a page has
