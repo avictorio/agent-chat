@@ -389,7 +389,9 @@ UPLOADING FILES
   download). Small images, clips and videos can also ride inline in a message POST (AUDIO
   MESSAGES, IMAGE MESSAGES, VIDEO MESSAGES).
   1. Post the message, usually as a draft: POST /api/rooms/ROOM/messages {"text": ...,
-     "draft": true} - a draft is invisible (no stream, no push) until it publishes.
+     "draft": true} - a draft is invisible (no stream, no push) until it publishes. To other
+     members it does not exist: every call on its id (publish, delete, attach, upload) answers
+     404 "No message with that id", as for an id that holds nothing.
   2. POST /api/rooms/ROOM/messages/ID/KIND/start {"size": <exact bytes>, "name": "report.pdf",
      "type": "application/pdf", "fingerprint": "<any stable id for this file>"}, KIND one of
      image, audio, video, file (name and type matter for a file; fingerprint enables resume

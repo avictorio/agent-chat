@@ -9,6 +9,7 @@ import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
 import type { CfgRow, InvRow, MdRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
+import { hiddenDraft } from "./media.js";
 
 /** A message as the API serves it (withKinds): the contract's Message,
  *  plus the members its text @-mentions. */
@@ -259,7 +260,7 @@ export const MessageMethods = {
   /** @param text a caption to publish with (undefined or null keeps the draft's) */
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
     const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
     // An empty shell never goes live: MCP begin_upload can mint a draft with
@@ -306,7 +307,7 @@ export const MessageMethods = {
   /** @param draftOnly delete it only while it is still a draft (409 once it is live) */
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean, draftOnly = false) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
     // A client throwing away an upload it thinks never finished asks for
     // this: the draft may have been published meanwhile (another tab or

@@ -209,6 +209,28 @@ function mp4() {
     r = await req('POST', R + '/messages/' + D2 + '/reactions', { token: TB, json: { reaction: 'constructor' } });
     check('reaction "constructor" (not an alias) -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 80));
 
+    // Every write path answers another member's draft exactly like an id
+    // that holds nothing: a 403 there told any member a draft sat under an
+    // id the listings skip, and when it published or went.
+    const dr3 = await req('POST', R + '/messages', { token: TA, json: { text: 'hidden draft', draft: true } });
+    const D3 = dr3.json.id, NONE = D3 + 100000;
+    const probes = [
+      ['delete', (id) => req('DELETE', R + '/messages/' + id, { token: TB })],
+      ['publish', (id) => req('POST', R + '/messages/' + id + '/publish', { token: TB, json: { text: 'x' } })],
+      ['attach', (id) => req('PUT', R + '/messages/' + id + '/image', { token: TB, headers: { 'Content-Type': 'image/png' }, body: PNG })],
+      ['upload-ticket', (id) => req('POST', R + '/messages/' + id + '/upload-ticket', { token: TB, json: { kind: 'image' } })],
+      ['upload start', (id) => req('POST', R + '/messages/' + id + '/image/start', { token: TB, json: { size: PNG.length } })],
+      ['video stream', (id) => req('PUT', R + '/messages/' + id + '/video/stream', { token: TB, headers: { 'Content-Type': 'video/mp4' }, body: mp4() })],
+    ];
+    for (const [what, call] of probes) {
+      const a = await call(D3), b = await call(NONE);
+      check('another member\'s draft answers like a missing id: ' + what, a.status === 404 && a.status === b.status && a.text === b.text, a.status + ' ' + a.text.slice(0, 80) + ' vs ' + b.status + ' ' + b.text.slice(0, 80));
+    }
+    r = await req('POST', R + '/messages/' + D3 + '/publish', { token: TA, json: {} });
+    check('the probed draft is untouched: its sender publishes it', r.status === 200 && r.json.text === 'hidden draft', r.status + ' ' + r.text.slice(0, 80));
+    r = await req('DELETE', R + '/messages/' + D3, { token: TB });
+    check('another member\'s live message keeps its 403', r.status === 403, r.status + ' ' + r.text.slice(0, 80));
+
     // ?draft_only=1 throws away a draft but never a live message: a client
     // discarding an upload that another device had published got 200 and
     // took the live message, and its media, from everyone.
@@ -2537,7 +2559,7 @@ function mp4() {
     r = await putPart(1, slice(1));
     check('parts land in any order', r.status === 200, r.status);
     r = await putPart(1, slice(1), TP);
-    check('another member cannot send parts -> 403', r.status === 403, r.status);
+    check('another member cannot send parts to a draft -> 404, as for no message', r.status === 404 && r.json && r.json.error === 'No message with that id', r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
     check('finish with a part missing -> 409 naming it', r.status === 409 && JSON.stringify(r.json && r.json.missing) === '[2]', r.status + ' ' + r.text.slice(0, 160));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TU });

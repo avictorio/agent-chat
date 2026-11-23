@@ -314,6 +314,14 @@ credential, and the route reads no other.
 - `POST /messages {draft: true}` creates an invisible draft; uploads
   attach to it, and `/publish` makes it live. Until then its media is
   visible only to its sender and the owner.
+- To anyone else a draft does not exist (`hiddenDraft` in
+  `worker/room/media.ts`): publish, delete, the attach routes, the
+  upload-ticket route, every upload step and the video stream answer
+  another member's draft with the same 404 as an id that holds nothing.
+  They answered 403 "only your own", and since ids are consecutive any
+  member could sweep the gaps in the listing to see when someone was
+  preparing a post. Another member's live message keeps its 403: it is
+  in the listing anyway.
 - An abandoned draft is swept after 24 hours, or, while an upload for it
   is in flight, `UP_SESSION_MS` after that upload's start (`sweepDrafts`,
   run on post and on upload start, throttled per instance). The day also

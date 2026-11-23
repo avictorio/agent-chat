@@ -14,6 +14,15 @@ export type DraftCols = Pick<MsgRow, "sender" | "draft">;
  *  the owner's) alone. */
 export type MediaViewer = { name?: string | null, owner?: boolean };
 
+/** Someone else's draft, asked about without the owner key. Every path
+ *  answers such a row exactly like a missing id (404 "No message with that
+ *  id"): a 403 there told any member that a draft sat under an id the
+ *  listings skip, and when it appeared, published or went. A live message
+ *  is everyone's to see, so it keeps its honest 403. */
+export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner: boolean | undefined) {
+  return !!r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase();
+}
+
 export const MediaMethods = {
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
   // md maps (msg, kind) to an R2 key. An R2 failure fails the request:
@@ -159,8 +168,8 @@ export const MediaMethods = {
 
   /** @param transcript undefined keeps the current one */
   async attachAudio(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, transcript: string | null | undefined, room: string) {
-    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach audio to your own messages" };
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
@@ -170,8 +179,8 @@ export const MediaMethods = {
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
@@ -180,8 +189,8 @@ export const MediaMethods = {
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
-    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<DraftCols>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);

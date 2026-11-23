@@ -39,6 +39,7 @@ import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
 import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
 import { nameFold, stripControlChars } from "../lib/text.js";
+import { hiddenDraft } from "./media.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
@@ -84,7 +85,7 @@ export const UploadMethods = {
     const gone = byOwner ? null : this.inviteStill(token, member);
     if (gone) return gone;
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    if (!r || hiddenDraft(r, member, byOwner)) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
     if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
@@ -254,7 +255,7 @@ export const UploadMethods = {
   // or holds the owner key.
   upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string): { status: 404 | 403, error: string } | { status: 200, msg: Pick<MsgRow, "sender" | "ts" | "draft"> } {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
     return { status: 200, msg: r };
   },
@@ -625,8 +626,8 @@ export const UploadMethods = {
   // and indexes it, streamAbort discards it, each in the message's video
   // turn (withMediaLock).
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
-    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
-    if (!r) return { status: 404, error: "No message with that id" };
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };

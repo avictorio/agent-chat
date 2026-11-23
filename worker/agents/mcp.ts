@@ -569,7 +569,9 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
         return sout;
       }
       const t = await stub.mintUploadTicket(msg.id, kind, from, room, !!owner, null, token);
-      if (refused(t)) throw t.code ? codedError(t.error, t.code) : new Error(t.error);
+      // the draft was made for this ticket alone: refused (the ticket cap,
+      // a revoke), it went nowhere and lingered a day unseen
+      if (refused(t)) { await stub.deleteMessage(msg.id, from, owner); throw t.code ? codedError(t.error, t.code) : new Error(t.error); }
       const out: { room: string, message_id: number, draft: boolean, publish_on_complete: boolean, upload: ReturnType<typeof ticketUpload> & { bigger?: string } } = { room: room, message_id: msg.id, draft: true, publish_on_complete: !!A.publish_on_complete, upload: ticketUpload(origin, room, t) };
       out.upload.bigger = "For a file past max_bytes (up to " + UP_MAX_TEXT + "), a general file, or resumable parts, call begin_upload with size (and name, for a file).";
       return out;
