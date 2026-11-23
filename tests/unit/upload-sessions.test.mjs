@@ -682,3 +682,32 @@ test("a publish_on_complete draft goes live when its last upload finishes, not i
   assert.equal(last.status, 200);
   assert.equal(last.published, true, "the last one publishes it");
 });
+
+// Upload A is replaced by upload B of the same size (another device, the
+// same draft), and A's client sends its finish while B's is running. It
+// used to join B's finish and get B's file as its own; a finish after B's
+// ended was already told apart by size and fingerprint.
+test("a finish that joins one already running is told apart by its fingerprint, as a later one is", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  assert.equal((await h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "a.png", "fp-a", false)).status, 200);
+  await imageSession(h, id, 100); // B: same size, fingerprint fp-100
+  const status = await h.room.uploadStatus(id, "image", "Ada", false);
+  assert.equal(status.fp, "fp-100", "status names the session's fingerprint, so A's client can see the upload is not its own");
+  assert.equal(status.size, 100);
+  const c = st.hold("complete");
+  const fb = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-100" });
+  await c.reached;
+  const fa = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-a" });
+  const again = h.room.uploadFinish(id, "image", "Ada", false, R, { size: 100, fp: "fp-100" });
+  await tick();
+  c.release();
+  const [rb, ra, rr] = await Promise.all([fb, fa, again]);
+  assert.equal(rb.status, 200, "B finishes");
+  assert.equal(ra.status, 409, "A is not told B's file is its own");
+  assert.deepEqual(rr, rb, "B's own repeat joins its finish");
+  const done = await h.room.uploadStatus(id, "image", "Ada", false);
+  assert.equal(done.complete, true);
+  assert.equal(done.fp, "fp-100", "the finished file still names its fingerprint");
+});

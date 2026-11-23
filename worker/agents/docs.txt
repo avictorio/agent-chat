@@ -453,7 +453,8 @@ UPLOADING FILES
      "missing": [part numbers] if not), assembles the file, verifies its size (and its kind),
      and attaches it; the answer carries the attachment and its signed url. An audio upload
      may send {"transcript": ...} with finish. Finish is safe to repeat: sent again while
-     one runs, it gets that finish's own answer (which may be a refusal); after one that
+     one runs, it gets that finish's own answer (which may be a refusal; with a "size" or
+     "fp" that is not that upload's, 409); after one that
      succeeded (its answer lost), 200 with the file the message's KIND now holds - compare
      its bytes and name, or send {"size": <exact bytes>, "fp": "<the fingerprint you gave
      at start>"} with finish (both optional; fp only if you gave one) and a different file
@@ -476,7 +477,9 @@ UPLOADING FILES
   /part?n=N; the parts already sent count), or, when its parts are over {{UP_PART_MAX}}, abort
   it and start again (a start of the same file answers 409 too).
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
-  finish. Calling start again with the same size (and fingerprint) resumes rather than
+  finish. It answers {"uploading", "complete", "size", "type", "name", "fp", "part_size",
+  "parts", "received", "expires_at", "direct"}: fp is the fingerprint the upload's start gave
+  (null if none), so an upload of the same size that replaced yours shows as not yours. Calling start again with the same size (and fingerprint) resumes rather than
   restarting (a 502 there means storage did not list the parts: ask again rather than
   re-send them all; a 409 that the message already has one means the file is in place). Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
   finds your draft with that upload in flight - only a draft that holds nothing else: one

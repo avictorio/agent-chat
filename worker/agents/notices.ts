@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-uploads-media",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file.",
+    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file. Upload status now carries fp, the fingerprint given at its start.",
   },
   {
     id: "2026-11-23-delete-gap-frames",

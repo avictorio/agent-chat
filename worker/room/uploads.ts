@@ -552,12 +552,15 @@ export const UploadMethods = {
     } else msg = this.sql.exec<Pick<MsgRow, "ts">>("SELECT ts FROM m WHERE id = ?", id).toArray()[0];
     const row = this.upSession(id, kind);
     if (!row) return { status: 200, uploading: false, received: [] };
-    if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, received: [] };
+    // fp is the fingerprint the session's start gave: with size it tells
+    // a client its own upload from another of the same size that replaced
+    // it (another device, the same draft).
+    if (!row.upload_id) return { status: 200, uploading: false, complete: true, size: row.size, type: row.type, name: row.name || null, fp: row.fp || null, received: [] };
     const plan = this.upPlan(row);
     let received;
     try { received = Array.from((await this.upReceived(id, kind, row)).keys()).sort((x, y) => x - y); }
     catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && (e as Error).message) || e) + "); ask again" }; }
-    return { status: 200, uploading: true, direct: row.mode === "direct" && !this.upDirectOff(owner), size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
+    return { status: 200, uploading: true, direct: row.mode === "direct" && !this.upDirectOff(owner), size: row.size, type: row.type, name: row.name || null, fp: row.fp || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
   },
 
   /** @param room publishes a publish-on-complete draft when given */
@@ -568,12 +571,31 @@ export const UploadMethods = {
     // after a blip lost the first answer) gets that finish's answer. It
     // used to get 409 "already finishing", and an uploader reading that
     // as a failure gave up on an upload that succeeded.
+    // Only a finish of the same file, though: a client whose upload
+    // another of the same size replaced (a second device, a link opened
+    // for the old session) joined the new one's finish and was told the
+    // other file was its own. It is compared the way a finish after the
+    // fact is (upOtherFile), against the session being finished.
     const k = id + ":" + kind;
     const running = this._finishing.get(k);
-    if (running) return running;
+    if (running) {
+      const row = this.upSession(id, kind);
+      if (row && this.upOtherFile(row, a.msg, opts)) return { status: 409, error: "No upload in progress for that message" };
+      return running;
+    }
     const p = this.withMediaLock(id, kind, (live) => this.upFinishNow(id, kind, who, owner, room, opts, live));
     this._finishing.set(k, p);
     try { return await p; } finally { if (this._finishing.get(k) === p) this._finishing.delete(k); }
+  },
+
+  // Whether a finish names another file than the session in this row: by
+  // its size, the fingerprint its start gave (stored cut to 200
+  // characters), or an upload link's expiry, which is its session's start
+  // plus UP_SESSION_MS. A finish that names none of them takes the row's.
+  upOtherFile(row: UpSession, msg: { ts: number } | null | undefined, opts: UpFinishAsk | null | undefined) {
+    return !!opts && ((opts.size != null && opts.size !== row.size)
+      || (!!opts.fp && !!row.fp && opts.fp.slice(0, 200) !== row.fp)
+      || (opts.expires != null && this.upBegan(row, msg) + UP_SESSION_MS !== opts.expires));
   },
 
   // Whether this upload still owns its message's row: anything written
@@ -616,9 +638,7 @@ export const UploadMethods = {
       // that says which file it means (size, the fingerprint it gave at
       // start, or a link minted for another session) is told it is not
       // this one.
-      if (opts && ((opts.size != null && opts.size !== row.size)
-        || (opts.fp && row.fp && opts.fp.slice(0, 200) !== row.fp)
-        || (opts.expires != null && this.upBegan(row, a.msg) + UP_SESSION_MS !== opts.expires))) return { status: 409, error: "No upload in progress for that message" };
+      if (this.upOtherFile(row, a.msg, opts)) return { status: 409, error: "No upload in progress for that message" };
       const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
       return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
     }

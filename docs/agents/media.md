@@ -177,7 +177,12 @@ way; the routes are in docs.txt UPLOADING FILES.
   restart too. Another engine upload that replaced the caller's and
   finished leaves a row just as engine-made, so the finish takes two
   optional fields, `size` (bytes) and `fp` (the start's fingerprint):
-  either one differing from the row's answers 409. An upload link's
+  either one differing from the row's answers 409 (`upOtherFile`). A
+  finish sent while another runs is held to the same test against the
+  session being finished before it joins it: it used to join any running
+  finish, so a replaced upload of the same size was told the other file
+  was its own. `status` carries the session's `fp` too, so a client can
+  tell its own upload from another of the same size. An upload link's
   finish also compares the link's expiry, which is its session's start
   plus `UP_SESSION_MS` (`upBegan`), so a link opened for a replaced
   upload gets 409 without sending either. Storage answering NoSuchUpload

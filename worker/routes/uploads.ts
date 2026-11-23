@@ -143,7 +143,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     if (request.method !== "GET" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
     const r = await stub.uploadStatus(id, kind, who, owner);
     if (r.status && r.status !== 200) return json({ error: r.error }, r.status);
-    return json({ room: room, id: id, kind: kind, uploading: r.uploading, complete: !!r.complete, direct: !!r.direct, size: r.size || null, type: r.type || null, name: r.name || null, part_size: r.part_size || null, parts: r.parts || null, received: r.received, expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null });
+    return json({ room: room, id: id, kind: kind, uploading: r.uploading, complete: !!r.complete, direct: !!r.direct, size: r.size || null, type: r.type || null, name: r.name || null, fp: r.fp || null, part_size: r.part_size || null, parts: r.parts || null, received: r.received, expires_at: r.expires_at ? new Date(r.expires_at).toISOString() : null });
   }
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   const body = await readBody(request);
