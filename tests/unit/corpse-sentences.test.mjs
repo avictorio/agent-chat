@@ -57,6 +57,16 @@ const CORPUS = [
   // The once-a-segment cap is kept because it is what stops "We like Plan
   // A. We like Plan B. ..." from hiding a sentence behind every letter.
   ["She met John F. Kennedy and Martin L. King. They talked. It rained.", 4],
+  // the same for a second abbreviation before a capital: 3 by grammar
+  ["The U.S. Army came. The U.S. Navy came. The end.", 4],
+  // speech: an opening quote is not part of a title or an initial, and a
+  // stop inside closing quotes runs on into a lowercase tag
+  ["\"Mr. Smith is here,\" she said. He came in.", 2],
+  ["\"J. R. R. Tolkien wrote it,\" she said.", 1],
+  ["\"U.S. troops landed,\" he said. We ran.", 2],
+  ["\"Run!\" she shouted. We ran. It rained.", 3],
+  ["She whispered, \"Well...\" and then nothing. It rained.", 2],
+  ["(It was late.) Then we slept.", 2],
 ];
 
 test("the server and web copies are the same file", () => {

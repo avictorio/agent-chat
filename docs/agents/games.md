@@ -588,9 +588,15 @@ Build notes only; the rules are in each engine module's comment and its
   initials ("J. R. R. Tolkien", and once a segment "George W. Bush"),
   titles ("Dr."), other abbreviations ("U.S.", "etc.") before a
   lowercase letter or digit and once a segment before anything else, and
-  "p." before a lowercase letter or digit. So "Plan A. ... Plan F."
-  counts 6 and "We ran to the U.S. We hid in the U.K. ..." can hide at
-  most one sentence. Change both files together;
+  "p." before a lowercase letter or digit. Speech is read as speech: an
+  opening quote is not part of a title or initial, and a stop inside
+  closing quotes runs on into a lowercase tag ('"Run!" she shouted.').
+  So "Plan A. ... Plan F." counts 6 and "We ran to the U.S. We hid in
+  the U.K. ..." can hide at most one sentence. Known and accepted: run-ons
+  before a lowercase letter (after an abbreviation or an ellipsis) and
+  after a title have no limit, so a writer set on it can still pack
+  sentences in; the 400-character cap bounds that, and the count never
+  refuses ordinary prose for it. Change both files together;
   `tests/unit/corpse-sentences.test.mjs` fails when they differ. The old
   split counted "Dr. Watson ... St. Nobody answered." as 4 and Russian
   as 0.

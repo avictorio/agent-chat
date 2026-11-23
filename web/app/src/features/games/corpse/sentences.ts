@@ -34,13 +34,20 @@
 //    d. A lowercase one-letter word before a lowercase letter or a digit
 //       ("see p. 5").
 //    A piece ending in an ellipsis runs on before a lowercase letter
-//    ("Well... maybe not."). Every other stop ends a sentence. Where a
-//    stop is ambiguous ("Come at 5 p.m. Bring wine.") this counts fewer:
-//    a segment is capped by length too.
+//    ("Well... maybe not."), and so does one that ends inside closing
+//    quotes or brackets ('"Run!" she shouted.' is one sentence). Every
+//    other stop ends a sentence. Where a stop is ambiguous ("Come at 5 p.m.
+//    Bring wine.") this counts fewer: a segment is capped by length too.
+// Opening quotes and brackets are not part of a word: '"Dr. Watson," she
+// said.' opens on a title all the same. A story game is full of speech,
+// and with the quote left on, the title was not seen and the line counted
+// one sentence more.
 
 const STOPS = ".!?…։।॥؟۔።";
 const CJK_STOPS = "。！？";
 const CLOSERS = "\"'”’»)\\]}」』";
+const CLOSED = new RegExp("[" + CLOSERS + "]$", "u");
+const OPENERS = /^["'“‘„«([{¿¡「『]+/u;
 const PIECE = new RegExp("[^]*?(?:[" + STOPS + "]+[" + CLOSERS + "]*(?=\\s|$)|[" + CJK_STOPS + "]+[" + CLOSERS + "]*|$)", "gu");
 
 // Titles before a name: they always run on.
@@ -64,15 +71,15 @@ export function ecSentences(text: string): number {
     if (!runsOn) n++;
     runsOn = false;
     // how the next piece starts, past opening quotes and brackets
-    const next = (pieces[i + 1] ?? "").replace(/^["'“‘„«([{¿¡「『]+/u, "");
+    const next = (pieces[i + 1] ?? "").replace(OPENERS, "");
     const nextCapital = /^\p{Lu}/u.test(next);
     const nextLower = /^[\p{Ll}\p{N}]/u.test(next);
-    if (/(?:\.\.\.|…)$/u.test(t)) {
+    if (/(?:\.\.\.|…)$/u.test(t) || CLOSED.test(t)) {
       runsOn = /^\p{Ll}/u.test(next);
       continue;
     }
     if (!/[^.]\.$/u.test(t)) continue;
-    const words = t.split(/\s+/);
+    const words = t.split(/\s+/).map((w) => w.replace(OPENERS, ""));
     const last = words[words.length - 1] || "";
     const word = last.slice(0, -1).toLowerCase();
     if (INITIAL.test(last)) {
