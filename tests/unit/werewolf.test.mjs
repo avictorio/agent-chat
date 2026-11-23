@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
+import { RESERVED_KEYS, memberNameProblem } from "../../worker/lib/text.ts";
 
 const R = "unit";
 const NINE = ["Ann", "Bob", "Cat", "Dan", "Eve", "Fay", "Gus", "Hal", "Ida"];
@@ -56,6 +57,19 @@ test("a legacy member named __proto__ cannot take a seat, so no role goes missin
   const st = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", c.game.id).one().state);
   assert.deepEqual(Object.keys(st.roles).sort(), names.slice().sort());
   assert.deepEqual(Object.values(c.game.roles_in_play).reduce((a, b) => a + b, 0), 5);
+});
+
+test("a seat refuses exactly the names a new member may not take as reserved", async () => {
+  // games.ts once kept its own copy of the set; one list keeps the two
+  // refusals from drifting apart
+  assert.ok(RESERVED_KEYS.size > 5);
+  for (const k of RESERVED_KEYS) {
+    assert.match(memberNameProblem(k) || "", /reserved/, k);
+    const h = makeRoom();
+    for (const n of ["Ann", k]) h.member(n);
+    const c = await h.room.createGame("Ann", ["Ann", k], { game: "duel" }, R);
+    assert.equal(c.status, 409, k + ": " + JSON.stringify(c));
+  }
 });
 
 /** a 5-seat Werewolf at dawn of day 1: its roles, and one villager already dead */

@@ -19,7 +19,7 @@ export function shellQuote(s: string) {
 }
 
 // Object.prototype's member names, folded (memberNameProblem).
-const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
+export const RESERVED_KEYS = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
 
 // Member names: free text, but never markup or game syntax. A name
 // reaches HTML-built strings, game moves ("Ada:C5", volleys split on
