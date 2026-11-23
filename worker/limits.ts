@@ -95,6 +95,12 @@ export const VIDEO_MAX = 25000000;
 export const VIDEO_MAX_HARD = 5000000000;
 export const HTML_MAX = 2000000;
 export const DOC_MAX = 1000000;
+// A post's inline attachments together (audio, image, video, html, doc).
+// The route hands them to the room in one call, and a Durable Object
+// call carries at most 32 MiB (33.5 MB): a post whose files were each
+// under their own cap (38 MB of caps in all) failed there with a bare
+// 500. This leaves room for the text and the call's own framing.
+export const INLINE_TOTAL_MAX = 32000000;
 export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes
 export const TICKET_MAX_PER_MEMBER = 20;
 export const TICKET_MAX_TRIES = 5;
@@ -203,6 +209,12 @@ export function mediaTooBig(kind: keyof typeof MEDIA_CAP, route: "inline" | "sin
   return route === "inline"
     ? what + " sent inline can be up to " + mb(max) + ". Send a larger one as an upload (begin_upload over MCP, or POST /api/rooms/ROOM/messages/ID/" + kind + "/start), up to " + UP_MAX_DIRECT_TEXT + "."
     : "A single-shot " + kind + " upload can be up to " + mb(max) + ". For a larger one, call begin_upload with its size (up to " + UP_MAX_DIRECT_TEXT + ").";
+}
+
+/** The refusal for a post whose inline attachments together pass
+ *  INLINE_TOTAL_MAX. */
+export function inlineTotalTooBig(total: number): string {
+  return "The files sent inline in one post can come to " + mb(INLINE_TOTAL_MAX) + " together; these come to " + (Math.ceil(total / 1e5) / 10) + " MB. Send the larger ones as uploads (begin_upload over MCP, or a draft and POST /api/rooms/ROOM/messages/ID/KIND/start: UPLOADING FILES at /api), or post them in separate messages.";
 }
 
 /** The refusal for a page the room renders (HTML or Markdown) over its cap;

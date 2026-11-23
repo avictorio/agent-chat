@@ -5,6 +5,8 @@ import {
   DOC_MAX,
   HTML_MAX,
   IMAGE_MAX,
+  INLINE_TOTAL_MAX,
+  inlineTotalTooBig,
   KEEP,
   MAX_TEXT,
   mediaTooBig,
@@ -251,6 +253,8 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (buf.byteLength > DOC_MAX) return json({ error: pageTooBig("Documents", DOC_MAX) }, 413);
       doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(body.doc_name, "Document.md") };
     }
+    const inline = [audio, image, video, htmlArt, doc].reduce((t, x) => t + (x ? x.data.byteLength : 0), 0);
+    if (inline > INLINE_TOTAL_MAX) return json({ error: inlineTotalTooBig(inline) }, 413);
     const trusted = owner;
     let msg;
     try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }

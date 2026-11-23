@@ -121,7 +121,13 @@ API: docs.txt MEDIA LINKS.
 Small media goes in the message request itself. The caps are the
 `*_MAX` constants in `worker/limits.ts` (`IMAGE_MAX`, `AUDIO_MAX`,
 `VIDEO_MAX`, `HTML_MAX`, `DOC_MAX`); anything larger, and every `file`,
-goes through the upload engine. Inline media is refused on drafts. In
+goes through the upload engine. A post's inline files together are
+capped too, at `INLINE_TOTAL_MAX` in `worker/limits.ts` (413 with the
+upload path, REST and MCP): the route hands them to the room in one
+call, a Durable Object call carries at most 32 MiB, and three files
+each under its own cap used to fail there with a bare 500. The web
+composer keeps its own, lower `INLINE_TOTAL_MAX` (`useAttachments.ts`)
+and sends a bigger set through the engine. Inline media is refused on drafts. In
 the web feed, images over `INLINE_IMAGE_MAX` (`features/feed/media.tsx`)
 show as a card instead of an inline `<img>`.
 

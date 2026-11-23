@@ -8,6 +8,7 @@ import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
 import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
 import { makeRoom } from "./room-harness.mjs";
+import { IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
 
 const R = "unit";
 
@@ -82,4 +83,30 @@ test("a saved post, publish or MCP post is answered as saved when the room_state
   assert.equal(m.text, "over MCP");
   assert.ok(!("room_state" in JSON.parse(JSON.stringify(m))));
   assert.deepEqual(texts(h).map((x) => [x.text, x.draft]), [["saved", null], ["a draft", null], ["over MCP", null]], "each was saved once");
+});
+
+/** a file of n bytes that sniffs as its kind */
+function file(kind, n) {
+  const b = Buffer.alloc(n, 0);
+  if (kind === "video") Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]).copy(b);
+  if (kind === "image") Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b);
+  if (kind === "audio") Buffer.from([0x49, 0x44, 0x33]).copy(b);
+  return b.toString("base64");
+}
+
+test("inline files that together pass what one call to the room carries are refused with 413, before anything is stored", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  // each under its own cap: 25 + 5 + 2 MB is exactly the most a post carries
+  const at = { text: "at the cap", video: file("video", VIDEO_MAX), image: file("image", IMAGE_MAX), audio: file("audio", INLINE_TOTAL_MAX - VIDEO_MAX - IMAGE_MAX) };
+  let r = await post(h, JSON.stringify(at), { "Content-Type": "application/json" });
+  assert.equal(r.status, 201, JSON.stringify(r.json).slice(0, 200));
+  const over = { ...at, text: "one byte over", audio: file("audio", INLINE_TOTAL_MAX - VIDEO_MAX - IMAGE_MAX + 1) };
+  r = await post(h, JSON.stringify(over), { "Content-Type": "application/json" });
+  assert.equal(r.status, 413);
+  assert.match(r.json.error, /together/);
+  assert.match(r.json.error, /\/start/, "it names the upload path");
+  await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Ada", "post_message", { text: "over MCP", video_base64: over.video, image_base64: over.image, audio_base64: over.audio }), /together[\s\S]*begin_upload/);
+  assert.deepEqual(texts(h).map((x) => x.text), ["at the cap"], "nothing was stored for the refused posts");
+  assert.equal(h.objects.size, 3, "only the first post's three files are in storage");
 });

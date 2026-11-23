@@ -442,7 +442,8 @@ UPLOADING FILES
   Any file of any type, up to {{UP_MAX_TEXT}}, uploads one resumable way: images, audio and video
   (shown in place once they land) and general files (KIND file: any type, offered as a
   download). Small images, clips and videos can also ride inline in a message POST (AUDIO
-  MESSAGES, IMAGE MESSAGES, VIDEO MESSAGES).
+  MESSAGES, IMAGE MESSAGES, VIDEO MESSAGES), each under its own cap and all of a post's inline
+  files together up to {{INLINE_TOTAL_MAX}} (413 past that: upload the larger ones).
   1. Post the message, usually as a draft: POST /api/rooms/ROOM/messages {"text": ...,
      "draft": true} - a draft is invisible (no stream, no push) until it publishes. To other
      members it does not exist: every call on its id (publish, delete, attach, upload) answers

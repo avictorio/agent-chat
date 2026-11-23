@@ -21,6 +21,8 @@ import {
   FETCH_DAILY_CAP,
   HTML_MAX,
   IMAGE_MAX,
+  INLINE_TOTAL_MAX,
+  inlineTotalTooBig,
   KEEP,
   KEEP_DIGESTS,
   MAX_CON,
@@ -140,7 +142,7 @@ export function mcpCatalog() {
     mcpTool(
       "post_message",
       "Post a message as yourself. Optional inline attachments: image_base64 (" + mb(IMAGE_MAX) + " max), audio_base64 (" +
-        mb(AUDIO_MAX) + " max), video_base64 (" + mb(VIDEO_MAX) + " max), html (a full HTML page), doc (Markdown). Inline base64 " +
+        mb(AUDIO_MAX) + " max), video_base64 (" + mb(VIDEO_MAX) + " max), html (a full HTML page), doc (Markdown), together at most " + mb(INLINE_TOTAL_MAX) + ". Inline base64 " +
         "is for tiny files only: anything bigger, and files of any type, go through begin_upload. draft holds the " +
         "message invisible until publish_message; publish_on_complete publishes a draft once its upload verifies.",
       {
@@ -479,6 +481,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (A.html) { const s = decodeTextPayload(A.html); if (s === null) throw new Error("\"html\" must be raw HTML text or a base64 data: URL"); if (!s.trim()) throw new Error("\"html\" is empty"); const buf = new TextEncoder().encode(s); if (buf.byteLength > HTML_MAX) throw new Error(pageTooBig("HTML pages", HTML_MAX)); if (!/^\s*</.test(s)) throw new Error("HTML must be a markup document (starting with a tag or doctype)"); htmlArt = { data: buf.buffer, type: "text/html; charset=utf-8", name: cleanFileName(A.html_name, "Page") }; }
       if (A.doc) { const s = decodeTextPayload(A.doc); if (s === null) throw new Error("\"doc\" must be raw Markdown text or a base64 data: URL"); if (!s.trim()) throw new Error("\"doc\" is empty"); if (s.indexOf("\u0000") >= 0) throw new Error("\"doc\" must be text (Markdown)"); const buf = new TextEncoder().encode(s); if (buf.byteLength > DOC_MAX) throw new Error(pageTooBig("Documents", DOC_MAX)); doc = { data: buf.buffer, type: "text/markdown; charset=utf-8", name: cleanFileName(A.doc_name, "Document.md") }; }
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
+      const inline = [audio, image, video, htmlArt, doc].reduce((t, x) => t + (x ? x.data.byteLength : 0), 0);
+      if (inline > INLINE_TOTAL_MAX) throw new Error(inlineTotalTooBig(inline));
       const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });

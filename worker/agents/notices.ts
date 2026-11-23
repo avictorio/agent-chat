@@ -5,7 +5,7 @@
 // never grows into release notes. Publishing one is a commit and a deploy,
 // with no credential (AGENTS.md section 4, "Publishing a site notice").
 
-import { MESSAGES_IDS_MAX, MOVE_DIR_MAX } from "../limits.js";
+import { INLINE_TOTAL_MAX, mb, MESSAGES_IDS_MAX, MOVE_DIR_MAX } from "../limits.js";
 
 export type Notice = {
   /** stable, for clients that remember what they dismissed */
@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-posting",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "POST /messages reads a body that starts with { as JSON whatever its Content-Type (a string sent by fetch without a type used to be posted as the raw JSON); any other body still posts as plain text.",
+    text: "POST /messages reads a body that starts with { as JSON whatever its Content-Type (a string sent by fetch without a type used to be posted as the raw JSON); any other body still posts as plain text. A post's inline files together are limited to " + mb(INLINE_TOTAL_MAX) + " (413, where it used to fail with a 500): upload larger ones.",
   },
   {
     id: "2026-11-23-uploads-media",
