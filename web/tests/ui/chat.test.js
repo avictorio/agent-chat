@@ -980,8 +980,18 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
   // onto the new with no sign of the hole.
   for (const [tag, w, h, scheme] of [['', 1280, 860, 'light'], ['-phone', 390, 844, 'dark']]) {
     await run('stream-gap-divider' + tag, { init: heldStream, w, h, scheme, touch: !!tag }, async (page, S, calls) => {
+      // the reconnect delay the stream hands out, read when it opens
+      S.streamRetry = 200;
       await page.reload(); await settle(page);
       const top = Math.max(...(await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id))));
+      // the tab slept and its stream dropped: the gap comes on the reconnect
+      // (a gap on the boot's own stream, before any frame, is ignored:
+      // stream-gap-at-boot)
+      await page.evaluate(() => window.__streams[0].end());
+      await page.waitForFunction(() => window.__streams.length >= 2 && window.__streams[1].open, null, { timeout: 5000 });
+      S.streamRetry = 0;
+      await settle(page);
+      const sid = await page.evaluate(() => window.__streams.length - 1);
       // while the tab slept: row 2 was deleted and many messages came; the
       // room keeps the newest, from 1500 on
       S.msgs = S.msgs.filter((m) => m.id !== 2);
@@ -989,7 +999,7 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       for (let i = 0; i < 6; i++) S.msgs.push({ id: 1500 + i, ts: base + 60e3 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Back on line ' + (i + 1) + '.' });
       const from = calls.length;
       const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through: 1499 }) + '\n\n';
-      await page.evaluate((t) => window.__streams[0].send(t), gap);
+      await page.evaluate(([t, i]) => window.__streams[i].send(t), [gap, sid]);
       await page.waitForSelector('.msg[data-id="1505"]', { state: 'attached', timeout: 5000 }).catch(() => { throw new Error('the gap did not re-read the newest page: ' + JSON.stringify(calls.slice(from))); });
       await page.waitForSelector('.gap-sep', { timeout: 3000 });
       await settle(page);
@@ -1007,7 +1017,7 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       await shot(page, 'stream-gap-divider' + tag + '.png');
       // another long sleep, another gap: still one divider, at the new hole
       for (let i = 0; i < 3; i++) S.msgs.push({ id: 1600 + i, ts: base + 60e3 * (i + 20), from: 'Ada', kind: 'agent', text: 'Later still ' + (i + 1) + '.' });
-      await page.evaluate((t) => window.__streams[0].send(t), gap.replace('"through":1499', '"through":1599'));
+      await page.evaluate(([t, i]) => window.__streams[i].send(t), [gap.replace('"through":1499', '"through":1599'), sid]);
       await page.waitForSelector('.msg[data-id="1602"]', { state: 'attached', timeout: 5000 });
       await settle(page);
       const second = { order: await order(), seps: await seps() };
@@ -1030,6 +1040,80 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     await settle(page);
     const out = { seps: (await page.$$('.gap-sep')).length, empty: !!(await page.$('.chat-empty')), reads: calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages/.test(c)) };
     must(out.seps === 0 && out.empty && out.reads.length === 0, 'the gap is ignored: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // A gap as the first frame of the stream opened right after the boot
+  // read is not a hole: the boot page is the room's newest page. The
+  // server sends one there when over 1,000 messages after the newest live
+  // one were posted and deleted (its forgotten mark sits above the boot's
+  // last_id). Before, every page load drew a false divider and read the
+  // page again. After a message frame, a gap still marks the hole.
+  await run('stream-gap-at-boot', { init: heldStream }, async (page, S, calls) => {
+    await page.reload(); await settle(page);
+    const top = Math.max(...(await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id))));
+    const gap = (through) => 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through }) + '\n\n';
+    const reads = (from) => calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages\?limit=200$/.test(c));
+    const from = calls.length;
+    await page.evaluate((t) => window.__streams[0].send(t), gap(top + 1001));
+    await page.waitForTimeout(600);
+    await settle(page);
+    const boot = { seps: (await page.$$('.gap-sep')).length, reads: reads(from).length };
+    must(boot.seps === 0 && boot.reads === 0, 'a gap right after the boot read is ignored: ' + JSON.stringify(boot));
+    // a message frame, then a gap: the cursor has moved, the hole is real
+    const m = { id: top + 1, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'Fresh after boot.' };
+    S.msgs.push(m);
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + m.id + '\nevent: message\ndata: ' + JSON.stringify(m) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + m.id + '"]', { timeout: 3000 });
+    const from2 = calls.length;
+    await page.evaluate((t) => window.__streams[0].send(t), gap(top + 2001));
+    await page.waitForSelector('.gap-sep', { timeout: 5000 }).catch(() => { throw new Error('a gap after a message frame drew no divider'); });
+    await settle(page);
+    const later = { seps: (await page.$$('.gap-sep')).length, reads: reads(from2).length };
+    must(later.seps === 1 && later.reads === 1, 'a gap after a message frame still marks the hole: ' + JSON.stringify(later));
+    return { boot, later };
+  });
+
+  // A delete frame that lands while a gap's re-read is out: the answer,
+  // built before the delete, still carries the row. Before, the merge put
+  // it back and it stayed until a reload.
+  await run('stream-gap-merge-deleted', { init: heldStream }, async (page, S) => {
+    await page.reload(); await settle(page);
+    const ids = await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id));
+    const top = Math.max(...ids);
+    const victim = ids[ids.length - 2];
+    // a message frame first: the gap below is a real hole (stream-gap-at-boot)
+    const m = { id: top + 1, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'Before the gap.' };
+    S.msgs.push(m);
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + m.id + '\nevent: message\ndata: ' + JSON.stringify(m) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + m.id + '"]', { timeout: 3000 });
+    // the re-read's answer is built when it is asked for (the row still
+    // there), then held back
+    let release; const gate = new Promise((r) => { release = r; });
+    const asked = { n: 0 };
+    await page.route(/\/api\/rooms\/demo\/messages\?limit=200$/, async (route) => {
+      asked.n++;
+      const rows = [...S.msgs].sort((a, b) => a.id - b.id).slice(-200);
+      const body = JSON.stringify({ room: 'demo', messages: rows, last_id: rows[rows.length - 1].id, you: 'Anthony', you_kind: 'human' });
+      await gate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body });
+    });
+    const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through: top + 1001 }) + '\n\n';
+    await page.evaluate((t) => window.__streams[0].send(t), gap);
+    for (let i = 0; i < 100 && !asked.n; i++) await page.waitForTimeout(30);
+    must(asked.n === 1, 'the gap re-reads the newest page');
+    await page.waitForTimeout(200);
+    // the delete frame, while the read is out
+    S.msgs = S.msgs.filter((x) => x.id !== victim);
+    const frame = { type: 'delete', room: 'demo', from: 'Ada', kind: 'agent', targets: [], id: victim };
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + (top + 2002) + '\nevent: delete\ndata: ' + JSON.stringify(frame) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + victim + '"]', { state: 'detached', timeout: 3000 });
+    release();
+    await page.waitForSelector('.gap-sep', { timeout: 5000 });
+    await page.waitForTimeout(300);
+    await settle(page);
+    const out = { back: !!(await page.$('.msg[data-id="' + victim + '"]')), rows: (await page.$$('.msg')).length };
+    must(!out.back, 'the deleted row stays gone after the merge: ' + JSON.stringify(out));
     return out;
   });
 

@@ -138,13 +138,21 @@ docs.txt section that owns its routes, caps and formats.
     row (`removeMsg`): its clip or video is paused and its reading aloud
     stopped first, a reaction bar open on it closes (`closeFor`), and the
     renewal forgets its links; its id stays in the seen set, so a stale
-    copy cannot bring it back. A gap frame, while the feed holds rows,
+    copy cannot bring it back, and its id is kept (`deletedRef`, the
+    newest `DELETED_KEEP`) so no merge of a page read (`mergeAfterGap`,
+    `mergeHistory`, `loadInitial`) puts back a row whose answer was built
+    before the delete. A gap frame, while the feed holds rows,
     reads the newest page again as the boot load does (`BOOT_PAGE`) and
     merges it (`mergeAfterGap`): a held row inside the page's id range
     that the page lacks was deleted meanwhile and leaves, and the feed
     draws one "Some earlier messages were not loaded" divider after the
     newest row the tab held (`gapAfter`; a later gap moves it to the new
-    hole). A failed read still draws it. The web app has no reply or
+    hole). A failed read still draws it. A gap on the first stream
+    after the boot read, before any message or delete frame and with the
+    cursor still the boot's `last_id`, is ignored: the boot page is the
+    fresh newest page, and the server sends one there when more than
+    `KEEP` deletes past the newest live message lifted `msg_forgot`
+    above that `last_id`. The web app has no reply or
     edit on messages, so nothing else aims at a row.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for

@@ -31,6 +31,9 @@ function sameFile(a: MediaRef | undefined, b: MediaRef | undefined): boolean {
   return a.type === b.type && a.bytes === b.bytes && (a.name ?? null) === (b.name ?? null) && fileKey(a) === fileKey(b);
 }
 
+// How many deleted ids the feed remembers (deletedRef).
+const DELETED_KEEP = 5000;
+
 export function useMessages(opts: {
   tabRef: RefObject<string>;
   nameRef: RefObject<string>;
@@ -53,6 +56,14 @@ export function useMessages(opts: {
   // gets a row once, so useMediaRenewal re-reads the rows whose links
   // are getting old.
   const linksAtRef = useRef<Map<number, number>>(new Map());
+
+  // The ids delete frames removed in this page session. A page read sent
+  // before a delete and answered after it still carries the row, and the
+  // merges below took any row they did not hold: the deleted message came
+  // back (a gap's re-read, mostly) and stayed until a reload. Every merge
+  // of a page read skips these. Bounded, oldest first: a delete that old
+  // is far below any page still being read.
+  const deletedRef = useRef<Set<number>>(new Set());
 
   const endSettle = useCallback(() => {
     if (settleRef.current.ro) {
@@ -161,7 +172,8 @@ export function useMessages(opts: {
   // it in): seeds the seen set and splices the rows in id order,
   // keeping the memory cap. No unread or scroll side effects - the
   // caller steers the scroll afterwards.
-  const mergeHistory = useCallback((rows: Message[]) => {
+  const mergeHistory = useCallback((all: Message[]) => {
+    const rows = all.filter((m) => !deletedRef.current.has(m.id));
     if (!rows.length) return;
     const at = Date.now();
     rows.forEach((m) => {
@@ -182,6 +194,9 @@ export function useMessages(opts: {
   // cursor) finds no row to replace and cannot bring it back.
   const removeMsg = useCallback((id: number) => {
     linksAtRef.current.delete(id);
+    const gone = deletedRef.current;
+    gone.add(id);
+    if (gone.size > DELETED_KEEP) gone.delete(gone.values().next().value!);
     setMessages((arr) => {
       const next = arr.filter((m) => m.id !== id);
       return next.length === arr.length ? arr : next;
@@ -200,10 +215,11 @@ export function useMessages(opts: {
   // longer keeps), so it leaves. A row the stream delivered meanwhile is
   // not in `held` and stays. A failed read passes no rows: the hole is
   // still marked.
-  const mergeAfterGap = useCallback((rows: Message[], held: Set<number>) => {
+  const mergeAfterGap = useCallback((page: Message[], held: Set<number>) => {
     if (!held.size) return;
     const at = Date.now();
-    const fresh = new Set(rows.map((m) => m.id));
+    const fresh = new Set(page.map((m) => m.id));
+    const rows = page.filter((m) => !deletedRef.current.has(m.id));
     const lo = rows.length ? Math.min(...fresh) : Infinity;
     const hi = rows.length ? Math.max(...fresh) : -Infinity;
     const gone = new Set<number>();
@@ -231,7 +247,8 @@ export function useMessages(opts: {
 
   // The boot load: seed the seen set, arm the initial settle, and
   // set the stream cursor.
-  const loadInitial = useCallback((sorted: Message[], lastId: number) => {
+  const loadInitial = useCallback((page: Message[], lastId: number) => {
+    const sorted = page.filter((m) => !deletedRef.current.has(m.id));
     const at = Date.now();
     sorted.forEach((m) => {
       seenRef.current.add(m.id);

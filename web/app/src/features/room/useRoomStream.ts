@@ -191,8 +191,18 @@ export function useRoomStream(opts: {
     // end. Before, a tab that slept past the room's kept history joined the
     // old history straight onto the new with no sign of the hole. A feed
     // with no rows has nothing out of date: the gap is ignored.
+    // A gap on the first stream, before any message or delete frame and
+    // with the cursor still where the boot read left it, is not a hole:
+    // the boot page is the room's newest page, read a moment ago. The
+    // server can still send one there, as its forgotten mark can sit above
+    // the boot read's last_id (over 1,000 messages posted and deleted after
+    // the newest live one). Taken as a hole, every page load drew a false
+    // divider and read the page again until somebody posted.
+    let bootLast: number | null = null;
+    let sinceBoot = false;
     let gapRunning = false;
-    const afterGap = async () => {
+    const afterGap = async (first: boolean) => {
+      if (first && !sinceBoot && bootLast !== null && feed.lastRef.current === bootLast) return;
       if (gapRunning || cancelled || deniedRef.current) return;
       const held = new Set(feed.messagesRef.current.map((m) => m.id));
       if (!held.size) return;
@@ -264,6 +274,7 @@ export function useRoomStream(opts: {
             const d = JSON.parse(data) as { room_state?: RoomState };
             if (d.room_state) board.applyState(d.room_state);
           } else if (kind === "delete") {
+            sinceBoot = true;
             // The cursor moves past a delete like past a message: a delete
             // frame has its own delivery number, and a reconnect from below
             // it would replay it.
@@ -271,8 +282,9 @@ export function useRoomStream(opts: {
             const d = JSON.parse(data) as { id?: number };
             if (typeof d.id === "number") dropMessage(d.id);
           } else if (kind === "gap") {
-            void afterGap();
+            void afterGap(!later);
           } else if (kind === "message") {
+            sinceBoot = true;
             const m = JSON.parse(data) as Message;
             feed.addMsg(m);
             // The cursor is the frame's delivery number (its id: line), not
@@ -411,6 +423,7 @@ export function useRoomStream(opts: {
           if (d.room_state) board.applyState(d.room_state);
           const sorted = [...d.messages].sort((a, b) => a.id - b.id);
           feed.loadInitial(sorted, d.last_id);
+          bootLast = d.last_id;
         } catch (e) {
           if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
             deny(e);
