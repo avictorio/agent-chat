@@ -46,17 +46,26 @@ export const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla
 // The longest subscription values a browser makes, with room to spare:
 // endpoints run 200 to 700 characters, p256dh is 87 (65 bytes) and auth 22
 // (16 bytes). With no maximum a member stored ten endpoints of megabytes
-// each, and every post read them all into the room's memory.
+// each, and every post read them all into the room's memory. Subscribe
+// refuses longer ones; a row an older room kept over them stays stored
+// (nothing deletes stored data unasked) but the fan-out and push status
+// never read it.
 export const PUSH_ENDPOINT_MAX = 2048;
 export const PUSH_P256DH_MAX = 96;
 export const PUSH_AUTH_MAX = 64;
 // A subscription whose sends have all failed, at least PUSH_FAIL_MAX times
-// and for at least PUSH_FAIL_MS, is dropped. Before, only a 404 or 410
-// removed one, so a junk registration cost a send on every post forever.
-// Both conditions, so an hour's outage at one push service does not wipe
-// every member's phone registration.
+// and for at least PUSH_FAIL_MS, rests: no send to it for PUSH_REST_MS,
+// then one try, and another rest if that fails too. Before, a junk
+// registration cost a send on every post forever (only a 404 or 410 ends
+// one). It rests rather than being deleted because the failure can be
+// ours - a broken signing key fails every send to every phone - and
+// deleting would then wipe every member's registration for good; a
+// resting one wakes on its first success, or when the browser subscribes
+// again. Both conditions, so an hour's outage at one push service does
+// not even rest anything.
 export const PUSH_FAIL_MAX = 5;
 export const PUSH_FAIL_MS = 86400000;
+export const PUSH_REST_MS = 86400000;
 // A post's fan-out: this many sends at a time (a Worker keeps six
 // connections open at once), each given up after PUSH_SEND_MS. They used
 // to go one after another with no timeout, so one push service that never

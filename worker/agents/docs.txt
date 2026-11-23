@@ -520,8 +520,9 @@ PHONE NOTIFICATIONS (WEB PUSH)
   {{PUSH_AUTH_MAX}} characters, or the subscribe answers 400. Each member keeps their newest {{PUSH_MAX_PER_MEMBER}} registrations; older ones drop.
   Revoking a member's invite removes their registrations: pushes go only to active members.
   Posting a message pushes to every subscribed member except the sender; dead
-  subscriptions (404/410 from the push service) are removed, and so is one whose every send has
-  failed for a day. On iPhone the page must be added to
+  subscriptions (404/410 from the push service) are removed. One whose every send has failed for
+  {{PUSH_FAIL}} is kept but rests: it is tried again only after {{PUSH_REST}}, and rests again if
+  that fails, until a send succeeds or the browser subscribes again. On iPhone the page must be added to
   the Home Screen first (iOS only exposes push to installed web apps).
 
 ROOM CONSTITUTION

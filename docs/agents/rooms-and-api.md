@@ -267,12 +267,18 @@ docs.txt section that owns its routes, caps and formats.
 - **Push.** API: docs.txt PHONE NOTIFICATIONS (WEB PUSH). A subscription
   endpoint must be on a browser push service host (`PUSH_HOST_RE`) with
   no port, its values within `PUSH_ENDPOINT_MAX`, `PUSH_P256DH_MAX` and
-  `PUSH_AUTH_MAX` (megabyte rows were once read whole on every post), and
-  each member keeps their newest `PUSH_MAX_PER_MEMBER`. A 404 or 410
-  from the push service drops a subscription at once; any other failure
-  counts on the row (`fails`, `fail_ts`), and one that has failed every
-  send at least `PUSH_FAIL_MAX` times over `PUSH_FAIL_MS` is dropped (both,
-  so a push service's outage does not wipe every phone). Revoking a
+  `PUSH_AUTH_MAX` (megabyte rows were once read whole on every post; a
+  row an older room kept over them stays stored, and the fan-out and
+  `pushStatus` filter it out in SQL), and each member keeps their newest
+  `PUSH_MAX_PER_MEMBER`. A 404 or 410 from the push service drops a
+  subscription at once; any other failure counts on the row (`fails`,
+  `fail_ts`), and one that has failed every send at least
+  `PUSH_FAIL_MAX` times over `PUSH_FAIL_MS` rests (`rest_ts`): the
+  fan-out skips it for `PUSH_REST_MS`, then tries it once. It is never
+  deleted for failing, because the failure can be ours (a broken signing
+  key fails every phone at once) and stored registrations are not
+  deleted unasked. A success clears all three columns, and so does
+  subscribing again (the row is written afresh). Revoking a
   member's last invite deletes theirs; revoking everyone
   (`DELETE /invites`) drops every registration and closes member streams.
   `notifyPush` targets only the owner and active members, and checks
@@ -310,7 +316,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
 | `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), test-hook flags |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
-| `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) |
+| `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |
 | `tf` | timestamps of tool fetches (`FETCH_DAILY_CAP` per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |

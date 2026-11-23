@@ -111,37 +111,95 @@ test("a fan-out sends several at a time, each with a timeout, and signs once per
   assert.equal(h.signed.filter((a) => a === "https://wns2-unit.notify.windows.com").length, 1, "the next post reuses it");
 });
 
-test("a subscription whose every send fails for a day is dropped; one that comes back is kept", async (t) => {
+test("a subscription whose every send fails for a day rests, is tried once per rest, and is kept", async (t) => {
   const h = pushRoom();
   h.member("Ada"); h.member("Bob");
   const dead = "https://fcm.googleapis.com/fcm/send/junk-1", flaky = "https://fcm.googleapis.com/fcm/send/flaky-1";
   await subscribe(h, "Bob", dead);
   await subscribe(h, "Bob", flaky);
-  let flakyUp = false;
-  const net = pushServices(t, (url) => (url === dead || !flakyUp ? 500 : 201));
+  let flakyUp = false, deadUp = false;
+  const net = pushServices(t, (url) => (url === dead ? (deadUp ? 201 : 500) : flakyUp ? 201 : 500));
   net.release();
   t.mock.method(console, "warn", () => {});
-  const row = (ep) => h.one("SELECT fails, fail_ts FROM push WHERE endpoint = ?", ep);
-  for (let i = 0; i < 5; i++) { await h.room.post("Ada", "post " + i, R, false); await h.settled(); }
+  const row = (ep) => h.one("SELECT fails, fail_ts, rest_ts FROM push WHERE endpoint = ?", ep);
+  const sends = (ep) => net.sent.filter((x) => x.url === ep).length;
+  const post = async (text) => { await h.room.post("Ada", text, R, false); await h.settled(); };
+  for (let i = 0; i < 5; i++) await post("post " + i);
   assert.equal(row(dead).fails, 5, "five failures in a row are counted");
-  assert.ok(row(flaky), "but five failures within the hour (a push service's outage) drop nothing");
+  assert.equal(row(dead).rest_ts, null, "but five within the hour (a push service's outage) rest nothing");
   // the first failure was more than a day ago
   h.db.prepare("UPDATE push SET fail_ts = ?").run(Date.now() - 86400000 - 1000);
   flakyUp = true;
-  await h.room.post("Ada", "a day later", R, false);
-  await h.settled();
-  assert.equal(row(dead), undefined, "the one still failing is gone");
-  assert.deepEqual({ ...row(flaky) }, { fails: null, fail_ts: null }, "the one that answered again starts over");
+  await post("a day later");
+  assert.ok(row(dead), "the one still failing is kept");
+  assert.ok(row(dead).rest_ts > Date.now() + 86400000 - 60000, "and rests for a day");
+  assert.deepEqual({ ...row(flaky) }, { fails: null, fail_ts: null, rest_ts: null }, "the one that answered again starts over");
+  const before = sends(dead);
+  await post("while it rests");
+  await post("still resting");
+  assert.equal(sends(dead), before, "a resting subscription costs no send");
+  assert.equal(sends(flaky), 8);
+  // the rest is over: one try, which fails, and it rests again
+  h.db.prepare("UPDATE push SET rest_ts = ? WHERE endpoint = ?").run(Date.now() - 1, dead);
+  await post("after the rest");
+  assert.equal(sends(dead), before + 1, "tried once when the rest ends");
+  assert.ok(row(dead).rest_ts > Date.now(), "and rests again after failing");
+  // a success wakes it
+  h.db.prepare("UPDATE push SET rest_ts = ? WHERE endpoint = ?").run(Date.now() - 1, dead);
+  deadUp = true;
+  await post("it works again");
+  assert.deepEqual({ ...row(dead) }, { fails: null, fail_ts: null, rest_ts: null }, "a success clears the streak and the rest");
 });
 
-test("the schema step drops the oversized subscriptions older rooms kept", () => {
+test("subscribing again wakes a resting subscription", async (t) => {
   const h = pushRoom();
-  h.member("Bob");
+  h.member("Ada"); h.member("Bob");
+  const ep = "https://fcm.googleapis.com/fcm/send/again-1";
+  await subscribe(h, "Bob", ep);
+  h.db.prepare("UPDATE push SET fails = 9, fail_ts = 1, rest_ts = ?").run(Date.now() + 86400000);
+  await subscribe(h, "Bob", ep);
+  assert.deepEqual({ ...h.one("SELECT fails, fail_ts, rest_ts FROM push WHERE endpoint = ?", ep) }, { fails: null, fail_ts: null, rest_ts: null });
+  const net = pushServices(t);
+  net.release();
+  await h.room.post("Ada", "welcome back", R, false);
+  await h.settled();
+  assert.equal(net.sent.filter((x) => x.url === ep).length, 1);
+});
+
+test("a success clears a failure another fan-out recorded after this one read its targets", async (t) => {
+  const h = pushRoom();
+  h.member("Ada"); h.member("Bob");
+  const ep = "https://fcm.googleapis.com/fcm/send/race-1";
+  await subscribe(h, "Bob", ep);
+  const net = pushServices(t);
+  await h.room.post("Ada", "first", R, false);
+  await net.waitFor(1);
+  // meanwhile a failure lands on the row (its targets said fails: null)
+  h.db.prepare("UPDATE push SET fails = 3, fail_ts = 1 WHERE endpoint = ?").run(ep);
+  net.release();
+  await h.settled();
+  assert.deepEqual({ ...h.one("SELECT fails, fail_ts, rest_ts FROM push WHERE endpoint = ?", ep) }, { fails: null, fail_ts: null, rest_ts: null });
+});
+
+test("an oversized subscription an older room kept stays stored and is never sent to or read", async (t) => {
+  const h = pushRoom();
+  h.member("Ada"); h.member("Bob");
   const ins = h.db.prepare("INSERT INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES ('bob', ?, ?, ?, 1, 'all')");
-  ins.run("https://fcm.googleapis.com/fcm/send/fine", "p".repeat(87), "a".repeat(22));
-  ins.run("https://fcm.googleapis.com/fcm/send/" + "A".repeat(2_000_000), "p".repeat(87), "a".repeat(22));
-  ins.run("https://fcm.googleapis.com/fcm/send/big-auth", "p".repeat(87), "a".repeat(300_000));
+  const k = await subKeys();
+  const fine = "https://fcm.googleapis.com/fcm/send/fine";
+  const big = "https://fcm.googleapis.com/fcm/send/" + "A".repeat(2_000_000);
+  ins.run(fine, k.p256dh, k.auth);
+  ins.run(big, k.p256dh, k.auth);
+  ins.run("https://fcm.googleapis.com/fcm/send/big-auth", k.p256dh, "a".repeat(300_000));
+  ins.run("https://fcm.googleapis.com/fcm/send/big-key", "p".repeat(97), k.auth);
   h.db.prepare("UPDATE cfg SET v = '3' WHERE k = 'schema_version'").run();
   h.room.ensureSchema();
-  assert.deepEqual(h.all("SELECT endpoint FROM push").map((r) => r.endpoint), ["https://fcm.googleapis.com/fcm/send/fine"]);
+  assert.equal(h.one("SELECT COUNT(*) AS n FROM push").n, 4, "the schema step deletes nothing");
+  const net = pushServices(t);
+  net.release();
+  await h.room.post("Ada", "hello", R, false);
+  await h.settled();
+  assert.deepEqual(net.sent.map((x) => x.url), [fine], "only the one within bounds is sent to");
+  assert.deepEqual(h.room.pushStatus("Bob", fine), { count: 1, registered: true, mode: "all" });
+  assert.equal(h.room.pushStatus("Bob", big).registered, false, "push status does not read it either");
 });

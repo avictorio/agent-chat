@@ -2,7 +2,7 @@
 
 import { b64urlDecode, b64urlEncode, concatBytes } from "../lib/crypto.js";
 import { sendWebPush, vapidSubject } from "../platform/webpush.js";
-import { PUSH_FAIL_MAX, PUSH_FAIL_MS, PUSH_MAX_PER_MEMBER, PUSH_PARALLEL } from "../limits.js";
+import { PUSH_AUTH_MAX, PUSH_ENDPOINT_MAX, PUSH_FAIL_MAX, PUSH_FAIL_MS, PUSH_MAX_PER_MEMBER, PUSH_P256DH_MAX, PUSH_PARALLEL, PUSH_REST_MS } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 import type { ApiMessage } from "./messages.js";
@@ -12,6 +12,13 @@ import { warn } from "../lib/log.js";
 /** The site's VAPID keypair (the meta row "vapid" on the __vapid object):
  *  the private key as a JWK and the public key in base64url. */
 export type VapidRecord = { jwk: JsonWebKey, pub: string };
+
+// The rows the fan-out and push status may read, as SQL: those within the
+// bounds subscribe holds values to. An older room can keep a megabyte row,
+// which every post used to read whole; it stays stored, never read.
+// Takes PUSH_BOUNDS, in that order.
+const PUSH_SANE = "length(endpoint) <= ? AND length(p256dh) <= ? AND length(auth) <= ?";
+const PUSH_BOUNDS = [PUSH_ENDPOINT_MAX, PUSH_P256DH_MAX, PUSH_AUTH_MAX];
 
 export const PushMethods = {
   // ---- Web Push: VAPID identity (only ever used on the __vapid instance) ----
@@ -43,6 +50,8 @@ export const PushMethods = {
   // registration is a standing credential for the room's text, so it is
   // written only for an invite that is active as it is written (see
   // inviteStill, room/members.ts). The owner key registers under "".
+  // The INSERT OR REPLACE writes a fresh row, so subscribing again also
+  // wakes a resting registration (fails, fail_ts and rest_ts go NULL).
   /** @param mode "mentions" or "all" */
   pushSubscribe(token: string | null | undefined, owner: boolean, sub: Pick<PushRow, "endpoint" | "p256dh" | "auth">, mode: string) {
     let who = "";
@@ -64,7 +73,7 @@ export const PushMethods = {
     return { status: 200 };
   },
   pushStatus(member: string, endpoint: string) {
-    const rows = this.sql.exec<Pick<PushRow, "endpoint" | "mode">>("SELECT endpoint, mode FROM push WHERE member = ?", String(member || "").toLowerCase()).toArray();
+    const rows = this.sql.exec<Pick<PushRow, "endpoint" | "mode">>("SELECT endpoint, mode FROM push WHERE member = ? AND " + PUSH_SANE, String(member || "").toLowerCase(), ...PUSH_BOUNDS).toArray();
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   },
@@ -78,8 +87,8 @@ export const PushMethods = {
     // keeps any that slipped through (older rows) from leaking text.
     const active = new Set(this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
     const allowed = (m: string) => m === "" || active.has(m);
-    // Web push (browser subscriptions).
-    const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode" | "fails">>("SELECT member, endpoint, p256dh, auth, mode, fails FROM push WHERE member != ?", sender).toArray();
+    // Web push (browser subscriptions), but none resting.
+    const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">>("SELECT member, endpoint, p256dh, auth, mode FROM push WHERE member != ? AND " + PUSH_SANE + " AND (rest_ts IS NULL OR rest_ts <= ?)", sender, ...PUSH_BOUNDS, Date.now()).toArray();
     const targets = rows.filter((r) => allowed(r.member) && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     // The targets are fixed here, but the sends take a while: each is
     // checked again just before it leaves. A member removed meanwhile has
@@ -102,7 +111,9 @@ export const PushMethods = {
           if (status === null) continue;
           if (status === 404 || status === 410) { this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint); continue; }
           if (status < 300) {
-            if (r.fails) this.sql.exec("UPDATE push SET fails = NULL, fail_ts = NULL WHERE endpoint = ? AND member = ?", r.endpoint, r.member);
+            // Asked of the row, not of the targets read at the start: a
+            // failure another fan-out recorded meanwhile was left standing.
+            this.sql.exec("UPDATE push SET fails = NULL, fail_ts = NULL, rest_ts = NULL WHERE endpoint = ? AND member = ? AND (fails IS NOT NULL OR rest_ts IS NOT NULL)", r.endpoint, r.member);
             continue;
           }
           warn("push.send", "HTTP " + status, { room });
@@ -118,12 +129,14 @@ export const PushMethods = {
 
   // A send that failed (an error, a timeout, any answer but 2xx, 404 or
   // 410). The streak is counted on the row, and a row that has failed
-  // every send for PUSH_FAIL_MS and at least PUSH_FAIL_MAX times is
-  // dropped: a junk or long-dead registration, not an outage.
+  // every send for PUSH_FAIL_MS and at least PUSH_FAIL_MAX times rests for
+  // PUSH_REST_MS: one try per rest, nothing between. It used to be
+  // deleted, and a failure on our side (a broken signing key) would have
+  // wiped every member's registration (limits.ts says more).
   pushFailed(r: Pick<PushRow, "member" | "endpoint">) {
     const now = Date.now();
     this.sql.exec("UPDATE push SET fails = COALESCE(fails, 0) + 1, fail_ts = COALESCE(fail_ts, ?) WHERE endpoint = ? AND member = ?", now, r.endpoint, r.member);
-    this.sql.exec("DELETE FROM push WHERE endpoint = ? AND fails >= ? AND fail_ts <= ?", r.endpoint, PUSH_FAIL_MAX, now - PUSH_FAIL_MS);
+    this.sql.exec("UPDATE push SET rest_ts = ? WHERE endpoint = ? AND member = ? AND fails >= ? AND fail_ts <= ?", now + PUSH_REST_MS, r.endpoint, r.member, PUSH_FAIL_MAX, now - PUSH_FAIL_MS);
   },
 
   notifyMembers(name: string | null | undefined) {
