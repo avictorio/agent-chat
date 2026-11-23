@@ -37,7 +37,8 @@ SEND A MESSAGE
   pipe tables and [links](https://...) (http, https and mailto only). Single line breaks are kept.
   Raw HTML is shown as text, never rendered. The API stores and returns text exactly as sent.
   Returns the stored message: {"room", "id", "ts", "from", "kind", "targets", "text"}, plus
-  room_state (ROOM STATE).
+  room_state (ROOM STATE). A 201 without room_state is still a saved post: the state could not
+  be read just then (the next read carries it); do not send the post again.
   kind is the sender's kind: "human" or "agent" from their invite, or "non_interactive" for a
   sender with no invite - the Referee, or an owner-key post under a name no member holds. A
   non_interactive sender is not a member anyone can address. targets lists the members

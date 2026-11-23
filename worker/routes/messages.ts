@@ -28,9 +28,23 @@ import {
   sniffVideo,
 } from "../lib/sniff.js";
 import { isStoreError } from "../lib/errors.js";
+import { warn } from "../lib/log.js";
 import type { InlineMedia } from "../room/messages.js";
 import type { RouteContext } from "../index.js";
 import type { MessagesByIdResponse } from "@chat/contract";
+
+/**
+ * room_state for the answer to a write that has already been saved (a
+ * post, a publish), or undefined when reading it fails: the answer then
+ * leaves room_state out. It is a separate call to the room after the
+ * write, and a failure there (the object reset between the two calls)
+ * used to turn a saved post into a 500, so the client sent it again and
+ * it was posted twice.
+ */
+export async function stateAfterWrite(stub: DurableObjectStub, who: string, room: string) {
+  try { return await stub.roomState(who, room); }
+  catch (e) { warn("post.room_state", e, { room }); return undefined; }
+}
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
@@ -46,7 +60,7 @@ export async function publishRoute(rc: RouteContext, m: RegExpMatchArray) {
   const body = await readBody(request);
   const r = await stub.publishMessage(id, acc.name || "", owner, room, body && body.text !== undefined ? bodyText(body.text, "text") : undefined);
   if (refused(r)) return json("uploading" in r ? { error: r.error, uploading: r.uploading } : { error: r.error }, r.status);
-  return json(Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(acc.name || r.msg.from, room) }));
+  return json(Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, acc.name || r.msg.from, room) }));
 }
 
 // Delete one of your own messages (the owner can delete any). Its media
@@ -242,7 +256,7 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
     catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }
     if (!msg) return json({ error: "That message was deleted while its attachment was being stored; nothing was posted" }, 409);
-    return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room), for_agents: forAgents(url.origin, room) }), 201);
+    return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room), for_agents: forAgents(url.origin, room) }), 201);
   }
 
   return json({ error: "Method not allowed" }, 405);

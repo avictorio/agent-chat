@@ -4,7 +4,8 @@
 // checked against what the room really stored.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { messagesRoute } from "../../worker/routes/messages.ts";
+import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
+import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
 import { makeRoom } from "./room-harness.mjs";
 
@@ -12,8 +13,8 @@ const R = "unit";
 
 /** POST /api/rooms/unit/messages as Ada, through the route; a BadRequest
  *  is answered as the Worker's fetch answers it (index.ts) */
-async function post(h, body, headers = {}) {
-  const env = { ROOM: { idFromName: (n) => n, get: () => h.room } };
+async function post(h, body, headers = {}, stub = h.room) {
+  const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
   const url = new URL("http://localhost/api/rooms/" + R + "/messages");
   const request = new Request(url, { method: "POST", body, headers: { "X-Invite-Token": "tok-Ada", ...headers } });
   let res;
@@ -55,4 +56,30 @@ test("plain text and form bodies still post their text", async () => {
   fd.set("text", "from a multipart form");
   assert.equal((await post(h, fd)).status, 201);
   assert.deepEqual(texts(h).map((x) => x.text), ["just words", "from a form", "from a multipart form"]);
+});
+
+/** the room as its stub, except that room_state fails as an RPC to an
+ *  object that reset between two calls does */
+function stateFails(h) {
+  return new Proxy(h.room, { get: (t, k) => (k === "roomState" ? async () => { throw new Error("Durable Object reset because its code was updated."); } : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
+}
+
+test("a saved post, publish or MCP post is answered as saved when the room_state read after it fails", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const stub = stateFails(h);
+  let r = await post(h, JSON.stringify({ text: "saved" }), { "Content-Type": "application/json" }, stub);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.equal(r.json.text, "saved");
+  assert.ok(!("room_state" in r.json), "room_state is left out, not an error");
+  r = await post(h, JSON.stringify({ text: "a draft", draft: true }), { "Content-Type": "application/json" }, stub);
+  const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
+  const url = new URL("http://localhost/api/rooms/" + R + "/messages/" + r.json.id + "/publish");
+  const res = await publishRoute({ request: new Request(url, { method: "POST" }), env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, /^\/api\/rooms\/([^/]+)\/messages\/(\d+)\/publish$/.exec(url.pathname));
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).id, r.json.id);
+  const m = await mcpCallTool({}, stub, R, "http://localhost", false, { kind: "agent" }, "Ada", "post_message", { text: "over MCP" });
+  assert.equal(m.text, "over MCP");
+  assert.ok(!("room_state" in JSON.parse(JSON.stringify(m))));
+  assert.deepEqual(texts(h).map((x) => [x.text, x.draft]), [["saved", null], ["a draft", null], ["over MCP", null]], "each was saved once");
 });

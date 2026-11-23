@@ -63,6 +63,7 @@ import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { GAME_ENGINES, moveFields } from "../games/engine.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
 import { memberReply } from "../routes/members.js";
+import { stateAfterWrite } from "../routes/messages.js";
 import type { RoomMember } from "../room/members.js";
 import type { InlineMedia } from "../room/messages.js";
 
@@ -480,10 +481,10 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
       const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
-      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stub.roomState(from, room) });
+      return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }
-    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stub.roomState(from, room) }); }
+    case "publish_message": { needFrom(from); const r = await stub.publishMessage(bodyNumber(A.id, "id", true), from, owner, room, A.text !== undefined ? bodyText(A.text, "text") : undefined); if (refused(r)) throw new Error(r.error); return Object.assign({ room: room }, r.msg, { room_state: await stateAfterWrite(stub, from, room) }); }
     case "react": {
       needFrom(from);
       const reaction = A.reaction === null || A.reaction === undefined ? null : normReaction(A.reaction);
