@@ -61,8 +61,9 @@ export { Room } from "./room/Room.js";
 /** What every route handler gets: the request and the bindings, the parsed
  *  URL and its path, whether the owner key came with it, and the invite
  *  token from a header (X-Invite-Token or Authorization: Bearer; on the MCP
- *  route also ?invite=). */
-export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string };
+ *  route also ?invite=), and the request's ctx, whose waitUntil carries work
+ *  that must finish even if the client goes away. */
+export type RouteContext = { request: Request, env: Env, url: URL, path: string, owner: boolean, invite: string, ctx: ExecutionContext };
 
 /** ?pretty=1: the JSON answer indented, for a person reading it raw. */
 async function prettyIfAsked(request: Request, res: Response): Promise<Response> {
@@ -133,7 +134,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
     // POST /api/rooms/ROOM/mcp still reads it, for MCP clients configured
     // with a URL alone, and a header wins there too.
     const invite = headerToken(request) || (MCP_PATH.test(path) ? queryToken(url) : "");
-    const rc: RouteContext = { request, env, url, path, owner, invite };
+    const rc: RouteContext = { request, env, url, path, owner, invite, ctx };
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     {

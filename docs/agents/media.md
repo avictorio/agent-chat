@@ -184,7 +184,13 @@ way; the routes are in docs.txt UPLOADING FILES.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
-  the edge's 100 MB request cap.
+  the edge's 100 MB request cap. From its reservation (`streamBegin`) to
+  its answer the stream's work is also handed to `ctx.waitUntil`
+  (`RouteContext.ctx`): Cloudflare may cancel a request's work when its
+  client disconnects, awaits included, and a phone that dropped mid-body
+  left its parts in storage and its row holding the upload id, while one
+  that dropped after the last byte left the video unindexed and a
+  `publish_on_complete` draft unposted.
 - **The web composer** (`features/composer/uploads.ts`) sends small media
   inline and everything else through the engine, with XMLHttpRequest for
   byte progress (percent, size, speed, time left), per-part retries with

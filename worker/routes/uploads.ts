@@ -18,6 +18,8 @@ import {
   VIDEO_STREAM_TOO_BIG,
 } from "../limits.js";
 import { mediaSigParams } from "../lib/media.js";
+import { isGoneError } from "../lib/errors.js";
+import { warn } from "../lib/log.js";
 import type { RouteContext } from "../index.js";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
@@ -289,7 +291,7 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
 // request. The Worker assembles
 // R2 multipart parts as the bytes arrive; nothing holds the whole file.
 export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
-  const { request, env, url, owner, invite } = rc;
+  const { request, env, owner, invite, ctx } = rc;
   const room = decodeURIComponent(m[1]).toLowerCase();
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
@@ -299,11 +301,28 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!acc.ok) return deny(acc);
   if (!env.MEDIA) return json({ error: "The R2 binding (MEDIA) is not configured" }, 501);
   if (!request.body) return json({ error: "Missing upload body" }, 400);
+  // From the reservation on, the work runs under waitUntil as well as
+  // being awaited for the answer. Cloudflare may cancel a request's work
+  // when its client disconnects, awaits and all: a phone dropping mid-body
+  // then skipped the cleanup, leaving the parts in storage and the row
+  // holding its upload id (which kept the draft for days), and one
+  // dropping after its last byte skipped the finish, so the video was
+  // never indexed and a publish_on_complete draft never posted.
+  const work = videoStreamIngest(rc, stub, room, id, acc.name || "", request.body);
+  ctx.waitUntil(work.catch((e) => { if (!isGoneError(e)) warn("upload.stream", e, { room, id }); }));
+  return await work;
+}
+
+/** videoStreamRoute's part from the reservation to the answer: take the
+ *  body into storage, then finish (or clean up) in the Room. */
+async function videoStreamIngest(rc: RouteContext, stub: DurableObjectStub, room: string, id: number, member: string, body: ReadableStream<Uint8Array>) {
+  const { request, env, url, owner, invite } = rc;
+  const media = env.MEDIA as R2Bucket;
   const declared = +(request.headers.get("Content-Length") || 0) || VIDEO_MAX_HARD;
-  const begun = await stub.streamBegin(id, acc.name || "", request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
+  const begun = await stub.streamBegin(id, member, request.headers.get("Content-Type") || "video/mp4", declared, owner, room);
   if (refused(begun)) return json({ error: begun.error }, begun.status);
   const key = begun.key, uploadId = begun.uploadId;
-  const up = env.MEDIA.resumeMultipartUpload(key, uploadId);
+  const up = media.resumeMultipartUpload(key, uploadId);
   const fail = async (status: number, error: string) => {
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
     // streamAbort drops the row only while this upload still owns it
@@ -323,7 +342,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
     buflen -= amount;
     return out;
   };
-  const reader = request.body.getReader();
+  const reader = body.getReader();
   try {
     for (;;) {
       const chunk = await reader.read();
@@ -345,7 +364,7 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   // The Room completes the upload, only while it still owns the
   // message's row and only while its sender is still in the room (the
   // stream can take minutes), then checks and indexes it (streamFinish).
-  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room, owner ? null : { token: invite, member: acc.name || "" });
+  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room, owner ? null : { token: invite, member: member });
   if (refused(doneRes)) {
     // replaced meanwhile: this upload is nobody's now
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
