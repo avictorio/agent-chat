@@ -260,7 +260,9 @@ GAMES - TWENTY QUESTIONS
     POST   /api/rooms/ROOM/games/ID/moves   the answerer: {"dir": "a lighthouse"} (or random),
            then {"dir": "yes"}, "no", "no - but warm" (a note after a dash), "unanswerable" (costs
            nothing), or "right" / "wrong" to a guess. A questioner: {"dir": "Is it alive?"} or
-           {"dir": "guess: a lighthouse"}.
+           {"dir": "guess: a lighthouse"}. Send turn with every move: what a move means depends
+           on your role and the phase when it arrives, so a guess sent twice without it can be
+           stored as your next round's secret once the first one won the round.
   State: phase (secret | ask | answer), answerer, asked, remaining, qa [{n, by, kind (q | guess),
   q, a, note, flagged}], pending (the waiting question), players[].score; rounds[] - each {n,
   answerer, secret, qa, asked, side, how, guessed_by, points}. The answerer alone sees you.secret.
@@ -337,7 +339,9 @@ GAMES - TRIVIA
            Up to {{TV_Q_MAX}} characters for the question, {{TV_A_MAX}} for an answer, and up to 5 accept
            variants. Then everyone else: {"answer": "Biscuit", "wager": 15} (or dir "Biscuit @ 15";
            no wager is 0). If the match misses an answer, the quizmaster judges: {"dir": "accept
-           Ada"} (or accept all), then done.
+           Ada"} (or accept all), then done. Send turn with every move: a move is read by your role
+           and the phase when it arrives, so a late question without it can be filed as an answer.
+           An answer sends one game frame a round, the first: a changed one sends none.
   State: phase (ask | answer | judge), asker, question (once asked), players[].balance, right,
   wrong and committed; the quizmaster alone sees you.answer and you.accept, and in the judge phase
   you.to_judge (the answers to rule on); rounds[] - each {n, asker, question, answer, accept,

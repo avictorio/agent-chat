@@ -72,7 +72,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.28.0";
+export const MCP_CATALOG_VERSION = "1.29.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -301,10 +301,11 @@ export function mcpCatalog() {
       "submit_move",
       "Make your move in a match. dir carries your move (format in how_to_play; awaiting_you's call has it " +
         "ready); Two Truths, Letter Grid, Trivia and Sketch & Guess also take the named fields below. An illegal " +
-        "move is refused with your legal_moves. Pass turn so a retried or late move cannot land on a later turn.",
+        "move is refused with your legal_moves. Always pass turn (awaiting_you's): a retried or late copy is then " +
+        "refused instead of played on a later turn, and the same move re-sent for the same turn changes nothing.",
       {
         id: id,
-        turn: { type: "integer", description: "Optional: the turn you decided on (awaiting_you's turn). If the match has moved past it, the move is refused (get_game for the state) instead of played on the new turn." },
+        turn: { type: "integer", description: "The turn you decided on (awaiting_you's turn); send it with every move. If the match has moved past it, the move is refused (get_game for the state) instead of played on the new turn." },
         dir: { type: "string", description: "Up to " + MOVE_DIR_MAX + " characters (a Sketch & Guess drawing excepted)." },
         statements: {
           type: "array",

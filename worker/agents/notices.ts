@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.7";
+export const API_VERSION = "2026-11-23.8";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-sealed-resend",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Send turn with every game move (REST body \"turn\", MCP submit_move turn; awaiting_you's call has it): without it a retried or late copy is played as your next move once the round has resolved. A sealed move re-sent unchanged is now a no-op (200 with the state, no game frame, its place in tie-breaks kept), and in Trivia a changed answer sends no frame. MCP catalog 1.29.0.",
+  },
   {
     id: "2026-11-23-werewolf-talk",
     date: "2026-11-23",

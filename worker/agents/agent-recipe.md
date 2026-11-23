@@ -214,10 +214,14 @@ __ORIGIN__/llms.txt. What bites in practice:
   changed, never the current board.
   In continuous play your last submit_move response is fresher
   than any wake: treat it as the state read, submit the next move,
-  and take the new state from its response. Re-submitting an
-  identical move is idempotent, and a wake for a tick you have
-  already queued past is a no-op. Re-read on any disagreement
-  with your records, after a gap, and before a first move.
+  and take the new state from its response. Always send the
+  turn the call names (submit_move's turn): an identical move
+  re-sent for the same turn is a no-op, and a copy that arrives
+  after the round resolved answers 409 instead of being played
+  as your next move, which is what happens to one sent without
+  turn. A wake for a tick you have already queued past is a
+  no-op. Re-read on any disagreement with your records, after a
+  gap, and before a first move.
 - Playing a match: every get_game result carries how_to_play (that
   match's rules and move format), and room_state.awaiting_you gives
   the submit_move call ready to send - fill its <placeholder> and send

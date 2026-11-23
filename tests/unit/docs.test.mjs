@@ -112,6 +112,21 @@ test("the Duel's texts say an unthrown round 1 calls it off", () => {
   assert.match(section.replace(/\s+/g, " "), /nobody threw in ends the duel where it stands .*round 1 it calls the duel off/);
 });
 
+test("the texts say to send turn with every move, and no longer promise an identical re-send is idempotent", () => {
+  // the recipe called an identical re-send idempotent; one sent without
+  // turn after the round resolved became the sender's next round's move
+  const r = recipe().replace(/\s+/g, " ");
+  assert.doesNotMatch(r, /identical move is idempotent/);
+  assert.match(r, /Always send the turn the call names/);
+  const api = docs("https://example.test").replace(/\s+/g, " ");
+  assert.match(api, /Always send turn/);
+  assert.match(api, /sent again unchanged is a no-op/);
+  const games = gamesDocs("https://example.test");
+  for (const [from, to] of [["GAMES - TWENTY QUESTIONS", "GAMES - WEREWOLF"], ["GAMES - TRIVIA", "GAMES - SKETCH"]]) {
+    assert.match(games.slice(games.indexOf(from), games.indexOf(to)).replace(/\s+/g, " "), /Send turn with every move/, from);
+  }
+});
+
 test("every placeholder in agent-recipe.md has a value, and every value is used", () => {
   const usedR = new Set([...RECIPE.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
   const have = Object.keys(recipeValues());

@@ -5,6 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
+import { gameEngine } from "../../worker/games/engine.ts";
 
 const R = "unit";
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -159,4 +160,28 @@ test("Werewolf: a day vote sent again sends no frame", async () => {
   await move(voter, "vote " + wolves[0]);
   await move(voter, "vote " + wolves[0]);
   assert.equal(frames.length, n + 1);
+});
+
+test("a copy that names its turn is refused once the round moved on, instead of becoming the next round's move", async () => {
+  // a duel: Ann's lost reply is re-sent after Bob's throw resolved round 1
+  const d = await running("duel", ["Ann", "Bob"]);
+  await d.h.room.gameMove(d.id, "Ann", "rock", R, null, false, 1);
+  await d.move("Bob", "paper");
+  const late = await d.h.room.gameMove(d.id, "Ann", "rock", R, null, false, 1);
+  assert.equal(late.status, 409);
+  assert.equal(late.turn, 2);
+  assert.equal(d.stored().pending.Ann, undefined, "nothing queued for round 2");
+  // Twenty Questions: a winning guess tapped twice; the guesser answers next
+  const t = await running("twenty", ["Ann", "Bob"]);
+  const answerer = t.stored().answerer;
+  const guesser = answerer === "Ann" ? "Bob" : "Ann";
+  await t.move(answerer, "a lighthouse");
+  // the turn awaiting_you hands the guesser
+  const eng = gameEngine(t.stored());
+  const now = eng.turnOf(eng.stateItem({ id: t.id, status: "running" }, t.stored()));
+  assert.equal((await t.h.room.gameMove(t.id, guesser, "guess: a lighthouse", R, null, false, now)).status, 200);
+  assert.equal(t.stored().answerer, guesser, "the right guess ended the round");
+  const again = await t.h.room.gameMove(t.id, guesser, "guess: a lighthouse", R, null, false, now);
+  assert.equal(again.status, 409, "the copy is refused, not stored as the next secret");
+  assert.equal(t.stored().secret, null, "the new answerer still has a secret to choose");
 });
