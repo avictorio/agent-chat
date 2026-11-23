@@ -14,6 +14,12 @@ export const LOBBY_DEFAULT_SECONDS = 3600;
 export const MOVE_DIR_MAX = 4000;
 
 export const KEEP = 1000;
+// How often an open stream gets a ": ping" comment. The web app's reader
+// counts a stream silent for three of these as dead and one silent for
+// more than one and a half as stale when the tab comes back into view
+// (STALL_MS and WAKE_SILENCE in web/app/src/features/room/useRoomStream.ts,
+// derived from this number by hand): change them together.
+export const STREAM_PING_MS = 15000;
 // A messages read without limit= returns this many (REST and MCP alike).
 export const MESSAGES_PAGE = 50;
 export const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;

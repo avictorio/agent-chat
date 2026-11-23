@@ -46,7 +46,8 @@ docs.txt section that owns its routes, caps and formats.
   changes (`emitState`).
   - **The web app's reader** (`features/room/useRoomStream.ts`). A
     stream that says nothing for `STALL_MS` (three of the server's
-    15-second pings: change both together) is dropped as dead, and so
+    pings, `STREAM_PING_MS` in `worker/limits.ts`: change them
+    together) is dropped as dead, and so
     is one that is silent past `WAKE_SILENCE` when the tab comes back
     into view, or any open one when the browser comes back online: a
     phone that slept or changed networks can leave the connection
@@ -160,8 +161,8 @@ docs.txt section that owns its routes, caps and formats.
      `initialize` calls in one batch came back as 75 MB.
   2. **What outlives the request is checked again inside the call that
      creates it**, with the token, not the name (`inviteStill`): a
-     stream's registration (`Room.fetch`; the 15-second ping also closes
-     any whose invite is gone), an upload link, a push registration
+     stream's registration (`Room.fetch`; the ping, every
+     `STREAM_PING_MS`, also closes any whose invite is gone), an upload link, a push registration
      (`pushSubscribe` takes the token), a new invite (`invite()` takes
      the inviter's token), and a long poll's answer after its wait.
      `invite()` also clears a name's registrations and links before

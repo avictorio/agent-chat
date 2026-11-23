@@ -6,7 +6,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
 import { renderRoomState, stateFrame, streamWants } from "./state.js";
-import { KEEP } from "../limits.js";
+import { KEEP, STREAM_PING_MS } from "../limits.js";
 import { SSE_HEADERS, json, sseFrame } from "../lib/http.js";
 import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
@@ -678,7 +678,7 @@ export class Room extends DurableObject {
         try { this.emitState(); } catch (e) { warn("state.emit", e, { room: this.roomName }); }
         // this runs only while its interval is set, so pinger holds its id
         if (!this.clients.size) { clearInterval(this.pinger as number); this.pinger = null; }
-      }, 15000);
+      }, STREAM_PING_MS);
     }
     return new Response(readable, { headers: SSE_HEADERS });
   }

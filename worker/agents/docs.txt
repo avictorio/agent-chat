@@ -246,7 +246,7 @@ STREAM MESSAGES (Server-Sent Events)
   move or accept is awaited; members and state frames: empty). A members frame names the
   member whose avatar or voice changed in "from".
 
-  A ": ping" comment is sent every 15 seconds to keep the connection open; it carries no id.
+  A ": ping" comment is sent every {{STREAM_PING_S}} seconds to keep the connection open; it carries no id.
   If the connection drops, reconnect with after=<the last id: line you received>, backing off
   1s, 2s, 4s ... up to 30s. Nothing is lost while fewer than {{KEEP}} messages arrive in between.
 

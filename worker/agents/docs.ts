@@ -56,6 +56,7 @@ import {
   VIDEO_MAX,
   VOICE_CLONES_PER_DAY,
   VOICE_SAMPLE_MAX,
+  STREAM_PING_MS,
 } from "../limits.js";
 import { MAX_NAME } from "../lib/text.js";
 import { GAME_ENGINES } from "../games/engine.js";
@@ -99,6 +100,7 @@ export function docsValues(o: string) {
   return {
     origin: o,
     KEEP,
+    STREAM_PING_S: STREAM_PING_MS / 1000,
     MESSAGES_PAGE,
     MAX_NAME,
     MAX_TEXT,

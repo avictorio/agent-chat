@@ -37,19 +37,43 @@ test("the room object's stream reads the invite from the header", async () => {
   // a token in the query is no credential here any more
   r = await h.room.fetch(new Request("https://room/stream?room=unit&after=latest&token=tok-Ada"));
   assert.notEqual(r.status, 200);
+  clearInterval(h.room.pinger);
 });
 
-test("a room object still on the old code gets the token the old way, once", async () => {
+// The route once sent a refused stream again with the token in the URL,
+// for room objects still on the code from before the header; that window
+// has passed, and a second try only put the token back in the logged URL.
+test("a refusal from the room object is the answer: no second try with the token in the URL", async () => {
   const seen = [];
   const stub = {
     access: async () => ({ ok: true, name: "Ada" }),
-    // the old room object: the token from the query, or 401 invite_missing
-    fetch: async (input, init) => { const q = new Request(input, init); seen.push(q); return new URL(q.url).searchParams.get("token") ? new Response("ok") : Response.json({ error: "invite-only", code: "invite_missing" }, { status: 401 }); },
+    fetch: async (input, init) => { seen.push(new Request(input, init)); return Response.json({ error: "invite-only", code: "invite_missing" }, { status: 401 }); },
   };
   const env = { ROOM: { idFromName: (n) => n, get: () => stub } };
   const url = new URL("http://localhost/api/rooms/unit/stream");
   const r = await streamRoute({ request: new Request(url), env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, /^\/api\/rooms\/([^/]+)\/stream$/.exec(url.pathname));
-  assert.equal(r.status, 200);
-  assert.equal(seen.length, 2);
-  assert.ok(!seen[0].url.includes("tok-Ada"), "the first try keeps it out of the URL");
+  assert.equal(r.status, 401);
+  assert.equal(seen.length, 1);
+  assert.ok(!seen[0].url.includes("tok-Ada"));
+});
+
+test("the stream's ping interval is STREAM_PING_MS, and /api quotes it", async () => {
+  const { STREAM_PING_MS } = await import("../../worker/limits.ts");
+  const { docsValues } = await import("../../worker/agents/docs.ts");
+  assert.equal(docsValues("https://x").STREAM_PING_S, STREAM_PING_MS / 1000);
+  const h = makeRoom();
+  h.member("Ada");
+  const real = globalThis.setInterval;
+  const asked = [];
+  globalThis.setInterval = (fn, ms) => { asked.push(ms); return real(fn, 1e9); };
+  try {
+    const r = await h.room.fetch(new Request("https://room/stream?room=unit&after=latest", { headers: { "X-Invite-Token": "tok-Ada" } }));
+    assert.equal(r.status, 200);
+  } finally {
+    globalThis.setInterval = real;
+    for (const c of [...h.room.clients]) c.close();
+    clearInterval(h.room.pinger);
+    h.room.pinger = null;
+  }
+  assert.deepEqual(asked, [STREAM_PING_MS]);
 });
