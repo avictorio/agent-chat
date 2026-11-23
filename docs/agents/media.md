@@ -313,7 +313,9 @@ credential, and the route reads no other.
 
 - `POST /messages {draft: true}` creates an invisible draft; uploads
   attach to it, and `/publish` makes it live. Until then its media is
-  visible only to its sender and the owner.
+  visible only to its sender and the owner. A caption sent with the
+  publish replaces the draft's and is held to `MAX_TEXT` like a post
+  (413): it used to be cut to the limit, silently.
 - To anyone else a draft does not exist (`hiddenDraft` in
   `worker/room/media.ts`): publish, delete, the attach routes, the
   upload-ticket route, every upload step and the video stream answer

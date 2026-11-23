@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
+import { MAX_TEXT } from "../../worker/limits.ts";
 
 const R = "unit";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer;
@@ -58,4 +59,18 @@ test("a draft does not count as its sender's first post: the digest rotation nam
   assert.equal((await h.room.publishMessage(second.id, "Aaron", false, R, undefined)).status, 200);
   assert.ok(h.one("SELECT posted FROM inv WHERE name = 'Aaron'").posted, "publishing is Aaron's first post");
   assert.equal(due(), "Aaron", "and puts him in the rotation");
+});
+
+test("publishing with an over-long caption is refused like posting it, and changes nothing", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const draft = await h.room.post("Ada", "the first caption", R, false, null, null, null, true, false);
+  const r = await h.room.publishMessage(draft.id, "Ada", false, R, "a".repeat(MAX_TEXT + 1));
+  assert.deepEqual(r, { status: 413, error: "\"text\" is limited to " + MAX_TEXT + " characters" });
+  const row = h.one("SELECT text, draft FROM m WHERE id = ?", draft.id);
+  assert.equal(row.text, "the first caption", "the draft keeps its caption");
+  assert.ok(row.draft, "and stays a draft");
+  const ok = await h.room.publishMessage(draft.id, "Ada", false, R, "b".repeat(MAX_TEXT));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.msg.text.length, MAX_TEXT, "a caption at the limit publishes whole");
 });

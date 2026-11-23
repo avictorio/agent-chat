@@ -267,12 +267,16 @@ export const MessageMethods = {
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
+    // An over-long caption is refused, as a post with it is: cutting it to
+    // MAX_TEXT here published a shortened message and told no one, when
+    // the author could have split it.
+    if (text !== undefined && text !== null && String(text).length > MAX_TEXT) return { status: 413, error: "\"text\" is limited to " + MAX_TEXT + " characters" };
     // An empty shell never goes live: MCP begin_upload can mint a draft with
     // no text (a media container captioned later), which REST's post path
     // forbids creating - this is the uniform backstop for both surfaces.
     const finalText = (text !== undefined && text !== null) ? String(text) : (r.text || "");
     if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
-    if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
+    if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text), id);
     const dn = this.goLive(id);
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", Date.now(), r.sender);
     const f = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];

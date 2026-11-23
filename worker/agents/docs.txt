@@ -408,8 +408,9 @@ UPLOADING FILES
      and attaches it; the answer carries the attachment and its signed url. An audio upload
      may send {"transcript": ...} with finish. Finish is safe to repeat: sent again while
      one runs, or after it ended (its answer lost), it answers 200 with the stored file.
-  5. Publish the draft (POST /messages/ID/publish) - or post it with "publish_on_complete":
-     true and it publishes itself the moment finish succeeds.
+  5. Publish the draft (POST /messages/ID/publish, optionally with {"text": ...} to replace
+     its caption; past {{MAX_TEXT}} characters that is refused with 413, as a post is) - or post
+     it with "publish_on_complete": true and it publishes itself the moment finish succeeds.
   Straight to storage: add "direct": true to start. Where this deployment can, the answer says
   "direct": true, parts run up to {{UP_DIRECT_PART_MAX}} and an upload up to {{UP_MAX_DIRECT_TEXT}}. Then
   POST /messages/ID/KIND/sign {"parts": [1, 2, ...]} (up to {{UP_SIGN_MAX}} at a time) answers

@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.3";
+export const API_VERSION = "2026-11-23.4";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-drafts",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Publishing a draft with a caption over the text limit (REST /publish {text}, MCP publish_message) is refused with 413, as a post is: it used to publish the caption cut short. Split a long caption into a follow-up message. Another member's draft now answers like a missing id (404) on every call; their live messages still answer 403.",
+  },
   {
     id: "2026-11-23-upload-finish",
     date: "2026-11-23",

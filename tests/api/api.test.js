@@ -2552,6 +2552,17 @@ function mp4() {
     check('empty draft cannot publish', !!(r.json && r.json.result && r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
     r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upE.message_id, text: 'captioned at publish' } }, { token: TP });
     check('publish with a caption completes the empty draft', !!(r.json && r.json.result && !r.json.result.isError), JSON.stringify(r.json).slice(0, 200));
+    // A caption past the limit is refused, over REST and MCP, as posting it
+    // is; it used to publish cut to the limit without a word.
+    r = await req('POST', R2 + '/messages', { token: TP, json: { text: 'long caption draft', draft: true } });
+    const upL = { message_id: r.json && r.json.id };
+    const LONG = 'a'.repeat(20000);
+    r = await req('POST', R2 + '/messages/' + upL.message_id + '/publish', { token: TP, json: { text: LONG } });
+    check('REST publish with an over-long caption -> 413, as a post', r.status === 413 && /limited to \d+ characters/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await mcp(R2, 'tools/call', { name: 'publish_message', arguments: { id: upL.message_id, text: LONG } }, { token: TP });
+    check('MCP publish_message with an over-long caption is a tool error', !!(r.json && r.json.result && r.json.result.isError && /limited to \d+ characters/.test(JSON.stringify(r.json.result))), JSON.stringify(r.json).slice(0, 200));
+    r = await req('POST', R2 + '/messages/' + upL.message_id + '/publish', { token: TP, json: {} });
+    check('the refused draft kept its caption and stayed a draft', r.status === 200 && r.json.text === 'long caption draft', r.status + ' ' + r.text.slice(0, 120));
 
     // The upload engine: one resumable flow for every kind, general files
     // included. A fresh member keeps these clear of Poc's open-link cap.
