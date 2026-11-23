@@ -530,6 +530,22 @@ async function holdsNothingElse(client: RoomClient, id: number, kind: UploadKind
   return others.every((st) => !st.uploading && !st.complete);
 }
 
+// The lookups that decide whether a send resumes an earlier draft. Only a
+// definite answer may send it to a new draft: the draft is not there
+// (404) or holds nothing to resume. A blip used to fall through to a new
+// draft, which sent every part again and left the old draft and its parts
+// in storage with nothing pointing at them. Anything else stops the send,
+// so the interrupted note stays and Send again resumes.
+async function lookup<T>(fn: () => Promise<T>, signal: AbortSignal, meter: Meter): Promise<T | null> {
+  try {
+    return await net(fn, signal, meter);
+  } catch (e) {
+    if (e instanceof UploadCancelled) throw e;
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw new Error(denied(e) ? "Upload was denied" : "Couldn't check for the earlier upload (" + errText(e) + ")", { cause: e });
+  }
+}
+
 export async function sendWithUploads(
   client: RoomClient,
   room: string,
@@ -582,23 +598,23 @@ export async function sendWithUploads(
   let id: number | null = null;
   try {
     // 1. this browser started this exact set before
+    let saved: { id?: number } | null = null;
     try {
-      const saved = JSON.parse(localStorage.getItem(draftKey) || "null") as { id?: number } | null;
-      if (saved && saved.id) {
-        const st = await client.uploadStatus(saved.id, items[0]!.kind);
-        if (st.uploading || st.complete) id = saved.id;
-      }
+      saved = JSON.parse(localStorage.getItem(draftKey) || "null") as { id?: number } | null;
     } catch {
-      // no resumable local draft
+      // storage unavailable or the note unreadable: no local draft to resume
+    }
+    if (saved && saved.id) {
+      const savedId = saved.id;
+      const st = await lookup(() => client.uploadStatus(savedId, items[0]!.kind), signal, meter);
+      if (st && (st.uploading || st.complete)) id = savedId;
     }
     // 2. the server knows this file (another tab, another device)
     if (!id && items.length === 1 && fps[0]) {
-      try {
-        const rj = await client.uploadResume(items[0]!.blob.size, fps[0], items[0]!.kind);
-        if (rj.found && rj.id && (await holdsNothingElse(client, rj.id, items[0]!.kind))) id = rj.id;
-      } catch {
-        // the lookup is best-effort
-      }
+      const fp0 = fps[0];
+      const rj = await lookup(() => client.uploadResume(items[0]!.blob.size, fp0, items[0]!.kind), signal, meter);
+      const rid = rj && rj.found && rj.id ? rj.id : null;
+      if (rid && (await lookup(() => holdsNothingElse(client, rid, items[0]!.kind), signal, meter))) id = rid;
     }
     if (!id) {
       let pd: Message;

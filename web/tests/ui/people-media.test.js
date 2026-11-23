@@ -266,6 +266,45 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       return { published };
     });
   }
+  // A blip at Send (offline, or the lookup answering 503 once) must not
+  // skip the resume lookups: the send waits or retries, then resumes the
+  // earlier draft. Falling through to a new draft sent every part again and
+  // left the old draft and its parts behind with nothing pointing at them.
+  for (const [label, offline] of [['upload-resume-offline', true], ['upload-resume-blip', false]]) {
+    await run(label, { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+      const ts = S.msgs[S.msgs.length - 1].ts + 1000;
+      S.drafts = [{ id: 77, ts, from: 'Anthony', text: 'Survey' }];
+      S.ups = { '77:file': { size: 300000, name: 'survey.bin', type: 'application/octet-stream', ps: 65536, parts: 5, got: new Set([1, 2]) } };
+      S.resume = { found: true, id: 77, kind: 'file', received: [1, 2] };
+      let down = offline;
+      let failed = 0;
+      await page.route('**/upload/resume', (route) => {
+        if (down) return route.abort('internetdisconnected');
+        if (!offline && !failed++) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"upstream connect error"}' });
+        return route.fallback();
+      });
+      const online = (on) => page.evaluate((v) => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => v }), on);
+      await page.setInputFiles('#anyFile', { name: 'survey.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(300000, 3) });
+      await page.fill('#text', 'The survey');
+      if (offline) await online(false);
+      await page.click('#send');
+      await page.locator('#uplCard').waitFor({ timeout: 3000 });
+      if (offline) {
+        await page.waitForFunction(() => /Offline/.test((document.querySelector('#uplCard') || {}).textContent || ''), null, { timeout: 3000 });
+        await page.waitForTimeout(400);
+        must(!calls.some((c) => /"draft":true/.test(c)), 'no new draft while offline');
+        down = false;
+        await online(true);
+        await page.evaluate(() => window.dispatchEvent(new Event('online')));
+      }
+      await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+      await settle(page);
+      const published = calls.filter((c) => /^POST .*\/messages\/\d+\/publish/.test(c)).map((c) => +c.match(/messages\/(\d+)\/publish/)[1]);
+      must(published.length === 1 && published[0] === 77, 'the earlier draft is resumed and published: ' + JSON.stringify(published));
+      must(!calls.some((c) => /"draft":true/.test(c)), 'no new draft is made');
+      return { published };
+    });
+  }
   await run('upload-interrupted', {
     hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
     init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },

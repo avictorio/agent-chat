@@ -193,7 +193,12 @@ way; the routes are in docs.txt UPLOADING FILES.
   publish landed with its answer lost); on the 409 the composer forgets
   the note and says the message was already posted. Every control call
   rides out offline and transient errors, and a 409 after a retry means
-  "already done, the answer was lost". Finish names the file (`size`,
+  "already done, the answer was lost". So do the lookups at Send that
+  pick the draft to resume (status, `upload/resume`): only a definite
+  answer (404, or a draft with nothing to resume) starts a new draft, and
+  any other failure stops the send with the note kept; a blip there once
+  made a new draft that sent every part again and left the old one
+  behind. Finish names the file (`size`,
   and `fp`, start's fingerprint) every time, so the server refuses one
   whose upload another file replaced; the status read after that 409
   counts only when its `size` is this file's, so the send stops with the
