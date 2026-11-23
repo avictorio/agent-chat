@@ -460,6 +460,7 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       await page.$eval('#viewer .tv-judge', (e) => e.scrollIntoView({ block: 'center' }));
       out.rows = await page.$$eval('#viewer .tv-judge-row', (r) => r.map((x) => x.className + ' | ' + x.textContent));
       out.hint = await page.$eval('#viewer .tv-judge .tv-hint', (e) => e.textContent);
+      out.banner = await page.$eval('#viewer .turn-banner', (e) => e.textContent);
       await shot(page, label + '.png');
       await page.click('#viewer .tv-accept[aria-label="Stop counting Henry\'s answer as right"]');
       await settle(page);
@@ -467,6 +468,8 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       out.after = await page.$$eval('#viewer .tv-judge-row', (r) => r.map((x) => x.className + ' | ' + x.textContent));
       if (out.rows.length !== 2 || !/ok \| Henry.*Rexfrd.*close.*Counted/.test(out.rows[1]) || /ok/.test(out.rows[0])) throw new Error('the close match comes in counted and marked: ' + JSON.stringify(out.rows));
       if (!/close match counts unless you tap it off/.test(out.hint)) throw new Error('the hint explains close matches: ' + out.hint);
+      // the status used to speak of misses only, and say the clock counts them all wrong
+      if (!/Judge the answers the match missed or took as close/.test(out.banner) || !/misses count wrong and close matches count right/.test(out.banner)) throw new Error('the status names close matches: ' + out.banner);
       if (!/"dir":"reject Henry"/.test(out.reject)) throw new Error('tapping a counted answer rejects it: ' + out.reject);
       if (/ok/.test(out.after[1]) || !/Count it/.test(out.after[1])) throw new Error('the rejected close match reads not counted: ' + JSON.stringify(out.after));
       return out;

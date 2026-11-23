@@ -61,8 +61,9 @@ export const triviaStatus: GameStatus<TriviaState> = {
         sub = "If the clock runs out, you forfeit the round.";
       } else if (g.phase === "judge") {
         mine = true;
-        text = "Judge the answers the match missed";
-        sub = "If the clock runs out, the reveal counts them wrong.";
+        // close matches come here too, and count unless refused
+        text = "Judge the answers the match missed or took as close";
+        sub = "If the clock runs out, misses count wrong and close matches count right.";
       } else text = "Your question is up · " + (waiting.length ? "waiting on " + waiting.join(", ") : "closing…");
     } else if (g.phase === "ask") text = (g.asker || "The quizmaster") + " is writing a question · round " + g.round + " of " + g.rounds_total;
     else if (g.phase === "judge") text = (g.asker || "The quizmaster") + " is judging the answers";
