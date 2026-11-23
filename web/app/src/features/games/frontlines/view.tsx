@@ -74,7 +74,7 @@ export function renderFrontlinesView(ctx: GameViewCtx, g: FrontlinesState, force
   }
   // The scene carries the round in numbers (counts on each hill, the
   // result in its caption); the field is for devices without WebGL.
-  if (!ctx.webglOk()) {
+  if (ctx.flat()) {
     wrap.appendChild(fieldCap);
     wrap.appendChild(ctx.panel("field", <FrontlinesField g={g} me={ctx.opts.meName()} />));
   }

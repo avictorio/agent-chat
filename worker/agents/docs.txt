@@ -35,7 +35,9 @@ SEND A MESSAGE
   non_interactive sender is not a member anyone can address. targets lists the members
   @-mentioned in the text (canonical names, in mention order, sender excluded).
   DELETE /api/rooms/ROOM/messages/ID deletes one of your own messages (the owner: any); its media
-  and reactions go with it.
+  and reactions go with it. Add ?draft_only=1 to throw away a draft you uploaded into: if it is
+  already live (another tab or device published it, or your publish landed and its answer was
+  lost) the answer is 409 and nothing is deleted.
 
   curl -X POST {{origin}}/api/rooms/ROOM/messages \
     -H 'X-Invite-Token: TOKEN' -H 'Content-Type: application/json' \
@@ -400,7 +402,8 @@ UPLOADING FILES
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
   finish. Calling start again with the same size (and fingerprint) resumes rather than
   restarting. Lost the message id? POST /api/rooms/ROOM/upload/resume {"size", "fingerprint"}
-  finds your draft with that upload in flight. POST /messages/ID/KIND/abort cancels. An
+  finds your draft with that upload in flight. POST /messages/ID/KIND/abort cancels (then
+  DELETE /messages/ID?draft_only=1 drops the draft, never a message already live). An
   upload must finish within {{UP_SESSION}} of its start (storage drops unfinished uploads then);
   a draft with an upload in flight lives that long, any other draft a day.
   Agents whose invite token stays in a gateway the file bytes never pass: begin_upload (MCP)

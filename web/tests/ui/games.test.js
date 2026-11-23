@@ -1,7 +1,7 @@
 // UI scenarios: the Games tab, New game, the guide, the chat cards, the Duel and Light Cycles.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/games.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, ngOpen, run, shot } = require('./harness');
+const { settle, clockNow, done, ngOpen, run, shot } = require('./harness');
 
 (async () => {
   await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
@@ -490,6 +490,85 @@ const { settle, done, ngOpen, run, shot } = require('./harness');
     await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
     return { ok: true };
   });
+
+  // A spectator's Duel card when the match finishes: the frame that ends
+  // it carries no rounds, so the store fetches the full state once and
+  // the card's face-off shows the finishing throws, not the round before.
+  for (const [label, o] of [['duel-spectator-finish', {}], ['duel-spectator-finish-mobile', { w: 390, h: 844, touch: true }]]) {
+    await run(label, Object.assign({ state: { duel: true } }, o), async (page, S, calls) => {
+      // the duel is Ada against Henry; the signed-in Anthony watches
+      const swap = (x) => JSON.parse(JSON.stringify(x).replace(/Anthony/g, 'Henry'));
+      S.duel = swap(S.duel);
+      S.duel.you = { playing: false };
+      const msg = S.msgs.find((m) => m.id === 10);
+      msg.game = swap(msg.game);
+      msg.text = msg.text.replace(/Anthony/g, 'Henry');
+      let release;
+      const gate = new Promise((r) => (release = r));
+      let streams = 0;
+      await page.route('**/stream*', async (route) => {
+        streams++;
+        if (streams > 1) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
+        return route.fulfill({ status: 200, contentType: 'text/event-stream', body: await gate });
+      });
+      await page.reload();
+      await settle(page);
+      await page.waitForSelector('.game-card .duel-faceoff-line', { timeout: 10000 });
+      const before = await page.$eval('.game-card .duel-faceoff-line', (e) => e.textContent);
+      // the server finishes it: round 4, Ada's paper over Henry's rock
+      const at = clockNow();
+      S.duel.rounds.push({ n: 4, throws: { Ada: 'paper', Henry: 'rock' }, winner: 'Ada', at, throws_at: { Ada: at, Henry: at } });
+      Object.assign(S.duel, { status: 'finished', winner: 'Ada', round: 4, score: { Ada: 3, Henry: 0 }, deadline: null });
+      S.duel.players.forEach((p) => { p.wins = S.duel.score[p.name]; p.thrown = false; });
+      // the frame is the public summary: no rounds, log, h2h or you
+      const pub = JSON.parse(JSON.stringify(S.duel));
+      for (const k of ['rounds', 'log', 'you', 'awaiting', 'awaiting_accept', 'h2h', 'how_to_play']) delete pub[k];
+      release('retry: 600000\n\nevent: game\ndata: ' + JSON.stringify({ type: 'game', room: 'demo', from: 'Ada', kind: 'agent', targets: [], game: pub }) + '\n\n');
+      // well inside the 20 s card poll, which skips finished matches anyway
+      await page.waitForFunction(() => /🪨/.test((document.querySelector('.game-card .duel-faceoff-line') || {}).textContent || ''), null, { timeout: 8000 })
+        .catch(() => { throw new Error('the card must show the finishing throws (paper over rock); still: ' + before); });
+      const out = { before, after: await page.$eval('.game-card .duel-faceoff-line', (e) => e.textContent) };
+      out.gets = calls.filter((c) => /GET \/api\/rooms\/demo\/games\/2(\?|$)/.test(c)).length;
+      await page.waitForTimeout(300);
+      await shot(page, label + '.png');
+      return out;
+    });
+  }
+
+  // Werewolf is won by a side (winner null, the seats in winners): History
+  // names the side with your Won/Lost, and Standings counts its streaks.
+  for (const [label, o] of [['games-history-team', {}], ['games-history-team-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ww: true }, init: () => { try { localStorage.setItem('ac-games-tab', 'history'); } catch { /* storage off */ } } }, o), async (page, S) => {
+      const t = clockNow();
+      const mk = (id, ago, side) => Object.assign({}, S.ww, { id, status: 'finished', phase: null, side, winner: null, draw: false,
+        winners: side === 'village' ? ['Ada', 'Henry', 'Anthony', 'Jax'] : ['Ivy'], places: ['Ada', 'Henry', 'Anthony', 'Jax', 'Ivy'], deadline: null, created: t - ago - 3600e3, ended: t - ago,
+        players: S.ww.players.map((p) => Object.assign({}, p, { role: p.name === 'Ivy' ? 'werewolf' : 'villager' })) });
+      const games = [mk(42, 60e3, 'village'), mk(41, 3600e3, 'village'), mk(40, 7200e3, 'wolves')];
+      await page.route(/\/api\/rooms\/demo\/games(\?.*)?$/, (r) => r.request().method() === 'GET'
+        ? r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ room: 'demo', games, record: { werewolf: [{ name: 'Ada', hex: '#22d3ee', w: 2, l: 1 }, { name: 'Anthony', hex: '#f472b6', w: 2, l: 1 }, { name: 'Ivy', hex: '#4ade80', w: 1, l: 2 }] } }) })
+        : r.fallback());
+      if (o.w) {
+        await page.click('#menu');
+        await settle(page);
+      }
+      await page.click('.tab[data-tab="games"]');
+      await page.click('#view-games [role="tab"]:has-text("History")');
+      await page.waitForSelector('#view-games .gm-hrow', { timeout: 10000 });
+      await settle(page);
+      const rows = await page.$$eval('#view-games .gm-hrow-open', (els) => els.map((e) => ({ who: e.querySelector('.gm-hrow-who').textContent, label: e.getAttribute('aria-label'), chip: (e.querySelector('.gm-hrow-me') || {}).textContent || null })));
+      await shot(page, label + '.png');
+      await page.click('#view-games [role="tab"]:has-text("Standings")');
+      await settle(page);
+      const streaks = await page.$$eval('#view-games .gm-rec-streak', (els) => els.map((e) => e.textContent.trim()));
+      await shot(page, label + '-standings.png');
+      if (rows.length !== 3) throw new Error('three finished matches: ' + JSON.stringify(rows));
+      if (!/The village wins/.test(rows[0].who) || !/The wolves win/.test(rows[2].who)) throw new Error('History names the winning side: ' + JSON.stringify(rows));
+      if (rows[0].chip !== 'Won' || rows[2].chip !== 'Lost') throw new Error('your own result, from winners: ' + JSON.stringify(rows));
+      if (!/The village wins, against Ivy\./.test(rows[0].label)) throw new Error('the field splits by side: ' + rows[0].label);
+      if (!streaks.some((x) => /W2/.test(x)) || !streaks.some((x) => /L2/.test(x))) throw new Error('two village wins in a row are a streak: ' + JSON.stringify(streaks));
+      return { rows, streaks };
+    });
+  }
 
   done('games');
 })();

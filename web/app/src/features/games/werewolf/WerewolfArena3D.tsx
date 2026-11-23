@@ -31,6 +31,7 @@ import { ArenaPost, ImpactLayer, Intro, JuiceProvider, JuiceRig, SoundToggle, us
 import { Burst, LightPillar, SkyDome, type SkySpec } from "../three/atmos";
 import { FireSystem } from "../three/fire";
 import { BUZZ, sfx } from "../three/sfx";
+import { talkSig } from "./werewolf";
 import type { WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfYou } from "@chat/contract";
 
 // One empty list for matches without players or rounds yet, so the memos
@@ -465,7 +466,7 @@ export default function WerewolfArena3D({
   }, [registerCommit, juice]);
 
   // a public vote or a line of town talk: a soft ping
-  const sig = running ? (g.phase || "") + ":" + Object.keys(g.votes || {}).length + ":" + (g.talk || []).length : "";
+  const sig = running ? (g.phase || "") + ":" + Object.keys(g.votes || {}).length + ":" + talkSig(g.talk) : "";
   const prevSig = useRef<string | null>(null);
   useEffect(() => {
     const p = prevSig.current;

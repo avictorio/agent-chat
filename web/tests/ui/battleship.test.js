@@ -170,8 +170,42 @@ const { settle, done, noGl, run, shot } = require('./harness');
     await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
     await page.click('.game-card');
     await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && !s.hidden && /didn't load/.test(s.textContent) && s.querySelector('button'); }, null, { timeout: 20000 });
-    return { status: await page.$eval('#viewer .arena3d-status', e => e.textContent) };
+    // the failed scene was the only way to fire: the view is built again
+    // with their waters as the aiming grid
+    await page.waitForSelector('#viewer .bs-aim .bs-grid', { timeout: 10000 });
+    return { status: await page.$eval('#viewer .arena3d-status', e => e.textContent), aim: await page.$$eval('#viewer .bs-aim .bs-cell', (c) => c.length) };
   });
+  /* A browser with WebGL 1 only: three.js needs WebGL 2, so the device
+     counts as having no WebGL - the note and the aiming grid at once. */
+  const gl1Only = () => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (t, ...a) { return t === 'webgl2' ? null : g.call(this, t, ...a); }; };
+  await run('webgl1-only-battleship', { state: { bsPlay: true }, init: gl1Only }, async (page, S, calls) => {
+    await page.waitForSelector('.game-card .bs-minis', { timeout: 10000 });
+    await page.click('.game-card');
+    await page.waitForSelector('#viewer .bs-3d-host.no-3d .arena3d-status', { timeout: 10000 });
+    const out = { gl1: await page.evaluate(() => !!document.createElement('canvas').getContext('webgl')), aim: await page.$$eval('#viewer .bs-aim .bs-cell', (c) => c.length), canvas: await page.$$eval('#viewer canvas', (c) => c.length) };
+    if (out.aim !== 100) throw new Error('their waters as the aiming grid: ' + out.aim);
+    if (out.canvas) throw new Error('no scene is attempted on WebGL 1');
+    await page.click('#viewer .bs-aim .bs-cell:not(.miss):not(.hit):not(.sunk)');
+    await settle(page);
+    if (!calls.some((c) => /\/games\/6\/moves/.test(c))) throw new Error('a tap on the aiming grid fires');
+    return out;
+  });
+  /* Liar's Dice whose scene chunk failed on a device with WebGL: the
+     cup and the table come back, so the bidder sees their own dice. */
+  for (const [label, o] of [['liarsdice-3d-load-failure', {}], ['liarsdice-3d-load-failure-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+  await run(label, Object.assign({ state: { ld: true } }, o), async (page) => {
+    await page.route(/\/assets\/LiarsArena3D-.*\.js$/, (route) => route.fulfill({ status: 404, body: 'nf' }));
+    await page.waitForSelector('.game-card.kind-liarsdice', { timeout: 10000 });
+    await page.click('.game-card.kind-liarsdice');
+    await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && !s.hidden && /didn't load/.test(s.textContent); }, null, { timeout: 20000 });
+    await page.waitForSelector('#viewer .ld-cup .ld-die', { timeout: 10000 });
+    const out = { dice: await page.$$eval('#viewer .ld-cup .ld-die', (d) => d.length), table: await page.$$eval('#viewer .ld-table', (t) => t.length), bidder: await page.$$eval('#viewer .ld-bidder', (b) => b.length) };
+    await settle(page);
+    await shot(page, label + '.png');
+    if (!out.dice || !out.table || !out.bidder) throw new Error('the cup, the table and the bidder after the scene failed: ' + JSON.stringify(out));
+    return out;
+  });
+  }
   for (const [label, o] of [['no-webgl-battleship', {}], ['no-webgl-battleship-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { bsPlay: true }, init: noGl }, o), async (page, S, calls) => {
       const out = {};
@@ -287,10 +321,86 @@ const { settle, done, noGl, run, shot } = require('./harness');
     await page.waitForSelector('#viewer .no-3d .arena3d-status', { timeout: 10000 });
     out.status = await page.$eval('#viewer .arena3d-status', (e) => e.textContent);
     out.drops = await page.$$eval('#viewer .c4-under button', (b) => b.length);
+    out.cells = await page.$$eval('#viewer .c4-flat .c4-grid .c4-cell', (c) => c.length);
+    out.discs = await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (c) => c.length);
     if (!/3D isn't available on this device/.test(out.status)) throw new Error('the note: ' + out.status);
     if (out.drops < 7) throw new Error('the drop buttons stay: ' + out.drops);
+    // the board itself: without it the drops aim at nothing
+    if (out.cells !== 42 || !out.discs) throw new Error('the flat board, 7 by 6 with the discs down: ' + JSON.stringify(out));
     return out;
   });
+  /* A refused move on your own turn: the view puts its note line on the
+     page only when it has text, and on your turn it has none, so the
+     referee's refusal shows as a toast instead of vanishing. */
+  const REFUSED = 'The referee refused that move: the clock just ran out';
+  for (const [label, o, state, gid, open, act] of [
+    ['move-refused-toast', {}, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-toast-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-toast-werewolf', {}, { ww: true }, 30, '.game-card.kind-werewolf', '#viewer .ww-target[aria-label="Vote out Henry"]'],
+  ]) {
+    await run(label, Object.assign({ state, init: noGl, allowConsole: [/409/] }, o), async (page) => {
+      let posts = 0;
+      await page.route('https://chat.victorio.cloud/**/games/' + gid + '/moves*', (r) => (r.request().method() === 'POST' ? (posts++, r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: REFUSED }) })) : r.fallback()));
+      await page.click(open);
+      await page.waitForSelector(act, { timeout: 15000 });
+      await page.click(act);
+      await page.waitForFunction((t) => { const e = document.querySelector('#toast'); return !!e && !e.hidden && e.textContent.includes(t); }, REFUSED, { timeout: 10000 }).catch(() => {});
+      // on top: the viewer covers the page, and a toast under it was never seen
+      const out = { posts, toast: await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''), onTop: await page.$eval('#toast', (e) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e; }).catch(() => false) };
+      await shot(page, label + '.png');
+      if (posts !== 1 || !out.toast.includes(REFUSED) || !out.onTop) throw new Error('the refusal shows as a toast, over the arena: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  for (const [label, o] of [['no-webgl-fourinarow-shot', {}], ['no-webgl-fourinarow-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page) => {
+      await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 10000 });
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer .c4-flat .c4-grid', { timeout: 10000 });
+      await settle(page);
+      await shot(page, label + '.png');
+    });
+  }
+  /* Sketch & Guess without WebGL: the guesser sees the drawing over the
+     guess box (the scene was the only place it showed). */
+  for (const [label, o] of [['no-webgl-sketch-guess', {}], ['no-webgl-sketch-guess-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { sg: true }, init: noGl }, o), async (page, S) => {
+      await page.waitForSelector('.game-card.kind-sketch', { timeout: 10000 });
+      await page.click('.game-card.kind-sketch');
+      await page.waitForSelector('#viewer .no-3d .arena3d-status', { timeout: 10000 });
+      await settle(page);
+      const out = await page.evaluate((url) => {
+        const img = [...document.querySelectorAll('#viewer img')].find((i) => i.getAttribute('src') === url && /round 2/.test(i.alt));
+        const f = document.querySelector('#viewer .sg-in');
+        return { img: img ? img.alt : '', w: img ? Math.round(img.getBoundingClientRect().width) : 0, guess: !!f, above: !!(img && f && img.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) };
+      }, S.sg.image.url);
+      await shot(page, label + '.png');
+      if (!out.img || out.w < 200) throw new Error('the drawing being guessed is shown, large: ' + JSON.stringify(out));
+      if (!out.guess || !out.above) throw new Error('the drawing sits above the guess box: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  /* Letter Grid without WebGL: the grid as tiles; a tap traces the word
+     as in the scene, and Send sends the word with its cells. */
+  for (const [label, o] of [['no-webgl-lettergrid', {}], ['no-webgl-lettergrid-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { lg: true }, init: noGl }, o), async (page, S, calls) => {
+      await page.waitForSelector('.game-card.kind-lettergrid', { timeout: 10000 });
+      await page.click('.game-card.kind-lettergrid');
+      await page.waitForSelector('#viewer .lg-mini.big button.lg-mini-cell', { timeout: 10000 });
+      const out = { tiles: await page.$$eval('#viewer .lg-mini.big button.lg-mini-cell', (t) => t.length) };
+      if (out.tiles !== 25) throw new Error('the 5 by 5 grid as tiles: ' + out.tiles);
+      for (const at of ['B1', 'C1', 'D1']) await page.click('#viewer .lg-mini.big button[aria-label$=" at ' + at + '"], #viewer .lg-mini.big button[aria-label*=" at ' + at + ',"]');
+      out.word = await page.$eval('#viewer .lg-word', (f) => f.value);
+      out.lit = await page.$$eval('#viewer .lg-mini.big .lg-mini-cell.on', (t) => t.length);
+      await shot(page, label + '.png');
+      if (out.word !== 'TON' || out.lit !== 3) throw new Error('three taps trace TON and light its path: ' + JSON.stringify(out));
+      await page.click('#viewer .lg-send');
+      await settle(page);
+      out.move = calls.filter((c) => /\/games\/34\/moves/.test(c)).pop() || '';
+      if (!/"dir":"ton B1 C1 D1"/.test(out.move)) throw new Error('the word goes out with its cells: ' + out.move);
+      return out;
+    });
+  }
   /* Keyboard play in the 3D arena: the frame takes focus, arrow keys
      aim from the centre cell (E5), Enter fires through the same move
      call a tap makes, and the live region speaks each step. */

@@ -86,6 +86,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     sendMove,
     turnBanner,
     webglOk,
+    flat,
     youSig,
   };
 
@@ -317,17 +318,23 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
     if (note) note.textContent = label || "Queuing " + dir + "…";
+    // Several views add their note to the page only when it has text,
+    // and on the mover's own turn it has none: a refusal written there
+    // reached nobody, while the scene had already played the move in.
+    // Off the page, the refusal is a toast.
+    const say = (text: string) => {
+      if (note && note.isConnected) note.textContent = text;
+      else toast(text, true);
+    };
     try {
       const d = await client.submitMove(id, dir);
       if (d.game) {
         cache.set(id, d.game);
         notify();
         renderGameView(d.game, true);
-      } else if (note) {
-        note.textContent = "That move was refused.";
-      }
+      } else say("That move was refused.");
     } catch (e) {
-      if (note) note.textContent = e instanceof Error ? e.message : "The move did not reach the referee.";
+      say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
     }
   }
 
@@ -518,11 +525,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return h;
   }
   let webglKnown: boolean | null = null;
+  // WebGL 2 only: three.js dropped WebGL 1, so a browser that offers only
+  // that passed a webgl-or-webgl2 probe, then the scene threw - and the
+  // views, trusting the probe, left out the flat controls.
   function webglOk(): boolean {
     if (webglKnown != null) return webglKnown;
     try {
       const c = document.createElement("canvas");
-      webglKnown = !!(c.getContext("webgl2") || c.getContext("webgl"));
+      webglKnown = !!c.getContext("webgl2");
     } catch {
       webglKnown = false;
     }
@@ -531,8 +541,28 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   function ready3d(h: Host3d) {
     if (!h.failed) h.status.hidden = true;
   }
+  /* Whether the open arena plays on its flat panels: no WebGL, or its
+     scene failed (a WebGL error, a chunk that did not load, a scene that
+     threw). The views ask this, not webglOk() alone: a host that failed
+     on a device with WebGL said "play with the controls below" over a
+     page that had none. */
+  function flat(): boolean {
+    if (!webglOk()) return true;
+    const gv = gameView;
+    return !!gv && [gv.r3d, gv.bs3d, gv.lc3d, gv.duel3d].some((h) => !!h && h.failed);
+  }
   function fail3d(h: Host3d, err: unknown) {
+    const first = !h.failed;
     h.failed = true;
+    // the view was built for a working scene: build it again, once, with
+    // the flat panels (after this call - it can come from inside React's
+    // commit of the scene)
+    const gv = gameView;
+    if (first && gv && [gv.r3d, gv.bs3d, gv.lc3d, gv.duel3d].indexOf(h) >= 0)
+      window.setTimeout(() => {
+        const cg = gameView === gv ? cache.get(gv.id) : undefined;
+        if (cg) renderGameView(cg, true);
+      }, 0);
     const msg = String((err && (err as Error).message) || err || "");
     if (/webgl/i.test(msg)) {
       h.host.classList.add("no-3d");
@@ -838,7 +868,13 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         notify();
         const me = (opts.meName() || "").toLowerCase();
         const playing = !!me && (game.players || []).some((p: GLPlayer) => String(p.name || "").toLowerCase() === me);
-        if (!prev || prev.__frameOnly || playing) {
+        // The frame that ends a match is fetched once in full, for
+        // spectators too: its last round (the face-off, the log, the
+        // h2h) is only in the full state, and the card poll skips
+        // finished matches, so a spectator's card kept the round before
+        // the finish until a reload.
+        const ended = !!prev && prev.status !== game.status && (game.status === "finished" || game.status === "cancelled");
+        if (!prev || prev.__frameOnly || playing || ended) {
           void fetchGame(game.id);
           return;
         }

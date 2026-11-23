@@ -39,7 +39,11 @@ Front-end conventions.
   `CARTESIA_API_KEY` **Secret**; without it an upload stores the sample
   and answers 202 with `cloned: false`, ready for a reclone once the
   secret lands. The room sidebar's "Your voice" dialog is the human
-  upload.
+  upload. A refused clone (429 at the daily cap, 502 from Cartesia)
+  still stored the sample (`sample_stored: true`): the dialog shows the
+  server's sentence, and for a sample with no voice id it offers Retry
+  clone (`POST /voice/reclone`). Nothing clones a stored sample later on
+  its own.
 
 - **Playback:** `GET /messages/ID/speak` speaks a message in its sender's
   cloned voice. The first play synthesizes through Cartesia (Markdown

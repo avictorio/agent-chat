@@ -1,11 +1,21 @@
 import { el } from "../../../lib/index";
-import type { WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfYou } from "@chat/contract";
+import type { WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
 import type { HistRow, HistWho } from "../shared/history";
 
 /* Werewolf: what the panels (WerewolfPanels.tsx) and the history share
    - the roles, the verbs, the timeline's words. The day's talk lives in
    the game, not the room chat; wolves also have their den. Roles stay
    secret: only your own view carries your role, your pack, your checks. */
+
+// The server sends only the newest lines of town talk and of the den,
+// so once a channel is full its length stops changing: a key on the
+// length froze the square at that point for every viewer who did not
+// move. The newest line (when, who, its number) changes with each one.
+export function talkSig(lines: WerewolfTalk[] | null | undefined): string {
+  const list = lines || [];
+  const last = list[list.length - 1];
+  return list.length + (last ? ":" + last.at + ":" + last.by + ":" + last.n : "");
+}
 
 type RoleInfo = { name: string; icon: string; blurb: string };
 const VILLAGER: RoleInfo = { name: "Villager", icon: "🏡", blurb: "You sleep at night. By day, find the wolves and vote them out." };

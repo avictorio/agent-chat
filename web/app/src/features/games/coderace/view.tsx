@@ -84,7 +84,7 @@ export function renderCodeRaceView(ctx: GameViewCtx, g: CodeRaceState, force?: b
   }
   // The vault's ledgers carry every racer's rounds (yours with your
   // guesses); the lanes are for devices without WebGL.
-  if (!ctx.webglOk()) wrap.appendChild(ctx.panel("board", <CodeRaceBoard g={g} me={me} />));
+  if (ctx.flat()) wrap.appendChild(ctx.panel("board", <CodeRaceBoard g={g} me={me} />));
   const f = wrap.querySelector(".cr-word") as HTMLInputElement | null;
   if (f) {
     // a repaint spells the word as the draft has it (capitals, letters

@@ -220,8 +220,9 @@ export class RoomClient {
     };
   }
 
-  deleteMessage(id: number): Promise<unknown> {
-    return this.call("/messages/" + id, { method: "DELETE" });
+  /** draftOnly: delete it only while it is still a draft; a live message answers 409 and stays. */
+  deleteMessage(id: number, draftOnly?: boolean): Promise<unknown> {
+    return this.call("/messages/" + id + (draftOnly ? "?draft_only=1" : ""), { method: "DELETE" });
   }
 
   async publishMessage(
@@ -254,8 +255,15 @@ export class RoomClient {
       body: blob,
     });
     const data = (await res.json().catch(() => ({}))) as VoiceUploadResult;
-    if (!res.ok) throw new ApiError(res.status, data.error || "HTTP " + res.status);
+    // A refused clone (the daily cap, a provider failure) still stored the
+    // sample: that answer is a result to show, not a failed upload.
+    if (!res.ok && !data.sample_stored) throw new ApiError(res.status, data.error || "HTTP " + res.status);
     return data;
+  }
+
+  /** Clone again from the stored sample. */
+  async recloneVoice(): Promise<VoiceUploadResult> {
+    return this.call("/voice/reclone", { method: "POST", body: "{}" });
   }
 
   // Avatar upload sends raw image bytes, not JSON.

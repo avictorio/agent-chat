@@ -52,7 +52,8 @@ export function kb(n: number): string {
 
 const later = " - attaches to your next message";
 
-export function useAttachments() {
+/** @param sendingFile the general file a send under way is uploading, if any */
+export function useAttachments(sendingFile: PendingFile | null = null) {
   const imgFileRef = useRef<HTMLInputElement | null>(null);
   const clipFileRef = useRef<HTMLInputElement | null>(null);
   const artFileRef = useRef<HTMLInputElement | null>(null);
@@ -172,7 +173,10 @@ export function useAttachments() {
     if (k === "image" && !image) return takeImage(f);
     if (k === "video" && !video) return takeVideo(f);
     if (k === "audio" && !clip) return takeClip(f);
-    if (fileAtt) toast("One file per message: " + f.name + " replaces " + fileAtt.file.name);
+    // the file a send is uploading is not replaced: that send keeps it, and
+    // the new one waits in the slot for the next message
+    if (fileAtt && fileAtt === sendingFile) toast(f.name + " attaches to your next message - " + fileAtt.file.name + " is still uploading");
+    else if (fileAtt) toast("One file per message: " + f.name + " replaces " + fileAtt.file.name);
     asFile(f);
   };
   return {

@@ -1,7 +1,7 @@
 import { el } from "../../../lib/index";
 import type { WerewolfPlayer, WerewolfState } from "@chat/contract";
 import { gameMetaText, winnerBanner } from "../shared/render";
-import { wwActionVerb } from "./werewolf";
+import { talkSig, wwActionVerb } from "./werewolf";
 import { WerewolfAction, WerewolfEvents, WerewolfPlayers, WerewolfRole, WerewolfTalk } from "./WerewolfPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
@@ -16,7 +16,7 @@ export function renderWerewolfView(ctx: GameViewCtx, g: WerewolfState, force?: b
   const gv = ctx.gameView;
   const me = ctx.opts.meName();
   const you = g.you || { playing: false };
-  const key = [g.status, g.phase || "", g.night, g.day, (g.players || []).map((p: WerewolfPlayer) => (p.accepted ? 1 : 0) + "" + (p.alive ? 1 : 0) + (p.voted ? 1 : 0) + (p.role || "")).join(","), JSON.stringify(g.votes || null), (g.talk || []).length, (g.den || []).length, (g.events || []).length, ctx.youSig(g), you.role || "", you.act || "", you.vote || "", (you.checks || []).length, JSON.stringify(you.pack_picks || null), gv.tab || "game"].join("|");
+  const key = [g.status, g.phase || "", g.night, g.day, (g.players || []).map((p: WerewolfPlayer) => (p.accepted ? 1 : 0) + "" + (p.alive ? 1 : 0) + (p.voted ? 1 : 0) + (p.role || "")).join(","), JSON.stringify(g.votes || null), talkSig(g.talk), talkSig(g.den), (g.events || []).length, ctx.youSig(g), you.role || "", you.act || "", you.vote || "", (you.checks || []).length, JSON.stringify(you.pack_picks || null), gv.tab || "game"].join("|");
   if (!ctx.claimRender(key, force)) return;
   const wrap = gv.wrap;
   // emptying the wrap detaches the panels, field and all: note it to refocus

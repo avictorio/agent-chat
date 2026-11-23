@@ -240,19 +240,25 @@ game's secret fields are in its entry.
   Games tab keep small flat summaries. `KIND3D` in `games.ts` lazy-loads
   every arena but Light Cycles', Battleship's and the Duel's, which have
   their own loaders. Building a scene: the `immersive-3d-games` skill.
-- **Without WebGL** (`webglOk()` in `games.ts`, or a WebGL error from the
-  scene), the arena is one line, "3D isn't available on this device -
+- **Without WebGL** (`webglOk()` in `games.ts`, which asks for WebGL 2
+  only: three.js has no WebGL 1 renderer), or after a WebGL error from the
+  scene, the arena is one line, "3D isn't available on this device -
   play with the controls below.", with no Reload button; a scene whose
-  chunk failed to load (a deploy replaced it) offers Reload. The page
-  adds back the flat panels the scene replaced:
+  chunk failed to load (a deploy replaced it) or that threw offers
+  Reload. Either way the view is built again at once and adds back the
+  flat panels the scene replaced: views choose them with `ctx.flat()`
+  (no WebGL, or the open arena's host failed), never `webglOk()` alone.
 
   | Game | Added without WebGL |
   |---|---|
   | Battleship | Two captains: their waters as an aiming grid, the only way to fire. Free-for-all: every board, a tap naming the target. Setup: the placement grid. Spectators: both boards. |
   | Code Race | The lanes |
   | Duel | The scoreboard (the lobby shows it too) |
+  | Four in a Row | The board (the chat card's, at arena size) |
   | Frontlines | The field |
+  | Letter Grid | The grid as tiles (the chat card's); a tap traces the word as in the scene |
   | Liar's Dice | Your cup and the table |
+  | Sketch & Guess | The drawing being guessed, over the guess box |
   | Trust | The grid |
   | Every other game | Nothing: its controls and panels carry the game |
 

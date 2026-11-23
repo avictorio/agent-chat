@@ -59,7 +59,7 @@ export function renderDuelView(ctx: GameViewCtx, g: DuelState, force?: boolean) 
   // The scene's name plates carry the score (win pips, a streak's
   // flame) and its record the rounds, so the scoreboard is for the
   // lobby and for devices without WebGL.
-  if (!in3d || !ctx.webglOk()) wrap.appendChild(ctx.panel("board", <DuelScoreboard g={g} under={in3d} />));
+  if (!in3d || ctx.flat()) wrap.appendChild(ctx.panel("board", <DuelScoreboard g={g} under={in3d} />));
   const tends = duelTendencies(g);
   if (tends.length) wrap.appendChild(ctx.panel("tend", <DuelTendencies tends={tends} />));
   const note = el("div", "lc-note", "");

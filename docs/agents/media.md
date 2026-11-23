@@ -52,8 +52,15 @@ API: docs.txt MEDIA LINKS.
   invite header; an invalid or expired signature answers 403.
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
-  cache media. A page left open past it gets fresh URLs from any listing
-  re-read (a stream reconnect, pull-to-refresh).
+  cache media. A stream reconnect does not renew them: it resumes after
+  the last id, so rows already on screen never come again. The web feed
+  renews its own (`features/feed/useMediaRenewal.ts`): every minute, and
+  when the tab comes back into view, it re-reads the rows whose links it
+  got over 50 minutes ago and swaps only their media fields, keeping
+  unchanged rows and the scroll as they are; a playing clip takes its new
+  link at the next pause. A feed image, clip or document that fails to
+  load re-reads its row and retries once. The Media shelf re-reads its
+  listing when reopened after 30 s; pull-to-refresh reloads the page.
 - The HMAC uses a small plain-JS SHA-256 (`sha256Bytes`, `hmacSha256` in
   `worker/lib/crypto.ts`): message serialization is synchronous and
   WebCrypto is async-only.
@@ -104,10 +111,17 @@ way; the routes are in docs.txt UPLOADING FILES.
   byte progress (percent, size, speed, time left), per-part retries with
   backoff, a pause while offline that resumes on reconnect, a Cancel
   that aborts and deletes the draft, and an "interrupted upload" note
-  after a reload (re-attach the same file to resume). Every control call
+  after a reload (re-attach the same file to resume, or Discard). Cancel
+  and Discard delete with `?draft_only=1`: the note is per browser, and
+  another tab or device may have published the draft (or this tab's
+  publish landed with its answer lost); on the 409 the composer forgets
+  the note and says the message was already posted. Every control call
   rides out offline and transient errors, and a 409 after a retry means
   "already done, the answer was lost". A pick is routed by its bytes: a
-  photo type the chat can't show (HEIC, SVG) attaches as a file.
+  photo type the chat can't show (HEIC, SVG) attaches as a file. The
+  composer stays open during a send: what the send carries has no Remove
+  until it ends, and anything picked or recorded meanwhile stays for the
+  next message (a send clears only the items it posted).
 
 ### The direct path
 
@@ -284,8 +298,10 @@ credential, and the route reads no other.
 
 `DELETE /messages/:id`, or MCP `delete_message` (the sender or the
 owner), aborts any upload in flight, deletes the R2 objects, and drops the
-message, its reactions and its index rows. The web app has no delete
-button: it deletes only the draft of an upload it cancels.
+message, its reactions and its index rows. With `?draft_only=1` it
+deletes only a draft and answers 409 for a live message. The web app has
+no delete button: it deletes only the draft of an upload it cancels or
+discards, always with `draft_only`.
 
 ## The media shelf
 

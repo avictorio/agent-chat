@@ -2,7 +2,7 @@ import { el } from "../../../lib/index";
 import type { LetterGridMove, LetterGridPlayer, LetterGridState } from "@chat/contract";
 import { gameMetaText, winnerBanner } from "../shared/render";
 import { lgDir, lgLastRound, lgTap, type LgDraft } from "./lettergrid";
-import { LetterGridReveal, LetterGridScores, LetterGridTopWords, LetterGridWordPanel, LetterGridYours } from "./LetterGridPanels";
+import { LetterGridReveal, LetterGridScores, LetterGridTiles, LetterGridTopWords, LetterGridWordPanel, LetterGridYours } from "./LetterGridPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
 /* Letter Grid: the grid first (tap tiles to trace a word), then the
@@ -65,25 +65,30 @@ export function renderLetterView(ctx: GameViewCtx, g: LetterGridState, force?: b
     void ctx.sendMove(g.id, lgDir(d), note);
   };
   const wordPanel = () => ctx.panel("word", <LetterGridWordPanel g={g} draft={gv.lgDraft!} onDraft={setDraft} onSend={send} />);
+  const onCell = canPlay
+    ? (r: number, c: number) => {
+        if (ctx.gameView !== gv || !gv.lgDraft) return;
+        setDraft(lgTap(g, gv.lgDraft, r, c));
+      }
+    : undefined;
+  // without 3D the letters are flat tiles under the note (a tap traces,
+  // as in the scene): before, the page had only the word field, and
+  // nobody could see the grid to find a word in it
+  const flat = ctx.flat();
+  const tiles = () => ctx.panel("tiles", <LetterGridTiles g={g} big path={gv.lgDraft && gv.lgDraft.path} onTap={onCell} />);
   const paintScene = () => {
     const d = gv.lgDraft;
-    ctx.paint3d("lettergrid", g, h, {
-      draft: d && d.path ? { word: d.word, path: d.path } : null,
-      onCell: canPlay
-        ? (r: number, c: number) => {
-            if (ctx.gameView !== gv || !gv.lgDraft) return;
-            setDraft(lgTap(g, gv.lgDraft, r, c));
-          }
-        : undefined,
-    });
+    ctx.paint3d("lettergrid", g, h, { draft: d && d.path ? { word: d.word, path: d.path } : null, onCell });
   };
-  // typing in the panel and a tap in the scene both land here
+  // typing in the panel and a tap in the scene (or a tile) all land here
   function setDraft(d: LgDraft) {
     if (ctx.gameView !== gv) return;
     gv.lgDraft = d;
     wordPanel();
+    if (flat) tiles();
     paintScene();
   }
+  if (flat) wrap.appendChild(tiles());
   paintScene();
   if (canPlay) {
     const hint = ctx.arenaHint("lettergrid", "Trace a word through touching tiles - diagonals count. Cells nobody has used yet are yours for a bonus point each.");

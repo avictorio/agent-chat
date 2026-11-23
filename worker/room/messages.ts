@@ -279,10 +279,16 @@ export const MessageMethods = {
   // Delete one of your own messages (the owner can delete any). Removes the
   // row, its reactions, and any media: in-flight multipart uploads are
   // aborted and R2 objects deleted.
-  async deleteMessage(id: number, who: string | null | undefined, owner: boolean) {
-    const r = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", id).toArray()[0];
+  /** @param draftOnly delete it only while it is still a draft (409 once it is live) */
+  async deleteMessage(id: number, who: string | null | undefined, owner: boolean, draftOnly = false) {
+    const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r) return { status: 404, error: "No message with that id" };
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
+    // A client throwing away an upload it thinks never finished asks for
+    // this: the draft may have been published meanwhile (another tab or
+    // device picked it up, or this one's publish answer was lost), and a
+    // plain delete then took the live message from everyone.
+    if (draftOnly && !r.draft) return { status: 409, error: "That message is already live, so it was not deleted" };
     // The rows go first, in this one step, and storage after: with the
     // storage calls first, whatever happened to the message while they ran
     // (a publish, a new attachment) was deleted unseen along with it.

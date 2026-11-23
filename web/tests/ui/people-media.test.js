@@ -192,7 +192,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /cancelled/i.test(t.textContent || ''); }, null, { timeout: 3000 });
     await settle(page);
     const aborted = calls.some((c) => /^POST .*\/messages\/101\/file\/abort/.test(c));
-    const deleted = calls.some((c) => /^DELETE .*\/messages\/101$/.test(c));
+    const deleted = calls.some((c) => /^DELETE .*\/messages\/101\?draft_only=1$/.test(c));
     const published = calls.some((c) => /\/publish/.test(c));
     must(aborted && deleted && !published, 'cancel aborts the upload and deletes the draft: ' + JSON.stringify({ aborted, deleted, published }));
     must(await page.locator('#fileChip').isVisible(), 'the file stays armed after a cancel');
@@ -210,10 +210,112 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await shot(page, 'upload-interrupted-phone.png');
     await page.click('#uplDiscard');
     await note.waitFor({ state: 'detached', timeout: 3000 });
-    must(calls.some((c) => /^POST .*\/messages\/77\/video\/abort/.test(c)) && calls.some((c) => /^DELETE .*\/messages\/77$/.test(c)), 'discard aborts and deletes the draft');
+    must(calls.some((c) => /^POST .*\/messages\/77\/video\/abort/.test(c)) && calls.some((c) => /^DELETE .*\/messages\/77\?draft_only=1$/.test(c)), 'discard aborts and deletes the draft, and only a draft');
     const stored = await page.evaluate(() => localStorage.getItem('chat-upl:demo'));
     must(stored === null, 'discard forgets the note: ' + stored);
     return { ok: true };
+  });
+  await run('upload-discard-posted', {
+    // the note is this browser's, but another device picked the draft up
+    // by fingerprint and published it: Discard must not delete it
+    hash: '#invite=tok_Anthony',
+    init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },
+  }, async (page, S, calls) => {
+    S.msgs.push({ id: 77, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Anthony', text: 'from the laptop' });
+    const note = page.locator('#uplResume');
+    await note.waitFor({ timeout: 4000 });
+    await page.click('#uplDiscard');
+    await note.waitFor({ state: 'detached', timeout: 3000 });
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /already posted/.test(t.textContent || ''); }, null, { timeout: 3000 });
+    const toastText = await page.$eval('#toast', (t) => t.textContent || '');
+    must(calls.some((c) => /^DELETE .*\/messages\/77\?draft_only=1$/.test(c)), 'discard asks for a draft-only delete');
+    must(S.msgs.some((x) => x.id === 77), 'the live message is still in the room');
+    must(/holiday\.mp4 was already posted/.test(toastText), 'the person is told it was posted: ' + toastText);
+    const stored = await page.evaluate(() => localStorage.getItem('chat-upl:demo'));
+    must(stored === null, 'the note is forgotten: ' + stored);
+    await shot(page, 'upload-discard-posted.png');
+    return { toastText };
+  });
+  await run('upload-cancel-after-publish', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // the publish lands but its answer is lost: the engine retries, and a
+    // Cancel then must not delete what is already live
+    S.publishLost = true;
+    await page.setInputFiles('#anyFile', { name: 'notes.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(100000, 2) });
+    await page.fill('#text', 'the notes');
+    await page.click('#send');
+    await page.waitForFunction(() => /Connection trouble/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 10000 });
+    await page.click('#uplCancel');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 5000 });
+    await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /already posted/.test(t.textContent || ''); }, null, { timeout: 3000 });
+    await settle(page);
+    const out = {};
+    out.toast = await page.$eval('#toast', (t) => t.textContent || '');
+    out.live = S.msgs.some((x) => x.id === 101);
+    out.draftOnly = calls.some((c) => /^DELETE .*\/messages\/101\?draft_only=1$/.test(c));
+    out.chipGone = await page.$eval('#fileChip', (e) => e.hidden);
+    out.textCleared = (await page.inputValue('#text')) === '';
+    out.note = await page.locator('#uplResume').count();
+    must(out.live && out.draftOnly, 'the live message stays: ' + JSON.stringify(out));
+    must(!/nothing was posted/.test(out.toast), 'no claim that nothing was posted: ' + out.toast);
+    must(out.chipGone && out.textCleared && out.note === 0, 'what was posted leaves the composer: ' + JSON.stringify(out));
+    await shot(page, 'upload-cancel-after-publish.png');
+    return out;
+  });
+  await run('upload-pick-during-send', { hash: '#invite=tok_Anthony' }, async (page, S) => {
+    // A photo and a second file picked while a send uploads are for the
+    // next message: the send must not wipe them when it finishes, and the
+    // file being uploaded is not "replaced".
+    S.partDelay = 400;
+    await page.setInputFiles('#anyFile', { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300000, 7) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    await page.fill('#text', 'the report');
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    const out = {};
+    out.fileRemoveHidden = await page.$eval('#fileRemove', (e) => e.hidden);
+    await page.setInputFiles('#imgFile', FIXTURES + 'photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.setInputFiles('#anyFile', { name: 'next.txt', mimeType: 'text/plain', buffer: Buffer.from('for later') });
+    await page.waitForFunction(() => /next\.txt/.test((document.querySelector('#fileName') || {}).textContent || ''), null, { timeout: 3000 });
+    out.toast = await page.$eval('#toast', (t) => t.textContent || '');
+    out.nextFileRemove = await page.$eval('#fileRemove', (e) => !e.hidden);
+    await shot(page, 'upload-pick-during-send.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 30000 });
+    await page.locator('.file-card', { hasText: 'report.pdf' }).waitFor({ timeout: 4000 });
+    await settle(page);
+    const last = S.msgs[S.msgs.length - 1];
+    out.posted = { text: last.text, file: last.file && last.file.name, image: !!last.image };
+    out.imgKept = !(await page.$eval('#attachRow', (e) => e.hidden));
+    out.fileKept = await page.textContent('#fileName');
+    must(out.fileRemoveHidden, 'the uploading file has no Remove: ' + JSON.stringify(out));
+    must(/next\.txt attaches to your next message - report\.pdf is still uploading/.test(out.toast), 'no false "replaces": ' + out.toast);
+    must(out.posted.file === 'report.pdf' && !out.posted.image, 'the send posted what it was sent with: ' + JSON.stringify(out.posted));
+    must(out.imgKept && /next\.txt/.test(out.fileKept), 'what was picked meanwhile stays for the next message: ' + JSON.stringify(out));
+    must(out.nextFileRemove, 'the next file can be removed');
+    return out;
+  });
+  await run('upload-remove-during-send', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page, S) => {
+    // What a send is carrying can't be removed mid-send: Remove hid the
+    // chip while the send posted the image anyway.
+    S.partDelay = 400;
+    await page.setInputFiles('#imgFile', FIXTURES + 'photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.setInputFiles('#anyFile', { name: 'report.pdf', mimeType: 'application/pdf', buffer: Buffer.alloc(300000, 7) });
+    await page.locator('#fileChip:not([hidden])').waitFor({ timeout: 3000 });
+    await page.click('#send');
+    await page.locator('#uplCard').waitFor({ timeout: 3000 });
+    const out = {};
+    out.imgRemoveVisible = await page.locator('#imgRemove').isVisible();
+    out.fileRemoveVisible = await page.locator('#fileRemove').isVisible();
+    await shot(page, 'upload-remove-during-send-phone.png');
+    await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 30000 });
+    await settle(page);
+    const last = S.msgs[S.msgs.length - 1];
+    out.posted = !!(last && last.image && last.file);
+    out.cleared = await page.$eval('#attachRow', (e) => e.hidden) && await page.$eval('#fileChip', (e) => e.hidden);
+    must(!out.imgRemoveVisible && !out.fileRemoveVisible, 'no Remove on what is being sent: ' + JSON.stringify(out));
+    must(out.posted && out.cleared, 'both posted, both cleared after: ' + JSON.stringify(out));
+    return out;
   });
   await run('upload-route-phone', { hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true }, async (page) => {
     // a photo through the paperclip lands in the image slot
@@ -242,6 +344,51 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await shot(page, 'upload-progress-phone.png');
     await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
     return { box: Math.round(box.width) };
+  });
+  // The voice dialog reads the server's refusals: an upload whose clone was
+  // refused (the daily cap, a provider failure) still stored the sample,
+  // and it said only "Upload failed.", then "being prepared" for a clone
+  // nothing would ever make.
+  const voiceTake = { name: 'take.webm', mimeType: 'audio/webm', buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]) };
+  const voiceUpload = async (page) => {
+    await page.setInputFiles('#voiceFile', voiceTake);
+    await page.click('#voiceUpload');
+    await page.waitForFunction(() => document.querySelector('#voiceStatus').textContent !== 'Uploading…', null, { timeout: 5000 });
+    await settle(page);
+    return { status: await page.$eval('#voiceStatus', (e) => e.textContent), toast: await page.$eval('#toast', (e) => e.textContent || '') };
+  };
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('voice-clone-refused' + tag, { hash: '#invite=tok_Anthony', w, h, touch: !!tag, allowConsole: /status of 429/ }, async (page, S, calls) => {
+      S.voiceSample = { status: 429, body: { error: 'You can clone a voice up to 5 times a day. Try again tomorrow.', retry_after: 3600, voice: { provider: 'cartesia', voice_id: null, sample: true, updated: 1 }, cloned: false, sample_stored: true } };
+      if (tag) { await page.tap('#menu'); await settle(page); }
+      await page.click('#voiceBtn'); await settle(page);
+      const out = await voiceUpload(page);
+      out.retry = await page.locator('#voiceReclone').isVisible();
+      await shot(page, 'voice-clone-refused' + tag + '.png');
+      must(/stored, but it was not cloned: You can clone a voice up to 5 times a day\. Try again tomorrow\.$/.test(out.status), 'the cap and the stored sample are named: ' + out.status);
+      must(/5 times a day/.test(out.toast) && out.retry, 'toast gives the reason, Retry clone offered: ' + JSON.stringify(out));
+      await page.click('#voiceClose'); await settle(page);
+      await page.click('#voiceBtn'); await settle(page);
+      out.reopened = await page.$eval('#voiceStatus', (e) => e.textContent);
+      must(!/being prepared/.test(out.reopened) && /not cloned yet/.test(out.reopened) && await page.locator('#voiceReclone').isVisible(), 'reopened: no promise of a clone in the works: ' + out.reopened);
+      S.voiceSample = null;
+      await page.click('#voiceReclone');
+      await page.waitForFunction(() => /Your voice is set/.test(document.querySelector('#voiceStatus').textContent), null, { timeout: 5000 });
+      out.recloned = calls.some((c) => /^POST .*\/voice\/reclone/.test(c));
+      out.retryAfter = await page.locator('#voiceReclone').isVisible();
+      must(out.recloned && !out.retryAfter, 'Retry clone posts reclone and goes away once cloned: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  await run('voice-upload-refused', { hash: '#invite=tok_Anthony', allowConsole: /status of (415|502)/ }, async (page, S) => {
+    S.voiceSample = { status: 502, body: { error: 'Cartesia clone failed (400): audio too short', sample_stored: true } };
+    await page.click('#voiceBtn'); await settle(page);
+    const failed = await voiceUpload(page);
+    must(/stored, but it was not cloned: Cartesia clone failed \(400\): audio too short\.$/.test(failed.status), 'a failed clone: ' + failed.status);
+    S.voiceSample = { status: 415, body: { error: 'Samples must be MP3, WAV, M4A, OGG or WebM audio' } };
+    const wrong = await voiceUpload(page);
+    must(wrong.status === 'Upload failed: Samples must be MP3, WAV, M4A, OGG or WebM audio.' && /MP3, WAV/.test(wrong.toast), 'a refused upload says why: ' + JSON.stringify(wrong));
+    return { failed: failed.status, wrong: wrong.status };
   });
   await run('media-shelf', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony' }, async (page) => {
     await page.click('.tab[data-tab="media"]');
@@ -294,6 +441,94 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     if (overflow.doc > 0 || overflow.bar > 0) throw new Error('media bar overflows the viewport: ' + JSON.stringify(overflow));
     await shot(page, 'media-grid-mobile.png');
     return { tiles, overflow };
+  });
+
+  // Signed media links die one to two hours after they are minted, and the
+  // feed gets each row once. A tab left open past 50 minutes (or brought
+  // back into view after one) re-reads the rows that carry media and
+  // swaps in their new links: the same elements, the same scroll, and
+  // no other row touched. Before, nothing renewed them and an afternoon
+  // later the images, clips, documents and downloads answered 403.
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('media-links-renew' + tag, { state: { artifacts: true, files: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S, calls) => {
+      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c));
+      const fresh = (u) => u.split('?')[0] + '?exp=2&sig=fresh';
+      const img = await page.$('.msg[data-id="8"] img.msg-img');
+      const plain = await page.$('.msg[data-id="2"]');
+      must(img && plain, 'the image row and a plain row are on screen');
+      await page.evaluate(() => { const l = document.querySelector('#list'); l.scrollTop = Math.max(0, l.scrollHeight - l.clientHeight - 150); });
+      const top0 = await page.$eval('#list', (l) => l.scrollTop);
+      // a look back too soon reads nothing
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle(page);
+      must(reads().length === 0, 'no re-read before the links are old: ' + JSON.stringify(reads()));
+      // the server now mints new links; the tab's clock moves 51 minutes on
+      for (const m of S.msgs) for (const k of ['image', 'html', 'doc', 'file']) if (m[k]) m[k] = Object.assign({}, m[k], { url: fresh(m[k].url) });
+      await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 51 * 60e3; });
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 });
+      await settle(page);
+      const out = {
+        reads: reads(),
+        sameImg: await img.evaluate((e) => e.isConnected),
+        plainKept: await plain.evaluate((e) => e.isConnected),
+        file: await page.$eval('.msg[data-id="60"] .file-card', (a) => a.getAttribute('href')),
+        frame: await page.$eval('.msg[data-id="8"] .art-frame', (f) => f.getAttribute('src')),
+        scroll: [top0, await page.$eval('#list', (l) => l.scrollTop)],
+      };
+      must(out.reads.length === 1 && /\?after=7&limit=54$/.test(out.reads[0]), 'one read, from the first media row to the last: ' + JSON.stringify(out.reads));
+      must(out.sameImg && out.plainKept, 'the rows stay mounted: ' + JSON.stringify(out));
+      must(/sig=fresh/.test(out.file) && /sig=fresh/.test(out.frame), 'the download and the page preview carry the new links: ' + JSON.stringify(out));
+      must(Math.abs(out.scroll[0] - out.scroll[1]) < 2, 'the scroll position holds: ' + JSON.stringify(out.scroll));
+      // renewed just now: the next look reads nothing
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle(page);
+      must(reads().length === 1, 'renewed rows are not read again at once: ' + JSON.stringify(reads()));
+      await img.evaluate((e) => e.scrollIntoView({ block: 'start' }));
+      await settle(page);
+      must(await img.evaluate((e) => e.complete && e.naturalWidth > 0), 'the renewed image shows');
+      await shot(page, 'media-links-renew' + tag + '.png');
+      return out;
+    });
+  }
+  // A media element that fails to load (its link died while the device
+  // slept) asks for its row again and retries once, with the new link;
+  // one that keeps failing is not retried in a loop.
+  await run('media-links-retry', { state: { artifacts: true }, hash: '#invite=tok_Anthony', allowConsole: /status of 403/ }, async (page, S, calls) => {
+    const hits = { image: [], doc: [], gone: 0 };
+    const dead = '?exp=1&sig=dead';
+    S.msgs.find((m) => m.id === 8).image.url += dead;
+    S.msgs.find((m) => m.id === 8).doc.url += dead;
+    S.msgs.push({ id: 90, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'This photo is gone for good.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/90/image?exp=1&sig=gone' } });
+    await page.route(/\/messages\/(8\/(image|doc)|90\/image)\?/, (route) => {
+      const u = new URL(route.request().url());
+      const kind = u.pathname.split('/').pop();
+      if (/\/90\//.test(u.pathname)) { hits.gone++; return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' }); }
+      hits[kind].push(u.searchParams.get('sig'));
+      if (u.searchParams.get('sig') === 'dead') {
+        // the server signs anew from here on
+        const m = S.msgs.find((x) => x.id === 8);
+        m[kind] = Object.assign({}, m[kind], { url: m[kind].url.replace('sig=dead', 'sig=live') });
+        return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
+      }
+      return route.fallback();
+    });
+    await page.reload();
+    await page.waitForFunction(() => {
+      const i = document.querySelector('.msg[data-id="8"] img.msg-img');
+      return i && /sig=live/.test(i.getAttribute('src')) && i.complete && i.naturalWidth > 0;
+    }, null, { timeout: 8000 });
+    await page.waitForFunction(() => /Probe doc/.test(document.querySelector('.msg[data-id="8"] .doc-body').textContent), null, { timeout: 8000 });
+    await page.evaluate(() => document.querySelector('.msg[data-id="90"]').scrollIntoView());
+    await page.waitForFunction(() => document.querySelector('.msg[data-id="90"] img.msg-img').complete, null, { timeout: 5000 });
+    await settle(page);
+    await page.waitForTimeout(300);
+    await settle(page);
+    const out = { hits, reads: calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c)) };
+    must(out.hits.image.join() === 'dead,live' && out.hits.doc.join() === 'dead,live', 'each retried once, with the new link: ' + JSON.stringify(out.hits));
+    must(out.hits.gone === 2, 'a link that keeps failing is retried once, not in a loop: ' + JSON.stringify(out.hits));
+    must(out.reads.length >= 1 && out.reads.length <= 3, 'failures share re-reads: ' + JSON.stringify(out.reads));
+    return out;
   });
 
   done('people-media');

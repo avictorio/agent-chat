@@ -8,6 +8,7 @@ import { ToastHost } from "../shell/ToastHost";
 import { AgentGateView, LockedView } from "./views";
 import { TABS, useTabs } from "./useTabs";
 import { useMessages } from "../feed/useMessages";
+import { useMediaRenewal } from "../feed/useMediaRenewal";
 import { useBoardData } from "../board/useBoardData";
 import { useRoomStream } from "./useRoomStream";
 import { Sidebar, STATUS_LABEL, type Status } from "./Sidebar";
@@ -153,6 +154,7 @@ export function RoomShell({ room }: { room: string }) {
     clearUnreadRef.current = feed.clearUnread;
   });
   const { messages, unread, jumpVisible, setJumpVisible, listRef } = feed;
+  const { renewMedia } = useMediaRenewal({ client, feed, deny, deniedRef });
 
   // created once (a lazy state initializer, not a ref filled during render)
   const [speaker] = useState(() => {
@@ -392,8 +394,9 @@ export function RoomShell({ room }: { room: string }) {
       openViewer: viewerHost.api.open,
       closeViewer: viewerHost.api.close,
       games,
+      renewMedia,
     }),
-    [speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games]
+    [speaker, speakingId, rx.api, rx.targetId, viewerHost.api, games, renewMedia]
   );
 
   const boardApi: BoardApi = useMemo(

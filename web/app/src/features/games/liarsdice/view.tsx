@@ -46,7 +46,7 @@ export function renderLiarsView(ctx: GameViewCtx, g: LiarsDiceState, force?: boo
   // The scene shows your dice face up and each seat's dice, turn and
   // latest bid on its plate; the cup and the table are for devices
   // without WebGL.
-  const flatLd = !ctx.webglOk();
+  const flatLd = ctx.flat();
   if (flatLd && g.status === "running" && you.playing && !you.out && (you.dice || []).length) wrap.appendChild(ctx.panel("cup", <LiarsCup g={g} />));
   if (myTurn) {
     const hint = ctx.arenaHint("liarsdice", "Raise the count, or the face at the same count - or call liar if you think the table can't hold the bid.");

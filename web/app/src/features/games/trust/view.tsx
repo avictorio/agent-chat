@@ -70,7 +70,7 @@ export function renderTrustView(ctx: GameViewCtx, g: TrustState, force?: boolean
   // The table's threads are the grid (teal trusts, red defects, the key
   // in the frame's caption, each seat's points on its plate); the grid
   // is for devices without WebGL.
-  if (!ctx.webglOk()) {
+  if (ctx.flat()) {
     const last = trLastRound(g);
     wrap.appendChild(el("div", "fl-cap", last ? "Round " + last.n + " · who trusted whom" : ""));
     wrap.appendChild(ctx.panel("grid", <TrustGrid g={g} round={last} me={me} />));
