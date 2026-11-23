@@ -22,19 +22,24 @@ import type { RouteContext } from "../index.js";
 // are served with the id stamped over the build's "next-dev" placeholder,
 // and GET /api/build reports it, so a long-lived page can tell it is
 // behind the latest deploy and offer a refresh.
-export let shellPromise: Promise<{ text: string, id: string }> | null = null;
-export function appShell(env: Env, origin: string) {
-  if (!shellPromise) {
-    shellPromise = (env.ASSETS as { fetch(req: Request): Promise<Response> }).fetch(new Request(origin + "/index.html")).then(async function (r) {
-      if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
-      const text = await r.text();
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-      const id = Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-      return { text: text, id: id };
-    });
-    shellPromise.catch(function () { shellPromise = null; });
-  }
-  return shellPromise;
+//
+// Only the settled shell is kept, never the fetch in flight. A promise
+// started by one request and awaited by others ties them all to the
+// first request: when it ended before the fetch did, the others waited on
+// I/O that belonged to a finished request and every page and /api/build
+// on that isolate failed until it was recycled. Requests that find no
+// shell yet each make their own (local, cheap) read; the first to finish
+// stores it.
+let shellKept: { text: string, id: string } | null = null;
+export async function appShell(env: Env, origin: string) {
+  if (shellKept) return shellKept;
+  const r = await (env.ASSETS as { fetch(req: Request): Promise<Response> }).fetch(new Request(origin + "/index.html"));
+  if (!r.ok) throw new Error("index.html is missing from the static assets (" + r.status + ")");
+  const text = await r.text();
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const id = Array.from(new Uint8Array(buf)).slice(0, 8).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  if (!shellKept) shellKept = { text: text, id: id };
+  return shellKept;
 }
 export async function currentBuildId(env: Env, origin: string) {
   return (await appShell(env, origin)).id;
