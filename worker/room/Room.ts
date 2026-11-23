@@ -91,7 +91,8 @@ export type UppRow = { msg: number, kind: string, n: number, etag: string };
 export type UtRow = { h: string, msg: number, kind: string, member: string, created: number, expires: number, max_bytes: number, used: number | null,
   tries: number, owner: number | null, sess: number | null };
 /** push: a member's Web Push subscription. */
-export type PushRow = { member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null };
+export type PushRow = { member: string, endpoint: string, p256dh: string, auth: string, ts: number, mode: string | null,
+  fails: number | null, fail_ts: number | null };
 /** mv: a member's voice (name lowercased). */
 export type MvRow = { name: string, provider: string | null, voice_id: string | null, sample_key: string | null, sample_type: string | null,
   sample_ts: number | null, ts: number | null };
@@ -262,8 +263,22 @@ function schemaDeliveryNumber(sql: SqlStorage) {
   addColumn(sql, "m", "seq", "INTEGER");
 }
 
+// Step 4. push.fails and push.fail_ts: how many sends in a row have
+// failed and when the first of them did (NULL once one gets through); the
+// fan-out drops a subscription that keeps failing (PUSH_FAIL_MAX,
+// PUSH_FAIL_MS). Only a 404 or 410 used to remove one, so a junk
+// registration cost a send on every post forever. And the rows no browser
+// makes go: values over the bounds subscribe now refuses (2048, 96 and 64
+// characters, PUSH_*_MAX in limits.ts, written out here because a step
+// never changes), which every post read whole.
+function schemaPushFailures(sql: SqlStorage) {
+  addColumn(sql, "push", "fails", "INTEGER");
+  addColumn(sql, "push", "fail_ts", "INTEGER");
+  sql.exec("DELETE FROM push WHERE length(endpoint) > 2048 OR length(p256dh) > 96 OR length(auth) > 64");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods

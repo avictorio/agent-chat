@@ -110,3 +110,38 @@ test("a fan-out sends several at a time, each with a timeout, and signs once per
   await h.settled();
   assert.equal(h.signed.filter((a) => a === "https://wns2-unit.notify.windows.com").length, 1, "the next post reuses it");
 });
+
+test("a subscription whose every send fails for a day is dropped; one that comes back is kept", async (t) => {
+  const h = pushRoom();
+  h.member("Ada"); h.member("Bob");
+  const dead = "https://fcm.googleapis.com/fcm/send/junk-1", flaky = "https://fcm.googleapis.com/fcm/send/flaky-1";
+  await subscribe(h, "Bob", dead);
+  await subscribe(h, "Bob", flaky);
+  let flakyUp = false;
+  const net = pushServices(t, (url) => (url === dead || !flakyUp ? 500 : 201));
+  net.release();
+  t.mock.method(console, "warn", () => {});
+  const row = (ep) => h.one("SELECT fails, fail_ts FROM push WHERE endpoint = ?", ep);
+  for (let i = 0; i < 5; i++) { await h.room.post("Ada", "post " + i, R, false); await h.settled(); }
+  assert.equal(row(dead).fails, 5, "five failures in a row are counted");
+  assert.ok(row(flaky), "but five failures within the hour (a push service's outage) drop nothing");
+  // the first failure was more than a day ago
+  h.db.prepare("UPDATE push SET fail_ts = ?").run(Date.now() - 86400000 - 1000);
+  flakyUp = true;
+  await h.room.post("Ada", "a day later", R, false);
+  await h.settled();
+  assert.equal(row(dead), undefined, "the one still failing is gone");
+  assert.deepEqual({ ...row(flaky) }, { fails: null, fail_ts: null }, "the one that answered again starts over");
+});
+
+test("the schema step drops the oversized subscriptions older rooms kept", () => {
+  const h = pushRoom();
+  h.member("Bob");
+  const ins = h.db.prepare("INSERT INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES ('bob', ?, ?, ?, 1, 'all')");
+  ins.run("https://fcm.googleapis.com/fcm/send/fine", "p".repeat(87), "a".repeat(22));
+  ins.run("https://fcm.googleapis.com/fcm/send/" + "A".repeat(2_000_000), "p".repeat(87), "a".repeat(22));
+  ins.run("https://fcm.googleapis.com/fcm/send/big-auth", "p".repeat(87), "a".repeat(300_000));
+  h.db.prepare("UPDATE cfg SET v = '3' WHERE k = 'schema_version'").run();
+  h.room.ensureSchema();
+  assert.deepEqual(h.all("SELECT endpoint FROM push").map((r) => r.endpoint), ["https://fcm.googleapis.com/fcm/send/fine"]);
+});

@@ -2,7 +2,7 @@
 
 import { b64urlDecode, b64urlEncode, concatBytes } from "../lib/crypto.js";
 import { sendWebPush, vapidSubject } from "../platform/webpush.js";
-import { PUSH_MAX_PER_MEMBER, PUSH_PARALLEL } from "../limits.js";
+import { PUSH_FAIL_MAX, PUSH_FAIL_MS, PUSH_MAX_PER_MEMBER, PUSH_PARALLEL } from "../limits.js";
 import { mentionsName } from "../lib/text.js";
 import { streamWants } from "./state.js";
 import type { ApiMessage } from "./messages.js";
@@ -79,8 +79,8 @@ export const PushMethods = {
     const active = new Set(this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
     const allowed = (m: string) => m === "" || active.has(m);
     // Web push (browser subscriptions).
-    const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">>("SELECT member, endpoint, p256dh, auth, mode FROM push").toArray();
-    const targets = rows.filter((r) => allowed(r.member) && r.member !== sender && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
+    const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode" | "fails">>("SELECT member, endpoint, p256dh, auth, mode, fails FROM push WHERE member != ?", sender).toArray();
+    const targets = rows.filter((r) => allowed(r.member) && ((r.mode || "all") !== "mentions" || mentionsName(msg.text, r.member)));
     // The targets are fixed here, but the sends take a while: each is
     // checked again just before it leaves. A member removed meanwhile has
     // no push rows left (revoke, revokeAll and a re-issued name drop
@@ -100,15 +100,30 @@ export const PushMethods = {
         try {
           const status = await sendWebPush(this.env, r, payload, wanted(r));
           if (status === null) continue;
-          if (status === 404 || status === 410) this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint);
-          else if (status >= 300) warn("push.send", "HTTP " + status, { room });
+          if (status === 404 || status === 410) { this.sql.exec("DELETE FROM push WHERE endpoint = ?", r.endpoint); continue; }
+          if (status < 300) {
+            if (r.fails) this.sql.exec("UPDATE push SET fails = NULL, fail_ts = NULL WHERE endpoint = ? AND member = ?", r.endpoint, r.member);
+            continue;
+          }
+          warn("push.send", "HTTP " + status, { room });
         } catch (e) {
           // the error's name only: a fetch error's message can quote the endpoint
           warn("push.send", e instanceof Error ? e.name : "Error", { room });
         }
+        this.pushFailed(r);
       }
     };
     await Promise.all(Array.from({ length: Math.min(PUSH_PARALLEL, targets.length) }, lane));
+  },
+
+  // A send that failed (an error, a timeout, any answer but 2xx, 404 or
+  // 410). The streak is counted on the row, and a row that has failed
+  // every send for PUSH_FAIL_MS and at least PUSH_FAIL_MAX times is
+  // dropped: a junk or long-dead registration, not an outage.
+  pushFailed(r: Pick<PushRow, "member" | "endpoint">) {
+    const now = Date.now();
+    this.sql.exec("UPDATE push SET fails = COALESCE(fails, 0) + 1, fail_ts = COALESCE(fail_ts, ?) WHERE endpoint = ? AND member = ?", now, r.endpoint, r.member);
+    this.sql.exec("DELETE FROM push WHERE endpoint = ? AND fails >= ? AND fail_ts <= ?", r.endpoint, PUSH_FAIL_MAX, now - PUSH_FAIL_MS);
   },
 
   notifyMembers(name: string | null | undefined) {

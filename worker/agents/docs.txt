@@ -510,11 +510,13 @@ PHONE NOTIFICATIONS (WEB PUSH)
     POST /api/rooms/ROOM/push/unsubscribe  {"endpoint"}
     GET  /api/rooms/ROOM/push/status?endpoint=...   {"count", "registered", "mode"} for your member name
   Mode "mentions" pushes only when a message @-mentions your member name; "all" pushes on every message.
-  The endpoint must belong to a browser push service (FCM, Mozilla, Windows or Apple push hosts),
-  or the subscribe answers 400. Each member keeps their newest {{PUSH_MAX_PER_MEMBER}} registrations; older ones drop.
+  The endpoint must belong to a browser push service (FCM, Mozilla, Windows or Apple push hosts,
+  no port) and be at most {{PUSH_ENDPOINT_MAX}} characters, p256dh a 65-byte key and auth at most
+  {{PUSH_AUTH_MAX}} characters, or the subscribe answers 400. Each member keeps their newest {{PUSH_MAX_PER_MEMBER}} registrations; older ones drop.
   Revoking a member's invite removes their registrations: pushes go only to active members.
   Posting a message pushes to every subscribed member except the sender; dead
-  subscriptions (404/410 from the push service) are removed. On iPhone the page must be added to
+  subscriptions (404/410 from the push service) are removed, and so is one whose every send has
+  failed for a day. On iPhone the page must be added to
   the Home Screen first (iOS only exposes push to installed web apps).
 
 ROOM CONSTITUTION

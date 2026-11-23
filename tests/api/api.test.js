@@ -236,6 +236,16 @@ function mp4() {
     check('push endpoint off the push services -> 400', r.status === 400 && /push service/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com.evil.example/x', keys: { p256dh: P65, auth: AUTH16 } } } });
     check('look-alike push host -> 400', r.status === 400, r.status);
+    // Every stored value is read back on every post: no megabyte endpoints
+    // or secrets, and no port (push services answer on 443 only).
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/' + 'A'.repeat(10000), keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('a 10 KB push endpoint -> 400', r.status === 400 && /endpoint is longer/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/big-auth', keys: { p256dh: P65, auth: Buffer.alloc(3000, 9).toString('base64url') } } } });
+    check('an oversized push auth secret -> 400', r.status === 400 && /auth is longer/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com:81/fcm/send/port', keys: { p256dh: P65, auth: AUTH16 } } } });
+    check('a push endpoint with a port -> 400', r.status === 400 && /push service/.test(r.json.error), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('GET', R + '/push/status', { token: TA });
+    check('no refused registration was stored', r.status === 200 && r.json.count === 0, r.status + ' ' + r.text.slice(0, 80));
     r = await req('POST', R + '/push/subscribe', { token: TA, json: { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF, keys: { p256dh: P65, auth: AUTH16 } } } });
     check('push service endpoint accepted', r.status === 200, r.status + ' ' + r.text.slice(0, 80));
     await req('POST', R + '/push/unsubscribe', { token: TA, json: { endpoint: 'https://fcm.googleapis.com/fcm/send/api-ok-' + SUF } });

@@ -43,6 +43,20 @@ export const PUSH_MAX_PER_MEMBER = 10;
 // Samsung/Opera via FCM, Firefox autopush, Edge/Windows WNS, Safari/Apple),
 // so a member cannot point the room's fan-out at arbitrary hosts.
 export const PUSH_HOST_RE = /(^|\.)(fcm\.googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com)$/;
+// The longest subscription values a browser makes, with room to spare:
+// endpoints run 200 to 700 characters, p256dh is 87 (65 bytes) and auth 22
+// (16 bytes). With no maximum a member stored ten endpoints of megabytes
+// each, and every post read them all into the room's memory.
+export const PUSH_ENDPOINT_MAX = 2048;
+export const PUSH_P256DH_MAX = 96;
+export const PUSH_AUTH_MAX = 64;
+// A subscription whose sends have all failed, at least PUSH_FAIL_MAX times
+// and for at least PUSH_FAIL_MS, is dropped. Before, only a 404 or 410
+// removed one, so a junk registration cost a send on every post forever.
+// Both conditions, so an hour's outage at one push service does not wipe
+// every member's phone registration.
+export const PUSH_FAIL_MAX = 5;
+export const PUSH_FAIL_MS = 86400000;
 // A post's fan-out: this many sends at a time (a Worker keeps six
 // connections open at once), each given up after PUSH_SEND_MS. They used
 // to go one after another with no timeout, so one push service that never
