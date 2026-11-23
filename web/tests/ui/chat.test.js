@@ -435,6 +435,62 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       return { title, signers: S.dc[1].signers };
     });
   }
+  // The resolve form's stale box: a resolution does not replace the
+  // question's text, so it says what saving again does instead (it used
+  // the edit form's "put it in place of theirs").
+  for (const [label, o] of [['board-stale-resolve', {}], ['board-stale-resolve-phone', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, o, async (page, S, calls) => {
+      S.q[0].updated = S.dc[0].updated;
+      await staleRefusing(page, S, calls);
+      await page.reload(); await settle(page);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="questions"]'); await settle(page);
+      const card = '#qList .card:has-text("Who books the dinner")';
+      await page.click(card + ' button:has-text("Resolve")'); await settle(page);
+      const form = '#qList .card:has(form.edit)';
+      await page.fill(form + ' textarea', 'Henry booked it for 8.');
+      // meanwhile Ada rewords the question
+      S.q[0].text = 'Who books the dinner reservation in Barranco?'; S.q[0].updated += 40;
+      await page.click(form + ' button:has-text("Mark resolved")');
+      await page.waitForSelector(form + ' .stale-note', { timeout: 5000 });
+      await settle(page);
+      const line = (await page.textContent(form + ' .stale-note')).replace(/\s+/g, ' ');
+      must(line.includes('Who books the dinner reservation in Barranco?'), 'the box shows the question as it reads now: ' + line);
+      must(line.includes('Save again to resolve it as it now reads, or cancel.') && !/in place of theirs/.test(line), 'the box says what saving again does: ' + line);
+      must(S.q[0].status === 'open', 'nothing was resolved');
+      await page.evaluate((f) => document.querySelector(f).scrollIntoView({ block: 'center' }), form);
+      await shot(page, label + '.png');
+      await page.click(form + ' button:has-text("Mark resolved")');
+      await page.waitForSelector('#qList form.edit', { state: 'detached', timeout: 5000 });
+      must(S.qr[0].id === 1 && S.qr[0].resolution === 'Henry booked it for 8.', 'saving again resolves it: ' + JSON.stringify(S.qr[0]));
+      return { line };
+    });
+  }
+  // The card's "This is how it reads now" line describes the copy a
+  // refusal brought back. When a later edit by someone else reaches the
+  // board (a board reload), the card shows that instead and the line
+  // goes. Before, it stayed until a write from this tab went through.
+  await run('board-stale-line-clears', {}, async (page, S, calls) => {
+    S.boardRev = 4;
+    S.streamRetry = 150;
+    await staleRefusing(page, S, calls);
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="decisions"]'); await settle(page);
+    const base = S.dc[1].updated;
+    S.dc[1].title = 'Digests rotate by who posted last'; S.dc[1].updated = base + 70;
+    await page.click('#dcList .card:has-text("Digests rotate") button:has-text("Sign")');
+    await page.waitForSelector('#dcList .card .stale-note', { timeout: 5000 });
+    await settle(page);
+    // Henry edits it again; the board reloads on board_rev
+    S.dc[1].title = 'Digests rotate weekly'; S.dc[1].updated = base + 90;
+    S.boardRev = 5;
+    await page.waitForFunction(() => /Digests rotate weekly/.test(document.getElementById('dcList').textContent), null, { timeout: 8000 }).catch(() => { throw new Error('the board did not reload'); });
+    await settle(page);
+    const out = { lines: await page.locator('#dcList .stale-note').count() };
+    must(out.lines === 0, 'the line goes once the board has a newer copy: ' + JSON.stringify(out));
+    S.streamRetry = 0;
+    return out;
+  });
   // A text-only edit by someone else (a decision's note, which no list in
   // room_state carries) shows on an open board when room_state's board_rev
   // moves. Before, the board reloaded only when its room_state lists

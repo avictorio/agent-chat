@@ -100,9 +100,11 @@ Front-end conventions.
   claim, unclaim, resolve, reopen, done) sends `base_updated`, the
   `updated` of the copy on screen (docs.txt BOARD WRITES FROM WHAT YOU
   READ). On the 409 the card takes the item from the answer
-  (`useFresh`, `staleItem`) and says someone else changed it first; an
+  (`useFresh`, `staleItem`) and says someone else changed it first,
+  until the board's own copy is newer than the one the 409 carried; an
   open form keeps the typed text, shows the other person's version and
-  saves again from its `updated`. Before, nothing was sent, and a form
+  saves again from its `updated` (the resolve form says it resolves the
+  question as it now reads: `staleNext`). Before, nothing was sent, and a form
   opened before another member's edit saved over it unseen. The
   constitution is versioned instead and sends no base. An open board
   reloads when room_state's `board_rev` (a count of board writes) or its

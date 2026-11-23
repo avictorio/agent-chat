@@ -179,6 +179,11 @@ export function useFresh<T extends Stamped>(x: T, key: BoardKey) {
   const [over, setOver] = useState<T | null>(null);
   const [changed, setChanged] = useState(false);
   const cur = over && over.id === x.id && (over.updated ?? 0) > (x.updated ?? 0) ? over : x;
+  // The line says the card shows what the refusal brought back. Once the
+  // board's own copy is newer than that (someone else's later edit, come
+  // in through a board reload), the line no longer describes the card; it
+  // used to stay until a write from this tab went through.
+  const passed = !!over && over.id === x.id && (x.updated ?? 0) > (over.updated ?? 0);
   const take = (e: unknown): T | null => {
     const it = staleItem<T>(e, key);
     if (!it) return null;
@@ -188,8 +193,9 @@ export function useFresh<T extends Stamped>(x: T, key: BoardKey) {
   };
   return {
     cur,
-    /** the line on the card: the last write was refused as stale */
-    changed,
+    /** the line on the card: the last write was refused as stale, and the
+     *  card still shows the copy the refusal carried */
+    changed: changed && !passed,
     clear: () => setChanged(false),
     /** for ActionButton's onStale */
     onStale: (e: unknown) => !!take(e),
@@ -227,6 +233,9 @@ interface EditState {
   /** A refusal because someone else changed the item first: its new
    *  updated and how it reads now (null for any other failure). */
   onStale?: (e: unknown) => { updated?: number; theirs: string } | null;
+  /** what saving again does after a stale refusal, when it is not putting
+   *  the typed text in place of theirs (a resolution leaves the text be) */
+  staleNext?: string;
   onSave: (name: string, vals: Record<string, string>, base: number | undefined) => Promise<unknown>;
 }
 
@@ -283,7 +292,7 @@ export function EditForm({
         <div className="stale-note" role="status">
           <p>Someone else changed this while you were editing. It now reads:</p>
           <div className="stale-theirs">{theirs}</div>
-          <p>Your text is still in the form. Save again to put it in place of theirs, or cancel to keep theirs.</p>
+          <p>Your text is still in the form. {edit.staleNext || "Save again to put it in place of theirs, or cancel to keep theirs."}</p>
         </div>
       ) : null}
       {edit.fields.map((f, i) =>

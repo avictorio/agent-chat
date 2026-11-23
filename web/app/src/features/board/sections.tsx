@@ -330,6 +330,7 @@ function QuestionCard({ x: board }: { x: Question }) {
                     context: x.text,
                     base: x.updated,
                     onStale: stale,
+                    staleNext: "Save again to resolve it as it now reads, or cancel.",
                     onSave: async (n, v, base) => {
                       await api.api("/questions/" + x.id, "POST", { from: n, action: "resolve", note: v.note, base_updated: base });
                       fr.clear();
