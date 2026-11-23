@@ -46,13 +46,19 @@ function escHTML(t: string): string {
 // Sending one post again after a lost answer is safe: it carries the
 // same client_msg_id, and the server answers a repeat with the first post
 // (repeat: true) instead of posting twice. A network failure or a server
-// error waits LOST_WAITS between tries; a 409 that names the id's first
-// post (still storing its files) waits STORING_WAITS. Then the error
-// shows, and Send again carries the same id.
+// error waits LOST_WAITS between tries. A 409 that names the id's first
+// post is one of two things the server tells apart only in its wording:
+// that post is still storing its files, or it posted and its message has
+// since been deleted. Only a post with inline media is ever held while
+// its files store, so only such a post waits STORING_WAITS and asks again;
+// a text-only post, or one still refused when the waits run out, throws
+// FirstPostGone. Before, every such 409 waited about 7.5 s and then showed
+// the server's sentence about client_msg_id, written for agents.
 const LOST_WAITS = [600, 1500, 3000];
 const STORING_WAITS = [500, 1000, 2000, 4000];
 const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
-async function postRetrying<T>(post: () => Promise<T>): Promise<T> {
+class FirstPostGone extends Error {}
+async function postRetrying<T>(post: () => Promise<T>, inlineMedia: boolean): Promise<T> {
   let lost = 0;
   let storing = 0;
   for (;;) {
@@ -62,9 +68,12 @@ async function postRetrying<T>(post: () => Promise<T>): Promise<T> {
       // a 409 without an id is a refusal (the message was deleted while
       // its files were stored): posting it again would bring it back
       const named = e instanceof ApiError && e.status === 409 && typeof (e.body as { id?: unknown } | null)?.id === "number";
-      if (named && storing < STORING_WAITS.length) {
-        await wait(STORING_WAITS[storing++]!);
-        continue;
+      if (named) {
+        if (inlineMedia && storing < STORING_WAITS.length) {
+          await wait(STORING_WAITS[storing++]!);
+          continue;
+        }
+        throw new FirstPostGone("This message was already posted and has since been deleted.");
       }
       const transient = !(e instanceof ApiError) || e.status >= 500;
       if (transient && lost < LOST_WAITS.length) {
@@ -427,8 +436,20 @@ export function Composer(p: ComposerProps) {
         payload.doc_name = art.name;
       }
       payload.client_msg_id = cid.id;
+      const inlineMedia = !!(clip || image || art);
       // repeat: true is this message's first post, answered again: success
-      const d = await postRetrying(() => client.postPayload(payload));
+      let d: Awaited<ReturnType<typeof client.postPayload>>;
+      try {
+        d = await postRetrying(() => client.postPayload(payload), inlineMedia);
+      } catch (postErr) {
+        if (!(postErr instanceof FirstPostGone)) throw postErr;
+        // The first post of this id went live and was deleted since: what
+        // the person sends is not in the room, so pressing Send asks for it
+        // to be posted. A new id makes it a new message, posted once.
+        cid.id = newClientMsgId();
+        payload.client_msg_id = cid.id;
+        d = await postRetrying(() => client.postPayload(payload), inlineMedia);
+      }
       cidRef.current = null;
       clearSent(textEl, typed);
       grow();
