@@ -116,8 +116,6 @@ export function useRoomStream(opts: {
     // feed holds, and every match that can still change. Without it a
     // reaction vote or a new avatar from the gap showed only after a reload.
     const rs = { running: false, again: false, at: 0, timer: 0 };
-    // ids whose reaction frame arrived while the re-read was out
-    let touched: Set<number> | null = null;
     const resync = () => {
       if (cancelled || deniedRef.current) return;
       if (rs.running) {
@@ -144,7 +142,7 @@ export function useRoomStream(opts: {
           const held = feed.messagesRef.current.length;
           if (held) {
             const seen = new Set<number>();
-            touched = seen;
+            feed.rxTouchedRef.current = seen;
             const d = await client.messages(undefined, Math.min(PAGE, held + SLACK));
             if (!cancelled) feed.syncReactions(d.messages || [], seen);
           }
@@ -152,7 +150,7 @@ export function useRoomStream(opts: {
           if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
           // any other failure: the next drop's re-sync reads again
         } finally {
-          touched = null;
+          feed.rxTouchedRef.current = null;
           rs.running = false;
           if (rs.again) {
             rs.again = false;
@@ -161,8 +159,12 @@ export function useRoomStream(opts: {
         }
       })();
     };
-    // Whether a stream has gone live yet: every later open follows a drop.
-    let opened = false;
+    // Whether a stream has been asked for since the initial load: every
+    // later open follows a failed or dropped one, and re-syncs. Counting
+    // from the first open that answered instead, a stream that failed for
+    // a while right after the load came up with no re-sync, though the
+    // members, reactions and matches may have changed meanwhile.
+    let asked = false;
     const recheck = async () => {
       try {
         await client.messages(feed.lastRef.current ?? undefined, 1);
@@ -187,6 +189,8 @@ export function useRoomStream(opts: {
       ctrlRef.current = ctrl;
       const s: Open = { ctrl, at: Date.now(), open: true, stalled: false };
       cur = s;
+      const later = asked;
+      asked = true;
       let retryMs = 3000;
       const onFrame = (kind: string, data: string, eventId: number | null) => {
         try {
@@ -198,7 +202,7 @@ export function useRoomStream(opts: {
               id: number;
               reactions?: Record<string, string[]>;
             };
-            touched?.add(d.id);
+            feed.touchReaction(d.id);
             feed.setMessages((arr) =>
               arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
             );
@@ -257,8 +261,7 @@ export function useRoomStream(opts: {
           s.at = Date.now();
           setStatus("live");
           window.dispatchEvent(new Event("ac-stream-open"));
-          if (opened) resync();
-          opened = true;
+          if (later) resync();
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let buf = "";

@@ -218,11 +218,21 @@ export function useMessages(opts: {
     });
   }, []);
 
+  // The rows whose reactions changed while a re-sync's read (below) was
+  // out, or null when none is: a reaction frame, the person's own tap and
+  // that tap's answer all mark their row, and the read leaves it be. A
+  // read sent before a tap and answered after it used to put the old
+  // chips back over the person's own reaction.
+  const rxTouchedRef = useRef<Set<number> | null>(null);
+  const touchReaction = useCallback((id: number) => {
+    rxTouchedRef.current?.add(id);
+  }, []);
+
   // Reactions from a fresh read of rows already on screen, after the
   // stream dropped: reaction frames are sent live only, so a vote made
   // while the stream was down never came, and the chip kept its old count
-  // until a reload. `skip` holds the rows whose reaction frame landed while
-  // the read was out: that frame is newer than the read. Rows the read
+  // until a reload. `skip` holds the rows touched while the read was out
+  // (rxTouchedRef): what touched them is newer than the read. Rows the read
   // does not carry are left as they are, and so is everything but the
   // reactions (new rows and changed messages come as message frames).
   const syncReactions = useCallback((rows: Message[], skip: Set<number>) => {
@@ -259,5 +269,7 @@ export function useMessages(opts: {
     linksAtRef,
     renewLinks,
     syncReactions,
+    rxTouchedRef,
+    touchReaction,
   };
 }

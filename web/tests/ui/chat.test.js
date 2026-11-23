@@ -737,5 +737,70 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     return { before, after, read: held[0] };
   });
 
+  // The person's own tap wins over a re-sync read that was sent before it
+  // and answered after it. The tap and its POST's answer did not mark the
+  // row, so the read put the old chips back over the new reaction.
+  await run('stream-resync-keeps-own-tap', { init: heldStream }, async (page, S, calls) => {
+    S.streamRetry = 300;
+    await page.reload(); await settle(page);
+    const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', (bs) => bs.map((b) => b.dataset.rx + b.textContent.replace(/\D/g, '') + (b.classList.contains('mine') ? '*' : '')).join(' '));
+    const before = await chips(3);
+    must(before === '👍2* ❤️1 🦄1', 'row 3 as loaded: ' + before);
+    // the re-read is held, and answers with the rows as they were when it
+    // was sent, before the tap
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const held = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?/, async (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/api/rooms/demo/messages' || u.searchParams.has('after') || /^(1|200)$/.test(u.searchParams.get('limit') || '')) return route.fallback();
+      const then = JSON.parse(JSON.stringify(S.msgs)).sort((a, b) => a.id - b.id).slice(-Number(u.searchParams.get('limit') || 50));
+      held.push(u.search);
+      await gate;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ room: 'demo', messages: then, you: 'Anthony', you_kind: 'human' }) });
+    });
+    const from = calls.length;
+    await page.evaluate(() => window.__streams[0].end());
+    for (let i = 0; i < 100 && !held.length; i++) await page.waitForTimeout(50);
+    must(held.length === 1, 'the reopen re-reads the rows on screen: ' + JSON.stringify(calls.slice(from)));
+    await page.click('.msg[data-id="3"] .rx-chip[data-rx="🦄"]');
+    await page.waitForFunction(() => { const c = document.querySelector('.msg[data-id="3"] .rx-chip[data-rx="🦄"]'); return c && c.classList.contains('mine'); }, null, { timeout: 3000 });
+    for (let i = 0; i < 100 && !calls.slice(from).some((c) => /^POST \/api\/rooms\/demo\/messages\/3\/reactions/.test(c)); i++) await page.waitForTimeout(50);
+    await settle(page);
+    const tapped = await chips(3);
+    release();
+    // the read lands (the members re-read runs beside it)
+    await page.waitForTimeout(800);
+    await settle(page);
+    const after = await chips(3);
+    must(tapped === '👍1 ❤️1 🦄2*', 'the tap shows: ' + tapped);
+    must(after === tapped, 'the held read does not put the old chips back: ' + after);
+    S.streamRetry = 0;
+    return { before, tapped, after };
+  });
+
+  // A stream that fails right after the page's first load and then opens
+  // re-syncs too: "the first open" used to be the first that answered, so
+  // the page came up without the reactions, members and matches that
+  // changed while the stream was failing.
+  await run('stream-resync-after-failed-first-open', { init: heldStream }, async (page, S, calls) => {
+    S.streamRetry = 300;
+    let fails = 1;
+    await page.route(/\/api\/rooms\/demo\/stream\?/, (route) => (fails-- > 0 ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"overloaded"}' }) : route.fallback()));
+    const from = calls.length;
+    await page.reload();
+    await page.waitForSelector('.msg[data-id="5"]', { timeout: 5000 });
+    // a vote while the stream is failing
+    S.msgs.find((m) => m.id === 5).reactions = { '🎉': ['Ada', 'Henry'] };
+    await page.waitForFunction(() => document.querySelector('#status').classList.contains('live'), null, { timeout: 8000 }).catch(() => { throw new Error('the stream never opened: ' + JSON.stringify(calls.slice(from))); });
+    must(fails < 0, 'the first stream failed');
+    await page.waitForFunction(() => !!document.querySelector('.msg[data-id="5"] .rx-chip[data-rx="🎉"]'), null, { timeout: 5000 }).catch(() => { throw new Error('the vote from the failing spell never showed: ' + JSON.stringify(calls.slice(from))); });
+    const later = calls.slice(from);
+    const opened = later.map((c) => /\/stream\?/.test(c)).lastIndexOf(true);
+    must(later.slice(opened).some((c) => /^GET \/api\/rooms\/demo\/members/.test(c)), 'the members are read again once it opens: ' + JSON.stringify(later));
+    S.streamRetry = 0;
+    return { streams: later.filter((c) => /\/stream\?/.test(c)).length };
+  });
+
   done('chat');
 })();

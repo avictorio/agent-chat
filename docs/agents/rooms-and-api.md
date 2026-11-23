@@ -48,10 +48,13 @@ docs.txt section that owns its routes, caps and formats.
     into view, or any open one when the browser comes back online: a
     phone that slept or changed networks can leave the connection
     half-open with no error. Each reopens through the usual backoff,
-    one at a time. Every open after the first re-syncs what the replay
-    does not carry (`RESYNC_GAP` apart): the members, the reactions of
-    the rows the feed holds (one latest page; a reaction frame that
-    lands meanwhile wins), and every match that can still change.
+    one at a time. Every open after the first stream asked for once the
+    page has loaded (so also the first that answers after failed tries)
+    re-syncs what the replay does not carry (`RESYNC_GAP` apart): the
+    members, the reactions of the rows the feed holds (one latest page;
+    a row touched while it is out, by a reaction frame, the person's own
+    tap or that tap's answer, keeps what touched it: `touchReaction` in
+    `useMessages.ts`), and every match that can still change.
     Deletes and messages past the replay's reach are not re-synced yet.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for

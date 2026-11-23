@@ -337,6 +337,7 @@ export function RoomShell({ room }: { room: string }) {
     meName: nameState.value,
     getMessage: (id) => feed.messagesRef.current.find((m) => m.id === id),
     setMessages: (fn) => feed.setMessages(fn),
+    touch: feed.touchReaction,
     listRef,
     denied,
   });

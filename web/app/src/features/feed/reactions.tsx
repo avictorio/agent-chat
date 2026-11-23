@@ -65,6 +65,9 @@ export function useReactions(opts: {
   meName: string;
   getMessage: (id: number) => Message | undefined;
   setMessages: (fn: (arr: Message[]) => Message[]) => void;
+  /** marks a row's reactions as changed here, so a re-sync read already
+   *  out does not put older ones back (useMessages' touchReaction) */
+  touch: (id: number) => void;
   listRef: RefObject<HTMLDivElement | null>;
   denied: boolean;
 }): {
@@ -76,7 +79,7 @@ export function useReactions(opts: {
   const [pop, setPop] = useState<Pop | null>(null);
   const popRef = useLatest(pop);
   const swallowRef = useRef(false);
-  const { client, who, getMessage, setMessages, listRef } = opts;
+  const { client, who, getMessage, setMessages, touch, listRef } = opts;
   const whoRef = useLatest(who);
   const deniedRef = useLatest(opts.denied);
   const meName = opts.meName;
@@ -89,6 +92,7 @@ export function useReactions(opts: {
       if (!n) return;
       const key = NAME2EMOJI[label] || label;
       setPop(null);
+      touch(m.id);
       setMessages((arr) =>
         arr.map((x) => {
           if (x.id !== m.id) return x;
@@ -109,12 +113,13 @@ export function useReactions(opts: {
         .then((d) => {
           const rx = (d as { reactions?: Record<string, string[]> } | null)?.reactions;
           if (rx) {
+            touch(m.id);
             setMessages((arr) => arr.map((x) => (x.id === m.id ? { ...x, reactions: rx } : x)));
           }
         })
         .catch((e: Error) => toast(e.message, true));
     },
-    [client, setMessages, whoRef]
+    [client, setMessages, touch, whoRef]
   );
 
   const openBar = useCallback((m: Message, row: HTMLElement) => {
