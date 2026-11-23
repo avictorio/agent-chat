@@ -89,10 +89,10 @@ test("the town's numbers count town lines only, whatever the den says", async ()
   // non-player's state; each town number is the line's place in the town
   const listed = h.room.listGames().games.find((g) => g.id === id);
   const pub = (await h.room.gameState(id, null, R)).game;
-  for (const g of [listed, pub]) {
-    assert.deepEqual(g.talk.map((t) => [t.n, t.text]), [[1, "one"], [2, "two"], [3, "three"]]);
-    assert.equal(g.den, undefined);
-  }
+  for (const lines of [listed.talk_recent, pub.talk_recent, pub.talk]) assert.deepEqual(lines.map((t) => [t.n, t.text]), [[1, "one"], [2, "two"], [3, "three"]]);
+  assert.equal(listed.talk_count, 3);
+  assert.equal(listed.den, undefined);
+  assert.equal(pub.den, undefined);
   const mine = (await h.room.gameState(id, wolf, R)).game;
   assert.deepEqual(mine.den.map((t) => t.n), [1, 2, 3, 4, 5], "the den is numbered on its own too");
 });
@@ -124,7 +124,7 @@ test("a match stored with both channels in one list still reads, and keeps every
   const pub = (await h.room.gameState(id, null, R)).game;
   assert.deepEqual(pub.talk.map((t) => [t.n, t.text]), [[1, "t1"], [2, "t2"]], "the town, numbered in its own order");
   assert.equal(pub.den, undefined);
-  assert.equal(h.room.listGames().games.find((g) => g.id === id).talk.length, 2);
+  assert.equal(h.room.listGames().games.find((g) => g.id === id).talk_count, 2);
   const mine = (await h.room.gameState(id, wolf, R)).game;
   assert.deepEqual(mine.den.map((t) => [t.n, t.text]), [[1, "d1"], [2, "d2"], [3, "d3"]]);
   // reading changed nothing stored
@@ -136,4 +136,30 @@ test("a match stored with both channels in one list still reads, and keeps every
   const after = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", id).one().state);
   assert.deepEqual(after.talk.map((t) => t.text), ["t1", "t2", "t3"]);
   assert.deepEqual(after.den.map((t) => t.text), ["d1", "d2", "d3"]);
+});
+
+test("frames and the games list carry the newest town lines and a count, not the transcript", async () => {
+  const { h, id, wolf, seer, vill } = await day1();
+  const long = "x".repeat(400);
+  for (let i = 0; i < 150; i++) assert.equal((await h.room.gameMove(id, [vill[0], vill[1], seer][i % 3], "say: " + i + " " + long, R)).status, 200);
+  const frames = [];
+  h.room.clients.add({ token: "t", owner: false, name: "Zed", kinds: null, games: null, stateSub: false, stateKey: null, send: (f) => { if (f.startsWith("event: game")) frames.push(f); }, close: () => {} });
+  assert.equal((await h.room.gameMove(id, wolf, "say: the last word", R)).status, 200);
+  assert.equal(frames.length, 1);
+  // one say: sent the newest 120 lines (~59 KB) to every stream
+  assert.ok(frames[0].length < 6000, "a frame of " + frames[0].length + " bytes");
+  const pub = JSON.parse(frames[0].split("data: ")[1]).game;
+  assert.equal(pub.talk, undefined);
+  assert.equal(pub.talk_count, 151);
+  assert.deepEqual(pub.talk_recent.map((t) => t.n), [147, 148, 149, 150, 151]);
+  assert.equal(pub.talk_recent[4].text, "the last word");
+  const listed = h.room.listGames().games.find((g) => g.id === id);
+  assert.equal(listed.talk, undefined);
+  assert.ok(JSON.stringify(listed).length < 6000);
+  // the full state, for everyone, still has the talk
+  for (const who of [null, vill[0]]) {
+    const g = (await h.room.gameState(id, who, R)).game;
+    assert.equal(g.talk.length, 120);
+    assert.equal(g.talk[119].text, "the last word");
+  }
 });

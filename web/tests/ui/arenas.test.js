@@ -1,7 +1,7 @@
 // UI scenarios: each game's arena: its controls, its moves and its finished state, desktop and phone.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/arenas.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
+const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harness');
 
 (async () => {
   // Frontlines: the card shows the score and the last round on a compact
@@ -553,6 +553,33 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       return out;
     });
   }
+  // Frames and the games list carry only the newest town lines and a count
+  // (they used to carry 120 lines, ~59 KB a frame): the square is the full
+  // state's talk, so a frame keeps what it shows and the read after it
+  // brings the new line.
+  await run('werewolf-talk-frame', { state: { ww: true }, init: noGl }, async (page, S, calls) => {
+    const out = {};
+    // a stream that reconnects at once, so the frame below goes out soon
+    S.streamRetry = 300;
+    await page.reload();
+    await page.waitForSelector('.game-card.kind-werewolf', { timeout: 10000 });
+    await page.click('.game-card.kind-werewolf');
+    await page.waitForSelector('#viewer .ww-talk-sec .ww-line', { timeout: 20000 });
+    const line = { n: 2, by: 'Henry', text: 'I was home all night.', ch: 'town', phase: 'day', day: 1, at: S.ww.talk[0].at + 5000 };
+    S.ww.talk = S.ww.talk.concat([line]);
+    const pub = Object.assign({}, S.ww, { talk_recent: S.ww.talk.slice(-5), talk_count: 2 });
+    for (const k of ['talk', 'den', 'you', 'log', 'awaiting', 'awaiting_accept']) delete pub[k];
+    S.liveGames = [pub];
+    const from = calls.length;
+    // well inside the arena's 8 s poll: the frame is what brings the read
+    await page.waitForFunction(() => document.querySelectorAll('#viewer .ww-talk-sec .ww-line').length === 2, null, { timeout: 5000, polling: 50 });
+    S.streamRetry = 0;
+    out.lines = await page.$$eval('#viewer .ww-talk-sec .ww-line-text', (els) => els.map((e) => e.textContent));
+    out.read = calls.slice(from).some((c) => /^GET \/api\/rooms\/demo\/games\/30\b/.test(c));
+    must(out.lines.join('|') === 'Henry was near the well last night.|I was home all night.', 'the square keeps its lines and gains the new one: ' + JSON.stringify(out));
+    must(out.read, 'the frame was followed by a read of the full state: ' + JSON.stringify(calls.slice(from)));
+    return out;
+  });
   // The same line said twice while the first is still out is two lines:
   // the form had already cleared its draft, and the second "no" was
   // dropped as a double tap, lost for good.

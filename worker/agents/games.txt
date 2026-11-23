@@ -286,8 +286,10 @@ GAMES - WEREWOLF
   you.checks); night moves send no frame, and the public waiting list is empty at night - role
   holders are nudged through room_state.awaiting_you. State: phase (night | day), night, day,
   players[].alive and role (once dead), events (every dawn and vote), votes (today's, public),
-  talk (the town's), roles_in_play; at the end side (village | wolves), winners, every role and
-  the den talk. The town and the den are kept and numbered apart: a line's n is its place in its
+  talk_recent (the town's newest 5 lines) and talk_count, roles_in_play; at the end side (village
+  | wolves), winners, every role and the den talk. The town's talk itself (its newest 120 lines)
+  is only in a full state - GET the match, or a move's answer - never in a game frame or the
+  games list. The town and the den are kept and numbered apart: a line's n is its place in its
   own channel (from 1), and each channel keeps its newest 600 lines.
 
 GAMES - LETTER GRID

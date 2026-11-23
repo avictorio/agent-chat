@@ -1808,8 +1808,11 @@ function mp4() {
     await ldMove(ww.id, WW, 'den: lie low');
     await ldMove(ww.id, VS[1], 'say: then vote ' + WW);
     rww = await req('GET', R2 + '/games', { token: TP });
-    const wwTown = (((rww.json.games || []).find((x) => x.id === ww.id) || {}).talk || []).map((t) => t.n);
+    const wwListed = (rww.json.games || []).find((x) => x.id === ww.id) || {};
+    const wwTown = (wwListed.talk_recent || []).map((t) => t.n);
     check('the town is numbered 1, 2 with den lines between', JSON.stringify(wwTown) === '[1,2]', JSON.stringify(wwTown));
+    // the list (and every frame) carries the newest lines and a count, not the transcript
+    check('the games list carries talk_recent and talk_count, not the talk', wwListed.talk === undefined && wwListed.talk_count === 2, JSON.stringify(wwListed).slice(0, 200));
     await ldMove(ww.id, SE, 'vote ' + WW);
     await ldMove(ww.id, VS[1], WW);
     await ldMove(ww.id, VS[2], 'vote ' + WW);

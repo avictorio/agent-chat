@@ -19,14 +19,14 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.6";
+export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
   {
     id: "2026-11-23-werewolf-talk",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Werewolf's town talk and den are numbered apart: a line's n is its place in its own channel, from 1 (the two used to share one counter, so gaps in the town's numbers counted den lines). Lines of a match already running are renumbered that way. Each channel keeps its newest 600 lines, so den lines no longer push town lines out.",
+    text: "Werewolf: the town talk and the den are numbered apart (n is a line's place in its own channel, from 1; running matches are renumbered) and each keeps its newest 600 lines, so den lines no longer push town lines out. Game frames and the games list (REST /games, MCP list_games) carry talk_recent (the newest 5 town lines) and talk_count instead of talk: read the match (GET /games/ID, MCP get_game) for the talk.",
   },
   {
     id: "2026-11-23-drafts",

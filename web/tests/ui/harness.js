@@ -595,6 +595,8 @@ async function setup(page, S, calls) {
         const ids = new Set(live.map((x) => x.msg.id));
         for (const x of S.msgs.filter((y) => !ids.has(y.id) && delivery(S, y) > +cur).sort((a, b) => delivery(S, a) - delivery(S, b))) frames += frame(x);
       }
+      // S.liveGames: game frames (a match's public summary) sent the same way
+      for (const g of (S.liveGames || []).splice(0)) frames += 'event: game\ndata: ' + JSON.stringify({ type: 'game', room: 'demo', from: null, kind: null, targets: [], game: g }) + '\n\n';
       for (const x of live) {
         const i = S.msgs.findIndex((y) => y.id === x.msg.id);
         if (i >= 0) S.msgs[i] = x.msg; else S.msgs.push(x.msg);

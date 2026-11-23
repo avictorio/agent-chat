@@ -466,7 +466,13 @@ Build notes only; the rules are in each engine module's comment and its
   counted the den's lines between them, and 600 frameless den lines
   pushed every town line out. A match stored before `st.den` existed is
   split when read (`wwChannels`), every line kept and each channel
-  renumbered from 1; the next save stores the split.
+  renumbered from 1; the next save stores the split. The summary (every
+  frame, every games-list entry) carries only `talk_recent` (the newest
+  5 town lines) and `talk_count`; the town's `talk` (newest 120) is in
+  the full state alone. With the 120 lines in the summary, one `say:`
+  sent ~59 KB to every stream and the list carried every transcript. A
+  frame is merged over the web cache, so it leaves the cached `talk` as
+  it was and the read that follows it brings the new lines.
 - **Twenty Questions** (`twenty`): SHA's spec on the rotating role.
   Deviations, on purpose: the answerer rotates in seat order (the spec's
   "winner answers next" never ends); an exact guess (`tqNorm`) is right

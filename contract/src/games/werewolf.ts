@@ -80,7 +80,7 @@ export interface WerewolfYou extends GameYouBase {
   vote?: string | null;
 }
 
-/** wwSummary, plus wwStateFull's log, awaiting, den and you. */
+/** wwSummary, plus wwStateFull's log, awaiting, talk, den and you. */
 export interface WerewolfState extends GameStateBase<"werewolf"> {
   /** Null unless the match is running. */
   phase: "night" | "day" | null;
@@ -94,8 +94,13 @@ export interface WerewolfState extends GameStateBase<"werewolf"> {
   events: WerewolfEvent[];
   /** By day while running: each voter's pick (public), else null. */
   votes: Record<string, string> | null;
-  /** The town talk, the newest 120 lines. */
-  talk: WerewolfTalk[];
+  /** The town talk, the newest 120 lines: in a full state only (a read,
+   *  a move's answer), never in a frame or a games-list entry. */
+  talk?: WerewolfTalk[];
+  /** The newest 5 town lines, in every view (frames and lists included). */
+  talk_recent: WerewolfTalk[];
+  /** How many town lines have been said (the newest line's n). */
+  talk_count: number;
   /** The winning side, once decided. */
   side: "village" | "wolves" | null;
   /** The winning side's players. */

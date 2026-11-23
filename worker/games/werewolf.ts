@@ -36,6 +36,10 @@ export type WwItemSeat = { name: string, alive: boolean, moved: boolean, accepte
 export const WW_TALK_MAX = 400;
 // Werewolf: the lines each channel keeps (the town's and the den's apart).
 const WW_TALK_KEEP = 600;
+// Werewolf: the town lines a full state sends, and the newest few the
+// summary carries (every frame and every games-list entry).
+const WW_TALK_SEND = 120;
+const WW_TALK_RECENT = 5;
 
 export const WerewolfMethods = {
   /* ---------- games: Werewolf ----------
@@ -105,7 +109,11 @@ export const WerewolfMethods = {
       phase: live ? st.phase : null, night: st.night, day: st.day, phase_seconds: st.phase_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       order: st.order, roles_in_play: this.wwRolesInPlay(st), alive_count: this.wwAlive(st).length,
       events: st.events, votes: live && st.phase === "day" ? st.votes : null,
-      talk: st.talk.slice(-120),
+      // The summary goes into every frame and every games-list entry: with
+      // the newest 120 lines in it, one say: sent ~59 KB to each stream
+      // and list_games carried every match's transcript. It carries the
+      // last few lines and the count; the full state carries the talk.
+      talk_recent: st.talk.slice(-WW_TALK_RECENT), talk_count: st.talk.length ? st.talk[st.talk.length - 1].n : 0,
       side: st.side || null, winners: st.winners || null, winner: null, draw: false, places: st.places || null, declined_by: st.declined_by || null,
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, alive: !!st.alive[p.name], role: over || !st.alive[p.name] ? st.roles[p.name] : null, voted: live && st.phase === "day" ? st.votes[p.name] !== undefined : false })),
     };
@@ -115,6 +123,7 @@ export const WerewolfMethods = {
     const out = this.wwSummary(g);
     const st = g.st;
     out.log = st.log.slice(-30);
+    out.talk = st.talk.slice(-WW_TALK_SEND);
     const live = g.status === "running";
     const over = g.status === "finished" || g.status === "cancelled";
     out.awaiting = live && st.phase === "day" ? this.wwAlive(st).filter((n) => st.votes[n] === undefined) : [];
@@ -132,7 +141,7 @@ export const WerewolfMethods = {
     const you: WerewolfYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
     if (role === "werewolf") {
       you.pack = st.order.filter((n) => st.roles[n] === "werewolf" && n !== me.name);
-      if (!over) out.den = den.slice(-120);
+      if (!over) out.den = den.slice(-WW_TALK_SEND);
       if (live && st.phase === "night") you.pack_picks = Object.fromEntries(this.wwLivingWolves(st).filter((n) => st.acts[n]).map((n) => [n, st.acts[n]]));
     }
     if (role === "seer") you.checks = st.checks;
