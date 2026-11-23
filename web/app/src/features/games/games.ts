@@ -327,10 +327,31 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     // Several views add their note to the page only when it has text,
     // and on the mover's own turn it has none: a refusal written there
     // reached nobody, while the scene had already played the move in.
-    // Off the page, the refusal is a toast.
+    // In the open arena the refusal goes into the page just above the
+    // control that was used: a toast sits at the bottom of the screen,
+    // which on a phone is the control row the player needs next (Four
+    // in a Row's drop buttons). Off the arena it is a toast.
     const say = (text: string) => {
-      if (note && note.isConnected) note.textContent = text;
-      else toast(text, true);
+      if (note && note.isConnected) {
+        note.textContent = text;
+        return;
+      }
+      const gv = gameView;
+      if (!gv || gv.id !== id) {
+        toast(text, true);
+        return;
+      }
+      const n = note || el("div", "lc-note", "");
+      n.textContent = text;
+      n.classList.add("move-refused");
+      n.setAttribute("role", "alert");
+      const used = gv.tapped && gv.tapped.parentNode === gv.wrap ? gv.tapped : null;
+      const scenes = gv.wrap.querySelectorAll(":scope > .lc-3d-host");
+      // a tap on the scene: under it, still above the controls
+      if (used && !used.classList.contains("lc-3d-host")) gv.wrap.insertBefore(n, used);
+      else if (used || scenes.length) gv.wrap.insertBefore(n, (used || scenes[scenes.length - 1]!).nextSibling);
+      else gv.wrap.appendChild(n);
+      n.scrollIntoView({ block: "nearest" });
     };
     try {
       const d = await client.submitMove(id, dir, opts.turnFor ? opts.turnFor(id) : undefined);
@@ -831,7 +852,20 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         const wrap = el("div", "lc-arena" + (kind ? " kind-" + kind : ""));
         wrap.appendChild(el("div", "lc-meta", "Loading the arena…"));
         vb.appendChild(wrap);
-        gameView = { id, wrap };
+        const gv: GameView = { id, wrap };
+        gameView = gv;
+        // the arena's child that holds the control last used, so a
+        // refused move is said next to it (sendMove); capture runs
+        // before the control's own handler sends the move
+        wrap.addEventListener(
+          "click",
+          (e) => {
+            let t = e.target as Node | null;
+            while (t && t.parentNode !== wrap) t = t.parentNode;
+            gv.tapped = t instanceof HTMLElement ? t : null;
+          },
+          true
+        );
         void fetchGame(id);
       },
       null,

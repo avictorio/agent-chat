@@ -38,6 +38,9 @@ export type Kind3d = { cls: string; load: () => Promise<{ default: ComponentType
 export type GameView = {
   id: number;
   wrap: HTMLElement;
+  // the arena's child holding the control last clicked: a refused move
+  // is said just above it (sendMove)
+  tapped?: HTMLElement | null;
   // the game's React panels (ctx.panel): one root per slot
   panels?: Record<string, { host: HTMLElement; root: Root }>;
   lastRounds?: number;

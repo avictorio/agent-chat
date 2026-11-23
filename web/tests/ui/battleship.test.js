@@ -331,12 +331,14 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
   });
   /* A refused move on your own turn: the view puts its note line on the
      page only when it has text, and on your turn it has none, so the
-     referee's refusal shows as a toast instead of vanishing. */
+     refusal used to vanish; then it was a toast, which on a phone sat over
+     the drop buttons the player needed next. In the open arena it is said
+     in the page, just above the control that was used, covering nothing. */
   const REFUSED = 'The referee refused that move: the clock just ran out';
   for (const [label, o, state, gid, open, act] of [
-    ['move-refused-toast', {}, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
-    ['move-refused-toast-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
-    ['move-refused-toast-werewolf', {}, { ww: true }, 30, '.game-card.kind-werewolf', '#viewer .ww-target[aria-label="Vote out Henry"]'],
+    ['move-refused-note', {}, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-note-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-note-werewolf', {}, { ww: true }, 30, '.game-card.kind-werewolf', '#viewer .ww-target[aria-label="Vote out Henry"]'],
   ]) {
     await run(label, Object.assign({ state, init: noGl, allowConsole: [/409/] }, o), async (page) => {
       let posts = 0;
@@ -344,11 +346,20 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       await page.click(open);
       await page.waitForSelector(act, { timeout: 15000 });
       await page.click(act);
-      await page.waitForFunction((t) => { const e = document.querySelector('#toast'); return !!e && !e.hidden && e.textContent.includes(t); }, REFUSED, { timeout: 10000 }).catch(() => {});
-      // on top: the viewer covers the page, and a toast under it was never seen
-      const out = { posts, toast: await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''), onTop: await page.$eval('#toast', (e) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e; }).catch(() => false) };
+      await page.waitForSelector('#viewer .move-refused', { timeout: 10000 }).catch(() => {});
+      const out = await page.evaluate(([sel, t]) => {
+        const n = document.querySelector('#viewer .move-refused');
+        const c = document.querySelector(sel);
+        const toast = document.querySelector('#toast');
+        if (!n || !c) return { note: n ? n.textContent : null, control: !!c };
+        const nr = n.getBoundingClientRect(), cr = c.getBoundingClientRect();
+        const hit = document.elementFromPoint(cr.left + cr.width / 2, cr.top + cr.height / 2);
+        return { posts: 0, note: n.textContent, said: n.textContent.includes(t), above: !!(n.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) && nr.bottom <= cr.top + 1,
+          inView: nr.top >= 0 && nr.bottom <= innerHeight, controlFree: !!hit && (hit === c || c.contains(hit)), toast: toast && !toast.hidden ? toast.textContent : '' };
+      }, [act, REFUSED]);
+      out.posts = posts;
       await shot(page, label + '.png');
-      if (posts !== 1 || !out.toast.includes(REFUSED) || !out.onTop) throw new Error('the refusal shows as a toast, over the arena: ' + JSON.stringify(out));
+      if (posts !== 1 || !out.said || !out.above || !out.inView || !out.controlFree || out.toast) throw new Error('the refusal shows in the arena above the control, covering nothing: ' + JSON.stringify(out));
       return out;
     });
   }
@@ -383,10 +394,12 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       Object.assign(S.c4, { turn: 9, board: S.c4.board.slice(0, 5).concat(['O.XOXXO']), moves: S.c4.moves.concat(mv), last_move: Object.assign({ at: now - 5e3 }, mv[1]) });
       await page.click('#viewer .c4-drop:nth-child(2)');
       await page.waitForFunction(() => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === 8, null, { timeout: 10000 }).catch(() => {});
-      await page.waitForFunction(() => /moved on/.test(document.querySelector('#viewer').textContent + ((document.querySelector('#toast') || {}).textContent || '')), null, { timeout: 10000 }).catch(() => {});
+      await page.waitForSelector('#viewer .move-refused', { timeout: 10000 }).catch(() => {});
       out.after = await discs();
       out.post = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).pop() || '';
-      out.said = /moved on: it is at turn 9/.test(await page.$eval('#viewer', (e) => e.textContent) + await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''));
+      // the two new discs fall (0.38 s): shoot the board once they land
+      await page.waitForTimeout(500);
+      out.said = /moved on: it is at turn 9/.test(await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => ''));
       await shot(page, label + '.png');
       if (!/"turn":7/.test(out.post)) throw new Error('the move named turn 7: ' + out.post);
       if (out.before !== 6 || out.after !== 8) throw new Error('the board catches up from the refusal: ' + JSON.stringify(out));

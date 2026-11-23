@@ -60,7 +60,7 @@
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg);
   padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-  /* over the viewer (#viewer, 120): a game move refused there is said in a toast */
+  /* over the viewer (#viewer, 120): a toast raised while it is open (a refused rematch) */
   z-index: 130; max-width: calc(100vw - 32px);
 }
 .toast.bad { background: var(--danger); color: #fff; }
