@@ -21,6 +21,9 @@ test("the stream route hands the invite to the room object in a header, not in i
   assert.ok(!seen[0].url.includes("tok-Ada"), "no token in the room object's URL: " + seen[0].url);
   assert.ok(!new URL(seen[0].url).searchParams.has("token"));
   assert.equal(seen[0].headers.get("X-Invite-Token"), "tok-Ada_with-dash");
+  // the logs redact a header by its name (cookie, set-cookie, or one containing auth, key, secret, token or jwt)
+  const carrying = [...seen[0].headers].filter(([, v]) => v === "tok-Ada_with-dash").map(([k]) => k);
+  assert.ok(carrying.length && carrying.every((k) => /^(set-)?cookie$|auth|key|secret|token|jwt/i.test(k)), "a name the logs redact: " + carrying);
   assert.equal(new URL(seen[0].url).searchParams.get("events"), "message");
 });
 
