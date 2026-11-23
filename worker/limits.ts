@@ -147,8 +147,15 @@ export const MIB = 1048576;
  *  are a few hundred bytes; with no cap they were read whole, whatever
  *  their size, before anything was checked. */
 export const SMALL_BODY_MAX = MIB;
-/** The largest body read whole before a member's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
+/** The largest body read whole before a member's or the owner's request is routed (lib/http.ts settleBody). The largest a route takes that way is a 25 MB video as base64 JSON, about 34 MB; bigger files go in parts. */
 export const SETTLED_BODY_MAX = 48 * MIB;
+/** The largest body a one-request file route takes for a file of up to
+ *  max bytes: the file as base64 JSON (4/3 of it, with room for line
+ *  breaks) plus a little for the JSON around it. The routes' documented
+ *  caps (avatar, voice sample, a message's audio, image or video). */
+export function inlineBodyCap(max: number) {
+  return max * 1.4 + 1000;
+}
 export const UP_KINDS = ["image", "audio", "video", "file"];
 export const UP_PART_MIN = 8 * MIB;
 export const UP_PART_MAX = 90 * MIB;

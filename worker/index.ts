@@ -3,7 +3,7 @@
 // (API, dashboard, a local wrangler deploy) are overwritten by the next push. See AGENTS.md.
 import { BadRequest, CORS, json, settleBody } from "./lib/http.js";
 import { GONE_MSG, isGoneError } from "./lib/errors.js";
-import { MIB, ROOM_RE, SETTLED_BODY_MAX } from "./limits.js";
+import { AUDIO_MAX, AVATAR_MAX, IMAGE_MAX, inlineBodyCap, mb, mediaTooBig, MIB, ROOM_RE, SETTLED_BODY_MAX, VIDEO_MAX, VOICE_SAMPLE_MAX } from "./limits.js";
 import { MCP_PATH, headerToken, queryToken, queryTokenNotice } from "./lib/tokens.js";
 import { renewDirectVerdict } from "./platform/r2-direct-check.js";
 import { r2DirectConfigured } from "./platform/r2-s3.js";
@@ -100,25 +100,46 @@ export default {
 // memory, and they look at the invite again once the stream ends.
 const STREAMED_BODY = /^\/api\/rooms\/[^/]+\/messages\/\d+\/(?:video\/stream|(?:image|audio|video|file)\/part)\/?$/;
 
+// The routes that take one file in one request, with a documented cap
+// below SETTLED_BODY_MAX, and their 413. Their own Content-Length check
+// came after the body had already been read here, so a member's chunked
+// voice sample or avatar was held up to SETTLED_BODY_MAX (48 MiB) before
+// its 14 MB or 3 MB cap was looked at.
+const BODY_CAPS: Array<[RegExp, number, string]> = [
+  [/^\/api\/rooms\/[^/]+\/(?:avatar|members\/[^/]+\/avatar)\/?$/, inlineBodyCap(AVATAR_MAX), "Avatars can be up to " + mb(AVATAR_MAX)],
+  [/^\/api\/rooms\/[^/]+\/(?:voice|members\/[^/]+\/voice)\/sample\/?$/, inlineBodyCap(VOICE_SAMPLE_MAX), "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX)],
+  [/^\/api\/rooms\/[^/]+\/messages\/\d+\/audio\/?$/, inlineBodyCap(AUDIO_MAX), mediaTooBig("audio", "inline")],
+  [/^\/api\/rooms\/[^/]+\/messages\/\d+\/image\/?$/, inlineBodyCap(IMAGE_MAX), mediaTooBig("image", "inline")],
+  [/^\/api\/rooms\/[^/]+\/messages\/\d+\/video\/?$/, inlineBodyCap(VIDEO_MAX), mediaTooBig("video", "inline")],
+];
+
 // A member's request to a room waits here for its whole body, so that
 // the route's invite check comes after it (lib/http.ts settleBody says
 // why). Only for a request whose invite is good right now: anyone else
 // is refused by the route as before, with the body left unread. The
-// owner key is not an invite and cannot be revoked, so its requests pass
-// straight through.
+// owner key is not an invite and cannot be revoked, but its body is
+// read here too, under the same caps: it was read whole by the route,
+// whatever its size, up to the edge's 100 MB. The cap is the route's
+// own (BODY_CAPS), or SETTLED_BODY_MAX; a declared Content-Length over
+// it is refused before anything is read, and a body sent without one
+// is read only up to it.
 /** @returns an answer to send now (the body is too large), or nothing */
-async function settleMemberBody(rc: RouteContext): Promise<Response | undefined> {
+async function settleRoomBody(rc: RouteContext): Promise<Response | undefined> {
   const { request, env, path, owner, invite } = rc;
-  if (owner || !invite || !request.body || STREAMED_BODY.test(path)) return undefined;
+  if ((!owner && !invite) || !request.body || STREAMED_BODY.test(path)) return undefined;
   const m = /^\/api\/rooms\/([^/]+)\//.exec(path);
   if (!m) return undefined;
   let room = "";
   try { room = decodeURIComponent(m[1]).toLowerCase(); } catch { return undefined; /* the route answers the malformed escape */ }
   if (!ROOM_RE.test(room)) return undefined;
-  const known = await env.ROOM.get(env.ROOM.idFromName(room)).lookupInvite(invite);
-  if (!known.ok) return undefined;
-  const settled = await settleBody(request, SETTLED_BODY_MAX);
-  if (!settled) return json({ error: "That request's body is over " + Math.floor(SETTLED_BODY_MAX / MIB) + " MiB. Bigger files go up in parts: see UPLOADING FILES at /api." }, 413);
+  if (!owner) {
+    const known = await env.ROOM.get(env.ROOM.idFromName(room)).lookupInvite(invite);
+    if (!known.ok) return undefined;
+  }
+  const own = BODY_CAPS.find(([re]) => re.test(path));
+  const cap = own ? own[1] : SETTLED_BODY_MAX;
+  const settled = await settleBody(request, cap);
+  if (!settled) return json({ error: own ? own[2] : "That request's body is over " + Math.floor(SETTLED_BODY_MAX / MIB) + " MiB. Bigger files go up in parts: see UPLOADING FILES at /api." }, 413);
   rc.request = settled;
   return undefined;
 }
@@ -138,7 +159,7 @@ async function routeRequest(request: Request, env: Env, ctx: ExecutionContext): 
 
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     {
-      const early = await settleMemberBody(rc);
+      const early = await settleRoomBody(rc);
       if (early) return early;
     }
     if (path === "/") return page(env, url.origin);

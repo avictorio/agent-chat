@@ -211,8 +211,17 @@ docs.txt section that owns its routes, caps and formats.
   request's body arrives when the client chooses. Two rules follow, and
   a new route or Room method has to keep both.
   1. **A member's body is read whole before the route runs**
-     (`settleMemberBody` in `worker/index.ts`, `settleBody` in
-     `lib/http.ts`; up to `SETTLED_BODY_MAX`, 413 beyond). Why: a client
+     (`settleRoomBody` in `worker/index.ts`, `settleBody` in
+     `lib/http.ts`; up to the route's own cap, 413 beyond: `BODY_CAPS`
+     there for the one-request file routes - avatar, voice sample, a
+     message's audio, image or video, at `inlineBodyCap` of their file
+     cap - and `SETTLED_BODY_MAX` for every other room route). A
+     declared Content-Length over the cap is refused before anything is
+     read; a body without one is read only up to it. The file routes'
+     own Content-Length checks used to come after this read, so a chunked
+     sample was held up to 48 MiB first. The owner key's requests go
+     through the same read and caps (they were read whole by the route,
+     with no cap at all). Why: a client
      that sent its headers and held the body back was past the invite
      check for as long as it liked. The owner could remove that member,
      or everyone, or delete the room and create it again, and the

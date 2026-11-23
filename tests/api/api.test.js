@@ -2552,6 +2552,39 @@ async function takenPortRefused() {
     check('mcp member batch still answers each item', r.status === 200 && Array.isArray(r.json) && r.json.length === 2 && r.json.every(x => x.result), r.status + ' ' + r.text.slice(0, 120));
     r = await putChunked(R2 + '/mcp', 'POST', chunked(1048576 + 1000, '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pad":"', '"}}'), { 'Content-Type': 'application/json' });
     check('mcp tokenless body over 1 MiB -> 413', r.status === 413 && !!(r.json && r.json.error && r.json.error.code === -32600), r.status + ' ' + r.text.slice(0, 120));
+    // A one-request file route reads a member's body only up to its own
+    // cap (its file as base64 JSON, inlineBodyCap): the body was read
+    // whole first, up to 48 MiB, and its Content-Length checked after.
+    // Each probe is JSON carrying a tiny valid file and padding past the
+    // cap, sent without a Content-Length: read whole, it was taken (200).
+    {
+      const capOf = (max) => max * 1.4 + 1000;
+      const ID3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(61, 0)]);
+      const padded = (field, file, max) => chunked(capOf(max) + 4096, '{"' + field + '":"' + file.toString('base64') + '","pad":"', '"}');
+      const capDraft = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'cap probe', draft: true } });
+      const JH = { 'Content-Type': 'application/json' };
+      const capProbes = [
+        ['avatar', R2 + '/avatar', padded('image', PNG, 2000000), /Avatars can be up to/],
+        ['voice sample', R2 + '/voice/sample', padded('audio', ID3, 10000000), /Voice samples can be up to/],
+        ['message audio', R2 + '/messages/' + capDraft.json.id + '/audio', padded('audio', ID3, 5000000), /sent inline/],
+        ['message image', R2 + '/messages/' + capDraft.json.id + '/image', padded('image', PNG, 5000000), /sent inline/],
+        ['message video', R2 + '/messages/' + capDraft.json.id + '/video', padded('video', mp4(), 25000000), /sent inline/],
+      ];
+      for (const [what, path, body, says] of capProbes) {
+        r = await putChunked(path, 'PUT', body, Object.assign({ 'X-Invite-Token': TP }, JH));
+        check(what + ': a chunked body past its cap -> 413 before it is read whole', r.status === 413 && says.test(r.text), r.status + ' ' + r.text.slice(0, 120));
+      }
+      // The owner key's bodies were read whole by the route, with no cap
+      // at all: now they go through the same caps.
+      r = await putChunked(R2 + '/messages', 'POST', chunked(48 * 1048576 + 4096, '{"from":"claude","text":"owner over the cap","pad":"', '"}'), Object.assign({ 'X-Owner-Key': OWNER }, JH));
+      check('owner: a chunked post past SETTLED_BODY_MAX -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 120));
+      r = await putChunked(R2 + '/members/Poc/avatar', 'PUT', padded('image', PNG, 2000000), Object.assign({ 'X-Owner-Key': OWNER }, JH));
+      check('owner: a chunked avatar past its cap -> 413', r.status === 413 && /Avatars can be up to/.test(r.text), r.status + ' ' + r.text.slice(0, 120));
+      r = await req('PUT', R2 + '/members/Poc/avatar', { owner: true, headers: { 'Content-Type': 'image/png' }, body: PNG });
+      check('owner: an avatar under its cap still goes through', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+      r = await req('PUT', R2 + '/messages/' + capDraft.json.id + '/image', { token: TP, json: { image: PNG.toString('base64') } });
+      check('a member: an image under its cap still goes through', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    }
     r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} });
     check('mcp unauthenticated tools/call -> -32001', !!(r.json && r.json.error && r.json.error.code === -32001), JSON.stringify(r.json).slice(0, 120));
     r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });

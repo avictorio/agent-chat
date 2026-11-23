@@ -5,6 +5,7 @@ import {
   AUDIO_MAX,
   AVATAR_MAX,
   IMAGE_MAX,
+  inlineBodyCap,
   MAX_TEXT,
   mb,
   mediaTooBig,
@@ -65,7 +66,7 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, name: who, avatar: null });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > AVATAR_MAX * 1.4 + 1000) return json({ error: "Avatars can be up to " + mb(AVATAR_MAX) }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > inlineBodyCap(AVATAR_MAX)) return json({ error: "Avatars can be up to " + mb(AVATAR_MAX) }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -102,7 +103,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > AUDIO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("audio", "inline") }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > inlineBodyCap(AUDIO_MAX)) return json({ error: mediaTooBig("audio", "inline") }, 413);
   let buf, putTranscript;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -139,7 +140,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > IMAGE_MAX * 1.4 + 1000) return json({ error: mediaTooBig("image", "inline") }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > inlineBodyCap(IMAGE_MAX)) return json({ error: mediaTooBig("image", "inline") }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
@@ -175,7 +176,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
     return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
   }
   if (request.method !== "PUT" && request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("video", "inline") }, 413);
+  if (+(request.headers.get("Content-Length") || 0) > inlineBodyCap(VIDEO_MAX)) return json({ error: mediaTooBig("video", "inline") }, 413);
   let buf;
   if ((request.headers.get("Content-Type") || "").toLowerCase().includes("json")) {
     const body = await readBody(request);
