@@ -116,19 +116,24 @@ export const SketchMethods = {
     return st.players.filter((p) => p.name !== st.artist);
   },
 
+  // Each seat's score, exact guesses, right guesses and their average
+  // time (ms; 0 with none - the count of right guesses is compared first,
+  // so a seat with none never wins on it).
   sgTally(st: SgStored) {
-    const t: Record<string, { score: number, exact: number, ms: number }> = {};
-    for (const p of st.players) t[p.name] = { score: 0, exact: 0, ms: 0 };
+    const t: Record<string, { score: number, exact: number, right: number, ms: number }> = {};
+    for (const p of st.players) t[p.name] = { score: 0, exact: 0, right: 0, ms: 0 };
     for (const r of st.rounds) {
       for (const n of Object.keys(r.points || {})) t[n].score += r.points[n];
       for (const n of Object.keys(r.guesses || {})) {
         const x = r.guesses[n];
         if (x.right) {
           if (x.exact) t[n].exact += 1;
+          t[n].right += 1;
           t[n].ms += Math.max(0, x.ms || 0);
         }
       }
     }
+    for (const n of Object.keys(t)) if (t[n].right) t[n].ms = t[n].ms / t[n].right;
     return t;
   },
 
@@ -517,11 +522,15 @@ export const SketchMethods = {
     }
   },
 
+  // Ties go to more exact guesses, then more right guesses, then the
+  // quicker right guesses on average. The times used to be summed alone,
+  // so every extra right guess counted against a player, and one who
+  // scored only as the artist (0 ms) beat one with two quick right guesses.
   sgStanding(st: SgStored) {
     const t = this.sgTally(st);
-    st.places = st.players.map((p) => p.name).sort((a, b) => t[b].score - t[a].score || t[b].exact - t[a].exact || t[a].ms - t[b].ms || (a < b ? -1 : 1));
+    st.places = st.players.map((p) => p.name).sort((a, b) => t[b].score - t[a].score || t[b].exact - t[a].exact || t[b].right - t[a].right || t[a].ms - t[b].ms || (a < b ? -1 : 1));
     const [x, y] = st.places;
-    const tied = !!y && t[x].score === t[y].score && t[x].exact === t[y].exact && t[x].ms === t[y].ms;
+    const tied = !!y && t[x].score === t[y].score && t[x].exact === t[y].exact && t[x].right === t[y].right && t[x].ms === t[y].ms;
     st.draw = tied;
     return tied ? null : x;
   },
@@ -566,6 +575,6 @@ export const sketchEngine = {
     "The artist draws it - generate an image or draw one - with no letters or words in it: the picture has to do the work. " +
     "Then everyone else sends one sealed guess, changeable until the guesses close. A guess that matches the prompt is right on its own; the Referee (Claude) rules on close calls - same meaning counts. " +
     "A right guess scores 2; the artist scores 1 per right guesser, at most 2 - so draw something guessable but not trivial. If nobody gets it, the prompt is revealed with a roast. " +
-    "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then quicker right guesses. " +
+    "The artist has " + clockWords(st.draw_seconds || 3600) + " to draw (missing it forfeits the round; two forfeits in a row end the game); guessers have " + clockWords(st.guess_seconds || 600) + " once the drawing is up. Highest total wins; ties go to more exact guesses, then more right guesses, then quicker right guesses on average. " +
     "Send: as the artist, image as a data URL (data:image/png;base64,...; PNG, JPEG, GIF or WebP up to " + Math.round(SG_IMAGE_MAX / 1000) + " KB); as a guesser, guess (or dir).",
 } satisfies GameEngineOf<SgStored>;

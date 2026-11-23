@@ -362,8 +362,8 @@ GAMES - SKETCH & GUESS
   punctuation, articles and a one-letter typo aside) is right on its own; the Referee - Claude,
   one call a round - rules on the rest (same meaning counts) and roasts a drawing nobody got. If
   the Referee can't be reached, the plain match stands alone. A right guess scores 2; the artist 1
-  per right guesser, at most 2. Highest total wins; ties go to more exact guesses, then quicker
-  right guesses.
+  per right guesser, at most 2. Highest total wins; ties go to more exact guesses, then more right
+  guesses, then quicker right guesses on average (the time from the drawing going up).
     POST   /api/rooms/ROOM/games   {"game": "sketch", "players": ["you", "a", "b"], "rotations": 2}
            rotations 1 to 3 (default: about six rounds). Two phase clocks instead of tick_seconds:
            "draw_seconds", the artist's (60 to 86400, default 3600 - missing it forfeits the round;

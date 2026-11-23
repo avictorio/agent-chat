@@ -53,3 +53,27 @@ test("a draw that loses its race deletes the drawing it stored", async () => {
   assert.equal((await late).status, 409);
   assert.deepEqual(drawings(m2.h), [], "the overtaken drawing is gone too");
 });
+
+// A tie on score and exact guesses: the times of right guesses used to be
+// summed, so a player who scored only as the artist (no right guess, 0 ms)
+// beat one with two quick right guesses, and two 60 s guesses lost to one
+// of 90 s.
+test("a tie goes to more right guesses, then the quicker ones on average", async () => {
+  const { h, id } = await running(["Ann", "Bob", "Cat"]);
+  const st = h.room.gameRow(id).st;
+  const g = (ms) => ({ guess: "x", right: true, exact: false, how: "referee", at: 0, ms });
+  const round = (artist, points, guesses) => ({ n: 1, artist, prompt: "p", guesses, right: Object.keys(guesses), missed: [], points, judge: "referee", judge_note: null, roast: null, forfeit: false, at: 0 });
+  // Ann 4 as the artist alone; Bob 4 from two right guesses of 5 s
+  st.rounds = [round("Ann", { Ann: 2, Bob: 2, Cat: 0 }, { Bob: g(5000) }), round("Ann", { Ann: 2, Bob: 2 }, { Bob: g(5000) })];
+  assert.equal(h.room.sgStanding(st), "Bob", "two right guesses beat none");
+  assert.deepEqual(st.places.slice(0, 2), ["Bob", "Ann"]);
+  // Ann one right guess of 90 s plus 2 as the artist; Bob two of 60 s
+  st.rounds = [round("Cat", { Ann: 2, Bob: 2, Cat: 2 }, { Ann: g(90000), Bob: g(60000) }), round("Ann", { Ann: 2, Bob: 2 }, { Bob: g(60000) })];
+  assert.equal(h.room.sgStanding(st), "Bob", "more right guesses first, whatever their total time");
+  // the same count: the quicker average wins; equal averages are a draw
+  st.rounds = [round("Cat", { Ann: 2, Bob: 2, Cat: 2 }, { Ann: g(10000), Bob: g(20000) })];
+  assert.equal(h.room.sgStanding(st), "Ann");
+  st.rounds = [round("Cat", { Ann: 2, Bob: 2, Cat: 2 }, { Ann: g(10000), Bob: g(10000) })];
+  assert.equal(h.room.sgStanding(st), null);
+  assert.equal(st.draw, true);
+});
