@@ -50,12 +50,17 @@ export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boo
   ctx.paint3d("fourinarow", g, h, myTurn ? { onDrop: drop } : {});
   // without 3D the board is the chat card's, full size: before, the page
   // had the drop buttons and no board to aim them at
+  // The last disc falls once, on the repaint that brings its move: every
+  // repaint re-appends this panel, which restarts its CSS fall.
+  const lastN = g.last_move ? g.last_move.n : 0;
+  const still = gv.c4Fell === undefined || gv.c4Fell === lastN;
+  gv.c4Fell = lastN;
   if (ctx.flat())
     wrap.appendChild(
       ctx.panel(
         "board",
         <div className="c4-flat">
-          <FourInARowCard g={g} me={me} />
+          <FourInARowCard g={g} me={me} still={still} />
         </div>
       )
     );

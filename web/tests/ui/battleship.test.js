@@ -394,6 +394,34 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       return out;
     });
   }
+  /* The flat board's last disc falls once, when its move arrives. Every
+     repaint re-appends the board's panel, which restarted the CSS fall:
+     the last disc dropped again on each repaint (screenshots caught it
+     mid-air). */
+  for (const [label, o] of [['fourinarow-flat-fall-once', {}], ['fourinarow-flat-fall-once-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page) => {
+      const anim = () => page.$eval('#viewer .c4-flat .c4-disc.last', (e) => getComputedStyle(e).animationName);
+      const repaint = async () => {
+        await page.click('#viewer .arena-tabs button:nth-child(2)');
+        await page.click('#viewer .arena-tabs button:nth-child(1)');
+        await page.waitForSelector('#viewer .c4-flat .c4-disc.last', { timeout: 10000 });
+      };
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer .c4-flat .c4-disc.last', { timeout: 15000 });
+      const out = { opened: await anim() };
+      await repaint();
+      out.repainted = await anim();
+      await page.click('#viewer .c4-drop:nth-child(2)');
+      await page.waitForFunction(() => { const e = document.querySelector('#viewer .c4-flat .c4-disc.last'); return !!e && /Column 2, row 1/.test(e.parentElement.getAttribute('aria-label')); }, null, { timeout: 10000 });
+      out.newMove = await anim();
+      await repaint();
+      out.afterNewMove = await anim();
+      await shot(page, label + '.png');
+      if (out.opened !== 'none' || out.repainted !== 'none' || out.afterNewMove !== 'none') throw new Error('no fall on a repaint that brings no move: ' + JSON.stringify(out));
+      if (out.newMove !== 'c4-fall') throw new Error('a new move\'s disc falls: ' + JSON.stringify(out));
+      return out;
+    });
+  }
   for (const [label, o] of [['no-webgl-fourinarow-shot', {}], ['no-webgl-fourinarow-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page) => {
       await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 10000 });

@@ -57,6 +57,8 @@ export type GameView = {
   // Letter Grid: the word being made, shared by the word panel and the
   // scene (a tap on a tile traces it); kept across repaints, reset each round
   lgDraft?: LgDraft | null;
+  // Four in a Row: the last move whose disc the flat board has dropped
+  c4Fell?: number;
   // Sketch & Guess: the pad's drawing for the round (its panel draws it)
   sgPad?: SgPad | null;
   // target: the rival in a free-for-all (the shot goes out "Name:Cell")

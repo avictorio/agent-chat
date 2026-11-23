@@ -19,6 +19,7 @@
   .c4-grid .c4-disc.last { animation: c4-fall .38s cubic-bezier(.55, 0, .9, .55) both; }
   .c4-grid .c4-disc.win { animation: c4-win 1.2s ease-in-out infinite alternate; }
 }
+.c4-grid.still .c4-disc.last { animation: none; }
 @keyframes c4-fall { from { transform: translateY(-420%); } to { transform: none; } }
 @keyframes c4-win { from { filter: brightness(1); } to { filter: brightness(1.35); } }
 .c4-seats { display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 4px; color: #ffe4e6; }

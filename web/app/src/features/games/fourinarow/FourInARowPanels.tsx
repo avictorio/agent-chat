@@ -62,8 +62,10 @@ export function FourDrops({ open, onDrop }: { open: string[]; onDrop: (col: numb
   );
 }
 
-/* The card: the board, small. */
-export function FourInARowCard({ g }: { g: FourInARowState; me: string }) {
+/* The card: the board, small. still: no fall for the last disc (the
+   arena's flat board, whose host is re-appended on every repaint, which
+   restarts a CSS animation: the last disc dropped again each time). */
+export function FourInARowCard({ g, still }: { g: FourInARowState; me: string; still?: boolean }) {
   const board: string[] = (g && g.board) || Array(C4_ROWS).fill(".".repeat(C4_COLS));
   const line = new Set(((g && g.line) || []).map((cr: number[]) => cr[0] + ":" + cr[1]));
   const last = g && g.last_move ? g.last_move.col + ":" + g.last_move.row : "";
@@ -86,7 +88,7 @@ export function FourInARowCard({ g }: { g: FourInARowState; me: string }) {
   });
   return (
     <div className="c4-wrap compact">
-      <div className="c4-grid" role="grid" aria-label="Four in a Row board, 7 columns by 6 rows">
+      <div className={"c4-grid" + (still ? " still" : "")} role="grid" aria-label="Four in a Row board, 7 columns by 6 rows">
         {cells}
       </div>
     </div>
