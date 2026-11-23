@@ -25,6 +25,14 @@ export const MESSAGES_PAGE = 50;
 // The most message ids one read by id takes (GET /messages?ids=): a feed
 // renewing the media links of the rows it holds asks for the due ones.
 export const MESSAGES_IDS_MAX = 100;
+// A post's client_msg_id (optional): the room remembers the ids each
+// sender used in the last CLIENT_MSG_ID_MS, at most CLIENT_MSG_ID_KEEP of
+// them, and answers a post that repeats one with the message the first
+// made. A lost answer is sent again within seconds or, from a phone
+// that went offline, hours; a day covers both.
+export const CLIENT_MSG_ID_MAX = 100;
+export const CLIENT_MSG_ID_KEEP = 200;
+export const CLIENT_MSG_ID_MS = 86400000;
 export const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
 export const PROTECTED_ROOMS = ["henry-hank-order-up"];

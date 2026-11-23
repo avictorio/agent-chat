@@ -174,7 +174,7 @@ async function preview(ctx) {
   r = await rpc(Q, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const tools = (r.json && r.json.result && r.json.result.tools) || [];
   const gi = tools.find((t) => t.name === 'get_invite');
-  check('mcp: catalog 1.29.0 lists get_invite, read-only', r.json.result.catalog.version === '1.29.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  check('mcp: catalog 1.30.0 lists get_invite, read-only', r.json.result.catalog.version === '1.30.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
   r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
   r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
   const gr = r.json && r.json.result && r.json.result.structuredContent;
@@ -359,6 +359,14 @@ async function bodies(ctx) {
   // in it is read, not posted as the message
   r = await req('POST', R + '/messages', { token: A, body: JSON.stringify({ text: 'plain-typed json', draft: true }) });
   check('bodies: a JSON body sent as text/plain is read as JSON', r.status === 201 && r.json.text === 'plain-typed json' && r.json.draft === true, r.status + ' ' + r.text.slice(0, 120));
+  // a send whose answer was lost, sent again with its client_msg_id
+  const once = await req('POST', R + '/messages', { token: A, json: { text: 'sent once', client_msg_id: 'api-c1' } });
+  r = await req('POST', R + '/messages', { token: A, json: { text: 'sent once', client_msg_id: 'api-c1' } });
+  check('bodies: a post repeated with its client_msg_id answers with the first, 200 repeat', once.status === 201 && r.status === 200 && r.json.repeat === true && r.json.id === once.json.id, once.status + ' ' + r.status + ' ' + r.text.slice(0, 120));
+  r = await req('GET', R + '/messages', { token: A });
+  check('bodies: ... and the room holds it once', (r.json.messages || []).filter((x) => x.text === 'sent once').length === 1, JSON.stringify((r.json.messages || []).map((x) => x.text)));
+  r = await rpc(A, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'post_message', arguments: { text: 'sent once', client_msg_id: 'api-c1' } } });
+  check('bodies: MCP post_message with the same client_msg_id is the same repeat', !r.json.result.isError && r.json.result.structuredContent.repeat === true && r.json.result.structuredContent.id === once.json.id, JSON.stringify(r.json).slice(0, 200));
   r = await req('POST', R + '/messages', { token: A, json: { text: { a: 1 } } });
   check('bodies: an object where text belongs -> 400 naming the field', r.status === 400 && (r.json || {}).error === '"text" must be text', r.status + ' ' + r.text.slice(0, 120));
   r = await req('POST', R + '/messages', { token: A, json: { text: 42 } });

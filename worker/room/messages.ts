@@ -2,12 +2,12 @@
 
 import { streamWants } from "./state.js";
 import { isStoreError, storeError } from "../lib/errors.js";
-import { KEEP, MAX_TEXT } from "../limits.js";
+import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT } from "../limits.js";
 import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
 import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
-import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
+import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
 import { hiddenDraft } from "./media.js";
 
@@ -28,6 +28,9 @@ export type Delivered = { msg: ApiMessage, dn: number };
 /** A listing row while withKinds rewrites it in place into an ApiMessage:
  *  its columns as read (typed), plus the fields it gains on the way. */
 export type MsgBag = MsgListRow & Record<string, unknown>;
+/** post()'s answer to a repeated client_msg_id: the first post's message
+ *  as it is now, and whether it is still a draft (and publishes itself). */
+export type PostRepeat = { repeat: true, msg: ApiMessage, draft: boolean, pubauto: boolean };
 /** Inline media for post(): the bytes and their sniffed type, plus the
  *  audio transcript or the page / document name those kinds carry. */
 export type InlineMedia = { data: ArrayBuffer, type: string, transcript?: string | null, name?: string };
@@ -73,16 +76,39 @@ export const MessageMethods = {
   },
 
   /**
+   * A post with no client_msg_id (the room's own callers, the fetch
+   * tool's post, MCP begin_upload's draft): postKeyed without one.
    * @param trusted the post carried the owner key (kept as provenance)
    * @param pubauto publish the draft once its upload verifies
    */
-  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null) {
+  async post(sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | null> {
+    const r = await this.postKeyed(null, sender, text, room, trusted, audio, image, video, draft, pubauto, html, doc);
+    if (r && ("repeat" in r || "status" in r)) throw new Error("a post without a client_msg_id cannot repeat");
+    return r;
+  },
+
+  /**
+   * @param trusted the post carried the owner key (kept as provenance)
+   * @param pubauto publish the draft once its upload verifies
+   * @param cid the client_msg_id the post carried: a repeat of one this
+   *   sender used gets the first post back (repeatPost), not a second post
+   * @returns the message; null when it was deleted while its media was
+   *   stored; a repeat, or a refusal of one
+   */
+  async postKeyed(cid: string | null, sender: string, text: string, room: string, trusted: boolean, audio: InlineMedia | null = null, image: InlineMedia | null = null, video: InlineMedia | null = null, draft = false, pubauto = false, html: InlineMedia | null = null, doc: InlineMedia | null = null): Promise<ApiMessage | PostRepeat | { status: 409, error: string, id: number } | null> {
     // the room the post was sent to: deleted during the sweep, it takes no message (Room.fence)
     const gen = this.gen;
     this.fence(gen);
     await this.sweepDrafts();
     this.fence(gen);
     this.roomName = room;
+    // Looked up and recorded with no await between, with the insert
+    // below: a repeat sent while the first is still storing its media
+    // finds it.
+    if (cid) {
+      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = lower(?) AND cid = ?", sender, cid).toArray()[0];
+      if (seen) return this.repeatPost(seen.msg, !!seen.draft);
+    }
     const ts = Date.now();
     // A post with media inside it is stored as a draft until every file
     // is in storage, then goes live in one step. Stored live from the
@@ -92,6 +118,7 @@ export const MessageMethods = {
     // never got it.
     const held = !draft && !!(audio || image || video || html || doc);
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft || held ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
+    if (cid) this.rememberPostId(sender, cid, id, draft, ts);
     // Inline media is all or nothing: every put lands in R2 before the
     // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
@@ -122,6 +149,8 @@ export const MessageMethods = {
         const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
         this.sql.exec("DELETE FROM md WHERE msg = ?", id);
         this.sql.exec("DELETE FROM m WHERE id = ?", id);
+        // nothing was posted: the same id sent again posts it
+        this.sql.exec("DELETE FROM pcid WHERE msg = ?", id);
         if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
         throw storeError();
       }
@@ -157,6 +186,29 @@ export const MessageMethods = {
     // finish before the message officially posts.
     if (!draft) this.announce(msg, room, dn);
     return msg;
+  },
+
+  /** Records a post's client_msg_id, and lets go of the sender's ids
+   *  past the newest CLIENT_MSG_ID_KEEP or older than CLIENT_MSG_ID_MS. */
+  rememberPostId(sender: string, cid: string, id: number, draft: boolean, ts: number) {
+    this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (lower(?), ?, ?, ?, ?)", sender, cid, id, ts, draft ? 1 : null);
+    this.sql.exec("DELETE FROM pcid WHERE sender = lower(?) AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = lower(?) ORDER BY ts DESC, rowid DESC LIMIT ?))", sender, ts - CLIENT_MSG_ID_MS, sender, CLIENT_MSG_ID_KEEP);
+  },
+
+  /**
+   * The answer to a post that repeats a client_msg_id: the message the
+   * first one made, as it is now (a draft since published is live). A
+   * first post still storing its media, or one whose message is gone,
+   * is a 409: answered as posted, the first could still fail, and
+   * posting again would bring back a message its sender deleted.
+   * @param asDraft the first post asked to be a draft
+   */
+  repeatPost(id: number, asDraft: boolean): PostRepeat | { status: 409, error: string, id: number } {
+    const r = this.sql.exec<MsgListRow & Pick<MsgRow, "draft" | "pubauto">>("SELECT " + MSG_COLS + ", draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+    if (!r) return { status: 409, error: "This client_msg_id already posted message " + id + ", which is no longer in the room; nothing was posted. Send a new client_msg_id to post it again.", id };
+    if (r.draft && !asDraft) return { status: 409, error: "This client_msg_id's first post (message " + id + ") is still storing its files; nothing was posted. Ask again in a moment.", id };
+    const { draft, pubauto, ...row } = r;
+    return { repeat: true, msg: this.withKinds([row])[0], draft: !!draft, pubauto: !!(draft && pubauto) };
   },
 
   // The room keeps its newest KEEP live messages - newest by when they

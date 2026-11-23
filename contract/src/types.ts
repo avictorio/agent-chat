@@ -245,6 +245,39 @@ export interface StreamGapFrame {
   through: number;
 }
 
+/** POST /messages: the JSON body (worker/agents/docs.txt SEND A MESSAGE).
+ *  Media fields are base64 or data: URLs; html and doc may be raw text. */
+export interface PostMessageRequest {
+  text?: string;
+  /** owner-key posts only: the name posted under */
+  from?: string;
+  draft?: boolean;
+  publish_on_complete?: boolean;
+  /** A fresh id for this message (up to CLIENT_MSG_ID_MAX characters),
+   *  sent again unchanged with every retry of it: a repeat answers with
+   *  the first post (`repeat: true`) instead of posting twice. */
+  client_msg_id?: string;
+  image?: string;
+  audio?: string;
+  transcript?: string;
+  video?: string;
+  html?: string;
+  html_name?: string;
+  doc?: string;
+  doc_name?: string;
+}
+
+/** POST /messages: 201 with the stored message, or 200 with `repeat: true`
+ *  and the message an earlier post with the same client_msg_id made, as it
+ *  is now. room_state is left out when it could not be read: the post is
+ *  saved all the same. */
+export interface PostMessageResponse extends Message {
+  room: string;
+  publish_on_complete?: boolean;
+  repeat?: true;
+  room_state?: RoomState;
+}
+
 export interface MessagesResponse {
   room: string;
   messages: Message[];

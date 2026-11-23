@@ -15,6 +15,7 @@
 
 import {
   AUDIO_MAX,
+  CLIENT_MSG_ID_MAX,
   DATE_RE,
   DIGESTS_PER_DAY,
   DOC_MAX,
@@ -65,7 +66,7 @@ import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { GAME_ENGINES, moveFields } from "../games/engine.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
 import { memberReply } from "../routes/members.js";
-import { stateAfterWrite } from "../routes/messages.js";
+import { CID_ERROR, postId, stateAfterWrite } from "../routes/messages.js";
 import type { RoomMember } from "../room/members.js";
 import type { InlineMedia } from "../room/messages.js";
 
@@ -75,7 +76,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.29.0";
+export const MCP_CATALOG_VERSION = "1.30.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -157,6 +158,7 @@ export function mcpCatalog() {
         doc_name: { type: "string" },
         draft: { type: "boolean" },
         publish_on_complete: { type: "boolean" },
+        client_msg_id: { type: "string", description: "Optional, up to " + CLIENT_MSG_ID_MAX + " characters, new for each message: sent again with a retry, the retry answers with the first post (repeat: true) instead of posting twice." },
       },
     ),
     mcpTool("delete_message", "Delete one of your own messages (the owner can delete any). Its media and reactions go with it.", { id: id }, ["id"]),
@@ -472,6 +474,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       needFrom(from);
       const text = bodyText(A.text, "text");
       if (text.length > MAX_TEXT) throw new Error("\"text\" is limited to " + MAX_TEXT + " characters");
+      const cid = postId(A.client_msg_id);
+      if (cid === undefined) throw new Error(CID_ERROR);
       const draft = !!A.draft, pubauto = draft && !!A.publish_on_complete;
       if (draft && (A.audio_base64 || A.image_base64 || A.video_base64 || A.html || A.doc)) throw new Error("\"draft\" cannot be combined with inline media; use begin_upload, then publish");
       let audio = null as InlineMedia | null, image = null as InlineMedia | null, video = null as InlineMedia | null, htmlArt = null as InlineMedia | null, doc = null as InlineMedia | null;
@@ -483,8 +487,10 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       if (!text.trim() && !audio && !image && !video && !htmlArt && !doc) throw new Error("\"text\" is required");
       const inline = [audio, image, video, htmlArt, doc].reduce((t, x) => t + (x ? x.data.byteLength : 0), 0);
       if (inline > INLINE_TOTAL_MAX) throw new Error(inlineTotalTooBig(inline));
-      const msg = await stub.post(from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
+      const msg = await stub.postKeyed(cid, from, text, room, owner, audio, image, video, draft, pubauto, htmlArt, doc);
       if (!msg) throw new Error("That message was deleted while its attachment was being stored; nothing was posted");
+      if ("status" in msg) throw new Error(msg.error);
+      if ("repeat" in msg) return Object.assign({ room: room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: await stateAfterWrite(stub, from, room) });
       return Object.assign({ room: room }, msg, draft ? { draft: true } : {}, pubauto ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room) });
     }
     case "delete_message": { const r = await stub.deleteMessage(bodyNumber(A.id, "id", true), from || "", owner); if (refused(r)) throw new Error(r.error); return { room: room, deleted: r.deleted }; }

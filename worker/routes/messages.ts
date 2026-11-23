@@ -2,6 +2,7 @@
 
 import {
   AUDIO_MAX,
+  CLIENT_MSG_ID_MAX,
   DOC_MAX,
   HTML_MAX,
   IMAGE_MAX,
@@ -46,6 +47,20 @@ import type { MessagesByIdResponse } from "@chat/contract";
 export async function stateAfterWrite(stub: DurableObjectStub, who: string, room: string) {
   try { return await stub.roomState(who, room); }
   catch (e) { warn("post.room_state", e, { room }); return undefined; }
+}
+
+/** The refusal for a client_msg_id that is not one. */
+export const CID_ERROR = "\"client_msg_id\" must be text of 1 to " + CLIENT_MSG_ID_MAX + " characters, the same on every retry of one post";
+
+/**
+ * A post's client_msg_id: null when it carries none, undefined when the
+ * field is there but not a usable id (the caller answers CID_ERROR).
+ */
+export function postId(v: unknown): string | null | undefined {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "string" && typeof v !== "number") return undefined;
+  const s = String(v).trim();
+  return s && s.length <= CLIENT_MSG_ID_MAX ? s : undefined;
 }
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
@@ -199,6 +214,8 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!from) return json({ error: "\"from\" is required" }, 400);
     if (!text.trim() && !(body && (body.audio || body.image || body.video || body.html || body.doc))) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_TEXT) return json({ error: "\"text\" is limited to " + MAX_TEXT + " characters" }, 413);
+    const cid = postId(body?.client_msg_id);
+    if (cid === undefined) return json({ error: CID_ERROR }, 400);
     const draftWanted = !!(body && body.draft);
   const pubautoWanted = draftWanted && !!(body && body.publish_on_complete);
   if (draftWanted && body && (body.audio || body.image || body.video || body.html || body.doc)) return json({ error: "\"draft\" cannot be combined with inline media; upload in chunks, then publish" }, 400);
@@ -257,9 +274,12 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (inline > INLINE_TOTAL_MAX) return json({ error: inlineTotalTooBig(inline) }, 413);
     const trusted = owner;
     let msg;
-    try { msg = await stub.post(from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
+    try { msg = await stub.postKeyed(cid, from, text, room, trusted, audio, image, video, draftWanted, pubautoWanted, htmlArt, doc); }
     catch (e) { if (isStoreError(e)) return json({ error: STORE_MSG }, 503); throw e; }
     if (!msg) return json({ error: "That message was deleted while its attachment was being stored; nothing was posted" }, 409);
+    if ("status" in msg) return json({ error: msg.error, id: msg.id }, msg.status);
+    // a repeat: 200, not 201, since nothing new was posted
+    if ("repeat" in msg) return json(Object.assign({ room }, msg.msg, msg.draft ? { draft: true } : {}, msg.pubauto ? { publish_on_complete: true } : {}, { repeat: true, room_state: await stateAfterWrite(stub, from, room), for_agents: forAgents(url.origin, room) }));
     return json(Object.assign({ room }, msg, draftWanted ? { draft: true } : {}, pubautoWanted ? { publish_on_complete: true } : {}, { room_state: await stateAfterWrite(stub, from, room), for_agents: forAgents(url.origin, room) }), 201);
   }
 

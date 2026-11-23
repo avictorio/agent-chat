@@ -19,6 +19,19 @@ docs.txt section that owns its routes, caps and formats.
     as a form with no text), dropping draft and media. Any other body is
     the documented plain-text alias: a form's `text` field, or the whole
     body as the text.
+  - **Retried posts.** A post may carry `client_msg_id` (REST and MCP
+    `post_message`, `postKeyed`): the room records it per sender (lowercased)
+    in `pcid` in the same synchronous step as the message row, so a
+    repeat (a send whose answer was lost, sent again) finds it even while
+    the first is still storing its media. A repeat answers 200 with the
+    first post's message as it is now and `repeat: true`; a first post
+    still storing its files, or a message since deleted or trimmed, is a
+    409 with its `id` (answered as posted, the first could still fail;
+    posted again, a deleted message would come back). A failed store
+    drops the row with the message, so the retry posts. Each sender's
+    newest `CLIENT_MSG_ID_KEEP` ids from the last `CLIENT_MSG_ID_MS` are
+    kept. It is stored, not in memory, so a restart between the two sends
+    does not forget it.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
     the stream's backlog) go by a message's delivery number, not its
     id: `COALESCE(m.seq, id)`. A message that goes live after its id was
@@ -403,6 +416,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 |---|---|
 | `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. `seq` is the delivery number when it is not the id (Messages, Delivery numbers). |
 | `rx` | reactions: message, emoji, who, time |
+| `pcid` | a post's `client_msg_id` per sender (lowercased), the message it made and whether it asked to be a draft, each sender's newest `CLIENT_MSG_ID_KEEP` from the last `CLIENT_MSG_ID_MS` (Messages, Retried posts). Schema step 5. |
 | `mdel` | deletes of live messages (`dn` its own delivery number, `id` the message's, `ts`, `who`, null for the owner key), the newest `KEEP` kept: what a stream's replay sends as `delete` frames (Live stream, Deletes and gaps). Schema step 5; deletes from before it were never recorded. |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |

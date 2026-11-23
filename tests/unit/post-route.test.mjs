@@ -8,7 +8,7 @@ import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
 import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
 import { makeRoom } from "./room-harness.mjs";
-import { IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
+import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MAX, CLIENT_MSG_ID_MS, IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
 
 const R = "unit";
 
@@ -109,4 +109,110 @@ test("inline files that together pass what one call to the room carries are refu
   await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Ada", "post_message", { text: "over MCP", video_base64: over.video, image_base64: over.image, audio_base64: over.audio }), /together[\s\S]*begin_upload/);
   assert.deepEqual(texts(h).map((x) => x.text), ["at the cap"], "nothing was stored for the refused posts");
   assert.equal(h.objects.size, 3, "only the first post's three files are in storage");
+});
+
+const asJson = { "Content-Type": "application/json" };
+
+test("a post sent again with its client_msg_id answers with the first post instead of posting twice", async () => {
+  const h = makeRoom();
+  h.member("Ada"); h.member("Bob");
+  const first = await post(h, JSON.stringify({ text: "only once", client_msg_id: "c-1" }), asJson);
+  assert.equal(first.status, 201);
+  assert.ok(!("repeat" in first.json));
+  const again = await post(h, JSON.stringify({ text: "only once", client_msg_id: "c-1" }), asJson);
+  assert.equal(again.status, 200, "nothing new was made");
+  assert.equal(again.json.repeat, true);
+  assert.equal(again.json.id, first.json.id);
+  assert.equal(again.json.text, "only once");
+  // a new id posts; the id is the sender's own, so Bob's c-1 is his first
+  assert.equal((await post(h, JSON.stringify({ text: "only once", client_msg_id: "c-2" }), asJson)).status, 201);
+  const bob = await mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Bob", "post_message", { text: "bob's", client_msg_id: "c-1" });
+  assert.notEqual(bob.id, first.json.id);
+  const bobAgain = await mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Bob", "post_message", { text: "bob's", client_msg_id: "c-1" });
+  assert.equal(bobAgain.repeat, true);
+  assert.equal(bobAgain.id, bob.id);
+  assert.deepEqual(texts(h).map((x) => x.text), ["only once", "only once", "bob's"]);
+});
+
+test("a repeated draft answers with the draft, and once it is published with the live message", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const d = await post(h, JSON.stringify({ text: "caption", draft: true, publish_on_complete: true, client_msg_id: "d-1" }), asJson);
+  let again = await post(h, JSON.stringify({ text: "caption", draft: true, publish_on_complete: true, client_msg_id: "d-1" }), asJson);
+  assert.equal(again.status, 200);
+  assert.deepEqual([again.json.id, again.json.draft, again.json.publish_on_complete, again.json.repeat], [d.json.id, true, true, true]);
+  assert.equal(h.all("SELECT id FROM m").length, 1, "one draft, not two");
+  await h.room.publishMessage(d.json.id, "Ada", false, R, "now live");
+  again = await post(h, JSON.stringify({ text: "caption", draft: true, client_msg_id: "d-1" }), asJson);
+  assert.equal(again.status, 200);
+  assert.equal(again.json.text, "now live");
+  assert.ok(!again.json.draft && !again.json.publish_on_complete);
+});
+
+test("a repeat while the first post is still storing its files, or after its message is gone, posts nothing and says so", async () => {
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const h = makeRoom({ put: () => held });
+  h.member("Ada");
+  const body = JSON.stringify({ text: "with a picture", image: file("image", 100), client_msg_id: "p-1" });
+  const first = post(h, body, asJson);
+  await new Promise((r) => setTimeout(r, 10));
+  const during = await post(h, body, asJson);
+  assert.equal(during.status, 409);
+  assert.match(during.json.error, /still storing/);
+  release();
+  const done = await first;
+  assert.equal(done.status, 201);
+  assert.equal(during.json.id, done.json.id);
+  assert.equal((await post(h, body, asJson)).json.repeat, true);
+  await h.room.deleteMessage(done.json.id, "Ada", false);
+  const gone = await post(h, body, asJson);
+  assert.equal(gone.status, 409, "a deleted message is not brought back");
+  assert.match(gone.json.error, /no longer in the room/);
+  assert.equal(h.all("SELECT id FROM m").length, 0);
+});
+
+test("a post whose storage failed is posted by the retry with the same client_msg_id", async () => {
+  let fail = true;
+  const h = makeRoom({ put: () => { if (fail) throw new Error("R2 down"); } });
+  h.member("Ada");
+  const body = JSON.stringify({ text: "pic", image: file("image", 100), client_msg_id: "f-1" });
+  assert.equal((await post(h, body, asJson)).status, 503);
+  fail = false;
+  const retry = await post(h, body, asJson);
+  assert.equal(retry.status, 201, JSON.stringify(retry.json));
+  assert.ok(!retry.json.repeat);
+  assert.equal(h.all("SELECT id FROM m").length, 1);
+});
+
+test("the room still knows a client_msg_id after it restarts", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const first = await post(h, JSON.stringify({ text: "before", client_msg_id: "r-1" }), asJson);
+  const restarted = new h.room.constructor(h.room.ctx, h.room.env);
+  const again = await post(h, JSON.stringify({ text: "before", client_msg_id: "r-1" }), asJson, restarted);
+  assert.equal(again.status, 200);
+  assert.equal(again.json.id, first.json.id);
+});
+
+test("the room keeps a bounded number of client_msg_ids per sender, for a day", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  for (let i = 0; i < CLIENT_MSG_ID_KEEP + 5; i++) await h.room.postKeyed("k-" + i, "Ada", "n" + i, R, false);
+  assert.equal(h.one("SELECT COUNT(*) AS n FROM pcid").n, CLIENT_MSG_ID_KEEP);
+  assert.equal(h.one("SELECT COUNT(*) AS n FROM pcid WHERE cid = 'k-0'").n, 0, "the oldest went first");
+  h.db.prepare("UPDATE pcid SET ts = ts - ?").run(CLIENT_MSG_ID_MS + 1);
+  await h.room.postKeyed("k-new", "Ada", "later", R, false);
+  assert.equal(h.one("SELECT COUNT(*) AS n FROM pcid").n, 1, "ids older than a day are let go");
+});
+
+test("a client_msg_id that is not one is refused before anything is posted", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  for (const cid of ["", " ", "x".repeat(CLIENT_MSG_ID_MAX + 1), { a: 1 }, true]) {
+    const r = await post(h, JSON.stringify({ text: "x", client_msg_id: cid }), asJson);
+    assert.equal(r.status, 400, JSON.stringify(cid));
+    assert.match(r.json.error, /client_msg_id/);
+  }
+  assert.equal(h.all("SELECT id FROM m").length, 0);
 });

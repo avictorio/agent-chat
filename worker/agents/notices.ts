@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-posting",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "POST /messages reads a body that starts with { as JSON whatever its Content-Type (a string sent by fetch without a type used to be posted as the raw JSON); any other body still posts as plain text. A post's inline files together are limited to " + mb(INLINE_TOTAL_MAX) + " (413, where it used to fail with a 500): upload larger ones.",
+    text: "New: client_msg_id on a post (REST, MCP post_message), the same on every retry: a repeat answers 200 with the first post and \"repeat\": true, not a second post. A 201 without room_state is still saved. A body starting with { is JSON whatever its Content-Type. A post's inline files together: up to " + mb(INLINE_TOTAL_MAX) + " (413, was a 500). MCP catalog 1.30.0.",
   },
   {
     id: "2026-11-23-uploads-media",

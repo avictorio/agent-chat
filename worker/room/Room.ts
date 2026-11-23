@@ -55,6 +55,9 @@ export type MsgRow = { id: number, ts: number, sender: string, text: string, dra
   game_id: number | null };
 /** mdel: a live message's delete, under its own delivery number (schema step 5). */
 export type MdelRow = { dn: number, id: number, ts: number, who: string | null };
+/** pcid: a post's client_msg_id (sender lowercased), the message it made,
+ *  and whether that post asked to be a draft. */
+export type PcidRow = { sender: string, cid: string, msg: number, ts: number, draft: number | null };
 /** rx: one member's reaction to a message. */
 export type RxRow = { msg: number, emoji: string, who: string, ts: number };
 /** inv: an invite, and the member it names. */
@@ -287,7 +290,7 @@ function schemaPushFailures(sql: SqlStorage) {
   addColumn(sql, "push", "rest_ts", "INTEGER");
 }
 
-// Step 5. mdel: a live message that was deleted, under a delivery number
+// Step 5. mdel and pcid. mdel: a live message that was deleted, under a delivery number
 // of its own from the id counter, so the stream can replay the delete to
 // a reader whose cursor is below it (a "delete" frame), in order with the
 // messages. A delete used to reach nobody: every open feed kept the
@@ -296,12 +299,19 @@ function schemaPushFailures(sql: SqlStorage) {
 // anything the room no longer holds, a trimmed message or a dropped
 // delete, and a replay from below it starts with a "gap" frame. Nothing
 // is backfilled: deletes from before this step were never recorded.
-function schemaDeletes(sql: SqlStorage) {
+//
+// And pcid: the client_msg_id a post carried, per sender, and the message
+// it made (CLIENT_MSG_ID_KEEP and CLIENT_MSG_ID_MS bound it), so a post
+// sent again after its answer was lost gets the first one back instead
+// of posting twice. It is stored, not held in memory, so a restart of the
+// room between the two sends does not forget it. Starts empty.
+function schemaDeletesAndPostIds(sql: SqlStorage) {
   sql.exec("CREATE TABLE IF NOT EXISTS mdel (dn INTEGER PRIMARY KEY, id INTEGER NOT NULL, ts INTEGER NOT NULL, who TEXT)");
+  sql.exec("CREATE TABLE IF NOT EXISTS pcid (sender TEXT NOT NULL, cid TEXT NOT NULL, msg INTEGER NOT NULL, ts INTEGER NOT NULL, draft INTEGER, PRIMARY KEY (sender, cid))");
 }
 
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletes];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
