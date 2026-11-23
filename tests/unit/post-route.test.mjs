@@ -185,6 +185,42 @@ test("a post whose storage failed is posted by the retry with the same client_ms
   assert.equal(h.all("SELECT id FROM m").length, 1);
 });
 
+// Any failure while the files are stored, not only storage's, drops the
+// held message and its client_msg_id: only a store error did, and a retry
+// with the same id was told "still storing its files" for a day.
+test("a post that fails for any reason while storing its files is posted by the retry with the same client_msg_id", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).buffer;
+  const real = h.room.putMedia;
+  let failing = true;
+  h.room.putMedia = async function (...args) { if (failing) throw new TypeError("not a storage error"); return real.apply(this, args); };
+  await assert.rejects(h.room.postKeyed("x-1", "Ada", "pic", R, false, null, { data: png, type: "image/png" }), /not a storage error/);
+  assert.equal(h.all("SELECT id FROM m").length, 0, "nothing was posted");
+  assert.equal(h.all("SELECT cid FROM pcid").length, 0, "and the id is free again");
+  failing = false;
+  const retry = await h.room.postKeyed("x-1", "Ada", "pic", R, false, null, { data: png, type: "image/png" });
+  assert.ok(retry && !("repeat" in retry) && !("status" in retry), JSON.stringify(retry));
+  assert.ok(retry.image, "posted with its picture");
+  assert.equal(h.all("SELECT id FROM m WHERE draft IS NULL").length, 1);
+});
+
+// The owner key posts under any name: its client_msg_ids are kept apart
+// from the member's own, so neither is answered with the other's post.
+test("an owner-key post as a member and that member's own post with the same client_msg_id are two posts", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const byOwner = await h.room.postKeyed("same", "Ada", "from the owner key", R, true);
+  const byAda = await h.room.postKeyed("same", "Ada", "from Ada", R, false);
+  assert.ok(!("repeat" in byAda), "Ada's post is not taken for a repeat of the owner's");
+  assert.notEqual(byAda.id, byOwner.id);
+  const ownerAgain = await h.room.postKeyed("same", "ada", "from the owner key", R, true);
+  assert.equal(ownerAgain.repeat, true);
+  assert.equal(ownerAgain.msg.id, byOwner.id, "each repeat finds its own first post");
+  const adaAgain = await h.room.postKeyed("same", "Ada", "from Ada", R, false);
+  assert.equal(adaAgain.msg.id, byAda.id);
+});
+
 test("the room still knows a client_msg_id after it restarts", async () => {
   const h = makeRoom();
   h.member("Ada");

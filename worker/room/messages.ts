@@ -1,7 +1,7 @@
 // Room methods: messages - posting, reading and listing, reactions, drafts and publishing, deletion, the attachments shelf.
 
 import { streamWants } from "./state.js";
-import { isStoreError, storeError } from "../lib/errors.js";
+import { isGoneError, isStoreError, storeError } from "../lib/errors.js";
 import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT, UP_SESSION_MS } from "../limits.js";
 import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
 import { mentionsName, nameFold, sameName } from "../lib/text.js";
@@ -106,7 +106,7 @@ export const MessageMethods = {
     // below: a repeat sent while the first is still storing its media
     // finds it.
     if (cid) {
-      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = ? AND cid = ?", nameFold(sender), cid).toArray()[0];
+      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = ? AND cid = ?", this.postIdKey(sender, trusted), cid).toArray()[0];
       if (seen) return this.repeatPost(seen.msg, !!seen.draft);
     }
     const ts = Date.now();
@@ -118,7 +118,7 @@ export const MessageMethods = {
     // never got it.
     const held = !draft && !!(audio || image || video || html || doc);
     const id = this.sql.exec<Pick<MsgRow, "id">>("INSERT INTO m (id, ts, sender, text, draft, pubauto, pub_ts, owntrust) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", this.nextMsgId(), ts, sender, text, draft || held ? 1 : null, draft && pubauto ? 1 : null, ts, trusted ? 1 : null).one().id;
-    if (cid) this.rememberPostId(sender, cid, id, draft, ts);
+    if (cid) this.rememberPostId(this.postIdKey(sender, trusted), cid, id, draft, ts);
     // Inline media is all or nothing: every put lands in R2 before the
     // message is announced at the end of this method, so on a storage
     // failure the catch below removes the row, its index rows and any object
@@ -145,15 +145,19 @@ export const MessageMethods = {
         this.sql.exec("UPDATE m SET doc_type = ?, doc_size = ?, doc_name = ? WHERE id = ?", doc.type, doc.data.byteLength, doc.name || null, id);
       }
     } catch (e) {
-      if (isStoreError(e)) {
-        const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
-        this.sql.exec("DELETE FROM md WHERE msg = ?", id);
-        this.sql.exec("DELETE FROM m WHERE id = ?", id);
-        // nothing was posted: the same id sent again posts it
-        this.sql.exec("DELETE FROM pcid WHERE msg = ?", id);
-        if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
-        throw storeError();
-      }
+      // a deleted room took these rows with it (and a new one is not this room's)
+      if (isGoneError(e)) throw e;
+      // Any failure, not only storage's: nothing was posted, so the rows
+      // go and the same client_msg_id sent again posts it. Only a store
+      // error used to clean up; anything else left the held message and
+      // its pcid row, and every retry with that id was told "still storing
+      // its files" until the draft sweep, then "no longer in the room".
+      const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE msg = ?", id).toArray().map((r) => r.r2key).filter(Boolean);
+      this.sql.exec("DELETE FROM md WHERE msg = ?", id);
+      this.sql.exec("DELETE FROM m WHERE id = ?", id);
+      this.sql.exec("DELETE FROM pcid WHERE msg = ?", id);
+      if (keys.length && this.env && this.env.MEDIA) { try { await this.env.MEDIA.delete(keys); } catch (de) { warn("media.delete", de, { room: this.roomName }); } }
+      if (isStoreError(e)) throw storeError();
       throw e;
     }
     // The message was deleted while its media was being stored (its
@@ -188,12 +192,20 @@ export const MessageMethods = {
     return msg;
   },
 
-  /** Records a post's client_msg_id, and lets go of the sender's ids
-   *  past the newest CLIENT_MSG_ID_KEEP or older than CLIENT_MSG_ID_MS. */
-  rememberPostId(sender: string, cid: string, id: number, draft: boolean, ts: number) {
-    // filed under the sender's fold (nameFold); rows from before were filed
-    // under SQL lower(), the same string for an ASCII name, and age out
-    const key = nameFold(sender);
+  /** Whose client_msg_ids a post is filed under (pcid.sender): the
+   *  sender's fold, or for a post made with the owner key, that fold
+   *  behind a control character, which no member name can hold. The owner
+   *  posts under any name, and filed with the member's own posts, an
+   *  owner post as "Ada" and Ada's own with the same id answered each
+   *  other as repeats. */
+  postIdKey(sender: string, trusted: boolean) {
+    return (trusted ? "\u0001" : "") + nameFold(sender);
+  },
+
+  /** Records a post's client_msg_id under key (postIdKey), and lets go of
+   *  that key's ids past the newest CLIENT_MSG_ID_KEEP or older than
+   *  CLIENT_MSG_ID_MS. */
+  rememberPostId(key: string, cid: string, id: number, draft: boolean, ts: number) {
     this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (?, ?, ?, ?, ?)", key, cid, id, ts, draft ? 1 : null);
     this.sql.exec("DELETE FROM pcid WHERE sender = ? AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = ? ORDER BY ts DESC, rowid DESC LIMIT ?))", key, ts - CLIENT_MSG_ID_MS, key, CLIENT_MSG_ID_KEEP);
   },
