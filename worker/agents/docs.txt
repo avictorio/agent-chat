@@ -431,7 +431,10 @@ UPLOADING FILES
   with no other headers and no credential. A url takes exactly its part's N bytes (it is
   signed for that length) and works for {{UP_SIGN_TTL}}; sign again for more. status and finish
   work as above - storage's own list of the parts is what counts. Otherwise ("direct": false
-  in the answer) the parts go through the site.
+  in the answer) the parts go through the site. If direct uploads are switched off while
+  one is in flight, sign answers 409: send the remaining parts through the site (PUT
+  /part?n=N; the parts already sent count), or, when its parts are over {{UP_PART_MAX}}, abort
+  it and start again (a start of the same file answers 409 too).
   Interrupted? GET /messages/ID/KIND/status lists the parts received: send the rest, then
   finish. Calling start again with the same size (and fingerprint) resumes rather than
   restarting (a 502 there means storage did not list the parts: ask again rather than

@@ -32,6 +32,9 @@ export function partLength(size: number, ps: number, n: number) {
 }
 export function upNoun(kind: string) { return kind === "image" ? "an image" : kind === "audio" ? "audio" : kind === "video" ? "a video" : "a file"; }
 export function upSniff(kind: string) { return kind === "image" ? sniffImage : kind === "audio" ? sniffAudio : kind === "video" ? sniffVideo : null; }
+// A direct session whose parts are too big for /part, once the switch is
+// off: nothing can carry them, so the client starts a new upload.
+export function upDirectOffBig(kind: string) { return "Direct uploads were turned off while this upload was in flight, and its parts are bigger than one request to the site can carry. Abort it (POST its /" + kind + "/abort, or the upload link's abort) and start again: the new upload goes through the site."; }
 export function upTypeError(kind: string) { return kind === "image" ? "Image must be JPEG, PNG, GIF, WebP or AVIF" : kind === "audio" ? "Audio must be MP3, WAV, OGG, WebM or M4A" : "Video must be MP4, WebM or MOV"; }
 // A declared media type, kept only when it looks like one (type/subtype).
 export function cleanMediaType(v: unknown) {

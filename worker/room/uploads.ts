@@ -28,6 +28,7 @@ import { goneError, isGoneError, isStoreError } from "../lib/errors.js";
 import {
   cleanMediaType,
   partLength,
+  upDirectOffBig,
   upNoun,
   upSniff,
   upTypeError,
@@ -359,15 +360,24 @@ export const UploadMethods = {
     return directUploadsProven(this.env);
   },
 
+  // Whether the direct path is shut for this caller: R2_DIRECT is off and
+  // this is not the owner, who may force it to try it live. Asked of
+  // sessions already in flight too: turning the switch off used to stop
+  // only new ones, while resumes stayed direct and /sign kept signing.
+  upDirectOff(owner: boolean | undefined) {
+    return this.env.R2_DIRECT !== "1" && !owner;
+  },
+
   // Whether a session that began direct is still to be sent that way when
   // it is picked up again. Parts that fit one request to the site can go
   // through it as well (PUT /part: storage keeps one list of parts however
-  // they arrive), and do while the direct check is not passing, so an
-  // upload in flight carries on with the parts it has. Bigger parts have
-  // no other way in: their sign waits for the check.
+  // they arrive), and do while the direct check is not passing or the
+  // switch is off, so an upload in flight carries on with the parts it
+  // has. Bigger parts have no other way in: their sign waits for the
+  // check (with the switch off, upStartNow refuses the resume).
   /** @param partSize the session's part length in bytes */
-  async upStaysDirect(mode: string | null | undefined, partSize: number) {
-    if (mode !== "direct") return false;
+  async upStaysDirect(mode: string | null | undefined, partSize: number, owner?: boolean) {
+    if (mode !== "direct" || this.upDirectOff(owner)) return false;
     return partSize > UP_PART_MAX || directUploadsProven(this.env);
   },
 
@@ -416,6 +426,7 @@ export const UploadMethods = {
       // another device): keep the parts already stored, on the route the
       // session began with (upStaysDirect has the one exception).
       const plan = this.upPlan(prev);
+      if (prev.mode === "direct" && plan.part_size > UP_PART_MAX && this.upDirectOff(owner)) return { status: 409, error: upDirectOffBig(kind) };
       let received: number[] | null = null;
       try { received = Array.from((await this.upReceived(id, kind, prev)).keys()).sort((x, y) => x - y); }
       catch (e) {
@@ -436,7 +447,7 @@ export const UploadMethods = {
         // Storage has dropped it (expired or cancelled): a fresh session
         // below, rather than a resume onto an upload that is gone.
       }
-      if (received) return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size) };
+      if (received) return { status: 200, part_size: plan.part_size, parts: plan.parts, resumed: true, received: received, expires_at: this.upBegan(prev, a.msg) + UP_SESSION_MS, direct: await this.upStaysDirect(prev.mode, plan.part_size, owner) };
     }
     if (this.r2TestFail()) return { status: 503, error: STORE_MSG };
     const key = this.mediaKey(room, id, kind);
@@ -489,7 +500,7 @@ export const UploadMethods = {
     const want = partLength(row.size, plan.part_size, n);
     if (len !== want) return { status: 400, error: "Part " + n + " must be exactly " + want + " bytes (it was " + len + "): every part is part_size bytes except the last, which is the remainder", expected: want };
     // a direct session's parts can be bigger than one request to the site carries
-    if (want > UP_PART_MAX) return { status: 409, error: "This upload's parts go straight to storage: POST its /sign for their addresses" };
+    if (want > UP_PART_MAX) return { status: 409, error: this.upDirectOff(owner) ? upDirectOffBig(kind) : "This upload's parts go straight to storage: POST its /sign for their addresses" };
     return { status: 200, key: row.r2key, upload_id: row.upload_id, sniff: n === 1 && kind !== "file" };
   },
 
@@ -505,6 +516,7 @@ export const UploadMethods = {
     if (row.mode !== "direct") return { status: 409, error: "This upload's parts go through the site: PUT each one to its /part?n=N" };
     if (this.upExpired(row, a.msg)) return { status: 410, error: "This upload has expired: an upload must finish within 7 days of its start. Start it again." };
     const plan = this.upPlan(row);
+    if (this.upDirectOff(owner)) return { status: 409, error: plan.part_size > UP_PART_MAX ? upDirectOffBig(kind) : "Direct uploads are turned off: send this upload's remaining parts through the site (PUT each one to its /part?n=N); the parts already in storage count" };
     const list = Array.from(new Set((Array.isArray(nums) ? nums : []).map((x) => Math.floor(Number(x)))));
     if (!list.length || list.length > UP_SIGN_MAX) return { status: 400, error: "Ask for 1 to " + UP_SIGN_MAX + " part numbers at a time, as {\"parts\": [1, 2, ...]}" };
     for (const n of list) if (!Number.isFinite(n) || n < 1 || n > plan.parts) return { status: 400, error: "Part numbers run from 1 to " + plan.parts + " for this upload" };
@@ -536,7 +548,7 @@ export const UploadMethods = {
     let received;
     try { received = Array.from((await this.upReceived(id, kind, row)).keys()).sort((x, y) => x - y); }
     catch (e) { return { status: 502, error: "Storage didn't list this upload's parts (" + String((e && (e as Error).message) || e) + "); ask again" }; }
-    return { status: 200, uploading: true, direct: row.mode === "direct", size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
+    return { status: 200, uploading: true, direct: row.mode === "direct" && !this.upDirectOff(owner), size: row.size, type: row.type, name: row.name || null, part_size: plan.part_size, parts: plan.parts, received: received, expires_at: this.upBegan(row, msg) + UP_SESSION_MS };
   },
 
   /** @param room publishes a publish-on-complete draft when given */

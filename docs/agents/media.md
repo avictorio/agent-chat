@@ -300,6 +300,14 @@ counts as not answered. A direct session picked up again (a second
 its parts fit a request to the site (`upStaysDirect`): the client sends
 the rest through `/part`, keeping the parts it has, since storage holds
 one list of parts however they arrive. Bigger parts wait for the check.
+Turning `R2_DIRECT` off shuts the path for sessions in flight as well
+(`upDirectOff`; the owner key is exempt, as it may force direct):
+a resume answers `direct: false` and `status` says the same, `sign`
+answers 409 telling the client to send the rest through `/part`, and a
+session whose parts are over `UP_PART_MAX` gets 409 from `sign`, `/part`
+and a resume alike, telling it to abort and start again (the server
+does not drop the upload itself: the switch may come back on within the
+session's 7 days).
 Read it in the logs: a pass is `{"note": "r2direct.check"}`, anything
 else `{"warn": "r2direct.check"}`, each with storage's status and error
 code for every try. `tests/unit/r2-direct.test.mjs` recomputes the JWT
