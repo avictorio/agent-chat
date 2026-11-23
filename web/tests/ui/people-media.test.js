@@ -334,6 +334,46 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       return { id: live.id };
     });
   }
+  // A message that goes up through the engine cannot carry a page or a
+  // document (a draft takes media only), and since every video goes that
+  // way a small clip beside an HTML page posts the clip and leaves the
+  // page in the composer. The person is told so as the send starts, and
+  // the page goes out as its own message after.
+  for (const [label, phone] of [['upload-video-leaves-page', false], ['upload-video-leaves-page-phone', true]]) {
+    await run(label, Object.assign({ hash: '#invite=tok_Anthony' }, phone ? { w: 390, h: 844, touch: true } : {}), async (page, S, calls) => {
+      S.partDelay = 700;
+      await page.evaluate(() => {
+        window.__toasts = [];
+        const t = document.querySelector('#toast');
+        new MutationObserver(() => { if (!t.hidden && t.textContent) window.__toasts.push(t.textContent); }).observe(t, { attributes: true, childList: true, subtree: true, characterData: true });
+      });
+      const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(150000, 2)]);
+      await page.setInputFiles('#vidFile', { name: 'clip.mp4', mimeType: 'video/mp4', buffer: mp4 });
+      await page.locator('#vidChip:not([hidden])').waitFor({ timeout: 3000 });
+      await page.setInputFiles('#artFile', { name: 'notes.html', mimeType: 'text/html', buffer: Buffer.from('<h1>Notes</h1><p>For the clip.</p>') });
+      await page.locator('#artChip:not([hidden])').waitFor({ timeout: 3000 });
+      await page.fill('#text', 'Clip and notes');
+      await page.click('#send');
+      await page.locator('#uplCard').waitFor({ timeout: 3000 });
+      await page.waitForFunction(() => { const t = document.querySelector('#toast'); return t && !t.hidden && /page is still here/.test(t.textContent || ''); }, null, { timeout: 3000 });
+      const said = await page.$eval('#toast', (t) => t.textContent || '');
+      await shot(page, label + '.png');
+      await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+      await settle(page);
+      const live = S.msgs.find((x) => x.text === 'Clip and notes');
+      must(live && live.video, 'the clip is posted: ' + JSON.stringify(live));
+      must(!calls.some((c) => /^POST .*\/messages /.test(c) && /"html"/.test(c)), 'the page did not ride the upload');
+      must(await page.$eval('#artChip', (e) => !e.hidden && /notes\.html/.test(e.textContent)), 'the page is still in the composer');
+      const toasts = await page.evaluate(() => window.__toasts);
+      must(toasts.some((t) => /The page is still here: send it as its own message/.test(t)), 'the person is told: ' + JSON.stringify(toasts));
+      await shot(page, label + '-after.png');
+      // and it goes out on the next send, inline as before
+      await page.click('#send');
+      await page.waitForFunction(() => document.querySelector('#artChip').hidden, null, { timeout: 5000 });
+      must(calls.some((c) => /^POST .*\/messages /.test(c) && /"html":"<h1>Notes/.test(c)), 'the page is posted on its own');
+      return { said, toasts };
+    });
+  }
   await run('upload-interrupted', {
     hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
     init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },

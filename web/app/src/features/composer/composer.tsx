@@ -299,6 +299,14 @@ export function Composer(p: ComposerProps) {
       // caption and every attachment stay armed, and sending again
       // resumes where it stopped (the parts already sent are kept).
       if (viaUploads) {
+        // A draft takes media only, so a page or document stays armed for
+        // the next message. Since every video goes this way, a small clip
+        // sent with a page used to post the clip and leave the page with
+        // no word until the upload ended: say it as the send starts, and
+        // again once it lands.
+        const leftHere = art ? (art.kind === "html" ? "page" : "document") : null;
+        const leftNote = leftHere ? "An upload can't carry a " + leftHere + ". The " + leftHere + " is still here: send it as its own message." : "";
+        if (leftNote) toast(leftNote);
         const items: UpItem[] = [];
         if (image) {
           const b = image.file || dataUrlBlob(image.data || "", "image/png");
@@ -320,9 +328,7 @@ export function Composer(p: ComposerProps) {
         try {
           const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
           clearUploaded();
-          // A page or document can't ride a draft: it stays armed for
-          // the next message. Never let that be silent.
-          if (art) toast("Sent. Your page or document is still in the composer - send again to post it, or remove it.");
+          if (leftNote) toast("Sent. " + leftNote);
           p.onPosted(live);
         } catch (uerr) {
           // Cancelled after the publish had landed: the message is live and

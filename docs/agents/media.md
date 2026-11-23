@@ -184,8 +184,13 @@ way; the routes are in docs.txt UPLOADING FILES.
   the engine: every video (base64 of up to `VIDEO_MAX` in one JSON body
   cost the Worker hundreds of MB to decode), and the whole send when its
   inline total would pass `INLINE_TOTAL_MAX` (`useAttachments.ts`; the
-  room takes a post's bytes in one call capped at 32 MiB). The engine
-  path uses XMLHttpRequest for byte progress (percent, size, speed,
+  room takes a post's bytes in one call capped at 32 MiB). A draft
+  takes media only, so a page or document picked beside anything that
+  goes through the engine (even a small clip) stays in the composer for
+  its own message: a toast says so as the send starts ("The page is
+  still here: send it as its own message.") and again when it lands,
+  since a page left behind without a word looked like it had gone. The
+  engine path uses XMLHttpRequest for byte progress (percent, size, speed,
   time left), per-part retries with backoff, a pause while offline that resumes on reconnect, a Cancel
   that aborts and deletes the draft, and an "interrupted upload" note
   after a reload (re-attach the same file to resume, or Discard). A
