@@ -478,3 +478,58 @@ test("a message deleted during a finish leaves no object behind", async () => {
   assert.equal(h.objects.has(key), false, "the object goes with its message");
   assert.equal(h.all("SELECT msg FROM md").length, 0);
 });
+
+// A removed member's uploads in flight end with the removal: storage
+// aborts each one, so a part address already handed out (a direct
+// upload's are good for an hour) is refused, and nothing is left for a
+// name invited again to resume. Files already in place stay.
+test("a revoke aborts the member's uploads in flight and keeps their finished files", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const up = await imageSession(h, id, 100);
+  const done = (await h.room.post("Ada", "a finished picture", R, false, null, null, null, true, false)).id;
+  await imageSession(h, done, 100);
+  assert.equal((await h.room.uploadFinish(done, "image", "Ada", false, R, null)).status, 200);
+  const doneKey = row(h, done, "image").r2key;
+  h.member("Bob");
+  const bobDraft = (await h.room.post("Bob", "Bob's", R, false, null, null, null, true, false)).id;
+  const bs = await h.room.uploadStart(bobDraft, "image", "Bob", false, R, 100, "image/png", "b.png", "fp-b", false);
+  assert.equal(bs.status, 200);
+  const bobUp = row(h, bobDraft, "image").upload_id;
+
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  await h.settled();
+  assert.equal(h.multipart.has(up), false, "storage aborted the upload: its part addresses are refused");
+  assert.equal(h.all("SELECT msg FROM md WHERE msg = ?", id).length, 0, "the session's rows went");
+  assert.equal(h.all("SELECT msg FROM upp WHERE msg = ?", id).length, 0);
+  assert.equal(h.room.uploadPartDone(id, "image", up, 1, "e1").status, 409);
+  assert.ok(h.one("SELECT id FROM m WHERE id = ?", id), "the draft itself stays");
+  assert.ok(h.objects.has(doneKey) && h.room.mediaMeta(done, "image"), "a finished file stays");
+  assert.ok(h.multipart.has(bobUp), "another member's upload goes on");
+});
+
+test("a revoke during an upload start aborts the session that start writes", async () => {
+  const st = holder();
+  const h = makeRoom({ after: st.hook });
+  const id = await draft(h);
+  const c = st.hold("create");
+  const s = h.room.uploadStart(id, "image", "Ada", false, R, 100, "image/png", "pic.png", "fp-1", false);
+  await c.reached;
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  await tick();
+  c.release();
+  await s;
+  await h.settled();
+  assert.equal(h.multipart.size, 0, "no upload left in storage");
+  assert.equal(h.all("SELECT msg FROM md WHERE msg = ?", id).length, 0);
+});
+
+test("revoke everyone aborts every member's uploads in flight", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const up = await imageSession(h, id, 100);
+  await h.room.revokeAll();
+  await h.settled();
+  assert.equal(h.multipart.has(up), false);
+  assert.equal(h.all("SELECT msg FROM md").length, 0);
+});

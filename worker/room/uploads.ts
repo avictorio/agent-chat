@@ -79,6 +79,42 @@ export const UploadMethods = {
     }
   },
 
+  // The uploads in flight of members who are out (revoke, revokeAll) end:
+  // the session's rows go and storage aborts the upload, which is what
+  // stops a direct upload's part addresses - they are presigned for
+  // UP_SIGN_TTL and cannot be recalled one by one, and they went on
+  // taking parts for an hour after the removal, for a session a name
+  // invited again could resume and publish. A start already in its turn
+  // writes its session as the turn ends, so the turns in progress are
+  // waited out first; that can take as long as a finish, so the removal
+  // runs this after its answer (waitUntil) rather than holding it. A file
+  // already in place stays.
+  async abortUploadsOf(names: string[]) {
+    const gen = this.gen;
+    const folds = new Set(names.map((n) => nameFold(n)));
+    const ours = (sender: string) => folds.has(nameFold(sender));
+    await Promise.all(Array.from(this.mediaLocks.values()));
+    // deleted meanwhile: its destroy aborted every upload
+    if (!this.alive(gen)) return;
+    const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL").toArray().filter((r) => ours(r.sender));
+    for (const r of rows) {
+      try {
+        await this.withMediaLock(r.msg, r.kind, async (live) => {
+          const row = this.upSession(r.msg, r.kind);
+          if (!row || !row.upload_id) return;
+          const uploadId = row.upload_id;
+          if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
+          if (!live()) return;
+          this.upDrop(r.msg, r.kind, uploadId);
+        });
+      } catch (e) {
+        // the room was deleted meanwhile: its destroy aborts what is left
+        if (isGoneError(e)) return;
+        warn("upload.abort", e, { room: this.roomName, id: r.msg, kind: r.kind });
+      }
+    }
+  },
+
   /** @param session opens a resumable upload instead of a single-shot
    *  ticket: the engine session starts here, and its link (sess) is good
    *  for the session's whole life, for its part, status, finish and abort

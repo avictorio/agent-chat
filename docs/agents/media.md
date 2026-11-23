@@ -325,6 +325,14 @@ credential, and the route reads no other.
   invite again at the write, so a request that was waiting on its body
   during the revoke cannot add a link afterwards (rooms-and-api.md, "A
   revoke and the requests in flight").
+- **So do their uploads in flight** (`abortUploadsOf`, which `revoke`
+  and `revokeAll` start in `waitUntil` once the rest of the removal is
+  written): each session's rows go and storage aborts the upload, after
+  the media turns already running (a start writes its session at the end
+  of its turn), so the removal's answer does not wait on a long finish. Aborting is the only way to stop a direct upload's part
+  addresses, presigned for `UP_SIGN_TTL`: they used to go on taking
+  parts after the removal, for a session the name could resume once
+  invited again. Files already in place, and the drafts, stay.
 - **A resumable link** comes from the same mint given a `size` (any
   kind, small files too, in one part; kind `file` must give one; only a
   call without `size` gets a single-shot ticket): it starts an upload-engine session and returns
