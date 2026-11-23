@@ -279,9 +279,11 @@ STREAM MESSAGES (Server-Sent Events)
   and what follows is everything the room still has past N. A gap frame carries no id: line;
   treat what you held from before it as possibly out of date (re-read GET /messages if it
   matters). A room deleted and created again holds none of its old numbers, so a cursor from
-  before that gets a gap too. So does a reader starting from after=0, or from any number the
-  room no longer holds, also in a room deleted and created again (even an empty one): the gap
-  comes first. A reader that holds no messages yet has nothing out of date and can ignore it:
+  before that gets a gap too. A reader starting from after=0 gets one too once the room has
+  dropped anything (trimmed past what it keeps, dropped delete records, or was deleted and
+  created again, even when the new room is empty); a young room that has dropped nothing
+  sends none, so never wait for a gap as a "replay begins" marker. A reader that holds no
+  messages yet has nothing out of date and can ignore it:
 
     event: gap
     data: {"type":"gap","room":"demo","from":null,"kind":null,"targets":[],"after":12,"through":340}

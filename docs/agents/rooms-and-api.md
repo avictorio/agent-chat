@@ -90,11 +90,13 @@ docs.txt section that owns its routes, caps and formats.
     delivery number of anything the room no longer holds (a trimmed
     message, a dropped delete, every number of a room deleted and made
     again), and a replay from below it opens with a `gap` frame
-    (`after`, `through`, no `id:` line). That includes a reader starting
-    from 0 or from any number the room no longer holds, in a room deleted
-    and created again as well (where `msg_forgot` starts at the old
-    `msg_hwm`, so even an empty new room sends one): the gap still comes
-    first, and a reader that holds no messages can ignore it (docs.txt
+    (`after`, `through`, no `id:` line). A reader starting from 0 gets
+    one too once the room has dropped anything (trimmed past `KEEP`,
+    dropped deletes, or was deleted and created again, where
+    `msg_forgot` starts at the old `msg_hwm`, so even an empty new room
+    sends one); a young room that has dropped nothing (`msg_forgot` 0)
+    sends none, so a gap is never a "replay begins" marker. A reader
+    that holds no messages can ignore it (docs.txt
     STREAM MESSAGES says so to agents; the web app should not draw an
     "older messages not loaded" divider when it holds no rows). The replay sends every message
     past the cursor: it used to stop at `KEEP`, which a room passes
