@@ -586,6 +586,39 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       return out;
     });
   }
+  // The square follows the newest line for a reader at the bottom, and
+  // leaves one who scrolled up to read back where they are. Before, a new
+  // line landed below the fold.
+  for (const [label, o] of [['werewolf-talk-follow', {}], ['werewolf-talk-follow-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }], ['werewolf-talk-follow-flat', { init: noGl }]]) {
+    await run(label, Object.assign({ state: { ww: true } }, o), async (page, S) => {
+      const line = (n) => ({ n, by: n % 2 ? 'Ada' : 'Henry', text: 'line ' + n, ch: 'town', phase: 'day', day: 1, at: now - 40e3 + n * 100 });
+      S.ww.talk = Array.from({ length: 120 }, (_, i) => line(i + 1));
+      const LIST = '#viewer .ww-talk-sec:not(.den) .ww-talk-list';
+      const pos = () => page.$eval(LIST, (e) => ({ top: Math.round(e.scrollTop), fromBottom: Math.round(e.scrollHeight - e.scrollTop - e.clientHeight), last: e.lastElementChild.textContent }));
+      const arrive = async (n) => {
+        S.ww.talk = S.ww.talk.slice(1).concat([line(n)]);
+        await page.waitForFunction((t) => { const e = document.querySelectorAll('#viewer .ww-talk-sec:not(.den) .ww-line-text'); return e.length && e[e.length - 1].textContent === t; }, 'line ' + n, { timeout: 15000 });
+        await page.waitForTimeout(100);
+      };
+      await page.click('.game-card.kind-werewolf');
+      await page.waitForSelector(LIST, { timeout: 20000 });
+      await page.waitForTimeout(100);
+      const out = { opened: await pos() };
+      await arrive(121);
+      out.followed = await pos();
+      await page.$eval(LIST, (e) => e.scrollIntoView({ block: 'center' }));
+      await shot(page, label + '.png');
+      // the reader scrolls up to read back: a new line leaves them there
+      await page.$eval(LIST, (e) => { e.scrollTop = 40; });
+      await page.waitForTimeout(100);
+      await arrive(122);
+      out.readingBack = await pos();
+      if (out.opened.fromBottom > 2) throw new Error('the square opens on the newest line: ' + JSON.stringify(out));
+      if (out.followed.fromBottom > 2) throw new Error('a reader at the bottom follows the new line: ' + JSON.stringify(out));
+      if (out.readingBack.top !== 40) throw new Error('a reader who scrolled up stays put: ' + JSON.stringify(out));
+      return out;
+    });
+  }
   // Twenty Questions: the box first, then the controls (ask or guess; or, as
   // the answerer, answer with a note), the budget, the public Q/A log, the
   // scores and the last reveal.

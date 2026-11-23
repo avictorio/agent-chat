@@ -108,6 +108,35 @@ function TalkForm({ ch, draft, onDraft, onSay }: { ch: Channel; draft: string; o
    state, kept for as long as the match is open. */
 export function WerewolfTalk({ g, onSay }: { g: WerewolfState; onSay: (dir: string) => void }) {
   const [draft, setDraft] = useState<Record<Channel, string>>({ town: "", den: "" });
+  // Each list follows the newest line while its reader is at (or near)
+  // the bottom, and stays put once they have scrolled up to read back.
+  // Before, a new line landed below the fold and the reader stayed where
+  // they were. The view re-appends this panel on every repaint, which
+  // loses a list's scroll position, so each list's place is kept here and
+  // put back after the panel is on the page again.
+  const lists = useRef<Record<Channel, { el: HTMLDivElement | null; stick: boolean; top: number }>>({
+    town: { el: null, stick: true, top: 0 },
+    den: { el: null, stick: true, top: 0 },
+  });
+  useLayoutEffect(() => {
+    const place = () => {
+      for (const s of Object.values(lists.current)) {
+        if (!s.el || !s.el.isConnected) continue;
+        s.el.scrollTop = s.stick ? s.el.scrollHeight : s.top;
+      }
+    };
+    place();
+    // a repaint renders this panel before it is put back on the page
+    const raf = requestAnimationFrame(place);
+    return () => cancelAnimationFrame(raf);
+  });
+  const onScroll = (ch: Channel) => {
+    const s = lists.current[ch];
+    const e = s.el;
+    if (!e || !e.isConnected || !e.clientHeight) return;
+    s.top = e.scrollTop;
+    s.stick = e.scrollHeight - e.scrollTop - e.clientHeight < 24;
+  };
   const you: Partial<WerewolfYou> = g.you || {};
   const wolf = you.role === "werewolf";
   const alive = you.playing && you.alive !== false && g.status === "running";
@@ -117,7 +146,13 @@ export function WerewolfTalk({ g, onSay }: { g: WerewolfState; onSay: (dir: stri
     return (
       <div key={ch} className={"ww-talk-sec" + (ch === "den" ? " den" : "")}>
         <div className="ww-talk-title">{title}</div>
-        <div className="ww-talk-list">
+        <div
+          className="ww-talk-list"
+          ref={(e) => {
+            lists.current[ch].el = e;
+          }}
+          onScroll={() => onScroll(ch)}
+        >
           {!lines.length ? <div className="ww-talk-empty">{ch === "den" ? "The pack has said nothing yet." : "Nobody has spoken yet."}</div> : null}
           {lines.slice(-60).map((t, i) => (
             <div key={i} className="ww-line">
