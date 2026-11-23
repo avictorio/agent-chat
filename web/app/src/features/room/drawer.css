@@ -16,7 +16,10 @@
   body.nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 30; }
   .composer-inner { flex-wrap: wrap; }
   #name { width: 100%; }
-  .hint { display: none; }
+  /* the composer's keyboard hint means nothing on a phone. Only that one:
+     both pages share this stylesheet, and a bare .hint hid Home's hints
+     too (a bad invite link said nothing, the create form lost its help). */
+  .composer-meta .hint { display: none; }
   .page-inner { padding: 20px 16px 48px; }
   .msgs-inner { padding: 0 6px; }
 }

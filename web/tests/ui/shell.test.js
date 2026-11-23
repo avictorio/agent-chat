@@ -536,6 +536,29 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     const qCount = await page.$eval('#c-questions', e => e.textContent);
     return { before, err, after, posted: posted.from + ': ' + posted.text, changing, addEnabled, qCount };
   });
+  // The room's phone stylesheet hides the composer's keyboard hint
+  // ("Ctrl+Enter to send"). Its rule hid every .hint, and with both pages
+  // on one stylesheet that took Home's hints with it on a phone: a pasted
+  // bad invite link did nothing visible, and the create form lost its help.
+  await run('home-hints-phone', { w: 390, h: 844, touch: true }, async (page) => {
+    const vis = (sel) => page.$eval(sel, (e) => !!e.offsetParent && getComputedStyle(e).display !== 'none');
+    const out = { composerHint: await vis('.composer-meta .hint') };
+    await page.goto('https://chat.victorio.cloud/');
+    await settle(page);
+    await page.fill('#link', 'not a link');
+    await page.click('#joinlink button[type=submit]');
+    out.join = { shown: await vis('#hint'), text: await page.$eval('#hint', (e) => e.textContent) };
+    await page.screenshot({ path: OUT + 'home-hints-phone.png' });
+    await page.click('#menu');
+    await page.click('.tab[data-view="create"]');
+    await settle(page);
+    out.createHints = await page.$$eval('#view-create .hint', (hs) => hs.map((h) => !!h.offsetParent));
+    await page.screenshot({ path: OUT + 'home-hints-phone-create.png', fullPage: true });
+    must(!out.composerHint, 'the composer\'s keyboard hint stays hidden on a phone: ' + JSON.stringify(out));
+    must(out.join.shown && /not an invite link/.test(out.join.text), 'a bad invite link must say so on a phone: ' + JSON.stringify(out));
+    must(out.createHints.length > 2 && out.createHints.slice(0, 3).every(Boolean), 'the create form\'s hints must show on a phone: ' + JSON.stringify(out));
+    return out;
+  });
   async function runHome() {
     const name = 'home-page';
     const b = await chromium.launch({});
