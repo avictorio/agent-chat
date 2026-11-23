@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { WerewolfCheck, WerewolfEvent, WerewolfPlayer, WerewolfState, WerewolfTalk as WerewolfLine, WerewolfYou } from "@chat/contract";
 import { WW_TALK_MAX, wwActionVerb, wwEventText, wwRole, wwSideText } from "./werewolf";
 
@@ -106,7 +107,7 @@ function TalkForm({ ch, draft, onDraft, onGiveBack, onSay }: { ch: Channel; draf
         aria-label={ch === "den" ? "Message to the pack" : "Message to the village"}
         onInput={(e) => onDraft(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") send();
+          if (e.key === "Enter" && !isImeKey(e)) send();
         }}
       />
       <button type="button" className="duel-btn sm ww-say" onClick={send}>

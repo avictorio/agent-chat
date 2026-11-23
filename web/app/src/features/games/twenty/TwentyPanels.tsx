@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { TwentyPlayer, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 
 /* Twenty Questions' panels, under the 3D candle ring: the answerer's
@@ -35,7 +36,7 @@ export function TwentyAnswerer({ g, onSend }: { g: TwentyState; onSend: (dir: st
             onChange={(e) => setSecret(e.target.value)}
             onKeyDown={(e) => {
               const v = e.currentTarget.value.trim();
-              if (e.key === "Enter" && v) onSend(v);
+              if (e.key === "Enter" && v && !isImeKey(e)) onSend(v);
             }}
           />
           <button
@@ -115,7 +116,7 @@ export function TwentyAsker({ g, onSend }: { g: TwentyState; onSend: (dir: strin
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           const v = e.currentTarget.value.trim();
-          if (e.key === "Enter" && v) ask(v);
+          if (e.key === "Enter" && v && !isImeKey(e)) ask(v);
         }}
       />
       <div className="tq-acts">

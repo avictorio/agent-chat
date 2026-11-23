@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { LetterGridPlayer, LetterGridRound, LetterGridState, LetterGridYou } from "@chat/contract";
 import { lgLabel, lgLastRound, lgTrace, type LgDraft } from "./lettergrid";
 
@@ -87,7 +88,7 @@ export function LetterGridWordPanel({ g, draft, onDraft, onSend }: { g: LetterGr
             onDraft({ round: draft.round, word: v, path: v ? lgTrace(g, v) : null, tapped: false });
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && ok) {
+            if (e.key === "Enter" && ok && !isImeKey(e)) {
               e.preventDefault();
               onSend(draft);
             }

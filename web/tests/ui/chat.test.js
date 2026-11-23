@@ -554,5 +554,26 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     });
   }
 
+  // With the mention menu open, the Enter that confirms an IME conversion
+  // belongs to the IME (it picked the first member and rewrote the text),
+  // and Ctrl+Enter sends the message (the menu took it as a pick).
+  await run('composer-ime-mention', {}, async (page, S, calls) => {
+    const out = {};
+    await page.click('#text');
+    await page.keyboard.type('@He');
+    await page.waitForSelector('.mentionMenu', { timeout: 4000 });
+    for (const how of [{ isComposing: true }, { keyCode: 229 }]) await page.$eval('#text', (e, how) => e.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }, how))), how);
+    await settle(page);
+    out.composing = await page.$eval('#text', (t) => t.value);
+    if (out.composing !== '@He') throw new Error('an IME-confirming Enter must not pick a member: ' + JSON.stringify(out.composing));
+    if (!(await page.$('.mentionMenu'))) throw new Error('the menu stays open through the composition');
+    const before = calls.length;
+    await page.keyboard.press('Control+Enter');
+    await settle(page);
+    out.posts = calls.slice(before).filter((c) => /^POST \/api\/rooms\/demo\/messages(\?|\s|$)/.test(c));
+    if (out.posts.length !== 1 || !/"text":"@He"/.test(out.posts[0])) throw new Error('Ctrl+Enter sends the message, menu or not: ' + JSON.stringify(out));
+    return out;
+  });
+
   done('chat');
 })();

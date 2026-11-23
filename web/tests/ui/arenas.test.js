@@ -571,7 +571,29 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
     if (out.kept !== out.back) throw new Error('the given-back line is the draft, kept across a repaint: ' + JSON.stringify(out.kept));
     return out;
   });
-  for (const [label, o] of [['werewolf-night-wolf', {}],['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+  // The Enter that confirms an IME conversion (isComposing on macOS
+  // Chrome, keyCode 229 on Safari) ends the composition: it sent the
+  // unconverted text as the move. A plain Enter afterwards still sends.
+  for (const [label, st, card, field, id] of [['ime-enter-werewolf', { ww: true }, '.game-card.kind-werewolf', '#viewer .ww-talk-input', 30], ['ime-enter-twenty', { tq: true }, '.game-card.kind-twenty', '#viewer .tq-panel .tq-input', 28]]) {
+    await run(label, { state: st, init: noGl }, async (page, S, calls) => {
+      const out = {};
+      await page.click(card);
+      await page.waitForSelector(field, { timeout: 20000 });
+      await page.fill(field, 'kawaii');
+      const before = calls.length;
+      for (const how of [{ isComposing: true }, { keyCode: 229 }]) await page.$eval(field, (e, how) => e.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }, how))), how);
+      await settle(page);
+      out.composing = calls.slice(before).filter((c) => c.includes('/games/' + id + '/moves')).length;
+      out.value = await page.$eval(field, (i) => i.value);
+      await page.press(field, 'Enter');
+      await settle(page);
+      out.sent = calls.slice(before).filter((c) => c.includes('/games/' + id + '/moves')).length;
+      if (out.composing !== 0 || out.value !== 'kawaii') throw new Error('an IME-confirming Enter must not send the move: ' + JSON.stringify(out));
+      if (out.sent !== 1) throw new Error('a plain Enter still sends: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  for (const [label, o] of [['werewolf-night-wolf', {}], ['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true, wwWolf: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .ww-card', { timeout: 10000 });

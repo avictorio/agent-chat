@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { TriviaPlayer, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import { tvLastRound } from "./trivia";
 
@@ -132,7 +133,7 @@ export function TriviaAnswerForm({ g, onSend }: { g: TriviaState; onSend: (dir: 
         aria-label="Your answer"
         onInput={(e) => setAns(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !off) {
+          if (e.key === "Enter" && !off && !isImeKey(e)) {
             e.preventDefault();
             send();
           }

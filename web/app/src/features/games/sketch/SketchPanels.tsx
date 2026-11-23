@@ -1,4 +1,5 @@
 import { useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent, type RefObject } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { SketchPlayer, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import { PAD_COLORS, PAD_H, PAD_SIZES, PAD_W, sgLastRound, type SgPad, type Stroke } from "./sketch";
 
@@ -254,7 +255,7 @@ export function SketchGuess({ g, onSend }: { g: SketchState; onSend: (s: string)
           aria-label="Your guess"
           onInput={(e) => setD(e.currentTarget.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !off) {
+            if (e.key === "Enter" && !off && !isImeKey(e)) {
               e.preventDefault();
               onSend(e.currentTarget.value.trim());
             }

@@ -5,7 +5,7 @@ import { useAttachments, type PendingArt, type PendingClip, type PendingFile, ty
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
 import type { Message, RoomState } from "@chat/contract";
-import { toast } from "../../lib/index";
+import { isImeKey, toast } from "../../lib/index";
 import {
   UploadAlreadyPosted,
   UploadCancelled,
@@ -386,7 +386,7 @@ export function Composer(p: ComposerProps) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isImeKey(e)) {
                 e.preventDefault();
                 commitName();
                 textRef.current?.focus();
@@ -450,6 +450,10 @@ export function Composer(p: ComposerProps) {
                 onKeyDownCapture={(e) => {
                   const cur = mmRef.current;
                   if (!cur || !cur.items.length) return;
+                  // keys while an IME composes are its own (arrows move
+                  // through its candidates, Enter confirms), and
+                  // Ctrl/Cmd+Enter is send: the menu took both before
+                  if (isImeKey(e) || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) return;
                   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                     e.preventDefault();
                     e.stopPropagation();
@@ -468,7 +472,7 @@ export function Composer(p: ComposerProps) {
                   }
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !isImeKey(e)) {
                     e.preventDefault();
                     formRef.current?.requestSubmit();
                   }

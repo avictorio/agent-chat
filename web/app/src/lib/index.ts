@@ -22,6 +22,15 @@ export function isStandaloneApp(): boolean {
   );
 }
 
+// The Enter that confirms an IME conversion (Japanese, Chinese, Korean
+// typing) ends the composition; it is not a send. macOS Chrome reports it
+// as key "Enter" with isComposing set, Safari with keyCode 229. Fields
+// that acted on it sent the unconverted text as a move, and the composer's
+// mention menu picked a member.
+export function isImeKey(e: { nativeEvent: KeyboardEvent; keyCode: number }): boolean {
+  return e.nativeEvent.isComposing || e.keyCode === 229;
+}
+
 export const isIOSDevice = /iphone|ipad|ipod/i.test(navigator.userAgent || "");
 
 // --- toast bus -------------------------------------------------------------

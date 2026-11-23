@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
+import { isImeKey } from "../../../lib/index";
 import type { CodeRaceFeedback, CodeRaceGuess, CodeRacePlayer, CodeRaceRound, CodeRaceState } from "@chat/contract";
 import { crWhat } from "../shared/render";
 import { crPalette, crStatus, TILE_LABEL, type Pal } from "./coderace";
@@ -199,7 +200,7 @@ export function CodeRaceInput({ g, onCommit }: { g: CodeRaceState; onCommit: (v:
             aria-label={"Your " + len + "-letter guess"}
             onInput={(e) => setDraft(clean(e.currentTarget.value))}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !off) {
+              if (e.key === "Enter" && !off && !isImeKey(e)) {
                 e.preventDefault();
                 onCommit(clean(e.currentTarget.value));
               }
