@@ -509,8 +509,15 @@ export const UploadMethods = {
     if (!row.upload_id) {
       // Finished already, and this is a retry whose first answer was lost
       // (the instance may even have restarted since): the stored file is
-      // the answer, as it was the first time.
-      const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+      // the answer, as it was the first time. Only a file an engine finish
+      // made, though, which the row itself tells, so a restart changes
+      // nothing: an engine session keeps its plan's part_size, always whole
+      // MiB; an attach (putMedia) leaves it NULL and a video stream writes
+      // STREAM_PART, which is not. Any file answered 200 before, so a finish
+      // for an upload that an attach had replaced (and aborted) reported
+      // the attach's file as its own.
+      if (row.part_size == null || row.part_size === STREAM_PART) return { status: 409, error: "No upload in progress for that message" };
+      const m =this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
       return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
     }
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };

@@ -152,8 +152,13 @@ way; the routes are in docs.txt UPLOADING FILES.
   will not give answers 502 (not an empty list, which sent the client
   to re-send everything); one storage no longer has starts afresh.
 - **Finish is safe to repeat.** One sent while another runs gets that
-  finish's answer (`_finishing` holds the promise); one sent after it
-  ended answers 200 with the stored file. Storage answering NoSuchUpload
+  finish's answer (`_finishing` holds the promise), which can be a
+  refusal; one sent after a finish succeeded answers 200 with the
+  stored file. Only a file an engine finish made counts: the row tells
+  (an engine session's `part_size` is a whole MiB; an attach leaves it
+  NULL, a stream writes `STREAM_PART`), so a finish for an upload an
+  attach or a stream replaced answers 409, as one with no upload does,
+  after a restart too. Storage answering NoSuchUpload
   is checked against the key first: an object of the declared size is
   an earlier finish that completed and never recorded so (an instance
   restart between the two), and it is checked and indexed. The stream

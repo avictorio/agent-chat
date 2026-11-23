@@ -80,7 +80,11 @@ export const DOC_MAX = 1000000;
 export const TICKET_TTL_MS = 900000; // upload tickets live 15 minutes
 export const TICKET_MAX_PER_MEMBER = 20;
 export const TICKET_MAX_TRIES = 5;
-export const STREAM_PART = 10000000; // server-side part size when ingesting a streamed upload
+// The server-side part size when ingesting a streamed upload. Kept off a
+// whole MiB on purpose: the engine's plans are always whole MiB, and a
+// finish sent again tells an engine-finished file from a streamed one by
+// it (upFinishNow, room/uploads.ts).
+export const STREAM_PART = 10000000;
 export const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 // ---- The resumable upload engine ----
 // Every attachment past its single-request cap - images, audio, video,

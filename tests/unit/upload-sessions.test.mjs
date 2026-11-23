@@ -6,6 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
+import { MIB, STREAM_PART } from "../../worker/limits.ts";
 
 const R = "unit";
 const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
@@ -172,6 +173,32 @@ test("a finish sent twice answers both with the same result, and again later", a
   assert.equal(r3.status, 200, "a retry after it ended (its answer lost) answers the stored file");
   assert.equal(r3.bytes, 100);
   assert.equal(r3.type, "image/png");
+});
+
+test("a finish for an upload an attach replaced answers 409, not the attach's file", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const s = await h.room.uploadStart(id, "image", "Ada", false, R, 5000, "image/png", "big.png", "fp-big", false);
+  assert.equal(s.status, 200);
+  assert.equal((await h.room.attachImage(id, "Ada", bytes(PNG_HEAD, 100).buffer, "image/png", false, R)).status, 200);
+  const f = await h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  assert.equal(f.status, 409, "the upload was replaced; its finish does not report the attached file");
+  assert.equal(row(h, id, "image").size, 100, "the attached image stays");
+});
+
+test("a finish on a kind that only ever had an attach or a stream answers 409", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  assert.equal((await h.room.attachImage(id, "Ada", bytes(PNG_HEAD, 100).buffer, "image/png", false, R)).status, 200);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).status, 409);
+  const a = await h.room.streamBegin(id, "Ada", "video/mp4", 100, false, R);
+  h.multipart.get(a.uploadId).data = bytes(MP4_HEAD, 100);
+  assert.equal((await h.room.streamFinish(id, a.uploadId, [{ partNumber: 1, etag: "e" }], 100, R)).status, 200);
+  assert.equal((await h.room.uploadFinish(id, "video", "Ada", false, R, null)).status, 409);
+});
+
+test("a stream's part size never looks like an engine plan's (finish tells them apart by it)", () => {
+  assert.notEqual(STREAM_PART % MIB, 0);
 });
 
 test("a finish whose upload storage already completed indexes the file instead of losing it", async () => {

@@ -32,7 +32,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-upload-finish",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "An upload's finish is safe to repeat: one sent again while the first runs, or after it ended with its answer lost, answers 200 with the stored file (it used to answer 409). Calls for one message's media kind (start, finish, abort, an attach, a video stream) now run one at a time in the order they arrive. A start that resumes answers 502 when storage did not list the parts: ask again instead of re-sending them all.",
+    text: "Upload finish is safe to repeat: sent again while one runs, it gets that finish's answer; after one succeeded, 200 with the stored file (both were 409); if an attach or stream replaced the upload, 409. Calls for one message's media kind (start, finish, abort, an attach, a video stream) now run one at a time in the order they arrive. A start that resumes answers 502 when storage did not list the parts: ask again instead of re-sending them all.",
   },
   {
     id: "2026-11-23-delivery-cursor",

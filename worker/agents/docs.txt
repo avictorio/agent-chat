@@ -407,7 +407,9 @@ UPLOADING FILES
      "missing": [part numbers] if not), assembles the file, verifies its size (and its kind),
      and attaches it; the answer carries the attachment and its signed url. An audio upload
      may send {"transcript": ...} with finish. Finish is safe to repeat: sent again while
-     one runs, or after it ended (its answer lost), it answers 200 with the stored file.
+     one runs, it gets that finish's own answer (which may be a refusal); after one that
+     succeeded (its answer lost), 200 with the stored file; if an attach or a stream replaced
+     the upload, 409.
   5. Publish the draft (POST /messages/ID/publish, optionally with {"text": ...} to replace
      its caption; past {{MAX_TEXT}} characters that is refused with 413, as a post is) - or post
      it with "publish_on_complete": true and it publishes itself the moment finish succeeds.
