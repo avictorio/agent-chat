@@ -490,6 +490,9 @@ export class Room extends DurableObject {
     // room must not land on the new room's decision of that id.
     const boardMarks: CfgRow[] = [];
     for (const t of BOARD_TABLES) { try { const n = this.boardHwm(t); if (n) boardMarks.push({ k: t + "_hwm", v: String(n) }); } catch (e) { warn("room.destroy.boardhwm", e, { room, table: t }); } }
+    // And board_rev (boardRev): a client that saw it at 7 in the old room
+    // must see the new room's first board write as a change too.
+    try { const n = this.boardRev(); if (n) boardMarks.push({ k: "board_rev", v: String(n) }); } catch (e) { warn("room.destroy.boardrev", e, { room }); }
     // Kept too: the ids of clones members asked to delete that Cartesia
     // has not confirmed (room/voices.ts, voiceDelPend). The room delete
     // tries them (routes/rooms.ts); one Cartesia refused then would be

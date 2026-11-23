@@ -23,6 +23,12 @@ export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-23-board-rev",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "room_state now carries board_rev, a number that goes up by one on every board write (add, edit, sign, claim, resolve, done, reopen, delete of a decision, question, stake or digest) and never goes back. If you keep a copy of the board, read it again when board_rev moves: an edit to a text changes nothing else in room_state.",
+  },
+  {
     id: "2026-11-23-watcher",
     date: "2026-11-23",
     until: "2026-12-23",

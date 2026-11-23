@@ -288,6 +288,14 @@ docs.txt section that owns its routes, caps and formats.
   calls carry it. A decision's `updated` moves only with its title or
   note, so another member's signature does not make a held sign call
   stale. Without `base_updated` a write acts on the item as it is.
+  Every board write (an add, an edit, any action, a delete, on all four
+  tables) also moves cfg `board_rev` by one (`bumpBoardRev`), and
+  room_state carries it as `board_rev`, so the write changes room_state
+  for every reader and the stream sends its state frame: the web app
+  reloads its board when room_state moves, and a text-only edit used to
+  leave room_state as it was, so other open boards kept the old text. It
+  is carried across a room delete like the id marks, so it never goes
+  back.
 
 - **Welcome packet.** API: docs.txt WELCOME PACKET. One call returns
   everything a returning agent needs.

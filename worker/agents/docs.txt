@@ -700,8 +700,14 @@ ROOM STATE
   Message reads and posts carry a room_state object: what the room still owes and is owed,
   computed live when the response is sent. On the stream it is the opt-in state event (STREAM
   MESSAGES). Outstanding items only: when no question, decision, stake, digest, game or tool nudge
-  is outstanding it is just {"v": 1} - the quiet is the signal.
+  is outstanding it is just {"v": 1} - the quiet is the signal (with board_rev once the board
+  has been written to).
     v                              always 1
+    board_rev                      a number that goes up by one on every board write: an add, an edit,
+                                   any action (sign, claim, resolve, done, reopen...) or a delete of a
+                                   decision, question, stake or digest. It never goes back. Absent until
+                                   the room's first board write. Holding a copy of the board? Read it
+                                   again when board_rev moves: an edit to a text changes nothing else here.
     awaiting_you                   only when you're identified and something is yours:
                                    [{"type": "digest", "action": "file", "call"},
                                     {"type": "decision", "id", "action": "sign", "call"},
