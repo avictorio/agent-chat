@@ -305,6 +305,35 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       return { published };
     });
   }
+  // A video never rides inline: base64 of up to 25 MB in one JSON post cost
+  // the Worker hundreds of MB to decode, and beside a photo and a clip it
+  // passed the room's 32 MiB hand-off and failed with a bare 500. Even a
+  // small one goes up through the engine, and the photo with it.
+  for (const [label, phone] of [['upload-video-small', false], ['upload-video-small-phone', true]]) {
+    await run(label, Object.assign({ hash: '#invite=tok_Anthony' }, phone ? { w: 390, h: 844, touch: true } : {}), async (page, S, calls) => {
+      S.partDelay = 700;
+      const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(150000, 2)]);
+      await page.setInputFiles('#vidFile', { name: 'clip.mp4', mimeType: 'video/mp4', buffer: mp4 });
+      await page.locator('#vidChip:not([hidden])').waitFor({ timeout: 3000 });
+      await page.setInputFiles('#imgFile', require('path').join(TESTS, '../../tests/fixtures/photo.png'));
+      await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+      await page.fill('#text', 'Short clip');
+      await page.click('#send');
+      await page.locator('#uplCard').waitFor({ timeout: 3000 });
+      await page.waitForFunction(() => /\d+% ·/.test((document.querySelector('#uplMeta') || {}).textContent || ''), null, { timeout: 10000 });
+      await shot(page, label + '.png');
+      await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+      await settle(page);
+      const inline = calls.filter((c) => /^POST .*\/messages /.test(c) && /"(video|image)":"data:/.test(c));
+      must(!inline.length, 'nothing rides inline: ' + inline.map((c) => c.slice(0, 120)).join(' | '));
+      must(calls.some((c) => /\/101\/video\/start/.test(c)) && calls.some((c) => /\/101\/video\/finish/.test(c)), 'the video goes up through the engine');
+      must(calls.some((c) => /\/101\/image\/start/.test(c)), 'the photo rides along through the engine');
+      const live = S.msgs.find((x) => x.text === 'Short clip');
+      must(live && live.video && live.image, 'one post with both: ' + JSON.stringify(live));
+      must(await page.$eval('#vidChip', (e) => e.hidden), 'the video chip clears after the send');
+      return { id: live.id };
+    });
+  }
   await run('upload-interrupted', {
     hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
     init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },

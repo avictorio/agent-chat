@@ -5,15 +5,23 @@ import { useLatest } from "../../lib/useLatest";
 
 // The composer's pending attachments: one clip, one image, one video,
 // one page/doc and one general file per message (the server keeps one
-// attachment of each kind on a message). Small images, clips and
-// videos ride inline in the post as data URLs; anything bigger, and
-// every general file, keeps its File and goes up through the resumable
+// attachment of each kind on a message). Small images and clips ride
+// inline in the post as data URLs; anything bigger, every video and
+// every general file keeps its File and goes up through the resumable
 // upload engine (uploads.ts) - there is no size cap here beyond the
-// server's. A pick is routed by what its bytes
+// server's. A video never rides inline: up to 25 MB of base64 in one
+// JSON body cost the Worker hundreds of MB to decode, and with a photo
+// and a clip beside it the post could pass the room's 32 MiB hand-off
+// and fail with a bare 500. A pick is routed by what its bytes
 // are, not by the button it came through: a photo type the chat can't
 // show (HEIC, SVG...) still attaches, as a file to download.
 
-export const INLINE_MAX = { image: 5000000, audio: 5000000, video: 25000000 };
+export const INLINE_MAX = { image: 5000000, audio: 5000000 };
+// What one post may carry inline in all: past it the whole send goes
+// through the upload engine. The room takes a post's bytes in one call
+// capped at 32 MiB, and the caps above keep a post well under this today;
+// it holds if a cap is raised.
+export const INLINE_TOTAL_MAX = 30000000;
 
 export interface PendingClip {
   data?: string;
@@ -36,9 +44,7 @@ export interface PendingArt {
   label: string;
 }
 export interface PendingVideo {
-  data?: string;
-  file?: File;
-  big?: boolean;
+  file: File;
   name: string;
 }
 export interface PendingFile {
@@ -115,18 +121,10 @@ export function useAttachments(sendingFile: PendingFile | null = null) {
       toast("Couldn't read that file", true);
     }
   };
-  const takeVideo = async (f: File) => {
-    const label = "🎬 " + f.name + " (" + fmtBytes(f.size) + ")" + later;
-    if (f.size > INLINE_MAX.video) {
-      setVideo({ file: f, big: true, name: label });
-      return;
-    }
-    try {
-      const data = await readAs(f, "data");
-      setVideo({ data, file: f, name: label });
-    } catch {
-      toast("Couldn't read that file", true);
-    }
+  const takeVideo = (f: File) => {
+    // kept as the File: it goes up through the upload engine, never read
+    // into memory here
+    setVideo({ file: f, name: "🎬 " + f.name + " (" + fmtBytes(f.size) + ")" + later });
   };
 
   const onImgFile = async (f: File | null) => {
@@ -142,7 +140,7 @@ export function useAttachments(sendingFile: PendingFile | null = null) {
   const onVidFile = async (f: File | null) => {
     if (!f) return;
     if ((await sniffKind(f)) !== "video") return asFile(f, "That video type can't be played in the chat - it attaches as a file to download");
-    await takeVideo(f);
+    takeVideo(f);
   };
   const onArtFile = async (f: File | null) => {
     if (!f) return;

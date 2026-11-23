@@ -179,10 +179,14 @@ way; the routes are in docs.txt UPLOADING FILES.
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is
   the edge's 100 MB request cap.
-- **The web composer** (`features/composer/uploads.ts`) sends small media
-  inline and everything else through the engine, with XMLHttpRequest for
-  byte progress (percent, size, speed, time left), per-part retries with
-  backoff, a pause while offline that resumes on reconnect, a Cancel
+- **The web composer** (`features/composer/uploads.ts`) sends small
+  photos, clips, pages and documents inline and everything else through
+  the engine: every video (base64 of up to `VIDEO_MAX` in one JSON body
+  cost the Worker hundreds of MB to decode), and the whole send when its
+  inline total would pass `INLINE_TOTAL_MAX` (`useAttachments.ts`; the
+  room takes a post's bytes in one call capped at 32 MiB). The engine
+  path uses XMLHttpRequest for byte progress (percent, size, speed,
+  time left), per-part retries with backoff, a pause while offline that resumes on reconnect, a Cancel
   that aborts and deletes the draft, and an "interrupted upload" note
   after a reload (re-attach the same file to resume, or Discard). A
   draft found by `upload/resume` is taken over only when it holds no

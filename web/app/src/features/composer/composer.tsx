@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon as I } from "../../ui/Icon";
 import { useDictation } from "./useDictation";
-import { useAttachments, type PendingArt, type PendingClip, type PendingFile, type PendingImage, type PendingVideo } from "./useAttachments";
+import { INLINE_TOTAL_MAX, useAttachments, type PendingArt, type PendingClip, type PendingFile, type PendingImage, type PendingVideo } from "./useAttachments";
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
 import type { Message, RoomState } from "@chat/contract";
@@ -272,7 +272,11 @@ export function Composer(p: ComposerProps) {
     sendingRef.current = true;
     setSending(true);
     setErr(null);
-    const viaUploads = !!(fileAtt || (image && image.big) || (clip && !clip.data) || (video && video.big));
+    // what the post would carry inline, in bytes (a page or document rides
+    // inline either way)
+    const clipBytes = clip ? (clip.blob ? clip.blob.size : (clip.data || "").length * 0.75) : 0;
+    const inlineBytes = (image && image.file ? image.file.size : 0) + clipBytes + (art ? art.content.length : 0);
+    const viaUploads = !!(fileAtt || video || (image && image.big) || (clip && !clip.data) || inlineBytes > INLINE_TOTAL_MAX);
     // a page or document can't ride a draft: an upload send leaves it be
     const sent: InFlight = { clip, image, video, fileAtt, art: viaUploads ? null : art };
     setInFlight(sent);
@@ -286,8 +290,9 @@ export function Composer(p: ComposerProps) {
       setArt((c) => (c && c === sent.art ? null : c));
     };
     try {
-      // Anything past the inline caps, and any general file, goes up
-      // first under a draft: the message does not officially post until
+      // Anything past the inline caps, every video, any general file and
+      // a set whose inline total passes INLINE_TOTAL_MAX goes up first
+      // under a draft: the message does not officially post until
       // every upload completes and the draft is published. The image,
       // clip and video in the same message ride along through the same
       // engine. Nothing is cleared up front: if an upload fails, the
@@ -303,10 +308,7 @@ export function Composer(p: ComposerProps) {
           const b = clip.blob || dataUrlBlob(clip.data || "", "audio/webm");
           items.push({ kind: "audio", blob: b, name: clip.name, type: b.type, transcript: clip.transcript || null });
         }
-        if (video) {
-          const b = video.file || dataUrlBlob(video.data || "", "video/mp4");
-          items.push({ kind: "video", blob: b, name: video.file ? video.file.name : "video", type: b.type });
-        }
+        if (video) items.push({ kind: "video", blob: video.file, name: video.file.name, type: video.file.type });
         if (fileAtt) items.push({ kind: "file", blob: fileAtt.file, name: fileAtt.file.name, type: fileAtt.file.type });
         const ctl = new AbortController();
         abortRef.current = ctl;
@@ -344,7 +346,6 @@ export function Composer(p: ComposerProps) {
       if (clip) payload.audio = clip.data;
       if (clip && clip.transcript) payload.transcript = clip.transcript;
       if (image) payload.image = image.data;
-      if (video && video.data) payload.video = video.data;
       if (art && art.kind === "html") {
         payload.html = art.content;
         payload.html_name = art.name;
