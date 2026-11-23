@@ -38,7 +38,16 @@ docs.txt section that owns its routes, caps and formats.
     message, so the retry posts. Each sender's
     newest `CLIENT_MSG_ID_KEEP` ids from the last `CLIENT_MSG_ID_MS` are
     kept. It is stored, not in memory, so a restart between the two sends
-    does not forget it.
+    does not forget it. The web composer gives every send one id
+    (`newClientMsgId` in `features/composer/uploads.ts`) and keeps it
+    with the unsent message (`cidRef`) through every retry, its own and
+    the person pressing Send again, until the message is sent or changed
+    (text, name or an attachment). A text or inline-media post retries a
+    network failure or a 5xx after `LOST_WAITS` and a 409 naming the
+    first post after `STORING_WAITS`, then shows the error; `repeat:
+    true` is success. An upload's draft-creating post carries it too, so
+    `net()`'s retry gets the same draft back; a 409 there means that
+    draft is gone and a new id starts a new one, and a cancel drops it.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
     the stream's backlog) go by a message's delivery number, not its
     id: `COALESCE(m.seq, id)`. A message that goes live after its id was

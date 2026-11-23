@@ -913,5 +913,70 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     return out;
   });
 
+  // Every send carries one client_msg_id that stays with the unsent
+  // message through its retries. The posts sent so far, as [id, text].
+  const posts = (calls, from) => calls.slice(from || 0).filter((c) => /^POST \/api\/rooms\/demo\/messages \{/.test(c)).map((c) => { const b = JSON.parse(c.slice(c.indexOf('{'))); return [b.client_msg_id, b.text]; });
+  const rowsWith = (page, t) => page.$$eval('.msg', (rs, tx) => rs.filter((r) => r.textContent.includes(tx)).length, t);
+  const idle = (page) => page.waitForFunction(() => !document.querySelector('#send').disabled, null, { timeout: 15000 });
+
+  // The post lands but its answer is lost: the composer sends it again
+  // with the same id, the server answers with the first post (repeat),
+  // and the message shows once. Before, there was no id: the error
+  // showed, and sending again posted it twice.
+  await run('send-answer-lost', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost'];
+    const from = calls.length;
+    await page.fill('#text', 'Only once, please.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { posts: posts(calls, from), rows: await rowsWith(page, 'Only once, please.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)), box: await page.$eval('#text', (t) => t.value) };
+    must(out.posts.length === 2 && out.posts[0][0] && out.posts.every((x) => x[0] === out.posts[0][0]), 'the retry carries the same id: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err && out.box === '', 'one row, no error, the box clears: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // Every automatic try is lost: the error shows and the text stays.
+  // Pressing Send again carries the same id and gets the first post back:
+  // one row. A new message then gets a new id.
+  await run('send-again-same-id', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
+    const from = calls.length;
+    await page.fill('#text', 'Sent through a bad line.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 15000 });
+    await idle(page);
+    const failed = { posts: posts(calls, from).length, box: await page.$eval('#text', (t) => t.value) };
+    must(failed.posts === 4 && failed.box === 'Sent through a bad line.', 'four tries, the text kept: ' + JSON.stringify(failed));
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    await page.fill('#text', 'A different message.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const all = posts(calls, from);
+    const out = { ids: all.map((x) => x[0]), rows: await rowsWith(page, 'Sent through a bad line.'), err: await page.$eval('#err', (e) => e.hidden) };
+    must(all.length === 6 && out.ids.slice(0, 5).every((id) => id === out.ids[0]), 'Send again keeps the id: ' + JSON.stringify(all));
+    must(out.ids[5] && out.ids[5] !== out.ids[0], 'a new message gets a new id: ' + JSON.stringify(all));
+    must(out.rows === 1 && out.err, 'the message shows once and the error is gone: ' + JSON.stringify(out));
+    return { tries: all.length };
+  });
+
+  // A 409 naming the id's first post (still storing its files) waits and
+  // asks again with the same id; the next answer posts it.
+  await run('send-409-then-200', {}, async (page, S, calls) => {
+    S.postAnswers = ['409'];
+    const from = calls.length;
+    await page.fill('#text', 'Waiting on storage.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { posts: posts(calls, from), rows: await rowsWith(page, 'Waiting on storage.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)) };
+    must(out.posts.length === 2 && out.posts[1][0] === out.posts[0][0], 'the same id, asked again: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err, 'one row, no error: ' + JSON.stringify(out));
+    return out;
+  });
+
   done('chat');
 })();

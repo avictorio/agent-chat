@@ -219,6 +219,23 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     must(calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
     return { r2, viaSite, signs: signs.length };
   });
+  // The draft-creating post's answer is lost: the upload's retry sends it
+  // again with the same client_msg_id and gets the same draft back, so one
+  // draft is made and the file posts once. Before, the retry made a second
+  // draft, and the first stayed behind.
+  await run('upload-draft-answer-lost', { hash: '#invite=tok_Anthony', allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost'];
+    const from = calls.length;
+    await page.setInputFiles('#anyFile', { name: 'once.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(150000, 6) });
+    await page.click('#send');
+    await page.locator('.file-card', { hasText: 'once.bin' }).waitFor({ timeout: 20000 });
+    const drafts = calls.slice(from).filter((c) => /^POST \/api\/rooms\/demo\/messages \{/.test(c) && /"draft":true/.test(c)).map((c) => JSON.parse(c.slice(c.indexOf('{'))).client_msg_id);
+    must(drafts.length === 2 && drafts[0] && drafts[1] === drafts[0], 'the draft post is retried with the same id: ' + JSON.stringify(drafts));
+    must(S.nid === 101 && (S.drafts || []).length === 0, 'one draft, published: ' + JSON.stringify({ nid: S.nid, drafts: S.drafts }));
+    must((await page.$$('.file-card')).length === 1, 'the file shows once');
+    return { drafts: drafts.length };
+  });
+
   await run('upload-finish-names-file',{ hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     // Every finish, the retry after a lost answer included, names the file
     // by the size and fingerprint start gave, so the server can refuse one

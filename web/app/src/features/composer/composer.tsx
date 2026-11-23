@@ -4,7 +4,7 @@ import { useDictation } from "./useDictation";
 import { INLINE_TOTAL_MAX, useAttachments, type PendingArt, type PendingClip, type PendingFile, type PendingImage, type PendingVideo } from "./useAttachments";
 import { useMembers, useSession } from "../room/ctx";
 import { useRecorder } from "./useRecorder";
-import type { Message, RoomState } from "@chat/contract";
+import { ApiError, type Message, type RoomState } from "@chat/contract";
 import { isImeKey, toast } from "../../lib/index";
 import {
   UploadAlreadyPosted,
@@ -13,6 +13,7 @@ import {
   discardPending,
   fmtBytes,
   fmtEta,
+  newClientMsgId,
   pendingUploads,
   sendWithUploads,
   type PendingUpload,
@@ -40,6 +41,53 @@ export interface ComposerProps {
 
 function escHTML(t: string): string {
   return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Sending one post again after a lost answer is safe: it carries the
+// same client_msg_id, and the server answers a repeat with the first post
+// (repeat: true) instead of posting twice. A network failure or a server
+// error waits LOST_WAITS between tries; a 409 that names the id's first
+// post (still storing its files) waits STORING_WAITS. Then the error
+// shows, and Send again carries the same id.
+const LOST_WAITS = [600, 1500, 3000];
+const STORING_WAITS = [500, 1000, 2000, 4000];
+const wait = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+async function postRetrying<T>(post: () => Promise<T>): Promise<T> {
+  let lost = 0;
+  let storing = 0;
+  for (;;) {
+    try {
+      return await post();
+    } catch (e) {
+      // a 409 without an id is a refusal (the message was deleted while
+      // its files were stored): posting it again would bring it back
+      const named = e instanceof ApiError && e.status === 409 && typeof (e.body as { id?: unknown } | null)?.id === "number";
+      if (named && storing < STORING_WAITS.length) {
+        await wait(STORING_WAITS[storing++]!);
+        continue;
+      }
+      const transient = !(e instanceof ApiError) || e.status >= 500;
+      if (transient && lost < LOST_WAITS.length) {
+        await wait(LOST_WAITS[lost++]!);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+// What a client_msg_id was minted for: the same message, sent again, keeps
+// its id; any change to it (the text, the name, an attachment picked or
+// removed) is a new message with a new id.
+interface CidFor {
+  cid: { id: string };
+  from: string;
+  text: string;
+  clip: PendingClip | null;
+  image: PendingImage | null;
+  video: PendingVideo | null;
+  fileAtt: PendingFile | null;
+  art: PendingArt | null;
 }
 
 interface InFlight {
@@ -233,6 +281,11 @@ export function Composer(p: ComposerProps) {
   // Ctrl+Enter submits through requestSubmit, which ignores the disabled
   // Send button: this ref is the real in-flight guard.
   const sendingRef = useRef(false);
+  // The unsent message's client_msg_id: kept through every retry (the
+  // automatic ones and the person pressing Send again after an error)
+  // until it is sent or its content changes. Without it a send whose
+  // answer was lost posted the message twice when sent again.
+  const cidRef = useRef<CidFor | null>(null);
   // After a send, clear only what was sent: text typed while a long
   // upload ran stays in the composer.
   const clearSent = (textEl: HTMLTextAreaElement | null, typed: string) => {
@@ -272,6 +325,12 @@ export function Composer(p: ComposerProps) {
     sendingRef.current = true;
     setSending(true);
     setErr(null);
+    const was = cidRef.current;
+    const same =
+      !!was && was.from === from && was.text === text && was.clip === clip && was.image === image &&
+      was.video === video && was.fileAtt === fileAtt && was.art === art;
+    const cid = same && was ? was.cid : { id: newClientMsgId() };
+    cidRef.current = { cid, from, text, clip, image, video, fileAtt, art };
     // what the post would carry inline, in bytes (a page or document rides
     // inline either way)
     const clipBytes = clip ? (clip.blob ? clip.blob.size : (clip.data || "").length * 0.75) : 0;
@@ -326,7 +385,8 @@ export function Composer(p: ComposerProps) {
           clearSlots();
         };
         try {
-          const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal);
+          const live = await sendWithUploads(client, room, from, text, items, setUp, ctl.signal, cid);
+          cidRef.current = null;
           clearUploaded();
           if (leftNote) toast("Sent. " + leftNote);
           p.onPosted(live);
@@ -334,9 +394,15 @@ export function Composer(p: ComposerProps) {
           // Cancelled after the publish had landed: the message is live and
           // stays, so what it carried leaves the composer as on a send.
           if (uerr instanceof UploadAlreadyPosted) {
+            cidRef.current = null;
             clearUploaded();
             toast("Too late to cancel - the message was already posted");
-          } else if (uerr instanceof UploadCancelled) toast("Upload cancelled - nothing was posted");
+          } else if (uerr instanceof UploadCancelled) {
+            // the cancel deleted the draft the id named: sending again is a
+            // new message
+            cidRef.current = null;
+            toast("Upload cancelled - nothing was posted");
+          }
           else {
             const msg = uerr instanceof Error ? uerr.message : String(uerr);
             toast("Upload interrupted: " + msg + ". Send again to pick up where it stopped.", true);
@@ -360,7 +426,10 @@ export function Composer(p: ComposerProps) {
         payload.doc = art.content;
         payload.doc_name = art.name;
       }
-      const d = await client.postPayload(payload);
+      payload.client_msg_id = cid.id;
+      // repeat: true is this message's first post, answered again: success
+      const d = await postRetrying(() => client.postPayload(payload));
+      cidRef.current = null;
       clearSent(textEl, typed);
       grow();
       clearSlots();
