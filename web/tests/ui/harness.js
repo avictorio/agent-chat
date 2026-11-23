@@ -659,6 +659,8 @@ async function setup(page, S, calls) {
     if (p.endsWith('/messages') && m === 'POST' && body.draft) { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; (S.drafts = S.drafts || []).push(x); return J(Object.assign({ draft: true }, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
     if (p.endsWith('/messages') && m === 'GET') (S.hits = S.hits || []).push('GET /messages');
+    // A read by id (?ids=, at most 100): the live messages among them, in id order, as on the server
+    if (p.endsWith('/messages') && u.searchParams.has('ids')) { const want = new Set(u.searchParams.get('ids').split(',').map(Number)); if (want.size > 100) return J({ error: '"ids" takes at most 100 message ids' }, 400); return J({ room: 'demo', messages: S.msgs.filter((x) => want.has(x.id)).sort((a, b) => a.id - b.id), you: 'Anthony', you_kind: 'human' }); }
     // A read with after= is a forward read, as on the server: the messages
     // whose delivery number is past it, in delivery order, a page at a
     // time; has_more means the page is full (not that more rows exist: a

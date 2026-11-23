@@ -89,17 +89,15 @@ API: docs.txt MEDIA LINKS.
   room with steady media renews in batches rather than every minute
   (each row has its own time), and swaps only their media fields,
   keeping unchanged rows and the scroll as they are; a playing clip
-  takes its new link at the next pause. The re-read is the latest page
-  (the newest by id, how the feed loaded them), asking for as many rows
-  as the feed holds from the lowest wanted id up plus `SLACK`, at most
-  `PAGE`: one request for an ordinary renewal. Only rows older than that
-  page are walked for forward at full pages from just under their ids,
-  following `last_id` (a forward read is in delivery order, and a row
-  delivered late sits past every message sent while it uploaded), for at
-  most `MAX_PAGES`. The Worker also answers a read by id (`GET /messages?ids=`,
-  `rooms-and-api.md`, Read by id), one request for every due row however
-  deep: the web feed does not use it yet. A row the walk does not reach is not walked for again
-  for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
+  takes its new link at the next pause. The re-read is a read by id
+  (`GET /messages?ids=`, `rooms-and-api.md`, Read by id), at most
+  `IDS_MAX` ids a call (`MESSAGES_IDS_MAX`), the calls one after
+  another: an ordinary renewal is one request, however deep the rows sit
+  or however late they were delivered. A wanted id the answer leaves out
+  is no longer live and counts as covered, so it is not asked for again.
+  It used to read the latest page and walk forward page by page for rows
+  delivered late, holding a row further on than the walk went unread for
+  an hour at a time. The check sends
   nothing while the browser says it is offline, and after a failed
   re-read it waits twice as long as before, up to ten minutes
   (`HOLD_MAX`; a re-read that gets through clears it, and the online

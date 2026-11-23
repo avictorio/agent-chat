@@ -4,6 +4,7 @@ import type {
   GameResponse,
   Member,
   Message,
+  MessagesByIdResponse,
   MessagesResponse,
   VoiceState,
   VoiceUploadResult,
@@ -123,6 +124,13 @@ export class RoomClient {
     if (limit != null) q.set("limit", String(limit));
     const s = q.toString();
     return this.call<MessagesResponse>("/messages" + (s ? "?" + s : ""));
+  }
+
+  /** Fresh copies of these messages (GET /messages?ids=, at most
+   *  MESSAGES_IDS_MAX ids): the live ones among them, in id order; an id
+   *  left out is no longer a live message. No cursor moves. */
+  messagesByIds(ids: number[]): Promise<MessagesByIdResponse> {
+    return this.call<MessagesByIdResponse>("/messages?ids=" + ids.join(","));
   }
 
   attachments(opts?: { kind?: string; from?: string; before?: string; limit?: number }): Promise<AttachmentsResponse> {

@@ -8,15 +8,15 @@ import { MEDIA_FIELDS, type useMessages } from "./useMessages";
 // A link is signed on an hour grid and dies one to two hours after it is
 // minted (mediaQuery in worker/lib/media.ts). The feed gets each row once,
 // at boot or from a stream frame, and a reconnect resumes after the last
-// id, so old rows never came again: an afternoon later the lazy images
-// were broken, clips would not play and documents and downloads answered
-// 403 until a reload. Once any row's links are older than RENEW_AFTER -
-// before any of them can have died - this re-reads it with every row past
-// BATCH_AFTER and swaps only their media fields in. Timers barely run in a
-// hidden tab, so the check also runs when the tab comes back into view,
-// when the browser comes back online and when the room's stream reopens.
-// A media element that fails to load asks for its own row (renewMedia)
-// and retries once.
+// delivery number, so old rows never came again: an afternoon later the
+// lazy images were broken, clips would not play and documents and
+// downloads answered 403 until a reload. Once any row's links are older
+// than RENEW_AFTER - before any of them can have died - this reads it
+// again by id with every row past BATCH_AFTER and swaps only their media
+// fields in. Timers barely run in a hidden tab, so the check also runs
+// when the tab comes back into view, when the browser comes back online
+// and when the room's stream reopens. A media element that fails to load
+// asks for its own row (renewMedia) and retries once.
 
 type Feed = ReturnType<typeof useMessages>;
 
@@ -27,8 +27,8 @@ const RENEW_AFTER = 50 * 60e3;
 // When one row is due, every row whose link is past this goes with it.
 // Each row has its own time, so in a room with steady media a few more
 // crossed RENEW_AFTER every minute and each minute began another re-read:
-// up to sixty large reads an hour per open tab. Taking the younger ones
-// along spaces renewals about twenty minutes apart.
+// up to sixty reads an hour per open tab. Taking the younger ones along
+// spaces renewals about twenty minutes apart.
 const BATCH_AFTER = 30 * 60e3;
 // The longest wait after failed reads. It was RENEW_AFTER: after an hour's
 // outage in which the browser still said "online" (the server down, a
@@ -37,18 +37,8 @@ const BATCH_AFTER = 30 * 60e3;
 // a download card or a page preview does not.
 const HOLD_MAX = 10 * 60e3;
 const CHECK_EVERY = 60e3;
-// The server's largest page.
-const PAGE = 500;
-// The latest page asks for the rows the feed holds from the lowest wanted
-// id up, plus this many it may not have seen (sent while the stream was
-// down): a tab renewing its newest thirty rows asked for 500, and the
-// server built all of them.
-const SLACK = 50;
-// How far a forward walk goes for rows older than the latest page: a row
-// delivered late (a long upload in a busy room) sits past every message
-// sent while it uploaded, so the walk must be able to step over them, but
-// not over the whole history.
-const MAX_PAGES = 4;
+// The most ids one read by id takes (MESSAGES_IDS_MAX in worker/limits.ts).
+const IDS_MAX = 100;
 
 function hasMedia(m: Message): boolean {
   return MEDIA_FIELDS.some((k) => !!(m[k] && m[k]!.url));
@@ -64,17 +54,10 @@ export function useMediaRenewal(opts: {
 }) {
   const live = useLatest(opts);
   // The re-read under way, and the one queued behind it. One at a time: a
-  // failed image used to start its own walk over the same pages while the
+  // failed image used to start its own read of the same rows while the
   // minute's renewal was still reading them.
   const runRef = useRef<Walk | null>(null);
   const nextRef = useRef<Walk | null>(null);
-  // Rows a forward walk could not reach, and when it gave up. They are
-  // walked for again only after RENEW_AFTER: before, the same ten requests
-  // went out every minute for as long as the tab was open.
-  // An id leaves it once a page covers the row or the row leaves the feed.
-  // Before, it only grew, and a row that a page had reached since was
-  // still skipped, unread, when its link came due again within the hour.
-  const farRef = useRef<Map<number, number>>(new Map());
   // After a failed re-read the minute's check waits, twice as long after
   // each failure in a row, up to HOLD_MAX; a re-read that gets through
   // clears it. With the network down every check failed at its first read
@@ -82,76 +65,26 @@ export function useMediaRenewal(opts: {
   // A failed image's own retry (renewMedia) is not held.
   const holdRef = useRef({ until: 0, wait: 0 });
 
-  // Read these rows again and hand the fresh links to the feed.
-  //
-  // First the latest page: the newest messages by id, which is how the feed
-  // loaded them, as many as reach the lowest wanted row (SLACK), so an
-  // ordinary renewal is this one request. A wanted row at or above that
-  // page's lowest id that is not in it is no longer live. Rows older than
-  // the page are found by a forward read from just under the lowest of
-  // them, in delivery order: a row's delivery number is never below its
-  // id, so what that skips is not wanted, and a row delivered late is
-  // reached by following last_id. Before, the walk always went forward,
-  // sized its pages from ids (50 rows once past the highest wanted id),
-  // and a row delivered 800 messages late was never reached.
+  // Read these rows again by id (GET /messages?ids=), IDS_MAX at a time,
+  // one read after another, and hand the fresh links to the feed. A wanted
+  // id the answer leaves out is no longer live (deleted, or trimmed from
+  // the room) and counts as covered: asking for it again every minute would
+  // not change that. Before reads by id, the renewal read the latest page
+  // and walked forward page by page for rows delivered late, and a row
+  // further on than its walk went was held unread for an hour at a time.
   const reread = useCallback(
     async (ids: number[]) => {
       const { client, feed, deny, deniedRef } = live.current;
       if (deniedRef.current || !ids.length) return;
-      const want = new Set(ids);
+      const want = [...new Set(ids)].sort((a, b) => a - b);
       const rows: Message[] = [];
       const covered: number[] = [];
-      const far = farRef.current;
-      const onFeed = new Set(feed.messagesRef.current.map((m) => m.id));
-      for (const id of [...far.keys()]) if (!onFeed.has(id)) far.delete(id);
-      // a page reached it: renewed, or no longer live
-      const reached = (id: number) => {
-        want.delete(id);
-        covered.push(id);
-        far.delete(id);
-      };
-      const take = (list: Message[]) => {
-        for (const m of list) {
-          if (!want.has(m.id)) continue;
-          rows.push(m);
-          reached(m.id);
-        }
-      };
       try {
-        const low = Math.min(...want);
-        const limit = Math.min(PAGE, feed.messagesRef.current.filter((m) => m.id >= low).length + SLACK);
-        const d = await client.messages(undefined, limit);
-        const got = d.messages || [];
-        take(got);
-        // A short page is the whole room. The floor must come from the
-        // limit asked for: a full page of fewer than PAGE is not the room.
-        const floor = got.length < limit ? -Infinity : Math.min(...got.map((m) => m.id));
-        for (const id of [...want]) if (id >= floor) reached(id);
-        const now = Date.now();
-        for (const id of [...want]) {
-          if (now - (far.get(id) ?? -Infinity) >= RENEW_AFTER) continue;
-          // given up on within the hour: not walked for again yet
-          want.delete(id);
-          covered.push(id);
-        }
-        let after = want.size ? Math.min(...want) - 1 : 0;
-        for (let page = 0; want.size && page < MAX_PAGES; page++) {
-          const f = await client.messages(after, PAGE);
-          take(f.messages || []);
-          // The newest message was reached: a row still wanted is no longer
-          // live, and asking again every minute would not change that.
-          if (!f.has_more || f.last_id <= after) {
-            for (const id of [...want]) reached(id);
-            break;
-          }
-          after = f.last_id;
-        }
-        // Out of pages: these sit further on than a walk goes. Their links
-        // count as renewed, so the minute's check leaves them, and the walk
-        // for them waits RENEW_AFTER.
-        for (const id of want) {
-          far.set(id, now);
-          covered.push(id);
+        for (let i = 0; i < want.length; i += IDS_MAX) {
+          const chunk = want.slice(i, i + IDS_MAX);
+          const d = await client.messagesByIds(chunk);
+          rows.push(...(d.messages || []));
+          covered.push(...chunk);
         }
         holdRef.current = { until: 0, wait: 0 };
       } catch (e) {
@@ -166,7 +99,7 @@ export function useMediaRenewal(opts: {
     [live]
   );
 
-  // Ask for these rows. Ids the walk under way already covers join it;
+  // Ask for these rows. Ids the re-read under way already covers join it;
   // the rest queue behind it, together with whatever else is asked for
   // meanwhile (failures that come together, every image on screen after a
   // long sleep, share one re-read).
