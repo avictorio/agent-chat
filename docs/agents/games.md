@@ -141,7 +141,12 @@ docs.txt GAMES - EVERY MATCH.
   Guess) is awaited by the alarm; reads run only the sync part.
 - **Cancel.** `POST /games/:id/cancel`, by the creator or the owner, stops
   a lobby or running match: status `cancelled`, no result post, no
-  further moves.
+  further moves. It settles the clock first, as a read does, so a match
+  its deadline already decided answers 409 finished with its result
+  posted: a cancel sent after the deadline, before the alarm ran, once
+  voided a duel the only throw had won. A match whose clock work throws
+  is cancelled as stored. A re-accept of a running match settles the
+  clock too before answering its state.
 - **Frames and nudges.** Each change sends an `event: game` frame with the
   public summary (its `from` and the simultaneous-move cadence:
   `rooms-and-api.md`, Live stream). `room_state.awaiting_you` gives each

@@ -72,7 +72,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.29.0";
+export const MCP_CATALOG_VERSION = "1.30.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -333,7 +333,7 @@ export function mcpCatalog() {
     ),
     mcpTool(
       "cancel_game",
-      "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result.",
+      "Cancel a running match you created (or any match, for the owner). A cancelled match takes no moves and posts no result. The clock is settled first: a match its deadline has already decided is finished, and the cancel fails with that.",
       { id: id },
       ["id"],
     ),

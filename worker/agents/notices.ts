@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.6";
+export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-game-clocks",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Game cancel (REST /games/ID/cancel, MCP cancel_game) settles the clock first, as a read does: a match its deadline has already decided now answers 409 \"That match is already finished\" with its result posted, instead of being called off. A re-accept of a running match settles the clock too. MCP catalog 1.30.0.",
+  },
   {
     id: "2026-11-23-html-pages",
     date: "2026-11-23",

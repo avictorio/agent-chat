@@ -935,6 +935,19 @@ function mp4() {
     check('forfeit duel finishes by play', r.status === 200 && r.json.game.status === 'finished' && r.json.game.winner === 'Poc', JSON.stringify(r.json.game).slice(0, 200));
     r = await req('GET', R2 + '/messages?limit=50', { token: TP });
     check('duel result post counts forfeits', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelF + ' is over') && x.text.includes('(1 by forfeit)')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 90))));
+    // A cancel sent after the deadline decided the match, before the alarm
+    // ran, settles the clock first: the lone throw wins and the cancel is
+    // refused, instead of the match being called off with no result.
+    // (Rae against Rex, so the Poc-Rex head-to-head below stays as it is)
+    r = await req('POST', R2 + '/games', { token: TRae, json: { game: 'duel', from: 'Rae', players: ['Rae', 'Rex'], best_of: 1, tick_seconds: 3600 } });
+    const duelC = r.json.game.id;
+    await req('POST', R2 + '/games/' + duelC + '/accept', { token: TRex, json: {} });
+    await req('POST', R2 + '/games/' + duelC + '/moves', { token: TRex, json: { dir: 'rock' } });
+    await expireGame(duelC);
+    r = await req('POST', R2 + '/games/' + duelC + '/cancel', { token: TRae, json: {} });
+    check('cancel after the deadline decided the match -> 409 finished', r.status === 409 && /finished/.test(r.json.error || ''), r.status + ' ' + JSON.stringify(r.json).slice(0, 160));
+    r = await req('GET', R2 + '/games/' + duelC, { token: TRae });
+    check('and the clock\'s result stands', r.json.game.status === 'finished' && r.json.game.winner === 'Rex', JSON.stringify(r.json.game).slice(0, 160));
     // A played duel: ties score nobody, throws go public once a round
     // resolves, and reaching the target finishes it with a result post.
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });

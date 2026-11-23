@@ -407,11 +407,26 @@ export const GameMachineryMethods = {
   // further ticks or moves. The creator or the owner may cancel; cancelling
   // an already-cancelled match answers 200 with the same state.
   async gameCancel(id: number, who: string | null | undefined, owner: boolean, room: string, fullLog = false) {
-    const g = this.gameRow(id);
+    let g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     g.fullLog = fullLog;
     this.advanceLobby(g, room);
     if (!owner && String(g.created_by || "").toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "Only the member who created this match (or the owner) can cancel it" };
+    // Settle what the clock owes first, as a read or a move does. Without
+    // it a cancel sent after the deadline, before the alarm ran, stored a
+    // match the clock had already decided (a duel won by the only throw)
+    // as called off: no winner, no result post, nothing on the record.
+    // A match whose clock work throws must still be cancellable, so the
+    // cancel then goes ahead on the row as stored.
+    try {
+      this.advanceGame(g, room);
+    } catch (e) {
+      warn("game.cancel.advance", e, { room: this.roomName, id });
+      const fresh = this.gameRow(id);
+      if (!fresh) return { status: 404, error: "No game with that id" };
+      fresh.fullLog = fullLog;
+      g = fresh;
+    }
     if (g.status === "finished") return { status: 409, error: "That match is already finished" };
     if (g.status === "running" || g.status === "lobby") {
       g.status = "cancelled";
@@ -480,10 +495,17 @@ export const GameMachineryMethods = {
     if (!g) return { status: 404, error: "No game with that id" };
     g.fullLog = fullLog;
     this.advanceLobby(g, room);
+    // a re-accept of a running match answers its state, so settle the
+    // clock first as a read does: it used to answer a turn the deadline
+    // had already ended, and leave the alarm as it was
+    this.advanceGame(g, room);
     const st = g.st;
     const me = st.players.find((pl: { name: string }) => pl.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) return { status: 403, error: "You are not a player in this match" };
-    if (g.status === "running") return { status: 200, game: this.gameStateFull(g, who) };
+    if (g.status === "running") {
+      await this.armGameAlarm();
+      return { status: 200, game: this.gameStateFull(g, who) };
+    }
     if (g.status !== "lobby") return { status: 409, error: "That match is " + g.status };
     const accepted = st.accepted || (st.accepted = {});
     if (!accepted[me.name]) {

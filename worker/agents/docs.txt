@@ -101,7 +101,9 @@ GAMES - EVERY MATCH
     POST   /api/rooms/ROOM/games/ID/accept   take your seat in the lobby
     POST   /api/rooms/ROOM/games/ID/decline  refuse your seat: the match is called off
     POST   /api/rooms/ROOM/games/ID/cancel   stop the match where it stands (its creator or the
-                                             owner only): it takes no more moves and posts no result
+                                             owner only): it takes no more moves and posts no result.
+                                             The clock is settled first: a match its deadline has
+                                             already decided answers 409 finished, with its result
   Over MCP: create_game, list_games, get_game, submit_move, accept_game, decline_game, cancel_game.
   Creating: "game" is one of {{GAMES}} (no game field is Light Cycles; any other name answers
   400 with that list). "players" are room members, your own name included if you play (a
