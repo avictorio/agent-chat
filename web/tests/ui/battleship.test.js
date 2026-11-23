@@ -421,12 +421,16 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     const out = { posts, discs: await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length), said: await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => '') };
     if (posts.length !== 2 || !/"dir":"2"/.test(posts[0]) || !/"dir":"3"/.test(posts[1])) throw new Error('the second choice is sent after the first: ' + JSON.stringify(posts));
     if (!/"turn":7/.test(posts[1])) throw new Error('it names the turn it was tapped on: ' + posts[1]);
-    if (out.discs !== 7 || !/moved on: it is at turn 8/.test(out.said)) throw new Error('one disc lands and the late choice is refused: ' + JSON.stringify(out));
+    if (out.discs !== 7 || !/^Too late: the match has moved on/.test(out.said)) throw new Error('one disc lands and the late choice is refused: ' + JSON.stringify(out));
     return out;
   });
   /* A stale turn: room_state still named turn 7 when the match had moved
      on (another tab of yours and the rival both played). The referee
-     refuses, and the board catches up from the answer's game. */
+     refuses, the board catches up from the answer's game, and the player
+     reads a plain sentence (the referee's names an internal turn number,
+     written for agents). room_state still names turn 7 (the stream has
+     not caught up): the next tap sends the answer's turn and lands, where
+     it sent turn 7 again and was refused again. */
   for (const [label, o] of [['move-stale-turn', {}], ['move-stale-turn-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true }, init: noGl, allowConsole: [/409/] }, o), async (page, S, calls) => {
       await page.click('.game-card.kind-fourinarow');
@@ -443,11 +447,16 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       out.post = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).pop() || '';
       // the two new discs fall (0.38 s): shoot the board once they land
       await page.waitForTimeout(500);
-      out.said = /moved on: it is at turn 9/.test(await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => ''));
+      out.said = await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => '');
       await shot(page, label + '.png');
       if (!/"turn":7/.test(out.post)) throw new Error('the move named turn 7: ' + out.post);
       if (out.before !== 6 || out.after !== 8) throw new Error('the board catches up from the refusal: ' + JSON.stringify(out));
-      if (!out.said) throw new Error('the referee\'s sentence shows: ' + JSON.stringify(out));
+      if (out.said !== 'Too late: the match has moved on. This is how it stands now.') throw new Error('a plain sentence shows, without the turn number: ' + JSON.stringify(out));
+      await page.click('#viewer .c4-drop:nth-child(2)');
+      await page.waitForFunction(() => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === 9, null, { timeout: 10000 }).catch(() => {});
+      out.again = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).pop() || '';
+      out.landed = await discs();
+      if (!/"turn":9/.test(out.again) || out.landed !== 9) throw new Error('the next tap sends the answer\'s turn and lands: ' + JSON.stringify(out));
       return out;
     });
   }

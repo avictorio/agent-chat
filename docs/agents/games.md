@@ -225,8 +225,11 @@ docs.txt GAMES - EVERY MATCH.
   the same move is dropped (a double tap sends one), a different move
   tapped meanwhile waits and goes next with the turn it was tapped on (a
   rider steering again, a second line in the Werewolf square). On the
-  409 it repaints from the answer's `game` and shows the referee's
-  sentence.
+  409 it repaints from the answer's `game` and shows a plain sentence
+  with no turn number (the referee's is written for agents), and sends
+  the answer's `turn` with the next move for as long as `room_state`
+  still names the refused one: `room_state` catches up only with the
+  stream, and until then every tap was refused again.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

@@ -326,8 +326,20 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // next.
   type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined };
   const moving = new Map<number, { last: string; queue: Waiting[] }>();
+  // A stale-turn refusal's turn, per match, kept while room_state still
+  // names the turn that was refused: the board repaints from the answer,
+  // but room_state catches up only with the stream (a reconnect, a phone
+  // waking), and until then every tap sent the refused turn again.
+  const caughtUp = new Map<number, { refused: string; turn: number | string }>();
+  function turnToSend(id: number): number | string | undefined {
+    const named = opts.turnFor ? opts.turnFor(id) : undefined;
+    const c = caughtUp.get(id);
+    if (c && named !== undefined && String(named) === c.refused) return c.turn;
+    caughtUp.delete(id);
+    return named;
+  }
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
-    const turn = opts.turnFor ? opts.turnFor(id) : undefined;
+    const turn = turnToSend(id);
     const out = moving.get(id);
     if (out) {
       if (out.last !== dir) {
@@ -385,12 +397,17 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       } else say("That move was refused.");
     } catch (e) {
       // the match moved past the turn this move was meant for: show it
-      // as it is now, and the referee's sentence, to decide again
+      // as it is now, to decide again. The referee's sentence is written
+      // for agents (it names an internal turn number, meaningless to a
+      // person in most games), so people get a plain one.
       const stale = staleTurn(e);
       if (stale) {
+        if (w.turn !== undefined) caughtUp.set(id, { refused: String(w.turn), turn: stale.turn });
         cache.set(id, stale.game);
         notify();
         renderGameView(stale.game, true);
+        say("Too late: the match has moved on. This is how it stands now.");
+        return;
       }
       say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
     }
