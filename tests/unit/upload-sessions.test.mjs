@@ -186,6 +186,60 @@ test("a finish for an upload an attach replaced answers 409, not the attach's fi
   assert.equal(row(h, id, "image").size, 100, "the attached image stays");
 });
 
+// Upload A is replaced by upload B of the same message and kind (its
+// start aborts A), and B finishes. A finish from A's client used to answer
+// 200 with B's file as A's: the row B left is as engine-made as A's would
+// have been. One that says which file it means is told it is not this one.
+async function replacedAndFinished(h, id) {
+  assert.equal((await h.room.uploadStart(id, "image", "Ada", false, R, 5000, "image/png", "a.png", "fp-a", false)).status, 200);
+  await tick(); // B starts a moment later than A, as two uploads do
+  await imageSession(h, id, 100);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).status, 200, "B finishes");
+}
+
+test("a finish naming the file another upload replaced answers 409, not that upload's file", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  await replacedAndFinished(h, id);
+  const fin = (ask) => h.room.uploadFinish(id, "image", "Ada", false, R, ask);
+  assert.equal((await fin({ size: 5000 })).status, 409, "A's size is not the stored file's");
+  assert.equal((await fin({ size: 100, fp: "fp-a" })).status, 409, "nor is A's fingerprint, even at the same size");
+  assert.equal((await fin({ fp: "fp-a" })).status, 409);
+  const b = await fin({ size: 100, fp: "fp-100" });
+  assert.equal(b.status, 200, "B's own repeat still answers its file");
+  assert.equal(b.bytes, 100);
+  const any = await fin(null);
+  assert.equal(any.status, 200, "a finish naming nothing answers the stored file");
+  assert.equal(any.bytes, 100);
+  assert.equal(any.name, "pic.png");
+  assert.equal(row(h, id, "image").size, 100, "B's file stays");
+});
+
+test("an upload link opened for a replaced upload cannot claim the file that replaced it", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const link = await h.room.mintUploadTicket(id, "image", "Ada", R, false, { size: 5000, type: "image/png", name: "a.png" }, "tok-Ada");
+  assert.equal(link.status, 200, link.error);
+  await tick();
+  await imageSession(h, id, 100);
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).status, 200, "B finishes");
+  const t = await h.room.uploadSessionTicket(link.ticket);
+  assert.equal(t.status, 200, "A's link still resolves: it names only the message and kind");
+  const r = await h.room.uploadFinish(t.msg, t.kind, t.member, false, R, { expires: t.expires });
+  assert.equal(r.status, 409, "the link was opened for another session; the caller sent nothing else");
+  // a link opened for the upload that did finish still gets its answer
+  const id2 = (await h.room.post("Ada", "another", R, false, null, null, null, true, false)).id;
+  const own = await h.room.mintUploadTicket(id2, "image", "Ada", R, false, { size: 100, type: "image/png", name: "b.png" }, "tok-Ada");
+  const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'image'", id2).upload_id;
+  h.multipart.get(up).data = bytes(PNG_HEAD, 100);
+  assert.equal(h.room.uploadPartDone(id2, "image", up, 1, "e1").status, 200);
+  const t2 = await h.room.uploadSessionTicket(own.ticket);
+  assert.equal((await h.room.uploadFinish(id2, "image", "Ada", false, R, { expires: t2.expires })).status, 200);
+  const again = await h.room.uploadFinish(id2, "image", "Ada", false, R, { expires: t2.expires });
+  assert.equal(again.status, 200, "its repeat after it ended answers the stored file");
+  assert.equal(again.bytes, 100);
+});
+
 test("a finish on a kind that only ever had an attach or a stream answers 409", async () => {
   const h = makeRoom();
   const id = await draft(h);

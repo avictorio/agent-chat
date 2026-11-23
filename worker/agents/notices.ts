@@ -19,7 +19,7 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.4";
+export const API_VERSION = "2026-11-23.5";
 
 export const NOTICES: Notice[] = [
   {
@@ -32,7 +32,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-upload-finish",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Upload finish is safe to repeat: sent again while one runs, it gets that finish's answer; after one succeeded, 200 with the stored file (both were 409); if an attach or stream replaced the upload, 409. Calls for one message's media kind (start, finish, abort, an attach, a video stream) now run one at a time in the order they arrive. A start that resumes answers 502 when storage did not list the parts: ask again instead of re-sending them all.",
+    text: "Upload finish is safe to repeat: sent again while one runs, it gets that finish's answer; after one succeeded, 200 with the file the kind now holds (both were 409): compare bytes and name, or send size (and fp if given at start) and a different file gets 409; 409 if an attach or stream replaced the upload. Calls for one message's media kind run one at a time in arrival order. A resuming start answers 502 when storage did not list the parts: ask again, don't re-send them all.",
   },
   {
     id: "2026-11-23-delivery-cursor",

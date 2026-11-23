@@ -156,12 +156,19 @@ way; the routes are in docs.txt UPLOADING FILES.
   finish would have and answers 409 "already has" (the file is in place).
 - **Finish is safe to repeat.** One sent while another runs gets that
   finish's answer (`_finishing` holds the promise), which can be a
-  refusal; one sent after a finish succeeded answers 200 with the
-  stored file. Only a file an engine finish made counts: the row tells
-  (an engine session's `part_size` is a whole MiB; an attach leaves it
-  NULL, a stream writes `STREAM_PART`), so a finish for an upload an
-  attach or a stream replaced answers 409, as one with no upload does,
-  after a restart too. Storage answering NoSuchUpload
+  refusal; one sent after a finish succeeded answers 200 with the file
+  the message's kind now holds (the caller compares bytes and name).
+  Only a file an engine finish made counts: the row tells (an engine
+  session's `part_size` is a whole MiB; an attach leaves it NULL, a
+  stream writes `STREAM_PART`), so a finish for an upload an attach or
+  a stream replaced answers 409, as one with no upload does, after a
+  restart too. Another engine upload that replaced the caller's and
+  finished leaves a row just as engine-made, so the finish takes two
+  optional fields, `size` (bytes) and `fp` (the start's fingerprint):
+  either one differing from the row's answers 409. An upload link's
+  finish also compares the link's expiry, which is its session's start
+  plus `UP_SESSION_MS` (`upBegan`), so a link opened for a replaced
+  upload gets 409 without sending either. Storage answering NoSuchUpload
   is checked against the key first: an object of the declared size is
   an earlier finish that completed and never recorded so (an instance
   restart between the two), and it is checked and indexed. The stream

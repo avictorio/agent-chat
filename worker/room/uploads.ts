@@ -56,6 +56,10 @@ export type UpPlan = { status: 200, part_size: number, parts: number, resumed: b
  *  the missing part numbers on a 409 for parts). Shared by a finish sent
  *  again while the first runs. */
 export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean } | { status: number, error: string, missing?: number[] };
+/** What a finish may say about the file it means (all optional): the
+ *  size and fingerprint (fp) the client gave at start, and for an upload
+ *  link its expiry, which is its session's start plus UP_SESSION_MS. */
+export type UpFinishAsk = { transcript?: unknown, size?: number | null, fp?: string | null, expires?: number | null };
 
 export const UploadMethods = {
   // ---- Upload tickets: a single-use credential for one PUT ----
@@ -144,7 +148,7 @@ export const UploadMethods = {
     const m = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The message this upload was opened for is gone" };
     if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The message changed hands; open a fresh upload" };
-    return { status: 200, msg: t.msg, kind: t.kind, member: t.member };
+    return { status: 200, msg: t.msg, kind: t.kind, member: t.member, expires: t.expires };
   },
 
   // A single-shot ticket as it stands: the row, or why it cannot be used.
@@ -480,7 +484,7 @@ export const UploadMethods = {
   },
 
   /** @param room publishes a publish-on-complete draft when given */
-  async uploadFinish(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: { transcript?: unknown } | null | undefined): Promise<UpFinish> {
+  async uploadFinish(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: UpFinishAsk | null | undefined): Promise<UpFinish> {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     // A finish sent again while the first still runs (a client retrying
@@ -510,7 +514,7 @@ export const UploadMethods = {
   },
 
   /** uploadFinish's work, in the message and kind's turn */
-  async upFinishNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: { transcript?: unknown } | null | undefined): Promise<UpFinish> {
+  async upFinishNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: UpFinishAsk | null | undefined): Promise<UpFinish> {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     const row = this.upSession(id, kind);
@@ -526,6 +530,17 @@ export const UploadMethods = {
       // for an upload that an attach had replaced (and aborted) reported
       // the attach's file as its own.
       if (row.part_size == null || row.part_size === STREAM_PART) return { status: 409, error: "No upload in progress for that message" };
+      // Another engine upload that replaced the caller's (its start
+      // aborts the older one) and finished leaves a row just as
+      // engine-made, and a finish from the replaced upload's client - a
+      // second device, or its upload link, which names only the message
+      // and kind - answered 200 with that other file as its own. A caller
+      // that says which file it means (size, the fingerprint it gave at
+      // start, or a link minted for another session) is told it is not
+      // this one.
+      if (opts && ((opts.size != null && opts.size !== row.size)
+        || (opts.fp && row.fp && opts.fp.slice(0, 200) !== row.fp)
+        || (opts.expires != null && this.upBegan(row, a.msg) + UP_SESSION_MS !== opts.expires))) return { status: 409, error: "No upload in progress for that message" };
       const m =this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
       return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
     }

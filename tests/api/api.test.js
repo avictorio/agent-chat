@@ -2618,6 +2618,16 @@ function mp4() {
     check('a finish sent again while the first runs gets the same answer', r2nd.status === 200 && !!(r2nd.json && r.json && r2nd.json.file && r2nd.json.file.url === r.json.file.url && r2nd.json.file.bytes === BIG.length), r2nd.status + ' ' + r2nd.text.slice(0, 200));
     const r3rd = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
     check('a finish sent again after it ended answers 200 with the same url', r3rd.status === 200 && !!(r3rd.json && r.json && r3rd.json.file && r3rd.json.file.url === r.json.file.url && r3rd.json.file.name === 'résumé data.bin' && r3rd.json.published === false), r3rd.status + ' ' + r3rd.text.slice(0, 200));
+    // A finish may name the file it means (size, and the fingerprint given
+    // at start as fp): a different file answers 409, a wrong type 400.
+    let rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: true } });
+    check('a finish with a size that is not a number -> 400 naming it', rf.status === 400 && /"size"/.test((rf.json && rf.json.error) || ''), rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { fp: { x: 1 } } });
+    check('a finish with an fp that is not text -> 400 naming it', rf.status === 400 && /"fp"/.test((rf.json && rf.json.error) || ''), rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: BIG.length + 1, fp: FP } });
+    check('a finish naming another file after one ended -> 409', rf.status === 409, rf.status + ' ' + rf.text.slice(0, 120));
+    rf = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU, json: { size: BIG.length, fp: FP } });
+    check('a finish naming the stored file after one ended -> 200', rf.status === 200 && !!(rf.json && rf.json.file && rf.json.file.bytes === BIG.length), rf.status + ' ' + rf.text.slice(0, 120));
     r = await req('GET', R2 + '/messages/' + fid + '/file', { token: TP });
     check('a draft file stays private before publish', r.status === 404, r.status);
     r = await req('POST', R2 + '/messages/' + fid + '/publish', { token: TU, json: {} });

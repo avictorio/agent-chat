@@ -1,6 +1,6 @@
 // Upload requests: streaming a part into R2, the session steps, and the addresses handed to clients and MCP.
 
-import { deny, json, readBody, type Body, bodyText, refused, settleBody } from "../lib/http.js";
+import { deny, json, readBody, type Body, bodyNumber, bodyText, refused, settleBody } from "../lib/http.js";
 import { upSniff, upTypeError } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
@@ -83,8 +83,9 @@ export async function streamUploadPart(up: R2MultipartUpload, n: number, body: R
  * @param stub the room
  * @param step start, part, sign, status, finish or abort
  */
-/** @param still asked once a streamed part has arrived: the refusal if the caller's credential has gone meanwhile */
-export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean, still?: () => Promise<{ status: number, error: string, code?: string } | null>) {
+/** @param still asked once a streamed part has arrived: the refusal if the caller's credential has gone meanwhile
+ *  @param linkExpires an upload link's expiry, which names the session it was opened for (a finish compares it) */
+export async function uploadStep(request: Request, env: Env, url: URL, stub: DurableObjectStub, room: string, id: number, kind: string, step: string, who: string | null | undefined, owner: boolean, still?: () => Promise<{ status: number, error: string, code?: string } | null>, linkExpires?: number) {
   if (step === "part") {
     // A refused part is read away before the answer goes back: a client
     // still sending its body would otherwise see the connection drop
@@ -151,7 +152,12 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     return json({ room: room, id: id, kind: kind, part_size: r.part_size, parts: r.parts, resumed: !!r.resumed, received: r.received, direct: !!r.direct, expires_at: new Date(r.expires_at).toISOString() });
   }
   if (step === "finish") {
-    const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined });
+    // Optional: the file this finish means, so a repeat after another
+    // upload replaced this one and finished is told so (upFinishNow).
+    const size = body && body.size !== undefined && body.size !== null ? bodyNumber(body.size, "size", true) : null;
+    if (size !== null && !(size >= 1)) return json({ error: "\"size\" must be the file's exact length in bytes" }, 400);
+    const fp = body ? bodyText(body.fp, "fp") || null : null;
+    const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined, size: size, fp: fp, expires: linkExpires ?? null });
     if (refused(r)) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
     /** the answer, with the media under its kind */
     const media: { type: string, bytes: number, url: string, name?: string | null } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
@@ -240,7 +246,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
     return json({ error: st.error }, st.status);
   }
   const still = async () => { const again = await ustub.uploadSessionTicket(link); return refused(again) ? again : null; };
-  return uploadStep(asked, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false, still);
+  return uploadStep(asked, env, url, ustub, uroom, st.msg, st.kind, usm[3], st.member, false, still, st.expires);
 }
 
 // Upload tickets: PUT /api/uploads/ROOM/TICKET redeems a
