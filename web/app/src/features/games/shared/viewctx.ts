@@ -63,6 +63,8 @@ export type GameView = {
   lgDraft?: LgDraft | null;
   // Four in a Row: the last move whose disc the flat board has dropped
   c4Fell?: number;
+  // and when its fall began (performance.now), to carry it on across a repaint
+  c4FellAt?: number;
   // Sketch & Guess: the pad's drawing for the round (its panel draws it)
   sgPad?: SgPad | null;
   // target: the rival in a free-for-all (the shot goes out "Name:Cell")

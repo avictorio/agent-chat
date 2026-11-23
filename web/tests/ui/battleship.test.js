@@ -519,11 +519,23 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       await page.click('#viewer .c4-drop:nth-child(2)');
       await page.waitForFunction(() => { const e = document.querySelector('#viewer .c4-flat .c4-disc.last'); return !!e && /Column 2, row 1/.test(e.parentElement.getAttribute('aria-label')); }, null, { timeout: 10000 });
       out.newMove = await anim();
+      // a second paint of the same move inside its 0.38 s fall (the frame's
+      // refetch, then the move's answer) carries the fall on: marking it
+      // still snapped the disc into place half-way down
+      out.midFall = await page.evaluate(async () => {
+        await new Promise((r) => setTimeout(r, 120));
+        document.querySelector('#viewer .arena-tabs button:nth-child(2)').click();
+        document.querySelector('#viewer .arena-tabs button:nth-child(1)').click();
+        const e = document.querySelector('#viewer .c4-flat .c4-disc.last');
+        return e ? getComputedStyle(e).animationName + ' ' + getComputedStyle(e).animationDelay : '';
+      });
+      await page.waitForTimeout(450);
       await repaint();
       out.afterNewMove = await anim();
       await shot(page, label + '.png');
       if (out.opened !== 'none' || out.repainted !== 'none' || out.afterNewMove !== 'none') throw new Error('no fall on a repaint that brings no move: ' + JSON.stringify(out));
       if (out.newMove !== 'c4-fall') throw new Error('a new move\'s disc falls: ' + JSON.stringify(out));
+      if (!/^c4-fall -\d/.test(out.midFall)) throw new Error('a repaint during the fall carries it on: ' + JSON.stringify(out));
       return out;
     });
   }

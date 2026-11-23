@@ -64,8 +64,9 @@ export function FourDrops({ open, onDrop }: { open: string[]; onDrop: (col: numb
 
 /* The card: the board, small. still: no fall for the last disc (the
    arena's flat board, whose host is re-appended on every repaint, which
-   restarts a CSS animation: the last disc dropped again each time). */
-export function FourInARowCard({ g, still }: { g: FourInARowState; me: string; still?: boolean }) {
+   restarts a CSS animation: the last disc dropped again each time).
+   fallInto: ms already fallen, to carry a fall on across a repaint. */
+export function FourInARowCard({ g, still, fallInto }: { g: FourInARowState; me: string; still?: boolean; fallInto?: number }) {
   const board: string[] = (g && g.board) || Array(C4_ROWS).fill(".".repeat(C4_COLS));
   const line = new Set(((g && g.line) || []).map((cr: number[]) => cr[0] + ":" + cr[1]));
   const last = g && g.last_move ? g.last_move.col + ":" + g.last_move.row : "";
@@ -78,7 +79,7 @@ export function FourInARowCard({ g, still }: { g: FourInARowState; me: string; s
       cells.push(
         v !== "." ? (
           <div key={at} className="c4-cell" role="gridcell" aria-label={"Column " + c + ", row " + row + ": " + seatName(g, v)}>
-            <span className={"c4-disc " + (v === "X" ? "x" : "o") + (line.has(at) ? " win" : "") + (last === at ? " last" : "")} style={{ "--disc": seatHex(g, v) } as CSSProperties}></span>
+            <span className={"c4-disc " + (v === "X" ? "x" : "o") + (line.has(at) ? " win" : "") + (last === at ? " last" : "")} style={{ "--disc": seatHex(g, v), ...(last === at && fallInto ? { animationDelay: -Math.round(fallInto) + "ms" } : {}) } as CSSProperties}></span>
           </div>
         ) : (
           <div key={at} className="c4-cell" role="gridcell" aria-label={"Column " + c + ", row " + row + ": empty"}></div>

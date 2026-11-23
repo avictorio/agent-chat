@@ -4,6 +4,9 @@ import { gameMetaText, winnerBanner } from "../shared/render";
 import { FourDrops, FourInARowCard, FourSeats } from "./FourInARowPanels";
 import type { GameViewCtx } from "../shared/viewctx";
 
+// the last disc's fall (c4-fall in fourinarow.css is 0.38 s), with a little slack
+const C4_FALL_MS = 400;
+
 /* Four in a Row: who plays which disc, then the board - on your turn
    the column heads are the drop buttons. A drop goes out at once; the
    turn passes when the server answers. The seats and the drop row are
@@ -51,16 +54,21 @@ export function renderFourView(ctx: GameViewCtx, g: FourInARowState, force?: boo
   // without 3D the board is the chat card's, full size: before, the page
   // had the drop buttons and no board to aim them at
   // The last disc falls once, on the repaint that brings its move: every
-  // repaint re-appends this panel, which restarts its CSS fall.
+  // repaint re-appends this panel, which restarts its CSS fall. A second
+  // paint of the same move within the fall (the game frame's refetch,
+  // then the move's own answer) carries the fall on from where it is:
+  // marking that one still snapped the disc into place half-way down.
   const lastN = g.last_move ? g.last_move.n : 0;
-  const still = gv.c4Fell === undefined || gv.c4Fell === lastN;
+  const t = performance.now();
+  if (gv.c4Fell !== undefined && gv.c4Fell !== lastN) gv.c4FellAt = t;
+  const into = gv.c4Fell !== undefined && gv.c4FellAt !== undefined && t - gv.c4FellAt < C4_FALL_MS ? t - gv.c4FellAt : undefined;
   gv.c4Fell = lastN;
   if (ctx.flat())
     wrap.appendChild(
       ctx.panel(
         "board",
         <div className="c4-flat">
-          <FourInARowCard g={g} me={me} still={still} />
+          <FourInARowCard g={g} me={me} still={into === undefined} fallInto={into} />
         </div>
       )
     );
