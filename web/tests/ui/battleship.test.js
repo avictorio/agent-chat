@@ -329,6 +329,29 @@ const { settle, done, noGl, run, shot } = require('./harness');
     if (out.cells !== 42 || !out.discs) throw new Error('the flat board, 7 by 6 with the discs down: ' + JSON.stringify(out));
     return out;
   });
+  /* A refused move on your own turn: the view puts its note line on the
+     page only when it has text, and on your turn it has none, so the
+     referee's refusal shows as a toast instead of vanishing. */
+  const REFUSED = 'The referee refused that move: the clock just ran out';
+  for (const [label, o, state, gid, open, act] of [
+    ['move-refused-toast', {}, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-toast-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, { c4: true }, 16, '.game-card.kind-fourinarow', '#viewer .c4-drop:nth-child(4)'],
+    ['move-refused-toast-werewolf', {}, { ww: true }, 30, '.game-card.kind-werewolf', '#viewer .ww-target[aria-label="Vote out Henry"]'],
+  ]) {
+    await run(label, Object.assign({ state, init: noGl, allowConsole: [/409/] }, o), async (page) => {
+      let posts = 0;
+      await page.route('https://chat.victorio.cloud/**/games/' + gid + '/moves*', (r) => (r.request().method() === 'POST' ? (posts++, r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: REFUSED }) })) : r.fallback()));
+      await page.click(open);
+      await page.waitForSelector(act, { timeout: 15000 });
+      await page.click(act);
+      await page.waitForFunction((t) => { const e = document.querySelector('#toast'); return !!e && !e.hidden && e.textContent.includes(t); }, REFUSED, { timeout: 10000 }).catch(() => {});
+      // on top: the viewer covers the page, and a toast under it was never seen
+      const out = { posts, toast: await page.$eval('#toast', (e) => (e.hidden ? '' : e.textContent)).catch(() => ''), onTop: await page.$eval('#toast', (e) => { const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e; }).catch(() => false) };
+      await shot(page, label + '.png');
+      if (posts !== 1 || !out.toast.includes(REFUSED) || !out.onTop) throw new Error('the refusal shows as a toast, over the arena: ' + JSON.stringify(out));
+      return out;
+    });
+  }
   for (const [label, o] of [['no-webgl-fourinarow-shot', {}], ['no-webgl-fourinarow-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page) => {
       await page.waitForSelector('.game-card.kind-fourinarow', { timeout: 10000 });

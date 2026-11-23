@@ -318,17 +318,23 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
     if (note) note.textContent = label || "Queuing " + dir + "…";
+    // Several views add their note to the page only when it has text,
+    // and on the mover's own turn it has none: a refusal written there
+    // reached nobody, while the scene had already played the move in.
+    // Off the page, the refusal is a toast.
+    const say = (text: string) => {
+      if (note && note.isConnected) note.textContent = text;
+      else toast(text, true);
+    };
     try {
       const d = await client.submitMove(id, dir);
       if (d.game) {
         cache.set(id, d.game);
         notify();
         renderGameView(d.game, true);
-      } else if (note) {
-        note.textContent = "That move was refused.";
-      }
+      } else say("That move was refused.");
     } catch (e) {
-      if (note) note.textContent = e instanceof Error ? e.message : "The move did not reach the referee.";
+      say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
     }
   }
 
