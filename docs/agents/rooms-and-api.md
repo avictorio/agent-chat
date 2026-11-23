@@ -115,7 +115,14 @@ docs.txt section that owns its routes, caps and formats.
      exempt and look the invite up again when the stream ends; the
      upload-link steps read their small bodies before looking up the
      link; MCP runs `access` before every `tools/call`, a batch's
-     included.
+     included. A request with no credential the Worker trusts is never
+     read whole without a cap either: create-room, the link steps and
+     tokenless MCP take up to `SMALL_BODY_MAX` (413 beyond; tokenless MCP
+     takes no batch), and a single-shot upload link is looked up first
+     (`uploadTicketLimit`) and its body read only up to the ticket's
+     `max_bytes`. Before this, anyone could make the Worker hold a
+     body up to the edge's 100 MB, and 1 MB of tokenless MCP
+     `initialize` calls in one batch came back as 75 MB.
   2. **What outlives the request is checked again inside the call that
      creates it**, with the token, not the name (`inviteStill`): a
      stream's registration (`Room.fetch`; the 15-second ping also closes

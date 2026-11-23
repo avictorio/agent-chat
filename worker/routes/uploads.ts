@@ -8,12 +8,12 @@ import {
   mediaTooBig,
   MIB,
   ROOM_RE,
+  SMALL_BODY_MAX,
   STREAM_PART,
   UP_PART_MAX,
   UP_KINDS,
   UP_SIGN_MAX,
   UP_SIGN_TTL,
-  VIDEO_MAX,
   VIDEO_MAX_HARD,
   VIDEO_STREAM_TOO_BIG,
 } from "../limits.js";
@@ -232,7 +232,7 @@ export async function uploadLinkStepRoute(rc: RouteContext, usm: RegExpMatchArra
   // the link is looked up, so a body held back cannot carry a step (a
   // finish that publishes, say) past the link's end (settleBody).
   let asked: Request | null = request;
-  if (usm[3] !== "part") asked = await settleBody(request, MIB);
+  if (usm[3] !== "part") asked = await settleBody(request, SMALL_BODY_MAX);
   if (!asked) return json({ error: "That request's body is too large for this step" }, 413);
   const st = await ustub.uploadSessionTicket(link);
   if (refused(st)) {
@@ -252,10 +252,27 @@ export async function uploadLinkRoute(rc: RouteContext, um: RegExpMatchArray) {
   const uroom = decodeURIComponent(um[1]).toLowerCase();
   if (!ROOM_RE.test(uroom)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   if (request.method !== "PUT") return json({ error: "Method not allowed" }, 405);
-  if (+(request.headers.get("Content-Length") || 0) > VIDEO_MAX * 1.4 + 1000) return json({ error: mediaTooBig("video", "single-shot") }, 413);
-  const ubuf = await request.arrayBuffer();
   const ustub = env.ROOM.get(env.ROOM.idFromName(uroom));
-  const ur = await ustub.redeemUpload(decodeURIComponent(um[2]), ubuf, uroom);
+  const ticket = decodeURIComponent(um[2]);
+  // The ticket first, then a body no bigger than it allows. This route
+  // takes anyone's request, and it used to hold the whole body before
+  // asking whether the ticket existed: with no Content-Length (chunked)
+  // nothing stopped it short of the edge's 100 MB, a few such requests
+  // filled the isolate's memory, and over 32 MiB the hand-off to the room
+  // failed with a 500.
+  const lim = await ustub.uploadTicketLimit(ticket);
+  const refuse = async (status: number, error: string) => {
+    // read away, not held: a client still sending sees the reason, not a dropped connection
+    if (request.body && !request.bodyUsed) { try { await request.body.pipeTo(new WritableStream()); } catch { /* the client went away mid-body */ } }
+    return json({ error: error }, status);
+  };
+  if (refused(lim)) return refuse(lim.status, lim.error);
+  const tooBig = mediaTooBig(lim.kind as "image" | "audio" | "video", "single-shot");
+  if (+(request.headers.get("Content-Length") || 0) > lim.max_bytes) return refuse(413, tooBig);
+  const held = await settleBody(request, lim.max_bytes);
+  if (!held) return json({ error: tooBig }, 413);
+  const ubuf = await held.arrayBuffer();
+  const ur = await ustub.redeemUpload(ticket, ubuf, uroom);
   if (ur.status !== 200) return json({ error: ur.error }, ur.status);
   return json({ room: uroom, ok: true, type: ur.type, bytes: ur.bytes, published: ur.published });
 }

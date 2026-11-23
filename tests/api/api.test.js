@@ -65,6 +65,29 @@ function parkedPost(p, token, bodyText) {
   return { send: () => { rq.end(bodyText); return done; } };
 }
 
+// A request body sent chunked (no Content-Length), so the Worker learns
+// its size only by reading it: head, then filler bytes up to size, then tail.
+function chunked(size, head, tail) {
+  const h = Buffer.from(head || ''), t = Buffer.from(tail || '');
+  let left = size - h.length - t.length;
+  let first = true;
+  return new ReadableStream({
+    pull(c) {
+      if (first) { first = false; if (h.length) { c.enqueue(new Uint8Array(h)); return; } }
+      if (left > 0) { const n = Math.min(left, 1 << 20); left -= n; c.enqueue(new Uint8Array(n).fill(97)); return; }
+      if (t.length) c.enqueue(new Uint8Array(t));
+      c.close();
+    },
+  });
+}
+async function putChunked(p, method, body, headers) {
+  const r = await fetch(BASE + p, { method, headers: headers || {}, body, duplex: 'half' });
+  const text = await r.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch {}
+  return { status: r.status, json, text };
+}
+
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 function mp4() {
   const b = Buffer.alloc(48);
@@ -493,6 +516,10 @@ function mp4() {
     check('create existing -> 409', r.status === 409, r.status);
     r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '2' }, json: { room: 'Bad Name!', name: 'X', email: 'x-' + SUF + '@example.com' } });
     check('create bad name -> 400', r.status === 400, r.status);
+    // Anyone may call create-room: a body past SMALL_BODY_MAX is refused
+    // while it is read, not parsed whole (a 40 MB one used to be).
+    r = await putChunked('/api/create-room', 'POST', chunked(2 * 1048576, '{"room":"Bad Name!","pad":"', '"}'), { 'Content-Type': 'application/json', 'CF-Connecting-IP': IPO + '7' });
+    check('create-room with a 2 MiB chunked body -> 413', r.status === 413, r.status + ' ' + r.text.slice(0, 120));
     r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': IPO + '3' }, json: { room: 'apitest-rb-' + SUF, name: 'Rb', email: 'rb-' + SUF + '@example.com' } });
     check('send failure -> 502', r.status === 502, r.status);
     r = await req('GET', '/api/rooms/apitest-rb-' + SUF + '/members', { owner: true });
@@ -2117,6 +2144,19 @@ function mp4() {
     check('mcp GET -> 405', r.status === 405, r.status);
     r = await req('POST', R2 + '/mcp', { headers: { 'Content-Type': 'application/json' }, body: 'not json' });
     check('mcp garbage -> -32700', r.status === 400 && r.json && r.json.error && r.json.error.code === -32700, r.status + ' ' + r.text.slice(0, 80));
+    // Without a valid token MCP takes one small request: a batch of
+    // tokenless initialize calls once came back 75 times the size it went in.
+    const initCall = (n) => ({ jsonrpc: '2.0', id: n, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {} } });
+    r = await req('POST', R2 + '/mcp', { json: initCall(1) });
+    check('mcp tokenless initialize still answers', r.status === 200 && !!(r.json && r.json.result && r.json.result.serverInfo), r.status + ' ' + r.text.slice(0, 80));
+    r = await req('POST', R2 + '/mcp', { json: [initCall(1), initCall(2)] });
+    check('mcp tokenless batch -> -32600 with the token code, nothing run', r.status === 400 && !Array.isArray(r.json) && !!(r.json && r.json.error && r.json.error.code === -32600 && r.json.error.data && r.json.error.data.code === 'invite_missing'), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/mcp', { token: 'not-a-token', json: [initCall(1), initCall(2)] });
+    check('mcp batch with a wrong token -> -32600 invite_invalid', r.status === 400 && !!(r.json && r.json.error && r.json.error.code === -32600 && r.json.error.data && r.json.error.data.code === 'invite_invalid'), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/mcp', { token: TP, json: [{ jsonrpc: '2.0', id: 1, method: 'ping' }, initCall(2)] });
+    check('mcp member batch still answers each item', r.status === 200 && Array.isArray(r.json) && r.json.length === 2 && r.json.every(x => x.result), r.status + ' ' + r.text.slice(0, 120));
+    r = await putChunked(R2 + '/mcp', 'POST', chunked(1048576 + 1000, '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"pad":"', '"}}'), { 'Content-Type': 'application/json' });
+    check('mcp tokenless body over 1 MiB -> 413', r.status === 413 && !!(r.json && r.json.error && r.json.error.code === -32600), r.status + ' ' + r.text.slice(0, 120));
     r = await mcp(R2, 'tools/call', { name: 'whoami', arguments: {} });
     check('mcp unauthenticated tools/call -> -32001', !!(r.json && r.json.error && r.json.error.code === -32001), JSON.stringify(r.json).slice(0, 120));
     r = await mcp(R2, 'initialize', { protocolVersion: '2025-03-26', capabilities: {} }, { token: TP });
@@ -2226,8 +2266,16 @@ function mp4() {
     r = await putTicket(tk2.upload.url, Buffer.alloc(5000001, 7));
     const bigText = await r.text();
     check('oversize on a ticket -> 413, naming begin_upload and its ceiling', r.status === 413 && /begin_upload/.test(bigText) && /TB/.test(bigText), r.status + ' ' + bigText.slice(0, 200));
+    // The ticket is looked up before the body is read, and the body read
+    // only up to the ticket's max_bytes: a chunked body (no
+    // Content-Length) used to be held whole first, whatever its size, and
+    // past 32 MiB the hand-off to the room failed with a 500.
+    r = await putChunked('/api/uploads/' + room2Name + '/' + 'C'.repeat(43), 'PUT', chunked(34000000));
+    check('unknown ticket with a 34 MB chunked body -> 404, not held whole', r.status === 404, r.status + ' ' + r.text.slice(0, 120));
+    for (let i = 0; i < 5; i++) r = await putChunked(new URL(tk2.upload.url).pathname, 'PUT', chunked(5000001), { 'Content-Type': 'image/png' });
+    check('chunked oversize on a ticket -> 413, naming begin_upload', r.status === 413 && /begin_upload/.test(r.text), r.status + ' ' + r.text.slice(0, 160));
     r = await putTicket(tk2.upload.url, PNG);
-    check('the same ticket still works after a 413', r.status === 200, r.status);
+    check('the same ticket still works after a 413 (oversize spends no attempt)', r.status === 200, r.status);
     // Ticket media on a draft stays private until publish, as on every other path.
     r = await req('GET', R2 + '/messages/' + tk2.message_id + '/image', { token: TRex });
     check('ticket-uploaded draft media is private before publish', r.status === 404, r.status);

@@ -146,18 +146,37 @@ export const UploadMethods = {
     return { status: 200, msg: t.msg, kind: t.kind, member: t.member };
   },
 
-  async redeemUpload(rawTicket: unknown, data: ArrayBuffer, room: string) {
-    // An unknown room answers exactly like an unknown ticket: no hint.
-    if (!this.ready) return { status: 404, error: "Unknown upload ticket" };
+  // A single-shot ticket as it stands: the row, or why it cannot be used.
+  // An unknown room answers exactly like an unknown ticket, and a garbled
+  // ticket like one that never existed: no hint either way.
+  async upTicketRow(rawTicket: unknown) {
+    if (!this.ready) return { status: 404 as const, error: "Unknown upload ticket" };
     const h = await sha256hex(String(rawTicket || ""));
     const t = this.sql.exec<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "max_bytes" | "used" | "tries" | "owner" | "sess">>("SELECT msg, kind, member, expires, max_bytes, used, tries, owner, sess FROM ut WHERE h = ?", h).toArray()[0];
-    // No hint whether a garbled ticket ever existed.
-    if (!t) return { status: 404, error: "Unknown upload ticket" };
-    if (t.sess) return { status: 405, error: "This is a resumable upload link: PUT the parts to its /part?n=N address, then POST its /finish" };
+    if (!t) return { status: 404 as const, error: "Unknown upload ticket" };
+    if (t.sess) return { status: 405 as const, error: "This is a resumable upload link: PUT the parts to its /part?n=N address, then POST its /finish" };
+    if (t.used) return { status: 410 as const, error: "This upload link has already been used" };
+    if (Date.now() > t.expires) return { status: 410 as const, error: "This upload link has expired" };
+    if (t.tries >= TICKET_MAX_TRIES) return { status: 410 as const, error: "This upload link has had too many attempts" };
+    return { status: 200 as const, h: h, t: t };
+  },
+
+  // What the upload route needs before it reads a single-shot PUT's
+  // body: whether the ticket can be used at all, and how many bytes it
+  // takes. The route used to read the whole body first - anything up to
+  // the edge's 100 MB, from anyone, with no ticket at all - and only then
+  // ask here. Spends no attempt: redeemUpload checks it all again.
+  async uploadTicketLimit(rawTicket: unknown) {
+    const r = await this.upTicketRow(rawTicket);
+    if (r.status !== 200) return r;
+    return { status: 200 as const, kind: r.t.kind, max_bytes: r.t.max_bytes };
+  },
+
+  async redeemUpload(rawTicket: unknown, data: ArrayBuffer, room: string) {
+    const row = await this.upTicketRow(rawTicket);
+    if (row.status !== 200) return row;
+    const { h, t } = row;
     const now = Date.now();
-    if (t.used) return { status: 410, error: "This upload link has already been used" };
-    if (now > t.expires) return { status: 410, error: "This upload link has expired" };
-    if (t.tries >= TICKET_MAX_TRIES) return { status: 410, error: "This upload link has had too many attempts" };
     this.sql.exec("UPDATE ut SET tries = tries + 1 WHERE h = ?", h);
     // Any active invite under the name counts: a member whose invite was
     // rotated has a revoked row and a live one. Owner-minted tickets carry

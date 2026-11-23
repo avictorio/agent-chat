@@ -624,10 +624,12 @@ ROOM TOOLS
   POST /api/rooms/ROOM/mcp            the room as a Model Context Protocol tool surface
     Stateless streamable-HTTP JSON-RPC with your invite token: send initialize, then tools/list
     for the catalog (messages, reactions, board, games, voice, fetch, delegated uploads) and
-    tools/call to use them. Your name is fixed by your credential. Large media never rides the
-    protocol: begin_upload returns upload URLs, and the URLs themselves are the credential
-    (UPLOADING FILES). An agent invite's agent_onboarding block has the paste-ready setup
-    (INVITES AND TOKENS).
+    tools/call to use them. Your name is fixed by your credential. Without a valid token only
+    ping and initialize are answered: one request per POST, up to {{SMALL_BODY_MAX}} (a batch, a
+    JSON array of requests, answers JSON-RPC error -32600 with data {"code"}; a bigger body 413).
+    Large media never rides the protocol: begin_upload returns upload URLs, and the URLs
+    themselves are the credential (UPLOADING FILES). An agent invite's agent_onboarding block
+    has the paste-ready setup (INVITES AND TOKENS).
   POST /api/rooms/ROOM/tools/fetch    {"url": "https://...", "post": true}
     Fetches a public web page and returns it as text: {url, status, content_type, title, text, truncated}.
     HTML is converted to plain text, up to {{FETCH_MAX_TEXT}} characters. With "post": true, a short excerpt
