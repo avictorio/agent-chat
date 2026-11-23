@@ -49,19 +49,28 @@ import { ErrorBoundary } from "../../ui/ErrorBoundary";
 // room_state counts, and the members fetch behind kinds, avatars,
 // voices and mentions.
 
-export function takeInvite(room: string): string {
+/** The invite this page runs on, and the one a link offers in its place.
+ *  A link's invite used to be saved over the device's own unasked, before
+ *  anything checked it: any page (a message link, a redirect, no click
+ *  needed) could swap in a junk token and lock the member out, or another
+ *  member's token and switch who they post as. Now a link only fills an
+ *  empty slot or repeats the saved invite; a different one is left as
+ *  `offered` for RoomShell to check and ask about. */
+export function takeInvite(room: string): { token: string; offered: string | null } {
   const invKey = "chat-invite:" + room;
+  const saved = store(invKey) || "";
   const hm = location.hash.match(/(?:^#|&)invite=([A-Za-z0-9_-]+)/);
   if (hm && hm[1]) {
-    store(invKey, hm[1]);
     try {
       history.replaceState(null, "", location.pathname + location.search);
     } catch {
       // history unavailable: the fragment stays, harmless
     }
-    return hm[1];
+    if (saved && saved !== hm[1]) return { token: saved, offered: hm[1] };
+    store(invKey, hm[1]);
+    return { token: hm[1], offered: null };
   }
-  return store(invKey) || "";
+  return { token: saved, offered: null };
 }
 
 export function RoomShell({ room }: { room: string }) {
@@ -95,10 +104,46 @@ export function RoomShell({ room }: { room: string }) {
 
   const denied = lockedText !== null;
   const tabsDisabled = denied || gate !== null;
-  const { client, token } = useMemo(() => {
+  const { client, token, offered } = useMemo(() => {
     const t = takeInvite(room);
-    return { client: new RoomClient(room, t || null), token: t };
+    return { client: new RoomClient(room, t.token || null), token: t.token, offered: t.offered };
   }, [room]);
+
+  // A link carrying a different invite than the one saved here: look at it
+  // first (GET /invite, which leaves it unopened) while the room loads as
+  // before. Refused: keep the saved invite and say so. Someone else's
+  // name: ask before this device becomes them. The same name (a re-sent
+  // link after a revoke): take it. The page reloads on the new invite.
+  useEffect(() => {
+    if (!offered) return;
+    let gone = false;
+    new RoomClient(room, offered).invitePreview().then(
+      (pv) => {
+        if (gone) return;
+        const was = store("chat-you:" + room) || "";
+        const name = pv.invite.name;
+        const ask = was
+          ? "You are " + was + " in this room. Switch this device to " + name + "?"
+          : "This device already has an invite for this room. Switch it to " + name + "'s?";
+        if (!same(was, name) && !window.confirm(ask)) return;
+        store("chat-invite:" + room, offered);
+        store("chat-you:" + room, name);
+        location.reload();
+      },
+      (e: unknown) => {
+        if (gone) return;
+        toast(
+          e instanceof ApiError && (e.status === 401 || e.status === 403)
+            ? "That invite link isn't valid for this room. This device kept its own invite."
+            : "Couldn't check that invite link. This device kept its own invite.",
+          true
+        );
+      }
+    );
+    return () => {
+      gone = true;
+    };
+  }, [room, offered]);
 
   const deniedRef = useRef(false);
   const streamCloseRef = useRef<() => void>(() => {});

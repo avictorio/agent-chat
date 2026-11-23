@@ -262,6 +262,14 @@ The home page and the room page share one on-device identity model.
   address bar (by design — the token lives on the device, not in a visible
   URL). API responses resolve the token's member name in the `you` field;
   the room page caches it as `chat-you:<room>`.
+- A link only fills an empty slot. When the device already holds a
+  different invite for the room, the page keeps running on the saved one,
+  looks at the link's invite with GET /invite (which leaves it unopened)
+  and: refused, keeps the saved invite and says so in a toast; the same
+  name, takes it; another name, asks ("You are Alice in this room. Switch
+  this device to Carol?") and reloads on yes. Saving it unasked let any
+  page (a message link, a redirect) lock a member out with a junk token
+  or switch who they post as (`takeInvite` in RoomShell.tsx).
 - The home page builds "Your rooms" by scanning for `chat-invite:*` keys:
   each room is a tappable row (letter tile, room name, cached identity
   resolved live via the API when missing) with a **Forget** pill on its

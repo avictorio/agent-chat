@@ -96,6 +96,42 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     return { hits: hits.length };
   });
 
+  // A link with a different invite than the one this device holds: it is
+  // looked at first and never saved unasked. Saving it straight away let
+  // any page lock a member out with a junk token, or switch who they post
+  // as with someone else's.
+  const seedAnthony = () => { if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem('chat-invite:demo', 'tok_Anthony'); localStorage.setItem('chat-you:demo', 'Anthony'); } };
+  const savedInvite = (page) => page.evaluate(() => [localStorage.getItem('chat-invite:demo'), localStorage.getItem('chat-you:demo'), location.hash]);
+  // confirm() is replaced in the page before the app runs (the question
+  // would come before the harness could listen for dialogs): it records
+  // what it was asked in sessionStorage, which outlives the reload, and
+  // answers yes or no.
+  const confirmSays = (yes) => '(' + seedAnthony + ')(); window.confirm = (m) => { const a = JSON.parse(sessionStorage.getItem("asked") || "[]"); a.push(m); sessionStorage.setItem("asked", JSON.stringify(a)); return ' + yes + '; };';
+  const askedLog = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('asked') || '[]'));
+  for (const vp of [{ tag: '', w: 1280, h: 860 }, { tag: '-phone', w: 390, h: 844, touch: true }]) await run('invite-link-refused' + vp.tag, { init: confirmSays(true), state: { previews: { tok_junk: 403 } }, hash: '#invite=tok_junk', w: vp.w, h: vp.h, touch: vp.touch, allowConsole: /status of 403/ }, async (page, S) => {
+    await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
+    await page.waitForFunction(() => /isn't valid/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 5000 });
+    await shot(page, 'invite-link-refused' + vp.tag + '.png');
+    const out = { saved: await savedInvite(page), hits: S.hits, asked: await askedLog(page) };
+    must(JSON.stringify(out.saved) === JSON.stringify(['tok_Anthony', 'Anthony', '']), 'a refused link must leave the saved invite and scrub the address: ' + JSON.stringify(out));
+    must(out.hits.includes('GET /invite tok_junk') && !out.asked.length, 'the link must be checked, with no question: ' + JSON.stringify(out));
+    return out;
+  });
+  for (const answer of ['no', 'yes']) {
+    await run('invite-link-switch-' + answer, { init: confirmSays(answer === 'yes'), state: { previews: { tok_Carol: 'Carol' } }, hash: '#invite=tok_Carol' }, async (page, S) => {
+      await page.waitForFunction(() => sessionStorage.getItem('asked'), null, { timeout: 5000 });
+      if (answer === 'yes') await page.waitForFunction(() => localStorage.getItem('chat-invite:demo') === 'tok_Carol', null, { timeout: 5000 });
+      await page.waitForSelector('#view-chat:not([hidden])', { timeout: 10000 });
+      await settle(page);
+      const reads = S.hits.filter((h) => h === 'GET /messages').length;
+      const out = { saved: await savedInvite(page), asked: await askedLog(page), reads, hits: S.hits };
+      must(out.asked.length === 1 && /You are Anthony in this room\. Switch this device to Carol\?/.test(out.asked[0]), 'switching identity must ask once: ' + JSON.stringify(out));
+      // yes: the page loads again on Carol's invite (the stub's reads still answer you: Anthony, so only the invite is compared)
+      must(answer === 'yes' ? out.saved[0] === 'tok_Carol' && reads === 2 : JSON.stringify(out.saved) === JSON.stringify(['tok_Anthony', 'Anthony', '']) && reads === 1, 'the saved invite after ' + answer + ': ' + JSON.stringify(out));
+      return out;
+    });
+  }
+
   // The room page's note for AI agents (stamped by the Worker outside
   // #root) is gone once the app runs: people never see or hear it.
   await run('agent-note-removed', {}, async (page) => {

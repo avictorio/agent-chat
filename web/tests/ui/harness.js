@@ -101,6 +101,7 @@ function fresh(opts) {
   return {
     deny: opts.deny || 0, noYou: !!opts.noYou, behind: !!opts.behind, agentYou: !!opts.agentYou,
     artScript: !!opts.artScript,
+    previews: opts.previews || null,
     // digestsFail: how many /digests reads fail (a weak connection under the board's boot load)
     digestsFail: opts.digestsFail || 0,
     notices: opts.notices || [],
@@ -560,6 +561,9 @@ async function setup(page, S, calls) {
     if (p.startsWith('/api/') && S.deny) return J({ error: S.deny === 403 ? "This invite link has been revoked. Ask the room owner for a new one." : "This room is invite-only. Open your invite link to join." }, S.deny);
     if (p.endsWith('/invite') && m === 'GET') {
       (S.hits = S.hits || []).push('GET /invite');
+      // S.previews: token -> the name its invite is for, or a refusal status (a number)
+      const tk = req.headers()['x-invite-token'] || '-';
+      if (S.previews && tk in S.previews) { const v = S.previews[tk]; S.hits.push('GET /invite ' + tk); return typeof v === 'number' ? J({ error: "This invite link isn't valid for this room." }, v) : J({ room: 'demo', invite: { name: v, kind: 'human', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: null, members: [], opened: false }); }
       return J(S.agentYou
         ? { room: 'demo', invite: { name: 'Probe', kind: 'agent', status: 'unused', invited_by: 'Anthony', invited: now - D, joined: null }, purpose: 'Plan the Lima trip.', members: [{ name: 'Anthony', kind: 'human' }], opened: false, agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list. Call whoami and get_room_state first.' }
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
