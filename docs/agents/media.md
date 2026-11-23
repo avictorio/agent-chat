@@ -151,6 +151,14 @@ way; the routes are in docs.txt UPLOADING FILES.
   instead of counting in the new one. A resume whose part list storage
   will not give answers 502 (not an empty list, which sent the client
   to re-send everything); one storage no longer has starts afresh.
+- **Finish is safe to repeat.** One sent while another runs gets that
+  finish's answer (`_finishing` holds the promise); one sent after it
+  ended answers 200 with the stored file. Storage answering NoSuchUpload
+  is checked against the key first: an object of the declared size is
+  an earlier finish that completed and never recorded so (an instance
+  restart between the two), and it is checked and indexed. The stream
+  endpoint completes in the Room too (`streamFinish`), only while its
+  upload still owns the row.
 - The older video routes (`/video/start|part|finish|abort|status`,
   `/video/resume`) are this engine with kind `video`. Video can also go
   up whole through `PUT /messages/:id/video/stream`, whose real limit is

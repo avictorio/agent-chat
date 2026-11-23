@@ -51,6 +51,11 @@ export type UploadSessionAsk = { size: number | string | null | undefined, type?
 export type UpStart = { status: number, error?: string, part_size?: number, parts?: number, expires_at?: number, direct?: boolean };
 /** A started (or resumed) session's plan, as uploadStart answers it. */
 export type UpPlan = { status: 200, part_size: number, parts: number, resumed: boolean, received: number[], expires_at: number, direct: boolean };
+/** uploadFinish's answer: the stored file, or { status, error } (with
+ *  the missing part numbers on a 409 for parts). Shared by a finish sent
+ *  again while the first runs. */
+export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean } | { status: number, error: string, missing?: number[] };
+
 export const UploadMethods = {
   // ---- Upload tickets: a single-use credential for one PUT ----
   // Minted by begin_upload (MCP) or the REST upload-ticket route for a draft
@@ -446,83 +451,19 @@ export const UploadMethods = {
   },
 
   /** @param room publishes a publish-on-complete draft when given */
-  async uploadFinish(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: { transcript?: unknown } | null | undefined) {
+  async uploadFinish(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: { transcript?: unknown } | null | undefined): Promise<UpFinish> {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
-    const row = this.upSession(id, kind);
-    if (!row || !row.upload_id) return { status: 409, error: "No upload in progress for that message" };
-    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
-    const plan = this.upPlan(row);
-    let got;
-    try { got = await this.upReceived(id, kind, row); }
-    catch (e) {
-      const em = String((e && (e as Error).message) || e);
-      if (/NoSuchUpload/i.test(em)) {
-        this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-        this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
-        return { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
-      }
-      return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
-    }
-    const missing = [];
-    for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
-    if (missing.length) return { status: 409, error: missing.length + " of " + plan.parts + " parts have not arrived (first missing: " + missing.slice(0, 10).join(", ") + "). Send them, then finish again.", missing: missing.slice(0, 1000) };
-    // One finish at a time per session: a second one would find the
-    // multipart upload already completed.
-    const lock = id + ":" + kind;
-    this._finishing = this._finishing || new Set();
-    if (this._finishing.has(lock)) return { status: 409, error: "This upload is already finishing" };
-    this._finishing.add(lock);
-    try {
-      const parts = [];
-      for (let n = 1; n <= plan.parts; n++) parts.push({ partNumber: n, etag: got.get(n) as string }); // every part is in (checked above)
-      try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, row.upload_id).complete(parts); }
-      catch (e) {
-        const em = String((e && (e as Error).message) || e);
-        if (/NoSuchUpload|upload does not exist|10024/i.test(em)) {
-          this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-          this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id IS NOT NULL", id, kind);
-          return { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
-        }
-        return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." };
-      }
-      /** the R2 object's head */
-      let head: { size: number } | null = null;
-      try { head = await this.env.MEDIA.head(row.r2key); } catch (e) { warn("upload.head", e, { room, id, kind }); }
-      const sized = !!head && head.size === row.size;
-      let type = kind === "file" ? (row.type || "application/octet-stream") : null;
-      if (sized && kind !== "file") {
-        try {
-          const obj = await this.env.MEDIA.get(row.r2key, { range: { offset: 0, length: 16 } });
-          // an upload session exists only for UP_KINDS, and kind is not file here
-          if (obj) type = (upSniff(kind) as NonNullable<ReturnType<typeof upSniff>>)(await obj.arrayBuffer());
-        } catch (e) {
-          warn("upload.sniff", e, { room, id, kind });
-        }
-      }
-      if (!sized || !type) {
-        try { await this.env.MEDIA.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
-        this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-        this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ?", id, kind);
-        return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
-      }
-      this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-      this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ?", type, Date.now(), id, kind);
-      const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
-      if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
-      if (kind === "audio") {
-        if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, row.size, transcript || null, id);
-        else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, row.size, id);
-      }
-      if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, row.size, id);
-      if (kind === "file") this.sql.exec("UPDATE m SET file_type = ?, file_size = ?, file_name = ? WHERE id = ?", type, row.size, row.name || "file", id);
-      // a live message is sent again with its file; a draft waits for its publish
-      this.mediaLanded(id, room);
-      const published = room ? await this.maybeAutoPublish(id, room) : null;
-      return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
-    } finally {
-      this._finishing.delete(lock);
-    }
+    // A finish sent again while the first still runs (a client retrying
+    // after a blip lost the first answer) gets that finish's answer. It
+    // used to get 409 "already finishing", and an uploader reading that
+    // as a failure gave up on an upload that succeeded.
+    const k = id + ":" + kind;
+    const running = this._finishing.get(k);
+    if (running) return running;
+    const p = this.withMediaLock(id, kind, () => this.upFinishNow(id, kind, who, owner, room, opts));
+    this._finishing.set(k, p);
+    try { return await p; } finally { if (this._finishing.get(k) === p) this._finishing.delete(k); }
   },
 
   // Whether this upload still owns its message's row: anything written
@@ -537,6 +478,94 @@ export const UploadMethods = {
     if (!this.upStill(id, kind, uploadId)) return;
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
     this.sql.exec("DELETE FROM md WHERE msg = ? AND kind = ? AND upload_id = ?", id, kind, uploadId);
+  },
+
+  /** uploadFinish's work, in the message and kind's turn */
+  async upFinishNow(id: number, kind: string, who: string | null | undefined, owner: boolean, room: string | null | undefined, opts: { transcript?: unknown } | null | undefined): Promise<UpFinish> {
+    const a = this.upAuth(id, who, owner, kind);
+    if (a.status !== 200) return a;
+    const row = this.upSession(id, kind);
+    if (!row) return { status: 409, error: "No upload in progress for that message" };
+    if (!row.upload_id) {
+      // Finished already, and this is a retry whose first answer was lost
+      // (the instance may even have restarted since): the stored file is
+      // the answer, as it was the first time.
+      const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+      return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
+    }
+    if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
+    const media = this.env.MEDIA;
+    const uploadId = row.upload_id;
+    const plan = this.upPlan(row);
+    // Storage saying it has no such upload can mean that an earlier finish
+    // completed it and never recorded so (the instance restarted between
+    // the two): an object of the declared size at the key is that upload,
+    // checked and indexed like any other. Otherwise it is gone.
+    const landed = async () => {
+      try { const hd = await media.head(row.r2key); return !!hd && hd.size === row.size; } catch (e) { warn("upload.head", e, { room, id, kind }); return false; }
+    };
+    const gone = { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+    let got: Map<number, string> | null = null;
+    try { got = await this.upReceived(id, kind, row); }
+    catch (e) {
+      const em = String((e && (e as Error).message) || e);
+      if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
+      if (!(await landed())) { this.upDrop(id, kind, uploadId); return gone; }
+    }
+    if (got) {
+      const missing = [];
+      for (let n = 1; n <= plan.parts; n++) if (!got.has(n)) missing.push(n);
+      if (missing.length) return { status: 409, error: missing.length + " of " + plan.parts + " parts have not arrived (first missing: " + missing.slice(0, 10).join(", ") + "). Send them, then finish again.", missing: missing.slice(0, 1000) };
+      if (!this.upStill(id, kind, uploadId)) return { status: 409, error: "This upload was cancelled while it finished" };
+      const parts = [];
+      for (let n = 1; n <= plan.parts; n++) parts.push({ partNumber: n, etag: got.get(n) as string }); // every part is in (checked above)
+      try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
+      catch (e) {
+        const em = String((e && (e as Error).message) || e);
+        if (!/NoSuchUpload|upload does not exist|10024/i.test(em)) return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." };
+        if (!(await landed())) { this.upDrop(id, kind, uploadId); return gone; }
+      }
+    }
+    /** the R2 object's head */
+    let head: { size: number } | null = null;
+    try { head = await media.head(row.r2key); } catch (e) { warn("upload.head", e, { room, id, kind }); }
+    const sized = !!head && head.size === row.size;
+    let type = kind === "file" ? (row.type || "application/octet-stream") : null;
+    if (sized && kind !== "file") {
+      try {
+        const obj = await media.get(row.r2key, { range: { offset: 0, length: 16 } });
+        // an upload session exists only for UP_KINDS, and kind is not file here
+        if (obj) type = (upSniff(kind) as NonNullable<ReturnType<typeof upSniff>>)(await obj.arrayBuffer());
+      } catch (e) {
+        warn("upload.sniff", e, { room, id, kind });
+      }
+    }
+    if (!this.upStill(id, kind, uploadId)) {
+      // The message was deleted while storage answered. Its delete has
+      // already run, so the object this upload just made is nobody's:
+      // left there, nothing would ever remove it.
+      if (!this.upSession(id, kind)) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
+      return { status: 409, error: "This upload was cancelled while it finished" };
+    }
+    if (!sized || !type) {
+      try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      this.upDrop(id, kind, uploadId);
+      return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
+    }
+    this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
+    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ? AND upload_id = ?", type, Date.now(), id, kind, uploadId);
+    const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
+    if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
+    if (kind === "audio") {
+      if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, row.size, transcript || null, id);
+      else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, row.size, id);
+    }
+    if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, row.size, id);
+    if (kind === "file") this.sql.exec("UPDATE m SET file_type = ?, file_size = ?, file_name = ? WHERE id = ?", type, row.size, row.name || "file", id);
+    // a live message is sent again with its file; a draft waits for its publish
+    this.mediaLanded(id, room);
+    const published = room ? !!(await this.maybeAutoPublish(id, room)) : false;
+    return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
   },
 
   async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean) {

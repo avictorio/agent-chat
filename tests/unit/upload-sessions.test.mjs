@@ -116,6 +116,97 @@ test("a stream begun when storage refuses answers 503", async () => {
   assert.equal(row(h, id, "video"), undefined);
 });
 
+test("a start during a finish waits for it, then finds the file in place", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  const c = st.hold("complete");
+  const f = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await c.reached;
+  const s = h.room.uploadStart(id, "image", "Ada", false, R, 9437184, "image/png", "big.png", "fp-big", false);
+  await tick();
+  c.release();
+  assert.equal((await f).status, 200);
+  assert.equal((await s).status, 409, "the message already has its image");
+  const r = row(h, id, "image");
+  assert.equal(r.upload_id, null);
+  assert.equal(r.size, 100, "the size is the stored file's");
+  assert.equal(h.objects.get(r.r2key).byteLength, 100);
+  assert.equal(h.multipart.size, 0, "no upload left open");
+});
+
+test("an abort during a finish leaves the finished file and its row together", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  const c = st.hold("complete");
+  const f = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await c.reached;
+  const a = h.room.uploadAbort(id, "image", "Ada", false);
+  await tick();
+  c.release();
+  assert.equal((await f).status, 200);
+  assert.equal((await a).aborted, false, "the abort came after the finish: nothing left to cancel");
+  const r = row(h, id, "image");
+  assert.ok(r && h.objects.has(r.r2key), "the file is listed and stored");
+  assert.ok(h.room.mediaMeta(id, "image"));
+});
+
+test("a finish sent twice answers both with the same result, and again later", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  const c = st.hold("complete");
+  const f1 = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await c.reached;
+  const f2 = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await tick();
+  c.release();
+  const [r1, r2] = await Promise.all([f1, f2]);
+  assert.equal(r1.status, 200);
+  assert.deepEqual(r2, r1, "the retry gets the first finish's answer");
+  const r3 = await h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  assert.equal(r3.status, 200, "a retry after it ended (its answer lost) answers the stored file");
+  assert.equal(r3.bytes, 100);
+  assert.equal(r3.type, "image/png");
+});
+
+test("a finish whose upload storage already completed indexes the file instead of losing it", async () => {
+  // what an instance reset between complete() and the row update leaves
+  const h = makeRoom();
+  const id = await draft(h);
+  const up = await imageSession(h, id, 100);
+  const key = row(h, id, "image").r2key;
+  await h.room.env.MEDIA.resumeMultipartUpload(key, up).complete([]);
+  const f = await h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  assert.equal(f.status, 200, f.error);
+  assert.equal(row(h, id, "image").upload_id, null);
+  assert.ok(h.room.mediaMeta(id, "image"));
+});
+
+test("an attach during a finish is not deleted by the finish's size check", async () => {
+  const st = holder();
+  const h = makeRoom({ after: st.hook });
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  // the multipart upload has landed in storage; the finish has not looked yet
+  const c = st.hold("complete");
+  const f = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await c.reached;
+  const at = h.room.attachImage(id, "Ada", bytes(PNG_HEAD, 70).buffer, "image/png", false, R);
+  await tick();
+  c.release();
+  await f;
+  assert.equal((await at).status, 200);
+  const r = row(h, id, "image");
+  assert.ok(r && r.upload_id === null && h.objects.has(r.r2key), "the attached image is listed and stored");
+  assert.equal(h.objects.get(r.r2key).byteLength, r.size, "with its own size");
+  assert.equal(r.size, 70);
+});
+
 test("an attach during a start is not turned back into an upload in flight", async () => {
   const st = holder();
   const h = makeRoom({ before: st.hook });
@@ -225,3 +316,32 @@ test("a resume of an upload storage no longer has starts a fresh one", async () 
   assert.ok(h.multipart.has(row(h, id, "image").upload_id));
 });
 
+test("a direct finish retried after storage completed the upload indexes it", async () => {
+  const h = makeRoom({ env: DIRECT_ENV });
+  const id = await draft(h);
+  const up = await directSession(h, id, 100);
+  await h.room.env.MEDIA.resumeMultipartUpload(row(h, id, "image").r2key, up).complete([]);
+  const f = await withFetch(() => new Response("<Error><Code>NoSuchUpload</Code></Error>", { status: 404 }),
+    () => h.room.uploadFinish(id, "image", "Ada", false, R, null));
+  assert.equal(f.status, 200, f.error);
+  assert.ok(h.room.mediaMeta(id, "image"));
+});
+
+test("a message deleted during a finish leaves no object behind", async () => {
+  const st = holder();
+  const h = makeRoom({ after: st.hook });
+  const id = await draft(h);
+  await imageSession(h, id, 100);
+  const key = row(h, id, "image").r2key;
+  const c = st.hold("complete");
+  const f = h.room.uploadFinish(id, "image", "Ada", false, R, null);
+  await c.reached;
+  assert.equal((await h.room.deleteMessage(id, "Ada", false)).status, 200);
+  // storage put the completed object back after the delete removed it
+  h.objects.set(key, bytes(PNG_HEAD, 100));
+  c.release();
+  const r = await f;
+  assert.notEqual(r.status, 200);
+  assert.equal(h.objects.has(key), false, "the object goes with its message");
+  assert.equal(h.all("SELECT msg FROM md").length, 0);
+});

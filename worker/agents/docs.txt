@@ -404,7 +404,8 @@ UPLOADING FILES
   4. POST /api/rooms/ROOM/messages/ID/KIND/finish - it checks every part is in (409 with
      "missing": [part numbers] if not), assembles the file, verifies its size (and its kind),
      and attaches it; the answer carries the attachment and its signed url. An audio upload
-     may send {"transcript": ...} with finish.
+     may send {"transcript": ...} with finish. Finish is safe to repeat: sent again while
+     one runs, or after it ended (its answer lost), it answers 200 with the stored file.
   5. Publish the draft (POST /messages/ID/publish) - or post it with "publish_on_complete":
      true and it publishes itself the moment finish succeeds.
   Straight to storage: add "direct": true to start. Where this deployment can, the answer says

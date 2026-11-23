@@ -2494,10 +2494,19 @@ function mp4() {
     check('start again resumes with the parts kept', !!(r.json && r.json.resumed === true && JSON.stringify(r.json.received) === '[1,3]'), JSON.stringify(r.json));
     r = await putPart(2, slice(2));
     check('the missing part lands', r.status === 200, r.status);
-    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    // Two finishes at once (a client retrying while the first runs) both
+    // answer the upload's result; storage is held open so they overlap.
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: R2.slice('/api/rooms/'.length), ms: 600 } });
+    const fin1 = req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    await new Promise((res) => setTimeout(res, 150));
+    const fin2 = req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    r = await fin1;
+    const r2nd = await fin2;
+    await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: R2.slice('/api/rooms/'.length), ms: 0 } });
     check('finish assembles and attaches the file', r.status === 200 && !!(r.json && r.json.file && r.json.file.bytes === BIG.length && r.json.file.name === 'résumé data.bin' && /sig=/.test(r.json.file.url) && r.json.published === false), r.status + ' ' + r.text.slice(0, 200));
-    r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
-    check('a second finish -> 409', r.status === 409, r.status);
+    check('a finish sent again while the first runs gets the same answer', r2nd.status === 200 && !!(r2nd.json && r.json && r2nd.json.file && r2nd.json.file.url === r.json.file.url && r2nd.json.file.bytes === BIG.length), r2nd.status + ' ' + r2nd.text.slice(0, 200));
+    const r3rd = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
+    check('a finish sent again after it ended answers 200 with the same url', r3rd.status === 200 && !!(r3rd.json && r.json && r3rd.json.file && r3rd.json.file.url === r.json.file.url && r3rd.json.file.name === 'résumé data.bin' && r3rd.json.published === false), r3rd.status + ' ' + r3rd.text.slice(0, 200));
     r = await req('GET', R2 + '/messages/' + fid + '/file', { token: TP });
     check('a draft file stays private before publish', r.status === 404, r.status);
     r = await req('POST', R2 + '/messages/' + fid + '/publish', { token: TU, json: {} });

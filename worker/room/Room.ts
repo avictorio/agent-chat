@@ -36,6 +36,7 @@ import { GameMachineryMethods } from "./games.js";
 import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
+import type { UpFinish } from "./uploads.js";
 import { warn } from "../lib/log.js";
 
 /* ---------- storage rows ----------
@@ -287,6 +288,8 @@ export class Room extends DurableObject {
   utMinting: Map<string, number> = new Map();
   /** The writer of each message's media kind holding its turn, by "msg:kind" (room/media.ts, withMediaLock). */
   mediaLocks: Map<string, Promise<void>> = new Map();
+  /** The finish in flight per upload session ("msg:kind"), whose answer a finish sent again shares (room/uploads.ts, uploadFinish). */
+  _finishing: Map<string, Promise<UpFinish>> = new Map();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
