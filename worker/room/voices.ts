@@ -104,6 +104,10 @@ export const VoiceMethods = {
   // clone INSERTed on the invite alone, and a clone of an older sample
   // landed on a row whose sample was replaced meanwhile. Otherwise
   // "changed", nothing saved, and the route deletes its clone.
+  // The clone this one replaces is recorded as a pending delete in this
+  // same call and handed back for the route to delete. The route used to
+  // delete the voice it read at its start, so with two clones overlapping
+  // the one in between was neither deleted nor recorded.
   /** @param gen this.gen as putVoiceSample or getVoiceSample answered it
    *  @param sampleKey the sample key putVoiceSample or getVoiceSample answered */
   async setVoiceId(name: string, provider: string, voiceId: string, gen: number, sampleKey: string) {
@@ -111,10 +115,12 @@ export const VoiceMethods = {
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
     if (!prev || !sampleKey || prev.sample_key !== sampleKey) return "changed" as const;
+    const replaced = prev.voice_id && prev.voice_id !== voiceId && (prev.provider || "cartesia") === "cartesia" ? prev.voice_id : null;
+    if (replaced) this.voiceDelPend([replaced]);
     this.sql.exec("UPDATE mv SET provider = ?, voice_id = ?, ts = ? WHERE name = ?", provider, voiceId, Date.now(), String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
-    return this.voiceOf(name);
+    return { voice: this.voiceOf(name), replaced };
   },
 
   // A voice change makes every cached speak rendering of that member's messages

@@ -55,9 +55,13 @@ Front-end conventions.
   `voice-del:<id>`, `voiceDelPend`); the route then asks Cartesia and
   takes the record off only on 2xx or 404 (`voiceDelDone`). The answer
   is 200 with `clone_delete_pending` saying whether the clone is still
-  waiting (Cartesia refused or timed out, or the key is unset). A clone a
-  new sample or a reclone replaced, or one the room would not take, is
-  recorded the same way when Cartesia does not delete it. Each voice
+  waiting (Cartesia refused or timed out, or the key is unset). The
+  clone a new one replaces is recorded by `setVoiceId` in the call that
+  overwrites it and handed back; the route deletes exactly that id and
+  takes the record off on 2xx or 404 (it used to delete the voice it read
+  at its start, and a clone landing in between was lost). A clone the
+  room would not take is the route's own: deleted, or recorded when
+  Cartesia does not confirm. Each voice
   route that writes (DELETE, sample, reclone) with the key set tries up
   to `CLONE_DELETE_RETRY` pending deletes beside the request
   (`retryCloneDeletes`), and a room delete tries up to

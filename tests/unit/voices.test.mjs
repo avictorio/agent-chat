@@ -306,3 +306,45 @@ test("a clone Cartesia will not delete after a 409 is kept as a pending delete",
     assert.deepEqual(pending(h), ["v-late", "v-old"]);
   } finally { c.restore(); }
 });
+
+// Two clones overlapping: the route deleted the voice it read at its
+// start, so the clone that landed in between and was then replaced was
+// neither deleted at Cartesia nor recorded. The room now records the id
+// it overwrites, in the same call, and the route deletes exactly that.
+for (const [what, deletes] of [["Cartesia deletes", 200], ["Cartesia refuses deletes", 503]]) {
+  test("two overlapping reclones lose no replaced clone and leave the live one alone (" + what + ")", async () => {
+    const h = await withVoice();
+    // both clones are made from the same sample; v1 lands first, then v2
+    const waiting = [];
+    let bothWaiting;
+    const ready = new Promise((r) => { bothWaiting = r; });
+    const c = cartesia(async (x) => {
+      if (x.url.endsWith("/voices/clone")) {
+        const id = "v" + (waiting.length + 1);
+        const gate = new Promise((r) => waiting.push(r));
+        if (waiting.length === 2) bothWaiting();
+        await gate;
+        return Response.json({ id });
+      }
+      return new Response(deletes === 200 ? null : "{}", { status: deletes });
+    });
+    try {
+      const first = call(h, "POST", "voice/reclone");
+      const second = call(h, "POST", "voice/reclone");
+      await ready;
+      waiting[0]();
+      const a = await first;
+      waiting[1]();
+      const all = [a, await second];
+      assert.deepEqual(all.map((r) => r.status), [200, 200], JSON.stringify(all.map((r) => r.json)));
+      const live = mv(h).voice_id;
+      assert.equal(live, "v2", "the later clone is the voice");
+      const deleted = new Set(c.calls.filter((x) => x.method === "DELETE" && deletes === 200).map((x) => x.url.split("/").pop()));
+      for (const id of ["v-old", "v1"]) assert.ok(deleted.has(id) || pending(h).includes(id), id + " deleted at Cartesia or pending");
+      assert.ok(!c.calls.some((x) => x.method === "DELETE" && x.url.endsWith("/voices/" + live)), "the live voice is never deleted");
+      assert.ok(!pending(h).includes(live), "nor recorded for deletion");
+      if (deletes === 200) assert.deepEqual(pending(h), [], "confirmed deletes leave nothing pending");
+      else assert.deepEqual(pending(h), ["v-old", "v1"]);
+    } finally { c.restore(); }
+  });
+}

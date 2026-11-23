@@ -47,31 +47,34 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
   // time, beside this request (retryCloneDeletes).
   if (env.CARTESIA_API_KEY) rc.ctx.waitUntil(retryCloneDeletes(env, stub, room, CLONE_DELETE_RETRY));
   const oldVoice = await stub.voiceOf(who);
-  // A clone this request is done with (the one a new clone replaced, or
-  // its own new one the room would not take) goes at Cartesia; one
-  // Cartesia does not confirm deleted is kept in the room as a pending
-  // delete. It used to be only logged, and its id was lost.
+  // A clone this request is done with (its own new one the room would
+  // not take) goes at Cartesia; one Cartesia does not confirm deleted is
+  // kept in the room as a pending delete. It used to be only logged, and
+  // its id was lost.
   const dropClone = async (vid: string) => { if (!(await cartesiaDelete(env, vid, { room }))) await stub.voiceDelPend([vid]); };
-  const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await dropClone(oldVoice.voice_id); };
-  // A clone the room would not take (setVoiceId) is this request's own
-  // and attached to no one, so it goes at Cartesia: the room deleted
-  // while the clone was made answers 410 room_deleted; the voice removed
-  // or its sample replaced meanwhile, 409 (a DELETE that answered 200
-  // used to find the voice back, cloned from the recording withdrawn).
+  // The room decides, in one call, whether the clone is saved (setVoiceId).
+  // Refused, the clone is this request's own and attached to no one, so it
+  // goes at Cartesia: the room deleted while the clone was made answers
+  // 410 room_deleted; the voice removed or its sample replaced meanwhile,
+  // 409 (a DELETE that answered 200 used to find the voice back). Saved,
+  // the clone it replaced is the one the room hands back, already a
+  // pending delete there: that one goes, and its record comes off on a
+  // 2xx or 404. The route used to delete the voice it read at its start,
+  // so a clone landing in between was neither deleted nor recorded.
   const saveClone = async (gen: number, key: string, vid: string) => {
-    let v;
-    try { v = await stub.setVoiceId(who, "cartesia", vid, gen, key); }
+    let r;
+    try { r = await stub.setVoiceId(who, "cartesia", vid, gen, key); }
     catch (e) {
       if (isGoneError(e)) await dropClone(vid);
       throw e;
     }
-    if (!v || v === "changed") {
+    if (!r || r === "changed") {
       await dropClone(vid);
-      if (!v) return json({ error: "No member with that name" }, 404);
+      if (!r) return json({ error: "No member with that name" }, 404);
       return json({ error: "The voice was removed or replaced while it was being cloned, so nothing was saved and this clone was discarded. Send the request again if you still want it." }, 409);
     }
-    await dropOld(vid);
-    return json({ room, name: who, voice: v, cloned: true });
+    if (r.replaced && (await cartesiaDelete(env, r.replaced, { room }))) await stub.voiceDelDone([r.replaced]);
+    return json({ room, name: who, voice: r.voice, cloned: true });
   };
   const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
   if (request.method === "DELETE" && !action) {
