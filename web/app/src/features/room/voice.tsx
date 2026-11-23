@@ -67,6 +67,23 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
       canRecord ? "The whole script is about 30 seconds." : "Recording is not available in this browser - upload a file instead."
     );
     const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+    // An upload or a clone is out: both buttons wait for it. A second tap
+    // on Retry clone used to send a second clone, spending two of the
+    // day's clones on one sample. The ref stops a tap that lands before
+    // the disabled state has rendered.
+    const [busy, setBusy] = useState(false);
+    const busyRef = useRef(false);
+    const whileBusy = async (fn: () => Promise<void>) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusy(true);
+      try {
+        await fn();
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    };
 
     const vRecRef = useRef<MRInstance | null>(null);
     const vStreamRef = useRef<MediaStream | null>(null);
@@ -349,10 +366,10 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
             Remove voice
           </Button>
           <span className="vd-sp"></span>
-          <Button type="button" size="sm" id="voiceReclone" hidden={!unclonedSample} onClick={() => void reclone()}>
+          <Button type="button" size="sm" id="voiceReclone" hidden={!unclonedSample} disabled={busy} onClick={() => void whileBusy(reclone)}>
             Retry clone
           </Button>
-          <Button type="button" variant="primary" size="sm" id="voiceUpload" onClick={() => void upload()}>
+          <Button type="button" variant="primary" size="sm" id="voiceUpload" disabled={busy} onClick={() => void whileBusy(upload)}>
             Upload sample
           </Button>
         </div>

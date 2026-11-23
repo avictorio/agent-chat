@@ -380,6 +380,39 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
       return out;
     });
   }
+  // Retry clone and Upload sample wait for the call that is out: a double
+  // tap on Retry clone sent two clones, two of the day's five for one sample.
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('voice-busy' + tag, { hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S, calls) => {
+      S.voice = { provider: 'cartesia', voice_id: null, sample: true, updated: 1 };
+      S.voiceDelay = 2500;
+      if (tag) { await page.tap('#menu'); await settle(page); }
+      await page.click('#voiceBtn'); await settle(page);
+      await page.waitForSelector('#voiceReclone:not([hidden])', { timeout: 5000 });
+      // two taps in one go, before the disabled state can render
+      await page.$eval('#voiceReclone', (b) => { b.click(); b.click(); });
+      await page.waitForSelector('#voiceReclone:disabled', { timeout: 2000 }).catch(() => {});
+      const out = { busy: await page.$eval('#voiceReclone', (b) => b.disabled), uploadBusy: await page.$eval('#voiceUpload', (b) => b.disabled) };
+      await shot(page, 'voice-busy' + tag + '.png');
+      await page.waitForFunction(() => /Your voice is set/.test(document.querySelector('#voiceStatus').textContent), null, { timeout: 5000 });
+      await settle(page);
+      out.reclones = calls.filter((c) => /^POST .*\/voice\/reclone/.test(c)).length;
+      out.uploadAfter = await page.$eval('#voiceUpload', (b) => b.disabled);
+      // an upload holds both too
+      S.voice = { provider: 'cartesia', voice_id: null, sample: true, updated: 1 };
+      S.voiceSample = { status: 429, body: { error: 'You can clone a voice up to 5 times a day. Try again tomorrow.', voice: S.voice, cloned: false, sample_stored: true } };
+      await page.setInputFiles('#voiceFile', voiceTake);
+      await page.$eval('#voiceUpload', (b) => { b.click(); b.click(); });
+      out.uploadBusy2 = await page.waitForSelector('#voiceUpload:disabled', { timeout: 2000 }).then(() => true, () => false);
+      await page.waitForFunction(() => !/Uploading/.test(document.querySelector('#voiceStatus').textContent), null, { timeout: 5000 });
+      await settle(page);
+      out.uploads = calls.filter((c) => /^PUT .*\/voice\/sample/.test(c)).length;
+      out.retryAfterUpload = await page.$eval('#voiceReclone', (b) => !b.hidden && !b.disabled);
+      must(out.busy && out.uploadBusy && out.reclones === 1, 'one clone for a double tap, both buttons held while it runs: ' + JSON.stringify(out));
+      must(!out.uploadAfter && out.uploadBusy2 && out.uploads === 1 && out.retryAfterUpload, 'the buttons come back; an upload holds them too: ' + JSON.stringify(out));
+      return out;
+    });
+  }
   await run('voice-upload-refused', { hash: '#invite=tok_Anthony', allowConsole: /status of (415|502)/ }, async (page, S) => {
     S.voiceSample = { status: 502, body: { error: 'Cartesia clone failed (400): audio too short', sample_stored: true } };
     await page.click('#voiceBtn'); await settle(page);

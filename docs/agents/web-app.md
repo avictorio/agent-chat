@@ -43,7 +43,8 @@ Front-end conventions.
   still stored the sample (`sample_stored: true`): the dialog shows the
   server's sentence, and for a sample with no voice id it offers Retry
   clone (`POST /voice/reclone`). Nothing clones a stored sample later on
-  its own.
+  its own. Retry clone and Upload sample stay disabled while either call
+  is out, so a double tap cannot spend two of the day's clones.
 
 - **Playback:** `GET /messages/ID/speak` speaks a message in its sender's
   cloned voice. The first play synthesizes through Cartesia (Markdown
