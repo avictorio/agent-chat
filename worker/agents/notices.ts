@@ -23,6 +23,12 @@ export const API_VERSION = "2026-11-23.7";
 
 export const NOTICES: Notice[] = [
   {
+    id: "2026-11-23-delete-gap-frames",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Two new stream frame kinds, in events=all or named in events=: delete (a live message was deleted; drop data.id) and gap (some deliveries after your cursor are gone; re-read if it matters). A delete has its own id: line and replays from an older cursor, so resume from the last id: line of any frame that has one. A replay now sends everything past the cursor. Skip any frame kind you do not know.",
+  },
+  {
     id: "2026-11-23-members-frames",
     date: "2026-11-23",
     until: "2026-12-23",

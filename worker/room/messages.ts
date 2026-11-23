@@ -3,11 +3,11 @@
 import { streamWants } from "./state.js";
 import { isStoreError, storeError } from "../lib/errors.js";
 import { KEEP, MAX_TEXT } from "../limits.js";
-import { sseFrame } from "../lib/http.js";
+import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
 import { mentionsName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
-import type { CfgRow, InvRow, MdRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
+import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
 import { warn } from "../lib/log.js";
 import { hiddenDraft } from "./media.js";
 
@@ -169,6 +169,8 @@ export const MessageMethods = {
     if (!cut) return;
     const old = "SELECT id FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))";
     const keys = this.sql.exec<Pick<MdRow, "r2key">>("SELECT r2key FROM md WHERE r2key IS NOT NULL AND msg IN (" + old + ")", cut.t, cut.t, cut.id).toArray().map((r) => r.r2key);
+    // a stream resuming from below these numbers can no longer be given them
+    this.forget(this.sql.exec<{ n: number | null }>("SELECT MAX(COALESCE(seq, id)) AS n FROM m WHERE id IN (" + old + ")", cut.t, cut.t, cut.id).one().n || 0);
     for (const table of ["rx", "md", "upp"]) this.sql.exec("DELETE FROM " + table + " WHERE msg IN (" + old + ")", cut.t, cut.t, cut.id);
     this.sql.exec("DELETE FROM m WHERE (draft IS NULL OR draft = 0) AND (COALESCE(pub_ts, ts) < ? OR (COALESCE(pub_ts, ts) = ? AND id <= ?))", cut.t, cut.t, cut.id);
     if (!keys.length || !this.env || !this.env.MEDIA) return;
@@ -335,8 +337,77 @@ export const MessageMethods = {
     this.sql.exec("DELETE FROM md WHERE msg = ?", id);
     this.sql.exec("DELETE FROM rx WHERE msg = ?", id);
     this.sql.exec("DELETE FROM m WHERE id = ?", id);
+    // A live message's delete is announced, and kept for a replay; a
+    // draft was never shown to anyone else.
+    if (!r.draft) this.announceDelete(id, owner ? null : (who || null));
     await this.dropStored(media);
     return { status: 200, deleted: id };
+  },
+
+  // A delete goes out as a "delete" frame under a delivery number of its
+  // own (from the id counter, like a message), and is kept in mdel so a
+  // stream resuming from below that number gets it in order with the
+  // messages. Without it every open page kept the deleted message, and
+  // links to its media that no longer worked, until a reload.
+  announceDelete(id: number, who: string | null) {
+    const d: MdelRow = { dn: this.nextMsgId(), id, ts: Date.now(), who };
+    this.sql.exec("INSERT INTO mdel (dn, id, ts, who) VALUES (?, ?, ?, ?)", d.dn, d.id, d.ts, d.who);
+    this.trimDeletes();
+    if (!this.clients.size) return;
+    const frame = this.deleteFrameOf(d);
+    for (const c of this.clients) { if (streamWants(c, "delete")) c.send(frame); }
+  },
+
+  deleteFrameOf(d: MdelRow) {
+    return deleteFrame(d.dn, { type: "delete", room: this.roomName || null, from: d.who, kind: this.memberKind(d.who), targets: [], id: d.id });
+  },
+
+  // The newest KEEP deletes are kept, as the newest KEEP messages are; a
+  // stream resuming from below the ones dropped gets a gap frame instead.
+  trimDeletes() {
+    const cut = this.sql.exec<Pick<MdelRow, "dn">>("SELECT dn FROM mdel ORDER BY dn DESC LIMIT 1 OFFSET ?", KEEP).toArray()[0];
+    if (!cut) return;
+    this.forget(cut.dn);
+    this.sql.exec("DELETE FROM mdel WHERE dn <= ?", cut.dn);
+  },
+
+  /** Records that deliveries up to dn may no longer be held (cfg msg_forgot only rises). */
+  forget(dn: number) {
+    if (dn > this.forgotten()) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_forgot', ?)", String(dn));
+  },
+
+  /** The highest delivery number the room no longer holds everything up to (0: it holds all). */
+  forgotten(): number {
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_forgot'").toArray()[0];
+    return r ? parseInt(r.v, 10) || 0 : 0;
+  },
+
+  // What a stream opened with after=N is owed before it goes live: a gap
+  // frame when deliveries past N are no longer held (the room keeps KEEP
+  // messages and KEEP deletes), then every message and delete numbered past
+  // N, in delivery order. A reconnect after more messages than the room
+  // keeps used to be shown its old rows joined straight onto the new ones,
+  // with nothing to say some were missing in between; and the replay
+  // stopped at KEEP messages, which a room holds more of for a while when
+  // drafts publish (only a post trims).
+  replay(c: StreamClient, room: string, after: number) {
+    const through = this.forgotten();
+    if (streamWants(c, "gap") && through > after) c.send(gapFrame({ type: "gap", room, from: null, kind: null, targets: [], after, through }));
+    const out: Array<{ dn: number, frame: string }> = [];
+    if (streamWants(c, "message")) {
+      // one page at a time, all of it: no await runs in between, so nothing changes under it
+      for (let from = after; ;) {
+        const page = this.delivered(from, KEEP);
+        for (const d of page) out.push({ dn: d.dn, frame: sseFrame(room, d.msg, d.dn) });
+        if (page.length < KEEP) break;
+        from = page[page.length - 1]!.dn;
+      }
+    }
+    if (streamWants(c, "delete")) {
+      for (const d of this.sql.exec<MdelRow>("SELECT dn, id, ts, who FROM mdel WHERE dn > ? ORDER BY dn", after).toArray()) out.push({ dn: d.dn, frame: this.deleteFrameOf(d) });
+    }
+    out.sort((a, b) => a.dn - b.dn);
+    for (const o of out) c.send(o.frame);
   },
 
   // The members @-mentioned in a text: canonical names, in the order they

@@ -215,6 +215,36 @@ export interface RoomState {
   reactions_to_you?: Array<{ message_id: number; reaction: string; from: string; at: string; excerpt: string }>;
 }
 
+/** The stream's "delete" frame (event: delete): a live message was
+ *  deleted. Its id: line is a delivery number of its own, so a reconnect
+ *  from below it replays the delete in order with the messages. */
+export interface StreamDeleteFrame {
+  type: "delete";
+  room: string | null;
+  /** who deleted it, or null for the owner key */
+  from: string | null;
+  kind: MemberKind | "non_interactive" | null;
+  targets: string[];
+  /** the deleted message's id */
+  id: number;
+}
+
+/** The stream's "gap" frame (event: gap), sent before a replay that
+ *  cannot be complete: some deliveries numbered after the cursor, up to
+ *  through, are no longer held (messages past the room's history, deletes
+ *  no longer on record). Everything numbered past through follows. */
+export interface StreamGapFrame {
+  type: "gap";
+  room: string | null;
+  from: null;
+  kind: null;
+  targets: string[];
+  /** the cursor the stream was opened from */
+  after: number;
+  /** the highest delivery number the room no longer holds */
+  through: number;
+}
+
 export interface MessagesResponse {
   room: string;
   messages: Message[];

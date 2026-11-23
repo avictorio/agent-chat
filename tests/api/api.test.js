@@ -2332,6 +2332,19 @@ function mp4() {
     await req('DELETE', R2 + '/invites/' + encodeURIComponent(mfTok), { owner: true });
     check('members frame: a revoke, and no frame for a later read', await waitFor(() => mfFrames().length === 3, 4000) && mfFrames().length === 3, JSON.stringify(mfFrames()));
     s.close();
+    // Delete frames: a live message's delete reaches an open stream, under
+    // an id: line of its own, and a reconnect from below that number gets
+    // it in its replay. A delete used to be sent nowhere.
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'delete frame probe' } });
+    const dfId = r.json.id;
+    s = await openStream(R2 + '/stream?events=message,delete&after=latest', TP);
+    r = await req('DELETE', R2 + '/messages/' + dfId, { token: TP });
+    const dfFrame = () => s.frames.find(f => { const d = frameData(f); return d && d.type === 'delete' && d.id === dfId; });
+    check('delete frame: sent live, with from, kind and its own id: line', await waitFor(() => !!dfFrame(), 4000) && /^id: \d+\nevent: delete\n/.test(dfFrame()) && Number(dfFrame().slice(4, dfFrame().indexOf('\n'))) > dfId && frameData(dfFrame()).from === 'Poc' && frameData(dfFrame()).kind === 'human', JSON.stringify(s.frames).slice(-300));
+    s.close();
+    s = await openStream(R2 + '/stream?events=message,delete,gap&after=' + (dfId - 1), TP);
+    check('delete frame: replayed to a reconnect from below it', await waitFor(() => s.frames.some(f => { const d = frameData(f); return d && d.type === 'delete' && d.id === dfId; }), 4000) && !s.frames.some(f => { const d = frameData(f); return d && d.type === 'message' && d.id === dfId; }) && !s.frames.some(f => f.includes('event: gap')), JSON.stringify(s.frames).slice(-300));
+    s.close();
 
     // Park the stream match: with a real alarm armed it would otherwise
     // keep resolving ticks (and eventually post a result) behind the

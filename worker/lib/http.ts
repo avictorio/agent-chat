@@ -1,6 +1,6 @@
 // HTTP helpers shared by the routes and the Room object.
 
-import type { Message } from "@chat/contract";
+import type { Message, StreamDeleteFrame, StreamGapFrame } from "@chat/contract";
 
 export const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -20,6 +20,17 @@ export const SSE_HEADERS = Object.assign({
  *  @param dn the message's delivery number (its id unless it went live late or was sent again): the "id:" line a reconnect resumes from */
 export function sseFrame(room: string | null, m: Message & { targets?: string[] }, dn: number = m.id) {
   return "id: " + dn + "\nevent: message\ndata: " + JSON.stringify({ id: m.id, room: room, ts: m.ts, from: m.from, kind: m.kind || null, targets: m.targets || [], text: m.text, audio: m.audio || null, image: m.image || null, video: m.video || null, html: m.html || null, doc: m.doc || null, file: m.file || null, game: m.game || null, reactions: m.reactions || {} }) + "\n\n";
+}
+
+/** @param dn the delete's own delivery number, its "id:" line */
+export function deleteFrame(dn: number, data: StreamDeleteFrame) {
+  return "id: " + dn + "\nevent: delete\ndata: " + JSON.stringify(data) + "\n\n";
+}
+
+/** No id: line: a gap is not a delivery, and a Last-Event-ID taken from
+ *  it would move a resume past the replay that follows it. */
+export function gapFrame(data: StreamGapFrame) {
+  return "event: gap\ndata: " + JSON.stringify(data) + "\n\n";
 }
 
 // Parse a single-range Range header against a known size. Returns {start, end, r2}

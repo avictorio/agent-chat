@@ -39,9 +39,28 @@ docs.txt section that owns its routes, caps and formats.
   the URL of that fetch: Workers Logs records it, and a token in the query
   stayed readable there whenever it missed the logs' masking. The
   default is `all` on purpose: extra frames are filterable noise, missing
-  frames are silent starvation. Only message frames replay from the
-  cursor; the other kinds are live-only, and consumers re-sync from
-  state. `room_state` is its own opt-in state frame (`all` excludes it):
+  frames are silent starvation. Message and delete frames replay from
+  the cursor (`replay` in `messages.ts`); the other kinds are live-only,
+  and consumers re-sync from state.
+  - **Deletes and gaps.** Deleting a live message (`deleteMessage`)
+    takes a delivery number of its own from the id counter, keeps it in
+    `mdel` and sends a `delete` frame (`id:` that number, `data.id` the
+    message's id), so a reconnect from below the number replays it in
+    order with the messages: a delete made while a reader was away
+    reaches it too. A draft's delete sends nothing. The newest `KEEP`
+    deletes are kept (`trimDeletes`); `cfg` `msg_forgot` is the highest
+    delivery number of anything the room no longer holds (a trimmed
+    message, a dropped delete, every number of a room deleted and made
+    again), and a replay from below it opens with a `gap` frame
+    (`after`, `through`, no `id:` line). The replay sends every message
+    past the cursor: it used to stop at `KEEP`, which a room passes
+    while drafts publish (only a post trims). `delete` and `gap` are
+    their own kinds, so a stream that lists its kinds, as the web app
+    does, gets neither until it names them, and an older page is never
+    sent a frame it does not know. Before, a deleted message stayed on
+    every open page with dead media until a reload, and a reconnect
+    after more than `KEEP` messages joined its old rows straight onto
+    the new ones. `room_state` is its own opt-in state frame (`all` excludes it):
   a snapshot on connect, then a frame only when that client's block
   changes (`emitState`).
   - **The web app's reader** (`features/room/useRoomStream.ts`). A
@@ -59,7 +78,9 @@ docs.txt section that owns its routes, caps and formats.
     a row touched while it is out, by a reaction frame, the person's own
     tap or that tap's answer, keeps what touched it: `touchReaction` in
     `useMessages.ts`), and every match that can still change.
-    Deletes and messages past the replay's reach are not re-synced yet.
+    It does not yet ask for `delete` and `gap` frames (Deletes and
+    gaps): a delete still shows only after a reload, and a gap is not
+    marked.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for
     clock-driven game frames (alarm resolutions, lobby expiry), the
@@ -364,9 +385,10 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 |---|---|
 | `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. `seq` is the delivery number when it is not the id (Messages, Delivery numbers). |
 | `rx` | reactions: message, emoji, who, time |
+| `mdel` | deletes of live messages (`dn` its own delivery number, `id` the message's, `ts`, `who`, null for the owner key), the newest `KEEP` kept: what a stream's replay sends as `delete` frames (Live stream, Deletes and gaps). Schema step 5; deletes from before it were never recorded. |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` (when something of theirs first went live: a draft stamps it at its publish, since a draft stamped at creation named its sender in the digest rotation everyone sees) and the `avatar_*` pointer columns |
-| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps two kinds of row: `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`). |
+| `cfg` | room settings: `schema_version`, `media_sig_key` (signing key for media URLs), `msg_hwm` (the message-id high-water mark: ids are never reused, even by a room created again under the name: `destroy()` writes it back after `deleteAll`), `msg_forgot` (the highest delivery number the room no longer holds: a replay from below it opens with a `gap` frame; it only rises, and a room created again starts it at `msg_hwm`), `room_name` (kept for alarms), `sg_judge_day` (the Sketch & Guess Referee's daily Claude-call count), `clone:<folded name>` (a member's voice clones on their last cloning day, `<day>:<n>`, taken in one call by `cloneTake` before the sample is read: one row per member who ever cloned, kept for the room's life), `voice-del:<clone id>` (a clone a member removed or a new clone replaced that Cartesia has not confirmed deleted, the value when it was recorded: written in the call that drops or replaces the voice, tried again up to `CLONE_DELETE_RETRY` at a time by the room's voice routes with the key set and up to `CLONE_DELETE_ON_ROOM_DELETE` by a room delete, and removed only on Cartesia's 2xx or 404; `web-app.md`, Voices), test-hook flags. A deleted room keeps `msg_hwm` and the `voice-del:` rows (`destroy()` writes them back after `deleteAll`), and `msg_forgot` set to that `msg_hwm`. |
 | `ut` | upload tickets and resumable upload links, stored only as SHA-256 hashes (`media.md`) |
 | `push` | Web Push subscriptions per member, with the current run of failed sends (`fails`, `fail_ts`) and the rest a failing one takes (`rest_ts`) |
 | `mv` | member voices: provider, voice id, the R2 key of the sample |

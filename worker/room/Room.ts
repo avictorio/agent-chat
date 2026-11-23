@@ -5,9 +5,9 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
-import { renderRoomState, stateFrame, streamWants } from "./state.js";
-import { KEEP, STREAM_PING_MS } from "../limits.js";
-import { SSE_HEADERS, json, sseFrame } from "../lib/http.js";
+import { renderRoomState, stateFrame } from "./state.js";
+import { STREAM_PING_MS } from "../limits.js";
+import { SSE_HEADERS, json } from "../lib/http.js";
 import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
 import { TrustMethods } from "../games/trust.js";
@@ -53,6 +53,8 @@ export type MsgRow = { id: number, ts: number, sender: string, text: string, dra
   video_type: string | null, video_size: number | null, html_type: string | null, html_size: number | null, html_name: string | null,
   doc_type: string | null, doc_size: number | null, doc_name: string | null, file_type: string | null, file_size: number | null, file_name: string | null,
   game_id: number | null };
+/** mdel: a live message's delete, under its own delivery number (schema step 5). */
+export type MdelRow = { dn: number, id: number, ts: number, who: string | null };
 /** rx: one member's reaction to a message. */
 export type RxRow = { msg: number, emoji: string, who: string, ts: number };
 /** inv: an invite, and the member it names. */
@@ -285,8 +287,21 @@ function schemaPushFailures(sql: SqlStorage) {
   addColumn(sql, "push", "rest_ts", "INTEGER");
 }
 
+// Step 5. mdel: a live message that was deleted, under a delivery number
+// of its own from the id counter, so the stream can replay the delete to
+// a reader whose cursor is below it (a "delete" frame), in order with the
+// messages. A delete used to reach nobody: every open feed kept the
+// message, and its dead media, until a reload. The newest KEEP are kept
+// (trimDeletes); cfg msg_forgot is the highest delivery number of
+// anything the room no longer holds, a trimmed message or a dropped
+// delete, and a replay from below it starts with a "gap" frame. Nothing
+// is backfilled: deletes from before this step were never recorded.
+function schemaDeletes(sql: SqlStorage) {
+  sql.exec("CREATE TABLE IF NOT EXISTS mdel (dn INTEGER PRIMARY KEY, id INTEGER NOT NULL, ts INTEGER NOT NULL, who TEXT)");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletes];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
@@ -460,6 +475,9 @@ export class Room extends DurableObject {
     await this.ctx.storage.deleteAll();
     if (hwm || voiceDels.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
     if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
+    // every number up to it belonged to the old room: a stream resuming
+    // from one of them is told its history is gone (a "gap" frame)
+    if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_forgot', ?)", String(hwm));
     for (const d of voiceDels) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
     // A stream or long poll that slipped in during the awaits above
     // (fetch refuses one now, but this is the last word) goes too.
@@ -598,7 +616,7 @@ export class Room extends DurableObject {
     // kinds; ?game=1,2 restricts game frames to those matches. Both are
     // validated here, before the stream opens, so a bad subscription fails
     // fast instead of silently starving.
-    const STREAM_KINDS = ["message", "reaction", "game", "members", "state"];
+    const STREAM_KINDS = ["message", "reaction", "game", "members", "state", "delete", "gap"];
     let kinds: Set<string> | null = null;
     const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
     // state is opt-in only: naming it anywhere in events= subscribes, and
@@ -610,7 +628,7 @@ export class Room extends DurableObject {
         const k = part.trim();
         if (!k) continue;
         if (k === "all") { kinds = null; break; }
-        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: message, reaction, game, members, state, all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        if (STREAM_KINDS.indexOf(k) < 0) return new Response(JSON.stringify({ error: "unknown stream event kind: " + k + " (valid: " + STREAM_KINDS.join(", ") + ", all)" }), { status: 400, headers: { "Content-Type": "application/json" } });
         kinds.add(k);
       }
       if (kinds && !kinds.size) kinds = null;
@@ -654,9 +672,7 @@ export class Room extends DurableObject {
       writer.close().catch(() => {}); // the stream may have closed already
     };
     client.send("retry: 2000\n\n");
-    if (after !== null && streamWants(client, "message")) {
-      for (const d of this.delivered(after, KEEP)) client.send(sseFrame(room, d.msg, d.dn));
-    }
+    if (after !== null) this.replay(client, room, after);
     this.clients.add(client);
     if (client.stateSub) {
       // One initial snapshot, so a fresh subscriber starts current without
