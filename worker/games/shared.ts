@@ -1,4 +1,5 @@
 // Helpers the game engines share: seats, clocks in words, data files, fuzzy answer matching (Trivia, Sketch & Guess).
+import type { StoredBase } from "../room/games.js";
 export const dataLines = (txt: string) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
 
 export const TV_NUMS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
@@ -102,3 +103,11 @@ export const clockWords = (sec: number) => (sec >= 3600 ? Math.round(sec / 3600)
 // ties). The stored move is always this round's - a round that resolves
 // clears it - so a repeat can never be mistaken for the next round's move.
 export const sameMove = (stored: unknown, move: unknown) => stored !== undefined && stored !== null && JSON.stringify(stored) === JSON.stringify(move);
+
+/** A match's revision (saveGame adds one on every stored change), which
+ *  every engine's summary, and so every frame, list row and full state,
+ *  carries as rev: 0 for a match not saved since it was created, and for
+ *  one stored before revisions existed, whose next save makes it 1. */
+export function gameRev(st: StoredBase): number {
+  return typeof st.rev === "number" && st.rev >= 0 ? st.rev : 0;
+}

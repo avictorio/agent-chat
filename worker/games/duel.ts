@@ -1,6 +1,6 @@
 // Duel: rock-paper-scissors, first to N, simultaneous throws.
 
-import { clockWords, sameMove, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, sameMove, seatAccepted } from "./shared.js";
 import type { DuelH2H, DuelRound, DuelState, DuelThrow, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -55,7 +55,7 @@ export const DuelMethods = {
   duelSummary(g: DuelGame): DuelState {
     const st = g.st;
     return {
-      id: g.id, type: "duel", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "duel", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, best_of: st.best_of, target: st.target, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       score: st.score, winner: st.winner || null, declined_by: st.declined_by || null,
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, wins: st.score[p.name] || 0, accepted: st.accepted ? !!st.accepted[p.name] : true, thrown: !!st.pending[p.name] })),

@@ -1,7 +1,7 @@
 // Letter Grid: everyone hunts words in the same grid each round.
 
 import LG_WORDS_TXT from "../data/lettergrid-words.txt";
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { GameLogLine, LetterGridCell, LetterGridMove, LetterGridRound, LetterGridState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -245,7 +245,7 @@ export const LetterGridMethods = {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
     return {
-      id: g.id, type: "lettergrid", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "lettergrid", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, rounds_total: st.rounds_total, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       size: st.size, min_len: st.min_len, grid: st.grid, claims: st.claims, word_count: st.word_count, top_words: over ? st.top_words : null,
       winner: st.winner || null, draw: !!st.draw, places: st.places || null, declined_by: st.declined_by || null,

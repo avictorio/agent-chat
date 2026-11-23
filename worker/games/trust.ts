@@ -1,6 +1,6 @@
 // Trust: the iterated prisoner's dilemma, simultaneous rounds.
 
-import { clockWords, seatAccepted, splitLastWord } from "./shared.js";
+import { clockWords, gameRev, seatAccepted, splitLastWord } from "./shared.js";
 import type { GameLogLine, TrustChoice, TrustRound, TrustState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -102,7 +102,7 @@ export const TrustMethods = {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
     return {
-      id: g.id, type: "trust", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "trust", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, rounds_about: st.rounds_about, last_round: over ? st.last_round : null, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       payoffs: TR_PAYOFFS, winner: st.winner || null, draw: !!st.draw, places: st.places || null, declined_by: st.declined_by || null,
       players: st.players.map((p) => {

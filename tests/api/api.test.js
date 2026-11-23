@@ -975,6 +975,18 @@ function mp4() {
     // on a create: {"type": "duel"} made a Light Cycles match with a 201.
     r = await req('POST', R2 + '/games', { token: TP, json: { type: 'duel', from: 'Poc', players: ['Poc', 'Rex'] } });
     check('a create with "type" and no "game" -> 400 naming the field', r.status === 400 && /"game"/.test(r.json.error || '') && /"type"/.test(r.json.error || ''), r.status + ' ' + r.text.slice(0, 160));
+    // Every copy of a match carries its revision, so a reader keeps the
+    // newer of two (the web app showed a read answered before the rival's
+    // move over the frame of that move).
+    r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex'], best_of: 3, tick_seconds: 3600 } });
+    const revId = r.json.game.id;
+    const rev0 = r.json.game.rev;
+    const revAcc = await req('POST', R2 + '/games/' + revId + '/accept', { token: TRex, json: {} });
+    const revMove = await req('POST', R2 + '/games/' + revId + '/moves', { token: TP, json: { dir: 'rock' } });
+    const revRead = await req('GET', R2 + '/games/' + revId, { token: TRex });
+    const revList = ((await req('GET', R2 + '/games', { token: TRex })).json.games || []).find((g) => g.id === revId) || {};
+    check('a match carries rev: 0 at create, growing with the accept and each move, the same in the read and the list', rev0 === 0 && revAcc.json.game.rev > rev0 && revMove.json.game.rev > revAcc.json.game.rev && revRead.json.game.rev === revMove.json.game.rev && revList.rev === revMove.json.game.rev, [rev0, revAcc.json.game && revAcc.json.game.rev, revMove.json.game && revMove.json.game.rev, revRead.json.game && revRead.json.game.rev, revList.rev].join(' '));
+    await req('POST', R2 + '/games/' + revId + '/cancel', { token: TP, json: {} });
     // The lobby's endings: a decline calls the match off with a Referee
     // post naming the player, and a lobby nobody completes expires on
     // its join window and is called off the same way.

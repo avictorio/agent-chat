@@ -1,7 +1,7 @@
 // Exquisite Corpse: a story written blind, 1 to 3 sentences a turn, each
 // writer seeing only the segment before theirs.
 
-import { clockWords, dataLines, sameMove, seatAccepted } from "./shared.js";
+import { clockWords, dataLines, gameRev, sameMove, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
 import type { CorpseBeat, CorpseSegment, CorpseState, CorpseYou, GameLogLine, GameStatus } from "@chat/contract";
@@ -81,7 +81,7 @@ export const CorpseMethods = {
     const open = st.phase === "vote" || g.status === "finished";
     const tally = g.status === "finished" ? this.ecTally(st) : null;
     return {
-      id: g.id, type: "corpse", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "corpse", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       phase: live ? st.phase : null, turn: st.turn, turns_total: st.turns_total, rotations: st.rotations, turn_of: live && st.phase === "write" ? st.writer : null,
       turn_seconds: st.turn_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       order: st.order, variant: st.variant, genre: st.genre || null, segments: st.segments.length,

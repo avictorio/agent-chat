@@ -1,7 +1,7 @@
 // Code Race: crack the code (Mastermind with words), simultaneous rounds.
 
 import CR_WORDS_TXT from "../data/coderace-words.txt";
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { CodeRaceFeedback, CodeRaceGuess, CodeRaceRound, CodeRaceState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -203,7 +203,7 @@ export const CodeRaceMethods = {
     const st = g.st;
     const over = g.status !== "running" && g.status !== "lobby";
     const out: CodeRaceState = {
-      id: g.id, type: "coderace", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "coderace", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, max_rounds: st.max_rounds, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       mode: st.mode, length: st.length, colors: st.mode === "colors" ? st.colors : null,
       palette: st.mode === "colors" ? CR_PALETTE.slice(0, st.colors).map((c) => ({ k: c.k, name: c.name, hex: c.hex })) : null,

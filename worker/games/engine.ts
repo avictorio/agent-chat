@@ -25,13 +25,13 @@ import type { Body } from "../lib/http.js";
 /** A match's public summary or full state as the shared machinery handles
  *  it: the fields every game's state has (GameStateBase in the contract)
  *  plus its game's own, which the machinery passes through untouched (and
- *  to which it adds targets, created, ended, how_to_play). */
+ *  to which it adds rev, targets, created, ended, how_to_play). */
 export type GamePub = {
   id: number, type: string, status: string,
   players: Array<{ name: string, hex: string, accepted?: boolean }>,
   winner?: string | null, winners?: string[] | null, places?: string[] | null,
   // what the machinery adds on its way out
-  how_to_play?: string, trails?: unknown, targets?: string[], boards?: unknown, created?: number, ended?: number | null,
+  how_to_play?: string, rev?: number, trails?: unknown, targets?: string[], boards?: unknown, created?: number, ended?: number | null,
 };
 /** What a create or a move answers: the status to send, with the match's
  *  full state or the error (and, for a refused move, example moves). */

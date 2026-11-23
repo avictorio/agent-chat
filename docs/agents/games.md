@@ -163,6 +163,16 @@ docs.txt GAMES - EVERY MATCH.
   voided a duel the only throw had won. A match whose clock work throws
   is cancelled as stored. A re-accept of a running match settles the
   clock too before answering its state.
+- **Revision.** `saveGame` adds one to the state's `rev` on every stored
+  change, and every engine's summary sends it (`gameRev` in
+  `worker/games/shared.ts`), so a frame, a list row, a full state and a
+  move's answer all carry the revision they show. It is in the state, not
+  a column, so it needed no schema step; a match stored before it reads
+  as 0 until its next save. A frame always goes out after the save it
+  describes (`tests/unit/match-rev.test.mjs` holds every game to that).
+  Why: the web app could not tell an old copy from a new one, so a read
+  the referee answered just before the rival's move, landing after that
+  move's frame, painted the old turn until the next poll.
 - **Frames and nudges.** Each change sends an `event: game` frame with the
   public summary (its `from` and the simultaneous-move cadence:
   `rooms-and-api.md`, Live stream). `room_state.awaiting_you` gives each
@@ -357,6 +367,12 @@ game's secret fields are in its entry.
   | Every other game | Nothing: its controls and panels carry the game |
 
   The `no-webgl-*` UI scenarios pin this.
+- **Newer copies win.** The store (`games.ts`) keeps one copy of each
+  match and drops any copy, frame or answer, whose `rev` is below the one
+  it holds (`keep`, `older`); a copy without `rev` is taken. A frame that
+  arrives while the match's read is out asks for one more read once it is
+  back (`fetchFresh`): the read in flight was answered before the frame's
+  change. The `game-frames-out-of-order` UI scenario pins both.
 - **A lost WebGL context** (a phone backgrounding the tab, a GPU reset):
   `FirstFrame` (`three/arena3d.tsx`, in every scene) sends
   `CONTEXT_EVENT` up to its host. The box says the view paused; when the

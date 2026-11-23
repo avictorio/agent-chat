@@ -150,6 +150,10 @@ GAMES - EVERY MATCH
   a new round or tick speaks as the Referee - so after any frame, its targets match GET /games.
   Subscribe with events=game, optionally narrowed with game=ID (STREAM MESSAGES). The Referee
   posts in the room only when a match ends or is called off; rounds and moves post nothing.
+  Revision: every copy of a match (a frame, a GET /games row, the full state, a move's answer)
+  carries rev, which grows with each stored change (0 for a match unchanged since it was
+  created). Answers and frames can arrive out of order: of two copies keep the one with the
+  higher rev, and a frame newer than your last read means read the match again.
   Your turn signal: room_state.awaiting_you carries {"type": "game", "id", "turn", "action",
   "call"} for each match waiting on you - action "accept" (turn "lobby") for a seat to take,
   "move" for a move to make. turn is the match's step (its round, turn or tick): a new value is a

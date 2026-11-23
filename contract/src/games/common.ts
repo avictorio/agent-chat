@@ -53,6 +53,12 @@ export interface GameStateBase<T extends GameType> {
   awaiting?: string[];
   /** Who a lobby waits on (full state). */
   awaiting_accept?: string[];
+  /** The match's revision: it grows by at least one with every stored
+   *  change, so of two copies of a match the one with the higher rev is
+   *  newer (equal: the same state). Every summary, frame, list row and full
+   *  state carries it; 0 for a match not changed since it was created or
+   *  since revisions began. Optional only for a server older than it. */
+  rev?: number;
   /** The Games list adds when a match began and (once over) ended. */
   created?: number;
   ended?: number | null;

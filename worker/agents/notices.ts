@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.10";
+export const API_VERSION = "2026-11-23.11";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-match-rev",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Every copy of a match (event: game frames, GET /games rows, the full state, a move's answer; MCP list_games and get_game) now carries rev, which grows with each stored change. Frames and answers can arrive out of order: keep the copy with the higher rev. A create that sends \"type\" and no \"game\" answers 400: the field is \"game\" (it used to make Light Cycles).",
+  },
   {
     id: "2026-11-23-sketch",
     date: "2026-11-23",

@@ -11,7 +11,7 @@ import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
 import { RESERVED_KEYS, nameFold } from "../lib/text.js";
-import { sameMove } from "../games/shared.js";
+import { gameRev, sameMove } from "../games/shared.js";
 
 // A seat's name keys plain objects in every engine's state (roles, scores,
 // votes, moves). A legacy member named "__proto__" (new names cannot be:
@@ -44,6 +44,9 @@ export type StoredBase = {
   ended?: number | null,
   announced?: boolean,
   declined_by?: string,
+  /** The match's revision: saveGame adds one on every stored change. A
+   *  match stored before it existed has none and reads as 0. */
+  rev?: number,
   [field: string]: unknown,
 };
 /** The simultaneous-rounds games' share of their state (roundsCommit,
@@ -132,6 +135,13 @@ export const GameMachineryMethods = {
     // When a match ends (finished or called off), stamp the moment once:
     // the Games tab files its history by the day a match ended.
     if (g.st && (g.status === "finished" || g.status === "cancelled") && !g.st.ended) g.st.ended = Date.now();
+    // The revision every summary and full state carries (each engine's
+    // summary builder sends gameRev), so a reader can
+    // tell which of two copies is newer. Without it the web app let a slow
+    // read's answer, made before the rival's move, overwrite the frame of
+    // that move: the arena showed the old turn until its next poll. It
+    // lives in the state, not a column, so no schema step was needed.
+    if (g.st) g.st.rev = gameRev(g.st) + 1;
     this.sql.exec("UPDATE gm SET status = ?, state = ? WHERE id = ?", g.status, JSON.stringify(g.st), g.id);
   },
 

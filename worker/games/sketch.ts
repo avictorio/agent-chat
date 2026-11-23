@@ -1,7 +1,7 @@
 // Sketch & Guess: a rotating artist draws a secret prompt, everyone guesses; Claude referees close calls.
 
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
-import { clockWords, sameMove, seatAccepted, tvMatchKind } from "./shared.js";
+import { clockWords, gameRev, sameMove, seatAccepted, tvMatchKind } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
 import type { GameLogLine, GameStatus, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import type { CfgRow, GmRow, Room } from "../room/Room.js";
@@ -204,7 +204,7 @@ export const SketchMethods = {
     const live = g.status === "running";
     const img = live && st.phase !== "draw" && (st.images || {})[st.round] ? { url: this.sgImageUrl(g, st.round), type: st.images[st.round].type } : null;
     return {
-      id: g.id, type: "sketch", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "sketch", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, rounds_total: st.rounds_total, rotations: st.rotations, phase: live ? st.phase : null, artist: live ? st.artist : null, image: img,
       draw_seconds: st.draw_seconds, guess_seconds: st.guess_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null, order: st.order,
       last_round: st.rounds.length ? this.sgRoundOut(g, st.rounds[st.rounds.length - 1]) : null,

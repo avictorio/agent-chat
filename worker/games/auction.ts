@@ -1,7 +1,7 @@
 // Auction: sealed bids on a season of lots.
 
 import AU_LOTS_TXT from "../data/auction-lots.txt";
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { AuctionRound, AuctionState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -67,7 +67,7 @@ export const AuctionMethods = {
     const st = g.st;
     const lotNow = g.status === "running" ? st.lots[st.round - 1] || null : null;
     return {
-      id: g.id, type: "auction", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "auction", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, lots_total: st.lots.length, lot: lotNow, budget: st.budget, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       winner: st.winner || null, draw: !!st.draw, places: st.places || null, declined_by: st.declined_by || null,
       players: st.players.map((p) => {

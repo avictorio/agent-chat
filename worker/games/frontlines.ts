@@ -1,6 +1,6 @@
 // Frontlines: split troops across hills, simultaneous rounds.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { FrontlinesRound, FrontlinesState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -87,7 +87,7 @@ export const FrontlinesMethods = {
   flSummary(g: FlGame): FrontlinesState {
     const st = g.st;
     return {
-      id: g.id, type: "frontlines", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "frontlines", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, best_of: st.best_of, target: st.target, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       variant: st.variant, hills: FL_HILLS, troops: FL_TROOPS, values: st.variant === "valued" ? st.values : null,
       score: st.score, winner: st.winner || null, declined_by: st.declined_by || null,

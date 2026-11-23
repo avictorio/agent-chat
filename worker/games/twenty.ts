@@ -1,6 +1,6 @@
 // Twenty Questions: a rotating answerer keeps a secret, everyone asks yes/no questions.
 
-import { clockWords, dataLines, foldRaw, foldWords, seatAccepted } from "./shared.js";
+import { clockWords, dataLines, foldRaw, foldWords, gameRev, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
 import type { GameLogLine, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
@@ -76,7 +76,7 @@ export const TwentyMethods = {
     const live = g.status === "running";
     const t = this.tqTotals(st);
     return {
-      id: g.id, type: "twenty", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "twenty", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, rounds_total: st.rounds_total, rotations: st.rotations, phase: live ? st.phase : null, answerer: live ? st.answerer : null,
       round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null, order: st.order,
       budget: TQ_BUDGET, asked: st.asked, remaining: TQ_BUDGET - st.asked, mode: st.players.length === 2 ? "duel" : "table",

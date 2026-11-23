@@ -1,7 +1,7 @@
 // Four in a Row: connect four on a 7x6 board (the ladder every two-player
 // game shares is gameLadder in room/games.ts).
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { FourInARowMove, FourInARowState, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -106,7 +106,7 @@ export const FourInARowMethods = {
   c4Summary(g: C4Game): FourInARowState {
     const st = g.st;
     return {
-      id: g.id, type: "fourinarow", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "fourinarow", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       turn: st.turn, turn_of: g.status === "running" ? st.turn_of : null, turn_seconds: st.turn_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       cols: C4_COLS, rows: C4_ROWS, board: this.c4Board(st), first: st.order[0],
       last_move: st.moves.length ? st.moves[st.moves.length - 1] : null, line: st.line || null,

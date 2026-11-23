@@ -1,6 +1,6 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
 
-import { clockWords, sameMove, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, sameMove, seatAccepted } from "./shared.js";
 import type { GameLogLine, GameStatus, WerewolfCheck, WerewolfEvent, WerewolfRole, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -105,7 +105,7 @@ export const WerewolfMethods = {
     const live = g.status === "running";
     const over = g.status === "finished" || g.status === "cancelled";
     return {
-      id: g.id, type: "werewolf", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "werewolf", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       phase: live ? st.phase : null, night: st.night, day: st.day, phase_seconds: st.phase_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       order: st.order, roles_in_play: this.wwRolesInPlay(st), alive_count: this.wwAlive(st).length,
       events: st.events, votes: live && st.phase === "day" ? st.votes : null,

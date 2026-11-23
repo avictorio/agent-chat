@@ -1,6 +1,6 @@
 // Liar's Dice: hidden dice, rising bids, call liar; ones are wild.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, seatAccepted } from "./shared.js";
 import type { GameLogLine, LiarsDiceBid, LiarsDiceRound, LiarsDiceState } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -130,7 +130,7 @@ export const LiarsDiceMethods = {
     const st = g.st;
     const last = st.rounds.length ? this.ldShownRound(g, st.rounds[st.rounds.length - 1]) : null;
     return {
-      id: g.id, type: "liarsdice", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "liarsdice", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       turn: st.turn, round: st.round, turn_of: g.status === "running" ? st.turn_of : null, turn_seconds: st.turn_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       dice_each: st.dice_each, ones_wild: !!st.ones_wild, dice_total: this.ldTotal(st), order: st.order, bid: st.bid || null, bids: st.bids, last_round: last,
       winner: st.winner || null, draw: false, places: st.places || null, forfeit: st.forfeit || null, declined_by: st.declined_by || null,

@@ -1,7 +1,7 @@
 // UI scenarios: Battleship (the 3D arena, placement, free-for-all, phone aim) and the no-WebGL fallbacks.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/battleship.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, noGl, now, run, shot } = require('./harness');
+const { settle, done, must, noGl, now, run, shot } = require('./harness');
 
 (async () => {
   await run('battleship-spectator', { state: { bs: true } }, async (page) => {
@@ -405,6 +405,49 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     const out = { posts };
     if (posts.length !== 1) throw new Error('a double tap sends one move: ' + JSON.stringify(posts));
     if (!/"turn":7/.test(posts[0]) || !/"dir":"2"/.test(posts[0])) throw new Error('the move names the turn room_state gave: ' + posts[0]);
+    return out;
+  });
+  /* Answers and frames out of order. Anthony's drop goes out as a frame
+     (rev 6, Ada to move) and the frame's read of the full state is slow;
+     Ada answers (rev 7, Anthony to move) while that read is out. The read,
+     answered at rev 6, used to overwrite rev 7 when it came back: the
+     arena said Ada was to move, with Anthony's clock running, until the
+     8 s poll. Now the older answer is dropped and the match read again. */
+  await run('game-frames-out-of-order', { state: { c4: true }, init: noGl }, async (page, S, calls) => {
+    const out = {};
+    S.c4.rev = 5;
+    S.streamRetry = 300;
+    await page.reload();
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+    const pub = (g) => { const f = Object.assign({}, g); for (const k of ['you', 'log', 'awaiting', 'awaiting_accept', 'moves']) delete f[k]; return f; };
+    // rev 6: Anthony dropped in column 2; Ada to move
+    const six = Object.assign({}, S.c4, { rev: 6, turn: 8, turn_of: 'Ada', board: ['.......', '.......', '.......', '.......', 'X..O...', 'OXXOX..'], awaiting: ['Ada'], you: Object.assign({}, S.c4.you, { your_turn: false, legal_moves: [] }) });
+    // rev 7: Ada dropped in column 7; Anthony to move again
+    const seven = Object.assign({}, six, { rev: 7, turn: 9, turn_of: 'Anthony', board: ['.......', '.......', '.......', '.......', 'X..O...', 'OXXOX.O'], awaiting: ['Anthony'], you: Object.assign({}, S.c4.you, { your_turn: true }) });
+    const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/games\/16\b/.test(c)).length;
+    const before = reads();
+    S.readDelays = [2000];
+    S.c4 = six;
+    S.liveGames = [pub(six)];
+    // the frame's read is out (held 2 s, answering rev 6) ...
+    const t0 = Date.now();
+    while (S.readsHeld !== 1 && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 20));
+    // ... when Ada's answer comes in
+    S.c4 = seven;
+    S.liveGames = [pub(seven)];
+    while (S.readsDone !== 1 && Date.now() - t0 < 7000) await new Promise((r) => setTimeout(r, 20));
+    out.frameInTime = !S.liveGames.length;
+    out.heldReads = S.readsHeld;
+    await page.waitForTimeout(600);
+    S.streamRetry = 0;
+    out.dropsAfterOldAnswer = await page.$$eval('#viewer .c4-drop', (els) => els.length);
+    out.reads = reads() - before;
+    out.ms = Date.now() - t0;
+    must(out.frameInTime, 'the rev 7 frame went out while the slow read was held: ' + JSON.stringify(out));
+    must(out.ms < 7500, 'checked well before the arena\'s 8 s poll: ' + JSON.stringify(out));
+    must(out.dropsAfterOldAnswer === 7, 'the slow read\'s older answer does not take Anthony\'s turn away: ' + JSON.stringify(out));
+    must(out.reads >= 2, 'the match is read again after the frame that came during the read: ' + JSON.stringify(out));
     return out;
   });
   /* A move names the turn of the call room_state hands out, not the

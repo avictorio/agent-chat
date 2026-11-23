@@ -51,6 +51,23 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     version++;
     listeners.forEach((fn) => fn());
   };
+  // Every copy of a match (a read's answer, a move's answer, a frame)
+  // carries the match's revision, rev, which grows with each stored
+  // change. Answers and frames can arrive out of order: a read the referee
+  // answered just before the rival's move landed after that move's frame,
+  // and overwrote it, so the arena showed the old turn, with the player's
+  // clock running, until the next 8 s poll. A copy older than the one held
+  // is dropped. A copy without rev (a server from before it) is taken, as
+  // every copy used to be.
+  function older(next: GL, held: CachedGame | undefined): boolean {
+    return !!held && typeof held.rev === "number" && typeof next.rev === "number" && next.rev < held.rev;
+  }
+  /** Cache a full state unless an older copy; answers whether it was. */
+  function keep(game: GL): boolean {
+    if (older(game, cache.get(game.id))) return false;
+    cache.set(game.id, game);
+    return true;
+  }
 
   let gameView: GameView | null = null;
   let gameViewTimer = 0;
@@ -266,9 +283,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     try {
       const d = accept ? await client.acceptGame(id) : await client.declineGame(id);
       if (d.game) {
-        cache.set(id, d.game);
-        notify();
-        renderGameView(d.game, true);
+        if (keep(d.game)) {
+          notify();
+          renderGameView(d.game, true);
+        }
       } else if (note) {
         note.textContent = "The referee refused that.";
       } else toast("The referee refused that.", true);
@@ -445,9 +463,12 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     try {
       const d = await client.submitMove(id, dir, w.turn, ctl.signal);
       if (d.game) {
-        cache.set(id, d.game);
-        notify();
-        renderGameView(d.game, true);
+        // a frame newer than this answer (the rival's reply) may be here
+        // already: the move landed all the same
+        if (keep(d.game)) {
+          notify();
+          renderGameView(d.game, true);
+        }
         return true;
       }
       if (ctl.signal.aborted) {
@@ -464,9 +485,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       const stale = staleTurn(e);
       if (stale) {
         if (w.named !== undefined) caughtUp.set(id, { refused: String(w.named), turn: stale.turn });
-        cache.set(id, stale.game);
-        notify();
-        renderGameView(stale.game, true);
+        if (keep(stale.game)) {
+          notify();
+          renderGameView(stale.game, true);
+        }
         say("Too late: the match has moved on. This is how it stands now.");
         return false;
       }
@@ -968,8 +990,17 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
 
   // One request per match at a time: a frame burst (Light Cycles ticks)
-  // or the poll landing mid-fetch rides the request already out.
+  // or the poll landing mid-fetch rides the request already out. A frame
+  // that arrives meanwhile is newer than what that request can answer, so
+  // it asks for one more read once the request is back (fetchFresh): the
+  // frame's own fetch used to ride the request out and nothing read the
+  // match again until a poll, so a fast rival's reply showed 8-20 s late.
   const fetching = new Map<number, Promise<void>>();
+  const again = new Set<number>();
+  function fetchFresh(id: number): Promise<void> {
+    if (fetching.has(id)) again.add(id);
+    return fetchGame(id);
+  }
   function fetchGame(id: number): Promise<void> {
     // A revoked member's tab kept asking every 8 s (an open arena) and
     // 20 s (the cards), each answered 403, for as long as it stayed open.
@@ -981,7 +1012,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         const d = await client.game(id);
         if (!d.game) return;
         const prev = cache.get(id);
-        cache.set(id, d.game);
+        if (!keep(d.game)) return;
         // listeners (cards, the Games tab's /games reload, the title
         // badge) only hear about real changes, not every poll
         if (!prev || prev.__frameOnly || JSON.stringify(prev) !== JSON.stringify(d.game)) notify();
@@ -992,6 +1023,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) opts.deny?.(e);
       } finally {
         fetching.delete(id);
+        if (again.delete(id)) void fetchGame(id);
       }
     })();
     fetching.set(id, p);
@@ -1078,6 +1110,9 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         // message may land after it), the full state is fetched right
         // away and "your move" and Accept/Decline are never stale.
         const prev = cache.get(game.id);
+        // a frame older than the state held (a read answered after this
+        // change already holds it) would paint the board back
+        if (older(game, prev)) return;
         cache.set(game.id, prev ? Object.assign({}, prev, game) : Object.assign({ __frameOnly: true }, game));
         notify();
         const me = (opts.meName() || "").toLowerCase();
@@ -1089,11 +1124,11 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         // the finish until a reload.
         const ended = !!prev && prev.status !== game.status && (game.status === "finished" || game.status === "cancelled");
         if (!prev || prev.__frameOnly || playing || ended) {
-          void fetchGame(game.id);
+          void fetchFresh(game.id);
           return;
         }
       }
-      if (gameView && gameView.id === game.id) void fetchGame(game.id);
+      if (gameView && gameView.id === game.id) void fetchFresh(game.id);
     },
     openGame,
     respond: (id: number, accept: boolean) => respond(id, accept, null),

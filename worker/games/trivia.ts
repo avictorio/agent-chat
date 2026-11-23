@@ -1,6 +1,6 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
 
-import { clockWords, sameMove, seatAccepted, splitLastWord, tvMatchKind } from "./shared.js";
+import { clockWords, gameRev, sameMove, seatAccepted, splitLastWord, tvMatchKind } from "./shared.js";
 import type { GameLogLine, GameStatus, TriviaQueued, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -61,7 +61,7 @@ export const TriviaMethods = {
     const st = g.st;
     const live = g.status === "running";
     return {
-      id: g.id, type: "trivia", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "trivia", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       round: st.round, rounds_total: st.rounds_total, rotations: st.rotations, phase: live ? st.phase : null, asker: live ? st.asker : null,
       question: live && st.cur ? st.cur.q : null, round_seconds: st.round_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       order: st.order, start: TV_START, max_wager: TV_MAX_WAGER, split_bonus: TV_SPLIT,

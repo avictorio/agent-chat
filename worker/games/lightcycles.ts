@@ -4,7 +4,7 @@
 // submitted move arrived. The clocks and the alarm are the shared
 // machinery in room/games.ts.
 
-import { clockWords, sameMove, seatAccepted } from "./shared.js";
+import { clockWords, gameRev, sameMove, seatAccepted } from "./shared.js";
 import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats, LightCyclesState, LightCyclesTrail } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -94,7 +94,7 @@ export const LightCyclesMethods = {
   lcSummary(g: LcGame): LightCyclesState {
     const st = g.st;
     return {
-      id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg,
+      id: g.id, type: "lightcycles", status: g.status, created_by: g.created_by, card_msg: g.card_msg, rev: gameRev(g.st),
       w: st.w, h: st.h, tick: st.tick, tick_seconds: st.tick_seconds, mode: st.mode || "live", deadline: st.deadline,
       winner: st.winner || null, record_keeper: st.record_keeper || null, declined_by: st.declined_by || null, moves: st.move_stats || {}, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, dir: p.dir, alive: p.alive, x: p.x, y: p.y, moved: !!st.pending[p.name], accepted: st.accepted ? !!st.accepted[p.name] : true })),
