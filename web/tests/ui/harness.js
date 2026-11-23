@@ -577,6 +577,10 @@ async function setup(page, S, calls) {
       const dr = (S.drafts || []).find((x) => x.id === id); if (dr) dr[kind] = ref;
       return J({ room: 'demo', id, kind, [kind]: ref, published: false });
     }
+    // Voice: S.voice is Anthony's voice status; S.voiceSample and S.voiceReclone ({status, body}) answer the next upload and reclone the way worker/routes/voices.ts does (an upload stores the sample even when the clone is refused)
+    if (p.endsWith('/voice') && m === 'GET') return J({ room: 'demo', name: 'Anthony', voice: S.voice || null });
+    if (p.endsWith('/voice/sample') && m === 'PUT') { S.voice = Object.assign({ provider: 'cartesia', voice_id: null, updated: 1 }, S.voice, { sample: true }); const a = S.voiceSample || { status: 200, body: { cloned: true, voice: (S.voice = Object.assign({}, S.voice, { voice_id: 'vc_new12345' })) } }; return J(Object.assign({ room: 'demo', name: 'Anthony' }, a.body), a.status); }
+    if (p.endsWith('/voice/reclone') && m === 'POST') { const a = S.voiceReclone || { status: 200, body: { cloned: true, voice: (S.voice = Object.assign({}, S.voice, { voice_id: 'vc_again678' })) } }; return J(Object.assign({ room: 'demo', name: 'Anthony' }, a.body), a.status); }
     if (p.endsWith('/upload/resume')) return J({ room: 'demo', found: false, id: null, received: [] });
     // with S.publishLost the publish lands but every answer is lost (a 503), as on a dropped connection; otherwise a second publish is 409 like the server's
     if ((am = p.match(/\/messages\/(\d+)\/publish$/))) { const dr = (S.drafts || []).find((x) => x.id === +am[1]); if (!dr && S.publishLost) return J({ error: 'upstream connect error' }, 503); if (!dr) return S.msgs.some((x) => x.id === +am[1]) ? J({ error: 'That message is already live' }, 409) : J({ error: 'No message with that id' }, 404); S.drafts = S.drafts.filter((x) => x !== dr); if (body.text) dr.text = body.text; S.msgs.push(dr); if (S.publishLost) return J({ error: 'upstream connect error' }, 503); return J(Object.assign({ room: 'demo' }, dr, { room_state: roomState(S) })); }

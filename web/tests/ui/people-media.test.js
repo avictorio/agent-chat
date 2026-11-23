@@ -345,6 +345,51 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
     return { box: Math.round(box.width) };
   });
+  // The voice dialog reads the server's refusals: an upload whose clone was
+  // refused (the daily cap, a provider failure) still stored the sample,
+  // and it said only "Upload failed.", then "being prepared" for a clone
+  // nothing would ever make.
+  const voiceTake = { name: 'take.webm', mimeType: 'audio/webm', buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]) };
+  const voiceUpload = async (page) => {
+    await page.setInputFiles('#voiceFile', voiceTake);
+    await page.click('#voiceUpload');
+    await page.waitForFunction(() => document.querySelector('#voiceStatus').textContent !== 'Uploading…', null, { timeout: 5000 });
+    await settle(page);
+    return { status: await page.$eval('#voiceStatus', (e) => e.textContent), toast: await page.$eval('#toast', (e) => e.textContent || '') };
+  };
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('voice-clone-refused' + tag, { hash: '#invite=tok_Anthony', w, h, touch: !!tag, allowConsole: /status of 429/ }, async (page, S, calls) => {
+      S.voiceSample = { status: 429, body: { error: 'You can clone a voice up to 5 times a day. Try again tomorrow.', retry_after: 3600, voice: { provider: 'cartesia', voice_id: null, sample: true, updated: 1 }, cloned: false, sample_stored: true } };
+      if (tag) { await page.tap('#menu'); await settle(page); }
+      await page.click('#voiceBtn'); await settle(page);
+      const out = await voiceUpload(page);
+      out.retry = await page.locator('#voiceReclone').isVisible();
+      await shot(page, 'voice-clone-refused' + tag + '.png');
+      must(/stored, but it was not cloned: You can clone a voice up to 5 times a day\. Try again tomorrow\.$/.test(out.status), 'the cap and the stored sample are named: ' + out.status);
+      must(/5 times a day/.test(out.toast) && out.retry, 'toast gives the reason, Retry clone offered: ' + JSON.stringify(out));
+      await page.click('#voiceClose'); await settle(page);
+      await page.click('#voiceBtn'); await settle(page);
+      out.reopened = await page.$eval('#voiceStatus', (e) => e.textContent);
+      must(!/being prepared/.test(out.reopened) && /not cloned yet/.test(out.reopened) && await page.locator('#voiceReclone').isVisible(), 'reopened: no promise of a clone in the works: ' + out.reopened);
+      S.voiceSample = null;
+      await page.click('#voiceReclone');
+      await page.waitForFunction(() => /Your voice is set/.test(document.querySelector('#voiceStatus').textContent), null, { timeout: 5000 });
+      out.recloned = calls.some((c) => /^POST .*\/voice\/reclone/.test(c));
+      out.retryAfter = await page.locator('#voiceReclone').isVisible();
+      must(out.recloned && !out.retryAfter, 'Retry clone posts reclone and goes away once cloned: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  await run('voice-upload-refused', { hash: '#invite=tok_Anthony', allowConsole: /status of (415|502)/ }, async (page, S) => {
+    S.voiceSample = { status: 502, body: { error: 'Cartesia clone failed (400): audio too short', sample_stored: true } };
+    await page.click('#voiceBtn'); await settle(page);
+    const failed = await voiceUpload(page);
+    must(/stored, but it was not cloned: Cartesia clone failed \(400\): audio too short\.$/.test(failed.status), 'a failed clone: ' + failed.status);
+    S.voiceSample = { status: 415, body: { error: 'Samples must be MP3, WAV, M4A, OGG or WebM audio' } };
+    const wrong = await voiceUpload(page);
+    must(wrong.status === 'Upload failed: Samples must be MP3, WAV, M4A, OGG or WebM audio.' && /MP3, WAV/.test(wrong.toast), 'a refused upload says why: ' + JSON.stringify(wrong));
+    return { failed: failed.status, wrong: wrong.status };
+  });
   await run('media-shelf', { state: { artifacts: true, shelf: true }, hash: '#invite=tok_Anthony' }, async (page) => {
     await page.click('.tab[data-tab="media"]');
     await page.waitForSelector('.media-tile', { timeout: 10000 });

@@ -29,9 +29,15 @@ function voiceText(v: VoiceState | null | undefined): string {
   if (!v) return "No voice yet. Record the script below and upload it - the server clones it for you.";
   if (v.voice_id)
     return "Your voice is set (id " + String(v.voice_id).slice(0, 8) + "…). Record a fresh take any time to replace it.";
-  if (v.sample)
-    return "Your sample is stored and your cloned voice is being prepared. It will show here once it is ready.";
+  // Nothing clones a stored sample later on its own: a clone the cap or
+  // the provider refused waits for Retry clone (or a new take).
+  if (v.sample) return "Your sample is stored but not cloned yet. Retry the clone, or record a fresh take.";
   return "No voice yet. Record the script below and upload it - the server clones it for you.";
+}
+
+// "...: <the server's sentence>." without a doubled full stop
+function notCloned(why: string): string {
+  return "Your sample is stored, but it was not cloned: " + why.replace(/\.$/, "") + ".";
 }
 
 const SCRIPT =
@@ -44,6 +50,12 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
     const dlgRef = useRef<HTMLDialogElement | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const [status, setStatus] = useState("Checking…");
+    // a stored sample with no voice id: offer Retry clone
+    const [unclonedSample, setUnclonedSample] = useState(false);
+    const showVoice = (v: VoiceState | null | undefined) => {
+      setStatus(voiceText(v));
+      setUnclonedSample(!!(v && v.sample && !v.voice_id));
+    };
     const [canRecord] = useState<boolean>(() => {
       const w = window as unknown as { MediaRecorder?: MRCtor };
       const md = navigator.mediaDevices as { getUserMedia?: unknown } | undefined;
@@ -94,7 +106,7 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
       }
       p.client
         .getVoice()
-        .then((j) => setStatus(voiceText(j && j.voice)))
+        .then((j) => showVoice(j && j.voice))
         .catch(() => setStatus("Could not load your voice status."));
     };
     useImperativeHandle(ref, () => ({
@@ -214,18 +226,34 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
       try {
         const j = await p.client.putVoiceSample(blob);
         if (j.cloned) {
-          setStatus(voiceText(j.voice));
+          showVoice(j.voice);
           toast("Voice cloned and saved.");
         } else if (j.sample_stored) {
-          setStatus("Sample stored, but cloning failed. Try a cleaner take.");
+          // the daily clone cap or the provider said no; the take is kept
+          setStatus(notCloned(j.error || "the clone failed"));
+          setUnclonedSample(!(j.voice && j.voice.voice_id));
           toast(j.error || "Cloning failed.", true);
         } else if (j.voice) {
-          setStatus(voiceText(j.voice));
+          showVoice(j.voice);
           toast("Sample stored.");
         } else toast(j.error || "Upload failed.", true);
-      } catch {
-        setStatus("Upload failed.");
-        toast("Upload failed.", true);
+      } catch (err) {
+        // the server's sentence says why (too large, not audio, no access)
+        const why = err instanceof Error ? err.message : "";
+        setStatus(why ? "Upload failed: " + why.replace(/\.$/, "") + "." : "Upload failed.");
+        toast(why || "Upload failed.", true);
+      }
+    };
+    const reclone = async () => {
+      setStatus("Cloning…");
+      try {
+        const j = await p.client.recloneVoice();
+        showVoice(j.voice);
+        toast("Voice cloned and saved.");
+      } catch (err) {
+        const why = err instanceof Error ? err.message : "the clone failed";
+        setStatus(notCloned(why));
+        toast(why, true);
       }
     };
     const remove = async () => {
@@ -233,7 +261,7 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
         const j = await p.client.deleteVoice();
         if (j && j.error) toast(j.error, true);
         else {
-          setStatus(voiceText(null));
+          showVoice(null);
           vBlobRef.current = null;
           setPreviewSrc(null);
           toast("Voice removed.");
@@ -321,6 +349,9 @@ export const VoiceDialog = forwardRef<VoiceDialogHandle>(
             Remove voice
           </Button>
           <span className="vd-sp"></span>
+          <Button type="button" size="sm" id="voiceReclone" hidden={!unclonedSample} onClick={() => void reclone()}>
+            Retry clone
+          </Button>
           <Button type="button" variant="primary" size="sm" id="voiceUpload" onClick={() => void upload()}>
             Upload sample
           </Button>
