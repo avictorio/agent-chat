@@ -2487,6 +2487,22 @@ function mp4() {
     check('a link finish attaches and auto-publishes', r.status === 200 && !!(r.json && r.json.file && r.json.file.name === 'notes.txt' && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
     r = await req('PUT', '/api/uploads/' + room2Name + '/' + 'B'.repeat(43) + '/part?n=1', { body: NOTE });
     check('a garbled link -> 404', r.status === 404, r.status);
+    // A size makes every kind resumable, small media too: a script written
+    // for upload.part.url once broke on a small image, which got the
+    // single-shot shape however it asked.
+    r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'image', size: PNG.length, text: 'small image, resumable', direct: true } }, { token: TU });
+    const sim = r.json && r.json.result && r.json.result.structuredContent;
+    check('begin_upload of a small image with a size is resumable', !!(sim && sim.upload && sim.upload.mode === 'resumable' && sim.upload.parts === 1 && sim.upload.part && sim.upload.finish && sim.upload.direct === false && sim.upload.method === undefined), JSON.stringify(r.json).slice(0, 240));
+    r = await req('PUT', linkPath(sim.upload.part.url.replace('{n}', '1')), { body: PNG });
+    check('the small image part lands', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', linkPath(sim.upload.finish.url), {});
+    check('the small image link finishes with the image', r.status === 200 && !!(r.json && r.json.image && r.json.image.type === 'image/png'), r.status + ' ' + r.text.slice(0, 160));
+    const tkd = await req('POST', R2 + '/messages', { token: TU, json: { text: 'small clip via ticket', draft: true } });
+    r = await req('POST', R2 + '/messages/' + tkd.json.id + '/upload-ticket', { token: TU, json: { kind: 'audio', size: 50000 } });
+    check('upload-ticket with a size for small audio is resumable', r.status === 200 && !!(r.json && r.json.upload && r.json.upload.mode === 'resumable' && r.json.upload.parts === 1 && r.json.upload.part && r.json.upload.finish), r.status + ' ' + r.text.slice(0, 200));
+    await req('POST', linkPath(r.json.upload.abort.url), {});
+    r = await req('POST', R2 + '/messages/' + tkd.json.id + '/upload-ticket', { token: TU, json: { kind: 'audio' } });
+    check('upload-ticket without a size stays single-shot', r.status === 200 && !!(r.json && r.json.upload && r.json.upload.method === 'PUT' && r.json.upload.single_use === true && !r.json.upload.part), r.status + ' ' + r.text.slice(0, 200));
     // Direct uploads. The signer must match AWS's published SigV4
     // presigned-URL example (its documented, non-secret example keys).
     r = await req('POST', '/api/test-hooks/sigv4', { owner: true, json: { method: 'GET', host: 'examplebucket.s3.amazonaws.com', path: '/test.txt', query: {}, accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', region: 'us-east-1', expires: 86400, date: '2013-05-24T00:00:00Z' } });

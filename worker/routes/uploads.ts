@@ -5,8 +5,6 @@ import { upSniff, upTypeError } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2PartAddresses } from "../platform/r2-s3.js";
 import {
-  AUDIO_MAX,
-  IMAGE_MAX,
   mediaTooBig,
   MIB,
   ROOM_RE,
@@ -193,8 +191,11 @@ export function sessionUpload(origin: string, room: string, kind: string, t: Upl
   };
 }
 
-// Does an upload-link request want a resumable session? Yes for a file
-// (always) and for any kind given a size past its single-shot cap.
+// Does an upload-link request want a resumable session? Yes whenever it
+// gives a size, for every kind, as the docs and the begin_upload schema
+// promise; a file must give one. Only a call without a size gets a
+// single-shot ticket. Small media given a size once got the single-shot
+// shape anyway, so a script written for upload.part.url broke on it.
 // Answers null (single-shot), { size, type, name } or { error }.
 /** @param a the request's fields (a JSON body or MCP arguments) */
 export function uploadSessionWanted(kind: string, a: Body) {
@@ -202,8 +203,6 @@ export function uploadSessionWanted(kind: string, a: Body) {
   if (!has) return kind === "file" ? { error: "\"size\" (the file's exact length in bytes) is required for kind file" } : null;
   const size = Math.floor(Number(a.size));
   if (!Number.isFinite(size) || size < 1) return { error: "\"size\" must be the file's exact length in bytes" };
-  const cap = kind === "image" ? IMAGE_MAX : kind === "audio" ? AUDIO_MAX : kind === "video" ? VIDEO_MAX : 0;
-  if (kind !== "file" && size <= cap) return null;
   return { size: size, type: bodyText(a.type, "type") || null, name: bodyText(a.name, "name") || null, direct: a.direct === true || a.direct === "true" };
 }
 

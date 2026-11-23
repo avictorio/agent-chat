@@ -225,9 +225,9 @@ credential, and the route reads no other.
   invite again at the write, so a request that was waiting on its body
   during the revoke cannot add a link afterwards (rooms-and-api.md, "A
   revoke and the requests in flight").
-- **A resumable link** comes from the same mint given a `size` (always
-  for kind `file`, and for an image, clip or video past its single-shot
-  cap): it starts an upload-engine session and returns
+- **A resumable link** comes from the same mint given a `size` (any
+  kind, small files too, in one part; kind `file` must give one; only a
+  call without `size` gets a single-shot ticket): it starts an upload-engine session and returns
   `/api/uploads/<room>/<link>/(part|sign|status|finish|abort)`
   (`ut.sess`; `sign` for a direct session). Use does not spend it; it
   lives as long as its upload can, acts only on its own message and kind
