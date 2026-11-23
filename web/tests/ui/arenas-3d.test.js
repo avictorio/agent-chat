@@ -30,6 +30,24 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
+  // The largest Trust table, 8 seats: each seat its own colour (from the
+  // seventh on a create used to answer 500, six colours for eight seats),
+  // and the choices list all seven rivals.
+  for (const [label, o] of [['trust-eight', {}], ['trust-eight-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { tr: true, tr8: true } }, o), async (page) => {
+      const out = {};
+      await page.click('.game-card.kind-trust');
+      await page.waitForSelector('#viewer:not([hidden]) .tr-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.rivals = await page.$$eval('#viewer .tr-choice-name', (els) => els.map((e) => e.textContent.trim() + ' ' + getComputedStyle(e).color));
+      await shot(page, label + '.png');
+      await page.$eval('#viewer .tr-plan', (e) => e.scrollIntoView());
+      await shot(page, label + '-plan.png');
+      if (out.rivals.length !== 7) throw new Error('a choice for each of the seven rivals: ' + JSON.stringify(out.rivals));
+      if (new Set(out.rivals.map((r) => r.split(' ').slice(1).join(' '))).size !== 7) throw new Error('each rival in its own colour: ' + JSON.stringify(out.rivals));
+      return out;
+    });
+  }
   // Liar's Dice in 3D: the table loads first, then the standing bid, your
   // cup, the bid builder, the table and the last round; Liar! still sends the
   // call.

@@ -534,6 +534,25 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       return out;
     });
   }
+  // The largest Werewolf table, 9 seats (two wolves, a guardian): each seat
+  // its own colour in the villagers and the talk. From the seventh seat on
+  // a create used to answer 500 (six seat colours).
+  for (const [label, o] of [['werewolf-nine', {}], ['werewolf-nine-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { ww: true, ww9: true } }, o), async (page) => {
+      const out = {};
+      await page.click('.game-card.kind-werewolf');
+      await page.waitForSelector('#viewer:not([hidden]) .ww-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      out.dots = await page.$$eval('#viewer .ww-players .ww-prow .hist-dot', (els) => els.map((e) => getComputedStyle(e).backgroundColor));
+      out.lines = await page.$$eval('#viewer .ww-talk-sec .ww-line-by', (els) => els.map((e) => e.textContent + ' ' + getComputedStyle(e).color));
+      await shot(page, label + '.png');
+      await page.$eval('#viewer .ww-talk', (e) => e.scrollIntoView());
+      await shot(page, label + '-talk.png');
+      if (out.dots.length !== 9 || new Set(out.dots).size !== 9) throw new Error('nine villagers, nine colours: ' + JSON.stringify(out.dots));
+      if (out.lines.length !== 4 || new Set(out.lines.map((l) => l.split(' ').slice(1).join(' '))).size !== 4) throw new Error('the square shows each speaker in their colour: ' + JSON.stringify(out.lines));
+      return out;
+    });
+  }
   // The same line said twice while the first is still out is two lines:
   // the form had already cleared its draft, and the second "no" was
   // dropped as a double tap, lost for good.
