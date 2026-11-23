@@ -40,3 +40,17 @@ test("a dir that is an object or a list is refused with 400, and the turn is not
   assert.equal((await fl.h.room.gameMove(fl.id, "Ann", [20, 20, 20, 20, 20], R)).status, 400);
   assert.equal((await fl.h.room.gameMove(fl.id, "Ann", "20,20,20,20,20", R)).status, 200);
 });
+
+test("Trust refuses a second bare C or D instead of letting the last one win", async () => {
+  const { h, id } = await running("trust", ["Aa", "Bb", "Cc"]);
+  for (const dir of ["C, D", "D, C", "C, C"]) {
+    const r = await h.room.gameMove(id, "Aa", dir, R);
+    assert.equal(r.status, 400, dir + " answered " + r.status);
+    assert.match(r.error, /one C or D for everyone only/);
+  }
+  assert.equal(h.room.gameRow(id).st.pending.Aa, undefined, "nothing was queued");
+  const ok = await h.room.gameMove(id, "Aa", "C, Cc:D", R);
+  assert.equal(ok.status, 200, ok.error);
+  assert.deepEqual(ok.game.you.queued, { Bb: "C", Cc: "D" });
+  assert.deepEqual((await h.room.gameMove(id, "Bb", "Aa:C, Cc:D", R)).game.you.queued, { Aa: "C", Cc: "D" });
+});

@@ -77,6 +77,11 @@ export const TrustMethods = {
       if (!m) {
         const w = word(tok);
         if (!w) return { error: "\"" + tok + "\" is not C or D (cooperate or defect)" };
+        // "C, D" reads like one choice per rival in order, but rivals are
+        // not ordered (a rival dropping out shifts them): the last bare
+        // token used to win silently, so the player defected against a
+        // rival they meant to trust.
+        if (dflt) return { error: "one C or D for everyone only - name rivals for the rest, e.g. " + (rivals.length ? "C, " + rivals.map((n, i) => n + ":" + (i % 2 ? "D" : "C")).join(", ") : "C") };
         dflt = w;
         continue;
       }
@@ -276,5 +281,5 @@ export const trustEngine = {
     "Choices are public once the round resolves, so everyone sees who betrayed whom. The match runs about " + st.rounds_about + " rounds; the real last round is a secret until it comes. Highest total wins; a tie at the top has no winner. " +
     "A round resolves when everyone still in has chosen, or at the " + clockWords(st.round_seconds || 180) + " deadline; a missed round counts as D toward everyone, and three missed rounds in a row take you out (your score stands). " +
     "A round in which nobody moves ends the match where it stands (an empty round 1 calls it off). " +
-    "Send: dir C or D toward everyone (cooperate / defect work too), one per rival (e.g. Ada:C, Henry:D), or a default plus exceptions (e.g. C, Henry:D).",
+    "Send: dir C or D toward everyone (cooperate / defect work too), one per rival by name (e.g. Ada:C, Henry:D), or one default plus exceptions (e.g. C, Henry:D); a second bare C or D is refused.",
 } satisfies GameEngineOf<TrSt>;

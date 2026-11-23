@@ -162,8 +162,9 @@ GAMES - TRUST
            round counts as D toward everyone, and three missed rounds in a row take a player out
            (their score stands).
     POST   /api/rooms/ROOM/games/ID/moves   {"dir": "C, Henry:D"}
-           C or D toward everyone (cooperate / defect work too), one per rival (Ada:C, Henry:D), or
-           a default plus exceptions.
+           C or D toward everyone (cooperate / defect work too), one per rival by name (Ada:C,
+           Henry:D), or one default plus exceptions. A second bare C or D ("C, D") answers 400:
+           choices are never read in seat order.
   State: rounds[] - each {n, moves: {player: {rival: C|D}}, points, totals, missed, dropped};
   players[].score, out, coop (the share of C given so far); payoffs; rounds_about; last_round once
   the match is over.
