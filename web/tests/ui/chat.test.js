@@ -486,6 +486,7 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     const dn = top + 40;
     S.live = [{ msg: Object.assign({}, m8, { file: { type: 'application/zip', bytes: 2048, name: 'extra.zip', url: '/api/rooms/demo/messages/8/file?exp=2&sig=x' } }), dn }];
     S.streamRetry = 300;
+    S.streamSent = {};
     const from = calls.length;
     await page.reload();
     const streams = () => calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/stream\?/.test(c));
@@ -496,6 +497,10 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     must(out.streams.length === 2, 'the stream reconnected: ' + JSON.stringify(out));
     must(out.streams[1] === 'after=' + dn, 'the reconnect resumes after the frame\'s id: line: ' + JSON.stringify(out));
     must((await page.$$('.msg[data-id="8"]')).length === 1, 'the re-sent row is shown once');
+    // the fake stream replays what was delivered after its cursor, as the
+    // server's does: from the right cursor row 8 is not sent again
+    out.sent8 = S.streamSent[8];
+    must(out.sent8 === 1, 'the reconnect does not deliver row 8 again: ' + JSON.stringify(out));
     await settle(page);
     return out;
   });
