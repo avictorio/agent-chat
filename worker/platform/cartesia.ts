@@ -2,6 +2,8 @@
 
 import { warn } from "../lib/log.js";
 
+const CARTESIA_DELETE_MS = 10000;
+
 // Clone a voice sample with Cartesia and return the new voice id. The API key is the
 // CARTESIA_API_KEY Worker secret; callers check for it before calling this.
 export async function cartesiaClone(env: Env, data: ArrayBuffer, type: string | null | undefined, memberName: string): Promise<string> {
@@ -22,8 +24,9 @@ export async function cartesiaClone(env: Env, data: ArrayBuffer, type: string | 
 // A replaced or cleared clone is deleted at Cartesia too, so re-cloning
 // does not pile voices up on the account. True once Cartesia no longer
 // has it: it answered 2xx, or 404 (gone already). Anything else - a 429
-// or 5xx, a timeout, no key - leaves the voice there, and the caller
-// keeps its id: forgetting it on an unread answer left clones on the
+// or 5xx, no answer within CARTESIA_DELETE_MS, no key - leaves the voice
+// there, and the caller keeps its id as a pending delete (room/voices.ts,
+// voiceDelPend): forgetting it on an unread answer left clones on the
 // owner's account with nothing recording them.
 export async function cartesiaDelete(env: Env, voiceId: string | null | undefined, ctx?: { room: string }): Promise<boolean> {
   if (!voiceId) return true;
@@ -32,6 +35,8 @@ export async function cartesiaDelete(env: Env, voiceId: string | null | undefine
     const r = await fetch("https://api.cartesia.ai/voices/" + encodeURIComponent(voiceId), {
       method: "DELETE",
       headers: { "X-API-Key": env.CARTESIA_API_KEY, "Cartesia-Version": "2025-04-16" },
+      // a pending delete is kept for a later try, so a hung call need not hold the request
+      signal: AbortSignal.timeout(CARTESIA_DELETE_MS),
     });
     if (r.ok || r.status === 404) return true;
     warn("cartesia.delete", "Cartesia answered " + r.status, ctx);

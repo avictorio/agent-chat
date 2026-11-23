@@ -1,11 +1,13 @@
 // The voice route (worker/routes/voices.ts) on the real Room class
 // (room-harness.mjs), with Cartesia stood in for by a stub of fetch: a
-// removed voice is forgotten only once Cartesia has deleted it, and the
-// daily clone allowance is taken in one call before the sample is read.
+// removed voice goes from the room at once and its clone is kept as a
+// pending delete until Cartesia confirms it, and the daily clone
+// allowance is taken in one call before the sample is read.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
 import { voiceRoute } from "../../worker/routes/voices.ts";
+import { roomRoute } from "../../worker/routes/rooms.ts";
 import { VOICE_CLONES_PER_DAY } from "../../worker/limits.ts";
 import { isGoneError } from "../../worker/lib/errors.ts";
 
@@ -35,41 +37,135 @@ async function withVoice(hooks) {
   return h;
 }
 
-/** the route's answer to method on /api/rooms/unit/<rest> as Ada */
-async function call(h, method, rest, body) {
+/** the route's answer to method on /api/rooms/unit/<rest> as Ada (opts.key false: no CARTESIA_API_KEY) */
+async function call(h, method, rest, body, opts = {}) {
   const url = new URL("http://localhost/api/rooms/unit/" + rest);
   // a KV with KV's delay, for code that counts there (the clone cap did)
   const kv = h.kv || (h.kv = new Map());
   const REQUESTS = { get: async (k) => { await new Promise((r) => setTimeout(r, 1)); return kv.get(k) ?? null; }, put: async (k, v) => { await new Promise((r) => setTimeout(r, 1)); kv.set(k, v); } };
-  const env = { ROOM: { idFromName: (n) => n, get: () => h.room }, REQUESTS, CARTESIA_API_KEY: "test-key" };
+  const env = { ROOM: { idFromName: (n) => n, get: () => h.room }, REQUESTS, ...(opts.key === false ? {} : { CARTESIA_API_KEY: "test-key" }) };
   const request = new Request(url, body ? { method, body, headers: { "Content-Type": "audio/mpeg" } } : { method });
-  const r = await voiceRoute({ request, env, url, path: url.pathname, owner: false, invite: "tok-Ada" }, ROUTE.exec(url.pathname));
+  const later = h.later || (h.later = []);
+  const ctx = { waitUntil: (p) => { later.push(p); } };
+  const r = await voiceRoute({ request, env, url, path: url.pathname, owner: false, invite: "tok-Ada", ctx }, ROUTE.exec(url.pathname));
+  await Promise.all(later.splice(0));
   return { status: r.status, json: await r.json() };
 }
 
+/** the clone ids the room holds as pending deletes */
+const pending = (h) => h.all("SELECT k FROM cfg WHERE k LIKE 'voice-del:%' ORDER BY k").map((r) => r.k.slice(10));
+
 const mv = (h) => { const r = h.one("SELECT voice_id, sample_key FROM mv WHERE name = 'ada'"); return r && { ...r }; };
 
-test("a voice Cartesia did not delete stays recorded, and the DELETE answers 502", async () => {
+// Withdrawing a voice never waits on Cartesia: the sample goes and the
+// room stops using the voice at once, and a clone Cartesia does not
+// confirm deleted is kept as a pending delete, tried again by the room's
+// next voice call. The wave before answered 502 and removed nothing, so a
+// member could not withdraw their recording while Cartesia was down, and
+// with the key unset never; before that the 200 lost the clone's id.
+for (const [what, answer] of [["answers 500", () => new Response("{}", { status: 500 })], ["answers 429", () => new Response("{}", { status: 429 })], ["cannot be reached", () => { throw new TypeError("fetch failed"); }]]) {
+  test("DELETE /voice while Cartesia " + what + " removes the voice, keeps the clone as a pending delete, and the next voice call deletes it", async () => {
+    const h = await withVoice();
+    const key = mv(h).sample_key;
+    let up = false;
+    let n = 0;
+    const c = cartesia((x) => x.url.endsWith("/voices/clone") ? Response.json({ id: "v-new" + (++n) }) : up ? new Response(null, { status: 200 }) : answer());
+    try {
+      const r = await call(h, "DELETE", "voice");
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.equal(r.json.voice, null);
+      assert.equal(r.json.clone_delete_pending, true);
+      assert.equal(mv(h), undefined, "the room no longer uses the voice");
+      assert.ok(!h.objects.has(key), "the sample is gone");
+      assert.deepEqual(pending(h), ["v-old"]);
+      up = true;
+      const s = await call(h, "PUT", "voice/sample", MP3);
+      assert.equal(s.status, 200, JSON.stringify(s.json));
+      assert.deepEqual(pending(h), [], "deleted at Cartesia, off the list");
+      assert.ok(c.calls.filter((x) => x.method === "DELETE" && x.url.endsWith("/voices/v-old")).length === 2);
+    } finally { c.restore(); }
+  });
+}
+
+test("DELETE /voice with the key unset removes the voice and keeps the clone, deleted once the key is back", async () => {
   const h = await withVoice();
   const key = mv(h).sample_key;
-  let status = 500;
-  const c = cartesia(() => new Response("{}", { status }));
+  const c = cartesia(() => new Response(null, { status: 200 }));
   try {
-    for (const s of [500, 429]) {
-      status = s;
-      const r = await call(h, "DELETE", "voice");
-      assert.equal(r.status, 502, "Cartesia " + s + ": " + JSON.stringify(r.json));
-      assert.deepEqual(mv(h), { voice_id: "v-old", sample_key: key }, "the row keeps the clone's id");
-      assert.ok(h.objects.has(key), "the sample stays");
-    }
-    assert.deepEqual(c.calls.map((x) => x.method + " " + x.url), ["DELETE https://api.cartesia.ai/voices/v-old", "DELETE https://api.cartesia.ai/voices/v-old"]);
-    // a 404 means Cartesia no longer has it: the room forgets it now
-    status = 404;
+    const r = await call(h, "DELETE", "voice", undefined, { key: false });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.clone_delete_pending, true);
+    assert.equal(mv(h), undefined);
+    assert.ok(!h.objects.has(key));
+    assert.deepEqual(pending(h), ["v-old"]);
+    assert.equal(c.calls.length, 0, "nothing is sent without the key");
+    // a voice call with the key set: the reclone has no sample (404), the pending delete still goes
+    const s = await call(h, "POST", "voice/reclone");
+    assert.equal(s.status, 404);
+    assert.deepEqual(pending(h), []);
+    assert.deepEqual(c.calls.map((x) => x.method + " " + x.url), ["DELETE https://api.cartesia.ai/voices/v-old"]);
+  } finally { c.restore(); }
+});
+
+test("DELETE /voice that Cartesia answers 404 records nothing pending", async () => {
+  const h = await withVoice();
+  const c = cartesia(() => new Response(null, { status: 404 }));
+  try {
     const r = await call(h, "DELETE", "voice");
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.equal(r.json.voice, null);
+    assert.equal(r.json.clone_delete_pending, false);
     assert.equal(mv(h), undefined);
-    assert.ok(!h.objects.has(key), "the sample went with it");
+    assert.deepEqual(pending(h), []);
+  } finally { c.restore(); }
+});
+
+test("a clone replaced while Cartesia will not delete the old one is kept as a pending delete", async () => {
+  const h = await withVoice();
+  const c = cartesia((x) => x.url.endsWith("/voices/clone") ? Response.json({ id: "v-new" }) : new Response("{}", { status: 503 }));
+  try {
+    const r = await call(h, "POST", "voice/reclone");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(mv(h).voice_id, "v-new");
+    assert.deepEqual(pending(h), ["v-old"]);
+  } finally { c.restore(); }
+});
+
+test("pending deletes are tried a few at a time, and only a 2xx or 404 takes one off", async () => {
+  const h = await withVoice();
+  h.room.voiceDelPend(["p1", "p2", "p3", "p4", "p5"]);
+  const c = cartesia((x) => x.url.endsWith("/voices/p2") ? new Response(null, { status: 500 }) : x.url.endsWith("/voices/p3") ? new Response(null, { status: 404 }) : new Response(null, { status: 200 }));
+  try {
+    await call(h, "POST", "voice/reclone", undefined);
+    const tried = c.calls.filter((x) => /\/voices\/p\d$/.test(x.url)).map((x) => x.url.slice(-2));
+    assert.deepEqual(tried, ["p1", "p2", "p3"], "CLONE_DELETE_RETRY of them, oldest first");
+    assert.deepEqual(pending(h), ["p2", "p4", "p5"]);
+  } finally { c.restore(); }
+});
+
+test("a room delete tries the pending deletes, and keeps the ids Cartesia still refuses", async () => {
+  const h = await withVoice();
+  h.room.voiceDelPend(["p1", "p2"]);
+  await h.room.revokeAll();
+  const c = cartesia((x) => x.url.endsWith("/voices/p2") ? new Response(null, { status: 500 }) : new Response(null, { status: 200 }));
+  try {
+    const url = new URL("http://localhost/api/rooms/unit?confirm=unit");
+    const later = [];
+    const env = { ROOM: { idFromName: (n) => n, get: () => h.room }, CARTESIA_API_KEY: "test-key" };
+    const r = await roomRoute({ request: new Request(url, { method: "DELETE" }), env, url, path: url.pathname, owner: true, invite: "", ctx: { waitUntil: (p) => { later.push(p); } } }, ["/api/rooms/unit", "unit"]);
+    await Promise.all(later);
+    assert.equal(r.status, 200, await r.clone().text());
+    assert.equal(h.room.exists(), false);
+    assert.deepEqual(c.calls.filter((x) => x.method === "DELETE").map((x) => x.url.slice(-2)).sort(), ["p1", "p2"]);
+    assert.deepEqual(pending(h), ["p2"], "the refused one outlives the room");
+    // and a room created again under the name tries it on its next voice call
+    h.room.create();
+    h.member("Ada");
+    c.restore();
+    const c2 = cartesia(() => new Response(null, { status: 200 }));
+    try {
+      await call(h, "POST", "voice/reclone");
+      assert.deepEqual(pending(h), []);
+    } finally { c2.restore(); }
   } finally { c.restore(); }
 });
 

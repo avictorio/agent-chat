@@ -447,15 +447,20 @@ export class Room extends DurableObject {
     // again - the same ids and so the same media keys (ROOM/ID/KIND) as
     // the old room's. A call still in flight from the old room then acted
     // on the new room's message of that id (a delete removed it), and an
-    // old signed link served the new room's file. Only this number is
-    // kept: nothing of the room's content.
+    // old signed link served the new room's file. This number is kept,
+    // and nothing of the room's content.
     let hwm = 0;
     try { hwm = this.msgHwm(); } catch (e) { warn("room.destroy.hwm", e, { room }); }
+    // Kept too: the ids of clones members asked to delete that Cartesia
+    // has not confirmed (room/voices.ts, voiceDelPend). The room delete
+    // tries them (routes/rooms.ts); one Cartesia refused then would be
+    // lost with the room while the clone lives on.
+    let voiceDels: CfgRow[] = [];
+    try { voiceDels = this.sql.exec<CfgRow>("SELECT k, v FROM cfg WHERE substr(k, 1, 10) = 'voice-del:'").toArray(); } catch (e) { warn("room.destroy.voicedel", e, { room }); }
     await this.ctx.storage.deleteAll();
-    if (hwm) {
-      this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
-      this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
-    }
+    if (hwm || voiceDels.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
+    for (const d of voiceDels) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
     // A stream or long poll that slipped in during the awaits above
     // (fetch refuses one now, but this is the last word) goes too.
     for (const c of Array.from(this.clients)) c.close();

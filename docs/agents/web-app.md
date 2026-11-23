@@ -45,13 +45,25 @@ Front-end conventions.
   the sample was stored in or read from (`setVoiceId` takes the
   generation `putVoiceSample` or `getVoiceSample` answered: a room
   deleted and created again during the clone gets 410 `room_deleted`,
-  and the route deletes the clone it made). Removing a voice
-  deletes the clone at Cartesia first and drops the row only once
-  Cartesia answered 2xx or 404 (otherwise 502 and nothing changes: the
-  row is the only record of the clone); a sample storage would not
-  delete keeps its row without the id (503), for the next DELETE. The
-  daily clone allowance is a `cfg` row per member, taken by `cloneTake`
-  before a reclone reads the sample. Cloning needs the
+  and the route deletes the clone it made). Removing a voice never waits
+  on Cartesia: `clearVoice` deletes the sample, drops the row and, in the
+  same call, records the clone's id as a pending delete (`cfg`
+  `voice-del:<id>`, `voiceDelPend`); the route then asks Cartesia and
+  takes the record off only on 2xx or 404 (`voiceDelDone`). The answer
+  is 200 with `clone_delete_pending` saying whether the clone is still
+  waiting (Cartesia refused or timed out, or the key is unset). A clone a
+  new sample or a reclone replaced, or one the room would not take, is
+  recorded the same way when Cartesia does not delete it. Each voice
+  route that writes (DELETE, sample, reclone) with the key set tries up
+  to `CLONE_DELETE_RETRY` pending deletes beside the request
+  (`retryCloneDeletes`), and a room delete tries up to
+  `CLONE_DELETE_ON_ROOM_DELETE`; `destroy()` keeps the `voice-del:` rows,
+  so an id is never lost with its room. A room delete does not delete the
+  members' live clones at Cartesia. A reclone landing during a DELETE
+  answers 409; a sample storage would not delete keeps its row without
+  the id (503), for the next DELETE. The daily clone allowance is a
+  `cfg` row per member, taken by `cloneTake` before a reclone reads the
+  sample. Cloning needs the
   `CARTESIA_API_KEY` **Secret**; without it an upload stores the sample
   and answers 202 with `cloned: false`, ready for a reclone once the
   secret lands. The room sidebar's "Your voice" dialog is the human

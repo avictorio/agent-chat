@@ -1,6 +1,6 @@
 // Voices: a member's voice sample and clone, and speaking a message.
 
-import { mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
+import { CLONE_DELETE_RETRY, mb, ROOM_RE, STORE_MSG, VOICE_CLONES_PER_DAY, VOICE_SAMPLE_MAX } from "../limits.js";
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/http.js";
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT } from "../room/voices.js";
@@ -10,6 +10,20 @@ import { speakableText } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
 import { isGoneError } from "../lib/errors.js";
+
+// The clones a room holds as pending deletes (room/voices.ts,
+// voiceDelPend), oldest first, up to max: each goes at Cartesia, and a
+// 2xx or 404 takes it off the list. Anything else leaves it for the next
+// try. Callers check for the key first.
+export async function retryCloneDeletes(env: Env, stub: DurableObjectStub, room: string, max: number) {
+  try {
+    const done: string[] = [];
+    for (const id of await stub.voiceDelList(max)) if (await cartesiaDelete(env, id, { room })) done.push(id);
+    if (done.length) await stub.voiceDelDone(done);
+  } catch (e) {
+    warn("cartesia.retry", e, { room });
+  }
+}
 
 // Voices. A member uploads a voice sample (invite token); the server stores it in R2,
 // clones it with Cartesia and saves the voice id on the member record. The owner can
@@ -29,33 +43,47 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!who) return json({ error: "Voices are for members: send your X-Invite-Token." }, 403);
   }
   if (request.method === "GET" && !action) return json({ room, name: who, voice: await stub.voiceOf(who) });
+  // Clones whose delete Cartesia did not confirm earlier, a few at a
+  // time, beside this request (retryCloneDeletes).
+  if (env.CARTESIA_API_KEY) rc.ctx.waitUntil(retryCloneDeletes(env, stub, room, CLONE_DELETE_RETRY));
   const oldVoice = await stub.voiceOf(who);
-  // A replaced clone: its id is already overwritten, so a delete
-  // Cartesia refuses is only logged (cartesiaDelete).
-  const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await cartesiaDelete(env, oldVoice.voice_id, { room }); };
+  // A clone this request is done with (the one a new clone replaced, or
+  // its own new one the room would not take) goes at Cartesia; one
+  // Cartesia does not confirm deleted is kept in the room as a pending
+  // delete. It used to be only logged, and its id was lost.
+  const dropClone = async (vid: string) => { if (!(await cartesiaDelete(env, vid, { room }))) await stub.voiceDelPend([vid]); };
+  const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await dropClone(oldVoice.voice_id); };
   // A clone the room refused because it was deleted while the clone was
   // made (setVoiceId) is this request's own and attached to no one: it
   // goes at Cartesia, and the request answers 410 room_deleted.
   const saveClone = async (gen: number, vid: string) => {
     try { return await stub.setVoiceId(who, "cartesia", vid, gen); }
     catch (e) {
-      if (isGoneError(e)) await cartesiaDelete(env, vid, { room });
+      if (isGoneError(e)) await dropClone(vid);
       throw e;
     }
   };
   const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
   if (request.method === "DELETE" && !action) {
     if (!oldVoice) return json({ error: "No voice to remove" }, 404);
-    // Cartesia first, and the room forgets the clone only once Cartesia
-    // has: the row went first before, so a refused delete answered 200
-    // and left the clone on the account with its id recorded nowhere.
+    // The room's part first, and it never waits on Cartesia: a member can
+    // always withdraw their recording, and the room stops using the voice
+    // at once. The clone's id is recorded as a pending delete in that same
+    // call, then Cartesia is asked; only its 2xx or 404 takes the record
+    // off, so an unreachable Cartesia or an unset key cannot lose the
+    // clone. (A refused delete first answered 200 with the id lost, then
+    // 502 with nothing removed: a member could not withdraw their voice
+    // until a third party answered.)
     const vid = oldVoice.provider === "cartesia" ? oldVoice.voice_id : null;
-    if (vid && !(await cartesiaDelete(env, vid, { room }))) return json({ error: env.CARTESIA_API_KEY ? "Cartesia did not delete the voice; nothing was removed. Try again in a minute." : "Removing a cloned voice is not configured right now (the CARTESIA_API_KEY secret is not set); nothing was removed." }, env.CARTESIA_API_KEY ? 502 : 503);
-    const done = await stub.clearVoice(who, oldVoice.voice_id);
-    if (done === "none") return json({ room, name: who, voice: null });
-    if (done === "changed") return json({ error: "The voice changed while it was being removed (a new clone landed). Send the DELETE again." }, 409);
-    if (done === "STORE_FAIL") return json({ error: "Storage did not delete your voice sample (the cloned voice is gone). Send the DELETE again." }, 503);
-    return json({ room, name: who, voice: null });
+    const done = await stub.clearVoice(who, oldVoice.voice_id, vid);
+    let pending = false;
+    if (vid) {
+      if (await cartesiaDelete(env, vid, { room })) await stub.voiceDelDone([vid]);
+      else pending = true;
+    }
+    if (done === "changed") return json({ error: "The voice changed while it was being removed (a new clone landed). Send the DELETE again.", clone_delete_pending: pending }, 409);
+    if (done === "STORE_FAIL") return json({ error: "Storage did not delete your voice sample; the room no longer uses the voice. Send the DELETE again.", clone_delete_pending: pending }, 503);
+    return json({ room, name: who, voice: null, clone_delete_pending: pending });
   }
   if (request.method === "POST" && action === "reclone") {
     if (!env.CARTESIA_API_KEY) return json({ error: "Server cloning is not configured yet (the CARTESIA_API_KEY secret is not set)" }, 503);
@@ -67,7 +95,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     let vid;
     try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e) }, 502); }
     const v = await saveClone(smp.gen, vid);
-    if (!v) { await cartesiaDelete(env, vid, { room }); return json({ error: "No member with that name" }, 404); }
+    if (!v) { await dropClone(vid); return json({ error: "No member with that name" }, 404); }
     await dropOld(vid);
     return json({ room, name: who, voice: v, cloned: true });
   }

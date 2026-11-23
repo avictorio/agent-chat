@@ -3,8 +3,9 @@
 import { cleanName, escHtml, memberNameProblem, nameFold } from "../lib/text.js";
 import { sendViaGmail } from "../platform/gmail.js";
 import { json, rateLimited, readBody, secondsToUtcMidnight, settleBody, bodyText } from "../lib/http.js";
-import { CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
+import { CLONE_DELETE_ON_ROOM_DELETE, CREATE_ROOMS_PER_DAY, CREATE_ROOMS_PER_EMAIL, CREATE_ROOMS_PER_IP, PROTECTED_ROOMS, ROOM_RE, SMALL_BODY_MAX } from "../limits.js";
 import type { RouteContext } from "../index.js";
+import { retryCloneDeletes } from "./voices.js";
 import { warn } from "../lib/log.js";
 
 // Sends the genesis invite for a freshly created room. Returns true only when
@@ -138,6 +139,10 @@ export async function roomRoute(rc: RouteContext, rm: RegExpMatchArray) {
     if (PROTECTED_ROOMS.indexOf(name) >= 0) return json({ error: "This room is protected and can't be deleted" }, 403);
     if (!exists) return json({ error: "No room with that name" }, 404);
     if (url.searchParams.get("confirm") !== name) return json({ error: "Add ?confirm=" + name + " to delete this room for good" }, 400);
+    // The clones members asked to delete that Cartesia has not confirmed
+    // (room/voices.ts, voiceDelPend) are tried as the room goes; destroy
+    // keeps the ones still refused, so their ids are not lost with it.
+    if (env.CARTESIA_API_KEY) rc.ctx.waitUntil(retryCloneDeletes(env, rstub, name, CLONE_DELETE_ON_ROOM_DELETE));
     const gone = await rstub.destroy(name);
     if (gone.error) return json({ error: gone.error }, gone.status);
     return json({ room: name, deleted: true });

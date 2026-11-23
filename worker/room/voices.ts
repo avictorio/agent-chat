@@ -121,14 +121,46 @@ export const VoiceMethods = {
     }
   },
 
-  // Called once the clone is gone at Cartesia (the route deletes it there
-  // first). voiceId is the clone the route deleted: a different one here
-  // means a reclone landed meanwhile, and dropping the row would leave
-  // that new clone at Cartesia with nothing recording it. A sample that
+  // Clones to delete at Cartesia that it has not confirmed deleted: one
+  // cfg row per id, 'voice-del:<id>' = when it was asked. A member's
+  // DELETE /voice must not wait on a third party (with the key unset it
+  // could never finish), and the clone's id must not be lost either: the
+  // row is written in the same call that forgets the voice, and only a
+  // 2xx or 404 from Cartesia takes it off (voiceDelDone). The rows outlive
+  // a room delete (destroy) and work in a deleted room, so an id is never
+  // dropped with the room that recorded it.
+  /** @param ids the clones' provider ids (empty ones are skipped) */
+  voiceDelPend(ids: Array<string | null | undefined>) {
+    const now = String(Date.now());
+    this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    for (const id of ids) if (id) this.sql.exec("INSERT OR IGNORE INTO cfg (k, v) VALUES (?, ?)", "voice-del:" + id, now);
+  },
+
+  /** The oldest pending deletes, at most limit of them. */
+  voiceDelList(limit: number): string[] {
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cfg'").toArray().length) return [];
+    return this.sql.exec<Pick<CfgRow, "k">>("SELECT k FROM cfg WHERE substr(k, 1, 10) = 'voice-del:' ORDER BY v, k LIMIT ?", Math.max(0, Math.floor(limit))).toArray().map((r) => r.k.slice(10));
+  },
+
+  /** Cartesia confirmed these deleted (2xx or 404). */
+  voiceDelDone(ids: string[]) {
+    if (!this.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cfg'").toArray().length) return;
+    for (const id of ids) this.sql.exec("DELETE FROM cfg WHERE k = ?", "voice-del:" + id);
+  },
+
+  // DELETE /voice's part in the room, which never waits on Cartesia: the
+  // sample goes and the room stops using the voice now, and the clone
+  // (pendingId) is recorded as a pending delete in this same call, before
+  // anything else, whatever the outcome; the route then asks Cartesia
+  // and takes the record off once it confirms. voiceId is the clone the
+  // route read: a different one here means a reclone landed meanwhile,
+  // and dropping the row would forget that new clone. A sample that
   // storage would not delete keeps its row (the clone's id cleared), so a
   // second DELETE finds it and tries again; the row was dropped anyway
   // before, and the object then had no pointer left.
-  async clearVoice(name: string, voiceId?: string | null): Promise<"none" | "changed" | "STORE_FAIL" | "cleared"> {
+  /** @param pendingId the clone to record as a pending delete */
+  async clearVoice(name: string, voiceId?: string | null, pendingId?: string | null): Promise<"none" | "changed" | "STORE_FAIL" | "cleared"> {
+    if (pendingId) this.voiceDelPend([pendingId]);
     const r = this.voiceRow(name);
     if (!r) return "none";
     if (voiceId !== undefined && (r.voice_id || null) !== (voiceId || null)) return "changed";

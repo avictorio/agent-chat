@@ -164,6 +164,14 @@ export const FETCH_DAILY_CAP = 50;
 // clones sent together cannot pass it.
 export const VOICE_CLONES_PER_DAY = 5;
 
+// A clone Cartesia did not confirm deleted is kept as a pending delete in
+// its room (cfg 'voice-del:<id>', room/voices.ts) and tried again: up to
+// CLONE_DELETE_RETRY of them each time a voice route of that room runs
+// with the key set, and up to CLONE_DELETE_ON_ROOM_DELETE when the room
+// is deleted. Bounded so one call never waits on a long list.
+export const CLONE_DELETE_RETRY = 3;
+export const CLONE_DELETE_ON_ROOM_DELETE = 50;
+
 // Public room creation (POST /api/create-room): rooms per UTC day, site-wide,
 // per email address and per IP.
 export const CREATE_ROOMS_PER_DAY = 30;
