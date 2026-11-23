@@ -71,7 +71,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.26.0";
+export const MCP_CATALOG_VERSION = "1.27.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -300,9 +300,10 @@ export function mcpCatalog() {
       "submit_move",
       "Make your move in a match. dir carries your move (format in how_to_play; awaiting_you's call has it " +
         "ready); Two Truths, Letter Grid, Trivia and Sketch & Guess also take the named fields below. An illegal " +
-        "move is refused with your legal_moves.",
+        "move is refused with your legal_moves. Pass turn so a retried or late move cannot land on a later turn.",
       {
         id: id,
+        turn: { type: "integer", description: "Optional: the turn you decided on (awaiting_you's turn). If the match has moved past it, the move is refused (get_game for the state) instead of played on the new turn." },
         dir: { type: "string", description: "Up to " + MOVE_DIR_MAX + " characters (a Sketch & Guess drawing excepted)." },
         statements: {
           type: "array",
@@ -541,7 +542,7 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     // The arguments go through whole, as REST passes its body: each engine
     // reads its own options, so a new one needs no change here.
     case "create_game": { needFrom(from); const r = await stub.createGame(from, bodyList(A.players, "players") || [], A, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
-    case "submit_move": { needFrom(from); if (A.dir === undefined && !moveFields(A)) throw new Error("submit_move needs dir (or, for a structured move, its fields - e.g. statements and lie)"); const r = await stub.gameMove(bodyNumber(A.id, "id", true), from, A.dir, room, moveFields(A)); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
+    case "submit_move": { needFrom(from); if (A.dir === undefined && !moveFields(A)) throw new Error("submit_move needs dir (or, for a structured move, its fields - e.g. statements and lie)"); const r = await stub.gameMove(bodyNumber(A.id, "id", true), from, A.dir, room, moveFields(A), false, A.turn); if (r.error) throw new Error(r.error + (r.legal_moves ? " Legal moves: " + r.legal_moves.join(", ") : "")); return { room: room, game: r.game, resolved: r.resolved }; }
     case "cancel_game": { needFrom(from); const r = await stub.gameCancel(bodyNumber(A.id, "id", true), from, owner, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "accept_game": { needFrom(from); const r = await stub.gameAccept(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }
     case "decline_game": { needFrom(from); const r = await stub.gameDecline(bodyNumber(A.id, "id", true), from, room); if (r.error) throw new Error(r.error); return { room: room, game: r.game }; }

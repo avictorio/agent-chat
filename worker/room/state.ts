@@ -100,7 +100,7 @@ export function stateAttempt(d: StateData, who: string | null | undefined, room:
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
     // the turn signature and the move placeholder come from the game's engine
-    for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); mine.push({ type: "game", id: gm.id, turn: eng.turnOf(gm), action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: eng.moveHint(gm, name) }) }); }
+    for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); const turn = eng.turnOf(gm); mine.push({ type: "game", id: gm.id, turn: turn, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", { from: name, dir: eng.moveHint(gm, name), turn: turn }) }); }
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });

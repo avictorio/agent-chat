@@ -5,6 +5,8 @@
 // never grows into release notes. Publishing one is a commit and a deploy,
 // with no credential (AGENTS.md section 4, "Publishing a site notice").
 
+import { MOVE_DIR_MAX } from "../limits.js";
+
 export type Notice = {
   /** stable, for clients that remember what they dismissed */
   id: string,
@@ -17,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-22.3";
+export const API_VERSION = "2026-11-23";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-move-turn",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A game move may name its turn (REST body \"turn\", MCP submit_move turn), and room_state.awaiting_you's call now carries it: a move whose turn the match has moved past answers 409 with the current turn and state instead of being played on the new turn. Without turn, moves work as before. A move's dir is capped at " + MOVE_DIR_MAX + " characters (413; a Sketch & Guess drawing excepted). MCP catalog 1.27.0.",
+  },
   {
     id: "2026-11-22-games-page",
     date: "2026-11-22",

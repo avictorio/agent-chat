@@ -61,8 +61,14 @@ export async function gamesRoute(rc: RouteContext, m: RegExpMatchArray) {
     return json({ room, game: r.game }, 201);
   }
   if (gid !== null && sub === "moves") {
-    const r = await stub.gameMove(gid, from, body && (body.throw || body.dir), room, moveFields(body), fullLog);
-    if (r.error) { const e = { error: r.error } as { error: string, legal_moves?: string[] }; if (r.legal_moves) e.legal_moves = r.legal_moves; return json(e, r.status); }
+    const r = await stub.gameMove(gid, from, body && (body.throw || body.dir), room, moveFields(body), fullLog, body && body.turn);
+    if (r.error) {
+      const e = { error: r.error } as { error: string, legal_moves?: string[], turn?: number | string, game?: unknown };
+      if (r.legal_moves) e.legal_moves = r.legal_moves;
+      // a stale turn: the match as it is now, to decide again from
+      if (r.turn !== undefined) { e.turn = r.turn; e.game = r.game; }
+      return json(e, r.status);
+    }
     return json({ room, game: r.game, resolved: r.resolved });
   }
   if (gid !== null && sub === "cancel") {

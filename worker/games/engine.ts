@@ -35,7 +35,7 @@ export type GamePub = {
 };
 /** What a create or a move answers: the status to send, with the match's
  *  full state or the error (and, for a refused move, example moves). */
-export type GameReply = { status?: number, error?: string, game?: unknown, legal_moves?: string[], resolved?: boolean };
+export type GameReply = { status?: number, error?: string, game?: unknown, legal_moves?: string[], resolved?: boolean, turn?: number | string };
 /** A match row whose state is one game's own stored type. */
 export type GameRowOf<S extends StoredBase> = Omit<GameRow, "st"> & { st: S };
 /**

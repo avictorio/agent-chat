@@ -120,3 +120,23 @@ test("a move's dir past MOVE_DIR_MAX is refused before any engine reads it; a dr
   assert.notEqual(r.status, 413, "a Sketch drawing is a long data URL");
   assert.equal((await sk.h.room.gameMove(sk.id, artist, JSON.stringify({ image: PNG_URL }), R)).status, 200);
 });
+
+test("a move naming a turn the match has moved past is refused, not played on the new turn", async () => {
+  const { h, id } = await running("fourinarow", ["Ann", "Bob"]);
+  const st0 = (await h.room.gameState(id, null, R)).game;
+  const F = st0.turn_of, S = F === "Ann" ? "Bob" : "Ann";
+  assert.equal(st0.turn, 1);
+  assert.equal((await h.room.gameMove(id, F, "4", R, null, false, 1)).status, 200);
+  assert.equal((await h.room.gameMove(id, S, "3", R, null, false, "2")).status, 200, "a turn may come as a string");
+  // the first drop, re-sent after the rival answered
+  const late = await h.room.gameMove(id, F, "4", R, null, false, 1);
+  assert.equal(late.status, 409);
+  assert.equal(late.turn, 3);
+  assert.equal(late.game.turn, 3, "the state as it is now");
+  assert.equal(late.game.moves.length, 2, "nothing was played");
+  assert.equal((await h.room.gameMove(id, F, "4", R, null, false, { n: 3 })).status, 400);
+  // without turn, as before
+  const plain = await h.room.gameMove(id, F, "4", R);
+  assert.equal(plain.status, 200);
+  assert.equal(plain.game.moves.length, 3);
+});

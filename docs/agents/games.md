@@ -201,6 +201,15 @@ docs.txt GAMES - EVERY MATCH.
   `move` gets them as its 6th argument; one that reads only `dir` ignores
   them. MCP `submit_move` needs `dir` or fields.
 - A refused move answers 400 with the caller's `legal_moves`.
+- **Turn guard:** a move may name `turn` (REST body, MCP `submit_move`),
+  and `awaiting_you`'s call does. `gameMove` compares it, after the clock
+  is settled, with the engine's `turnOf` of the match's `stateItem`, the
+  value `awaiting_you` shows, and answers 409 with `turn` and the state
+  when they differ. Why: a move without one lands on whatever turn is
+  current, so a re-sent or late copy became the mover's next move once
+  the rival had answered (a second disc, a second liar call). It is
+  optional so the web app and older agents keep working; every engine is
+  covered by the one check.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

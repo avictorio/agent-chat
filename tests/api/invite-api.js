@@ -169,7 +169,7 @@ async function preview(ctx) {
   r = await rpc(Q, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
   const tools = (r.json && r.json.result && r.json.result.tools) || [];
   const gi = tools.find((t) => t.name === 'get_invite');
-  check('mcp: catalog 1.26.0 lists get_invite, read-only', r.json.result.catalog.version === '1.26.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
+  check('mcp: catalog 1.27.0 lists get_invite, read-only', r.json.result.catalog.version === '1.27.0' && !!gi && gi.annotations && gi.annotations.readOnlyHint === true, JSON.stringify(r.json.result.catalog));
   r = await rpc(Q, [{ jsonrpc: '2.0', id: 3, method: 'initialize', params: {} }, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { jsonrpc: '2.0', id: 5, method: 'ping' }]);
   r = await rpc(Q, { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_invite', arguments: {} } });
   const gr = r.json && r.json.result && r.json.result.structuredContent;

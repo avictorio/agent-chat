@@ -347,7 +347,13 @@ export const GameMachineryMethods = {
   // fields: a structured move's named parts, beside or instead of dir -
   // e.g. a storyteller's {statements, lie}. Engines that take only dir
   // ignore them, so every string move keeps working.
-  async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null, fullLog = false) {
+  // turn, optional: the step the mover decided on (awaiting_you's turn,
+  // the engine's turnOf). A move used to land on whatever turn was
+  // current, so a copy re-sent or delayed past the rival's reply became
+  // the mover's next move: a second disc, a second liar call, a "yes"
+  // ruling on the next guess. With turn, a stale move answers 409 and the
+  // state as it is now; without it a move is read as before.
+  async gameMove(id: number, who: string, dir: unknown, room: string, fields?: Record<string, unknown> | null, fullLog = false, turn?: unknown) {
     const g = this.gameRow(id);
     if (!g) return { status: 404, error: "No game with that id" };
     // Refused before any engine reads it: a long dir once held the room
@@ -359,7 +365,16 @@ export const GameMachineryMethods = {
     this.advanceLobby(g, room);
     if (g.status === "lobby") return { status: 409, error: "That match is still in the lobby - it starts when every player accepts" };
     if (g.status !== "running") return { status: 409, error: "That match is " + g.status };
-    return gameEngine(g.st).move(this, g, who, dir, room, fields || null);
+    const eng = gameEngine(g.st);
+    if (turn !== undefined && turn !== null) {
+      if (typeof turn !== "number" && typeof turn !== "string") return { status: 400, error: "turn is the match's turn number, as room_state.awaiting_you gives it" };
+      const now = eng.turnOf(eng.stateItem({ id: g.id, status: g.status }, g.st));
+      if (String(turn).trim() !== String(now)) {
+        await this.armGameAlarm();
+        return { status: 409, error: "The match has moved on: it is at turn " + now + ", not " + String(turn).slice(0, 20) + " - read the state and decide again", turn: now, game: this.gameStateFull(g, who) };
+      }
+    }
+    return eng.move(this, g, who, dir, room, fields || null);
   },
 
   // Stop a running match where it stands: no winner, no result post, no
