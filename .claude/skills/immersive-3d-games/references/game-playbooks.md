@@ -286,7 +286,10 @@ earlier ones are placed at once).
 **World.** A dark round table on an open plain under a teal and violet
 aurora (`TR_SKY`); each player's seat glows in their colour around it,
 the viewer nearest the camera; name plates and scores sit outward from
-the table so they never cover the threads.
+the table so they never cover the threads. A phone with 7 or 8 seats
+(`trHomeCrowded` in `trust/trframe.ts`) looks down steeper and holds every
+plate at one size on screen, on a dark pill, fitted whole below the
+caption and tools and clear of Move (`tests/unit/trframe.test.mjs`).
 
 **Board.** The last round as a web: every pairing is a chord across the
 table in two halves, each the choice one player made toward the other -

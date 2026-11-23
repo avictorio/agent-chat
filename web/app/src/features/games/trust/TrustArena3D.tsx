@@ -26,6 +26,7 @@ import { Burst, LightPillar, Shockwave, SkyDome, type SkySpec } from "../three/a
 import { BUZZ, sfx } from "../three/sfx";
 import type { TrustChoice, TrustPlayer, TrustRound, TrustState } from "@chat/contract";
 import { useOnChange } from "../../../lib/useOnChange";
+import { PHONE_BELOW, PLATE, PLATE_BIG, PLATE_PX, plateK, tableR, trHome } from "./trframe";
 
 // One empty list for matches without players or rounds yet, so the memos
 // below keep their inputs from one render to the next.
@@ -45,7 +46,6 @@ const TR_SKY: SkySpec = {
 };
 
 const TABLE_Y = 0.75;
-const PHONE_BELOW = 560;
 const ANTIC = 0.5;
 const GROW = 0.45;
 const TRUST = new Color("#2dd4bf").multiplyScalar(2.0);
@@ -59,15 +59,13 @@ const smooth = (a: number, b: number, t: number) => {
   return x * x * (3 - 2 * x);
 };
 
-function tableR(n: number) {
-  return n <= 3 ? 2.6 : n <= 5 ? 3.1 : 3.6;
-}
-
 /* ---------- labels ---------- */
 
 const labelCache = new Map<string, CanvasTexture>();
-function labelTex(name: string, sub: string, hex: string): CanvasTexture {
-  const key = name + "|" + sub + "|" + hex;
+/* backed: a dark pill behind the text, for a crowded table, where the
+   plates sit over the threads and the table's rim */
+function labelTex(name: string, sub: string, hex: string, backed = false): CanvasTexture {
+  const key = name + "|" + sub + "|" + hex + (backed ? "|b" : "");
   const hit = labelCache.get(key);
   if (hit) return hit;
   const c = document.createElement("canvas");
@@ -75,14 +73,28 @@ function labelTex(name: string, sub: string, hex: string): CanvasTexture {
   c.height = 128;
   const x = c.getContext("2d");
   if (x) {
+    const shown = name.length > 12 ? name.slice(0, 11) + "…" : name;
+    const NAME = "800 46px system-ui, -apple-system, Segoe UI, sans-serif";
+    const SUB = "800 40px system-ui, -apple-system, Segoe UI, sans-serif";
+    if (backed) {
+      // as wide as the text, so neighbouring plates' pills do not cover each other
+      x.font = NAME;
+      let w = x.measureText(shown).width;
+      x.font = SUB;
+      w = Math.min(304, Math.max(w, x.measureText(sub).width) + 30);
+      x.fillStyle = "rgba(2,6,10,0.92)";
+      x.beginPath();
+      x.roundRect(160 - w / 2, 12, w, 104, 26);
+      x.fill();
+    }
     x.textAlign = "center";
     x.textBaseline = "middle";
     x.shadowColor = "rgba(0,0,0,0.85)";
     x.shadowBlur = 8;
-    x.font = "800 46px system-ui, -apple-system, Segoe UI, sans-serif";
+    x.font = NAME;
     x.fillStyle = hex;
-    x.fillText(name.length > 12 ? name.slice(0, 11) + "…" : name, 160, 42);
-    x.font = "800 40px system-ui, -apple-system, Segoe UI, sans-serif";
+    x.fillText(shown, 160, 42);
+    x.font = SUB;
     x.fillStyle = "rgba(223,247,242,0.95)";
     x.fillText(sub, 160, 96);
   }
@@ -118,7 +130,7 @@ function Table({ n }: { n: number }) {
   );
 }
 
-function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: boolean; pulse: number; score: number; gain: number | null; still: boolean; big: boolean }) {
+function SeatMark({ s, lit, pulse, score, gain, still, big, pxK }: { s: Seat; lit: boolean; pulse: number; score: number; gain: number | null; still: boolean; big: boolean; pxK: number }) {
   const ring = useRef<MeshStandardMaterial>(null);
   const j = useJuice();
   useFrame(() => {
@@ -129,6 +141,8 @@ function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: bo
   });
   // the round on the table's points ride the plate
   const sub = String(score) + (gain != null ? " (+" + gain + ")" : "") + (s.you ? " · you" : "") + (s.out ? " · out" : "");
+  // pxK (crowded tables, plateK): the plate holds its size on screen
+  const scale: [number, number, number] = pxK ? [PLATE_PX[0] * pxK, PLATE_PX[1] * pxK, 1] : [...(big ? PLATE_BIG : PLATE), 1];
   return (
     <group position={[s.x, 0, s.z]}>
       <mesh position={[0, 0.3, 0]}>
@@ -140,8 +154,8 @@ function SeatMark({ s, lit, pulse, score, gain, still, big }: { s: Seat; lit: bo
         <meshStandardMaterial ref={ring} color="#000" emissive={s.hex} emissiveIntensity={0.5} toneMapped={false} />
       </mesh>
       {/* the plate sits outward from the table, clear of the threads */}
-      <sprite position={[s.x * 0.28, 0.55, s.z * 0.28]} scale={big ? [2.4, 0.96, 1] : [1.7, 0.68, 1]} renderOrder={5}>
-        <spriteMaterial map={labelTex(s.name, sub, s.hex)} transparent depthWrite={false} depthTest={false} />
+      <sprite position={[s.x * 0.28, 0.55, s.z * 0.28]} scale={scale} renderOrder={5}>
+        <spriteMaterial map={labelTex(s.name, sub, s.hex, !!pxK)} transparent depthWrite={false} depthTest={false} sizeAttenuation={!pxK} />
       </sprite>
     </group>
   );
@@ -320,48 +334,6 @@ function writeSeen(id: unknown, n: number) {
   }
 }
 
-/* Home: every seat and its plate in frame, the aurora in a band across
-   the top: the camera looks at the table from elF above it, the view
-   pitched a little shallower so the sky shows, then backs off until each
-   key point projects inside the frame. */
-function trHome(aspect: number, width: number, seats: Seat[]): Home {
-  const phone = width < PHONE_BELOW;
-  const vfov = aspect < 1 ? 56 : 46;
-  const tv = Math.tan((vfov * Math.PI) / 360);
-  const th = tv * Math.max(0.45, aspect);
-  const elF = ((phone ? 34 : 28) * Math.PI) / 180;
-  // a little shallower than the look at the table: a thin band of aurora
-  const pitch = elF - (8 * Math.PI) / 180;
-  const pts: [number, number, number][] = [];
-  seats.forEach((st) => pts.push([st.x * 1.12, 0, st.z * 1.12], [st.x * 1.28, 0.9, st.z * 1.28]));
-  if (!pts.length) pts.push([3, 0, 3], [-3, 0, -3]);
-  const fy = 0.6;
-  const fy2 = -Math.sin(pitch);
-  const fz2 = -Math.cos(pitch);
-  const fits = (d: number) => {
-    const cy = fy + d * Math.sin(elF);
-    const cz = d * Math.cos(elF);
-    return pts.every(([x, y, z]) => {
-      const vy = y - cy;
-      const vz = z - cz;
-      const zc = vy * fy2 + vz * fz2;
-      if (zc <= 0.1) return false;
-      const yc = vy * -fz2 + vz * fy2;
-      return Math.abs(x / (zc * th)) <= 0.94 && yc / (zc * tv) >= -0.94 && yc / (zc * tv) <= 0.9;
-    });
-  };
-  let lo = 3;
-  let hi = 60;
-  for (let k = 0; k < 28; k++) {
-    const mid = (lo + hi) / 2;
-    if (fits(mid)) hi = mid;
-    else lo = mid;
-  }
-  const cy = fy + hi * Math.sin(elF);
-  const cz = hi * Math.cos(elF);
-  return { pos: [0, cy, cz], fov: vfov, tz: cz - cy / Math.tan(pitch) };
-}
-
 /* ---------- the arena ---------- */
 
 export default function TrustArena3D({
@@ -385,6 +357,7 @@ export default function TrustArena3D({
   const ctl = useRef<Ctl | null>(null);
   const homeRef = useRef<Home | null>(null);
   const [hostW, setHostW] = useState(() => (aspect && aspect < 1.4 ? 390 : 760));
+  const [hostH, setHostH] = useState(0);
   const meL = me.toLowerCase();
   const players: TrustPlayer[] = (g && g.players) || NO_ITEMS;
   const rounds: TrustRound[] = (g && g.rounds) || NO_ITEMS;
@@ -509,7 +482,10 @@ export default function TrustArena3D({
     <JuiceProvider juice={juice}>
       <ArenaFrame
         onReset={() => goHome(ctl, homeRef.current || first, !still)}
-        onSize={(width) => setHostW(width)}
+        onSize={(width, height) => {
+          setHostW(width);
+          setHostH(height);
+        }}
         tools={<SoundToggle />}
         frameProps={{
           onPointerDown: (e) => {
@@ -568,6 +544,7 @@ export default function TrustArena3D({
               gain={round && !playing && (round.moves || {})[s.name] ? (round.points || {})[s.name] || 0 : null}
               still={still}
               big={hostW < PHONE_BELOW}
+              pxK={plateK(hostW, hostH, seats.length)}
             />
           ))}
           <Threads seats={seats} round={round} t0={t0} gap={gap} still={still} />
