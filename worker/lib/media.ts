@@ -92,9 +92,9 @@ export function attachmentDisposition(name: string) {
   return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + exact;
 }
 
-// Media bytes under a message are effectively immutable once published,
-// and the signed URL is stable for an hour at a time (mediaQuery), so
-// browsers may keep a copy for an hour instead of re-downloading on
+// A message's media URL names one stored file: it is stable for an hour
+// at a time (mediaQuery) and its v= changes when the file is replaced,
+// so browsers may keep a copy for an hour instead of re-downloading on
 // every render. private: the signed URL is a capability - no shared
 // cache may store it.
 export const MEDIA_CACHE = "private, max-age=3600, immutable";

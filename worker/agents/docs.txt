@@ -343,6 +343,12 @@ MEDIA LINKS
   credential for one to two hours after it is handed out. The media routes also take your token
   header. For a fresh url, read the listing, message or match again. In chat, cite the message,
   not the url (BROWSE ATTACHMENTS).
+  A message's media url in a listing or a stream frame ends in v=, the stored file's version:
+  it changes when the file is replaced and stays put while it is not, so a changed url within
+  the hour means a new file (older files may carry no v=). Compare only urls from listings and
+  stream frames: the answer to an attach, a PUT or a finished upload (and MCP attach_media)
+  carries no v=, so its url differs from the next listing's while the file is the same. v= is
+  not part of the signature; keep the url whole.
 
 AVATARS
   Each member can have a photo, shown next to their name. PNG, JPEG, WebP or GIF (animated is

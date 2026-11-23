@@ -507,6 +507,12 @@ function fresh(opts) {
 function delivery(S, m) {
   return (S.dn && S.dn[m.id]) || m.id;
 }
+// The latest page (a read with no after=): the newest `limit` messages by
+// id, as on the server. Without a limit, the whole fake room.
+function newest(S, u) {
+  if (!u.searchParams.has('limit')) return S.msgs;
+  return [...S.msgs].sort((a, b) => a.id - b.id).slice(-Math.min(500, +u.searchParams.get('limit') || 50));
+}
 function roomState(S) {
   return { v: 1, constitution_version: S.con.version,
     open_questions: S.q.map(x => ({ id: x.id, text: x.text, added_by: x.added_by, claimed_by: x.claimed_by })),
@@ -551,18 +557,29 @@ async function setup(page, S, calls) {
         : { room: 'demo', invite: { name: 'Anthony', kind: 'human', status: 'active', invited_by: null, invited: now - 2 * D, joined: now - D }, purpose: null, members: [], opened: true });
     }
     // The stream answers with its frames and ends, as a dropped connection
-    // would. S.live holds the messages that go live (or are sent again,
-    // whole, under the same id) while it is open: each lands in S.msgs with
-    // its delivery number (S.dn) and goes out as a frame whose SSE id: line
-    // is that number, the way the server's does. S.streamRetry is the
-    // reconnect delay the stream hands out.
+    // would. Like the server's, it first replays every message delivered
+    // after its cursor (after=, or Last-Event-ID), in delivery order, so a
+    // reconnect from the wrong cursor shows up as a row delivered twice.
+    // S.live holds the messages that go live (or are sent again, whole,
+    // under the same id) while it is open: each lands in S.msgs with its
+    // delivery number (S.dn) and goes out as a frame whose SSE id: line is
+    // that number, the way the server's does. S.streamRetry is the
+    // reconnect delay the stream hands out; S.streamSent counts the message
+    // frames sent per id.
     if (p.endsWith('/stream')) {
+      const frame = (x) => { (S.streamSent = S.streamSent || {})[x.id] = (S.streamSent[x.id] || 0) + 1; return 'id: ' + delivery(S, x) + '\nevent: message\ndata: ' + JSON.stringify(x) + '\n\n'; };
+      const cur = req.headers()['last-event-id'] || u.searchParams.get('after');
+      const live = (S.live || []).splice(0);
       let frames = '';
-      for (const x of (S.live || []).splice(0)) {
+      if (cur && cur !== 'latest') {
+        const ids = new Set(live.map((x) => x.msg.id));
+        for (const x of S.msgs.filter((y) => !ids.has(y.id) && delivery(S, y) > +cur).sort((a, b) => delivery(S, a) - delivery(S, b))) frames += frame(x);
+      }
+      for (const x of live) {
         const i = S.msgs.findIndex((y) => y.id === x.msg.id);
         if (i >= 0) S.msgs[i] = x.msg; else S.msgs.push(x.msg);
         if (x.dn) (S.dn = S.dn || {})[x.msg.id] = x.dn;
-        frames += 'id: ' + delivery(S, x.msg) + '\nevent: message\ndata: ' + JSON.stringify(x.msg) + '\n\n';
+        frames += frame(x.msg);
       }
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: ' + (S.streamRetry || 600000) + '\n\nevent: state\ndata: ' + JSON.stringify({ type: 'state', room: 'demo', room_state: roomState(S) }) + '\n\n' + frames });
     }
@@ -618,19 +635,22 @@ async function setup(page, S, calls) {
     if (p.endsWith('/messages') && m === 'GET') (S.hits = S.hits || []).push('GET /messages');
     // A read with after= is a forward read, as on the server: the messages
     // whose delivery number is past it, in delivery order, a page at a
-    // time; last_id is the highest delivery number, or the page's last
-    // when has_more. A boot read (no after) is the whole fake room.
+    // time; has_more means the page is full (not that more rows exist: a
+    // page that ends exactly on the newest row still says has_more, and the
+    // reader asks once more); last_id is the page's last delivery number
+    // when has_more, else the highest. A boot read (no after) is the whole
+    // fake room.
     if (p.endsWith('/messages') && u.searchParams.has('after')) {
       const after = +u.searchParams.get('after') || 0;
       const lim = Math.min(500, +u.searchParams.get('limit') || 50);
       const live = S.msgs.filter((x) => delivery(S, x) > after).sort((a, b) => delivery(S, a) - delivery(S, b));
       const pageRows = live.slice(0, lim);
-      const hasMore = live.length > lim;
-      return J({ room: 'demo', messages: pageRows, last_id: hasMore ? delivery(S, pageRows[pageRows.length - 1]) : Math.max(after, ...S.msgs.map((x) => delivery(S, x))), has_more: hasMore, you: S.agentYou ? 'Probe' : (S.noYou ? undefined : 'Anthony'), you_kind: S.agentYou ? 'agent' : 'human' });
+      const hasMore = pageRows.length >= lim;
+      return J({ room: 'demo', messages: pageRows, last_id: hasMore ? Math.max(after, delivery(S, pageRows[pageRows.length - 1])) : Math.max(after, ...S.msgs.map((x) => delivery(S, x))), has_more: hasMore, you: S.agentYou ? 'Probe' : (S.noYou ? undefined : 'Anthony'), you_kind: S.agentYou ? 'agent' : 'human' });
     }
     if (p.endsWith('/messages')) return J(S.agentYou
-      ? { room: 'demo', messages: S.msgs, last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
-      : { room: 'demo', messages: S.msgs, last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
+      ? { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: 'Probe', you_kind: 'agent', agent_onboarding: 'You are invited to the Agent Chat room "demo" as the agent "Probe".\nConnect over MCP (Model Context Protocol), the room\'s agent surface:\n  Endpoint: POST https://chat.victorio.cloud/api/rooms/demo/mcp\n  Header: X-Invite-Token: tok_Probe\nSend initialize, then tools/list for the room\'s tools (messages, reactions, the board, games, voice, fetch, uploads). Call whoami and get_room_state first.', room_state: roomState(S) }
+      : { room: 'demo', messages: newest(S, u), last_id: Math.max(...S.msgs.map((x) => delivery(S, x))), you: S.noYou ? undefined : 'Anthony', you_kind: 'human', room_state: roomState(S) });
     if (p.endsWith('/constitution') && m === 'PUT') { S.hist.push(S.con); S.con = { version: S.con.version + 1, ts: clockNow(), editor: body.from, text: body.text }; return J({ constitution: S.con }, 201); }
     if (p.endsWith('/constitution')) return J({ constitution: S.con, history: S.hist.concat([S.con]) });
     let mm;

@@ -52,17 +52,43 @@ API: docs.txt MEDIA LINKS.
   invite header; an invalid or expired signature answers 403.
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
-  cache media. A stream reconnect does not renew them: it resumes after
+  cache media (`MEDIA_CACHE`: private, an hour, immutable). A message's
+  media URL also carries `v=`, the stored file's version (`md.at`, the
+  stamp every attach and finished upload writes), after `exp` and `sig`.
+  It is unsigned: the read checks only `exp` and `sig`, so ranges, the
+  page viewer and downloads take it as they are. Without it a file
+  replaced within the hour had a byte-identical URL and browsers kept
+  serving their cached copy of the old one, reloads included. Rows from
+  before `md.at` existed carry no `v=` until a new file lands. `withKinds`
+  reads the versions of a whole page in one query (`mediaVersions`); the
+  attachments listing selects `md.at` with its rows. Attach and finish
+  answers (built in the Worker by `mediaSigParams`) carry no `v=`: the
+  message frame that follows does. A stream reconnect does not renew them: it resumes after
   the last delivery number, so rows already on screen come again only
   when media landed on them. The web feed renews its own
-  (`features/feed/useMediaRenewal.ts`): every minute, and when the tab
-  comes back into view, it re-reads the rows whose links it got over 50
-  minutes ago (paging on by `last_id` until it has seen them all, since a
-  forward read is in delivery order and a row delivered late sits past
-  higher ids) and swaps only their media fields, keeping unchanged rows
-  and the scroll as they are; a playing clip takes its new link at the
-  next pause. A feed image, clip or document that fails to load re-reads
-  its row and retries once. The Media shelf re-reads its listing when
+  (`features/feed/useMediaRenewal.ts`): every minute, when the tab
+  comes back into view and when the browser comes back online, it checks
+  for a row whose links it got longer ago than `RENEW_AFTER`; if there
+  is one, it re-reads that row with every row past `BATCH_AFTER`, so a
+  room with steady media renews in batches rather than every minute
+  (each row has its own time), and swaps only their media fields,
+  keeping unchanged rows and the scroll as they are; a playing clip
+  takes its new link at the next pause. The re-read is the latest page
+  (the newest by id, how the feed loaded them), asking for as many rows
+  as the feed holds from the lowest wanted id up plus `SLACK`, at most
+  `PAGE`: one request for an ordinary renewal. Only rows older than that
+  page are walked for forward at full pages from just under their ids,
+  following `last_id` (a forward read is in delivery order, and a row
+  delivered late sits past every message sent while it uploaded), for at
+  most `MAX_PAGES`. A row the walk does not reach is not walked for again
+  for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
+  nothing while the browser says it is offline, and after a failed
+  re-read it waits twice as long as before, up to ten minutes
+  (`HOLD_MAX`; a re-read that gets through clears it): a longer wait
+  left download cards and page previews, which do not retry, on dead
+  links long after an outage ended. One re-read runs at a time:
+  others join it or queue behind it. A feed image, clip or document that
+  fails to load re-reads its row and retries once, wait or not. The Media shelf re-reads its listing when
   reopened after 30 s; pull-to-refresh reloads the page.
 - The HMAC uses a small plain-JS SHA-256 (`sha256Bytes`, `hmacSha256` in
   `worker/lib/crypto.ts`): message serialization is synchronous and
