@@ -12,7 +12,9 @@ import {
   EmptyState,
   Linkify,
   runWith,
+  StaleLine,
   useEditing,
+  useFresh,
 } from "./shared";
 import { Button } from "../../ui/Button";
 import { Card, CardActions, CardMeta, CardText, CardTitle } from "../../ui/Card";
@@ -120,9 +122,14 @@ export function ConstitutionView() {
 
 /* ---------- Decisions ---------- */
 
-function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, string> }) {
+// How a decision reads, for the stale-edit line.
+const decisionText = (d: Decision) => d.title + (d.note ? "\n\n" + d.note : "");
+
+function DecisionCard({ x: board, avatars }: { x: Decision; avatars: Record<string, string> }) {
   const api = useBoardApi();
   const ed = useEditing();
+  const fr = useFresh(board, "decision");
+  const x = fr.cur;
   const signers = x.signers || [];
   const mine = !!api.meName && signers.some((s) => same(s, api.meName));
   const active = (api.board?.mb.members || []).filter((m) => m.status === "active").map((m) => m.name);
@@ -133,6 +140,7 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
+          {fr.changed ? <StaleLine /> : null}
           <CardTitle>{x.title}</CardTitle>
           {x.note ? (
             <CardText>
@@ -168,9 +176,11 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
               variant={mine ? undefined : "primary"}
               label={mine ? "Remove my signature" : "Sign"}
               okText={mine ? "Signature removed" : "Signed"}
+              onStale={fr.onStale}
               fn={async (n) => {
                 const signed = signers.some((s) => same(s, n));
-                await api.api("/decisions/" + x.id, "POST", { from: n, action: signed ? "unsign" : "sign" });
+                await api.api("/decisions/" + x.id, "POST", { from: n, action: signed ? "unsign" : "sign", base_updated: x.updated });
+                fr.clear();
               }}
             />
             <span className="spacer"></span>
@@ -184,7 +194,15 @@ function DecisionCard({ x, avatars }: { x: Decision; avatars: Record<string, str
                     { key: "note", label: "Context or reasoning (optional)", value: x.note || "", multiline: true, rows: 3, max: 1000 },
                   ],
                   saveLabel: "Save changes",
-                  onSave: (n, v) => api.api("/decisions/" + x.id, "POST", { from: n, action: "edit", title: v.title, note: v.note }),
+                  base: x.updated,
+                  onStale: (e) => {
+                    const it = fr.take(e);
+                    return it && { updated: it.updated, theirs: decisionText(it) };
+                  },
+                  onSave: async (n, v, base) => {
+                    await api.api("/decisions/" + x.id, "POST", { from: n, action: "edit", title: v.title, note: v.note, base_updated: base });
+                    fr.clear();
+                  },
                 })
               }
             >
@@ -243,9 +261,29 @@ export function DecisionsView({ avatars }: { avatars: Record<string, string> }) 
 
 /* ---------- Questions ---------- */
 
-function QuestionCard({ x }: { x: Question }) {
+// How a question reads, for the stale-edit line: its text, and the
+// outcome when someone resolved it meanwhile.
+const questionText = (q: Question) =>
+  q.text +
+  (q.status === "resolved"
+    ? "\n\nResolved by " + (q.resolved_by || "someone") + (q.resolution ? ": " + q.resolution : "")
+    : q.status === "claimed" && q.claimed_by
+      ? "\n\nClaimed by " + q.claimed_by
+      : "");
+
+function QuestionCard({ x: board }: { x: Question }) {
   const api = useBoardApi();
   const ed = useEditing();
+  const fr = useFresh(board, "question");
+  const x = fr.cur;
+  // every action sends the copy's updated: a claim, resolve or reopen on
+  // a question someone has reworded since is refused, not applied to it
+  const act = (n: string, action: string) =>
+    api.api("/questions/" + x.id, "POST", { from: n, action, base_updated: x.updated }).then(() => fr.clear());
+  const stale = (e: unknown) => {
+    const it = fr.take(e);
+    return it && { updated: it.updated, theirs: questionText(it) };
+  };
   const resolved = x.status === "resolved";
   return (
     <Card className={resolved ? "subtle" : undefined}>
@@ -253,6 +291,7 @@ function QuestionCard({ x }: { x: Question }) {
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
+          {fr.changed ? <StaleLine /> : null}
           <CardTitle>
             <Linkify text={x.text} />
           </CardTitle>
@@ -275,10 +314,10 @@ function QuestionCard({ x }: { x: Question }) {
           ) : null}
           <CardActions>
             {x.status === "open" && (
-              <ActionButton size="sm" label="Claim" okText="Claimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "claim" })} />
+              <ActionButton size="sm" label="Claim" okText="Claimed" onStale={fr.onStale} fn={(n) => act(n, "claim")} />
             )}
             {x.status === "claimed" && (
-              <ActionButton size="sm" label="Unclaim" okText="Unclaimed" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "unclaim" })} />
+              <ActionButton size="sm" label="Unclaim" okText="Unclaimed" onStale={fr.onStale} fn={(n) => act(n, "unclaim")} />
             )}
             {!resolved ? (
               <Button
@@ -289,14 +328,19 @@ function QuestionCard({ x }: { x: Question }) {
                     fields: [{ key: "note", label: "How was it resolved? (optional)", value: "", multiline: true, rows: 3, max: 1000 }],
                     saveLabel: "Mark resolved",
                     context: x.text,
-                    onSave: (n, v) => api.api("/questions/" + x.id, "POST", { from: n, action: "resolve", note: v.note }),
+                    base: x.updated,
+                    onStale: stale,
+                    onSave: async (n, v, base) => {
+                      await api.api("/questions/" + x.id, "POST", { from: n, action: "resolve", note: v.note, base_updated: base });
+                      fr.clear();
+                    },
                   })
                 }
               >
                 Resolve
               </Button>
             ) : (
-              <ActionButton size="sm" label="Reopen" okText="Reopened" fn={(n) => api.api("/questions/" + x.id, "POST", { from: n, action: "reopen" })} />
+              <ActionButton size="sm" label="Reopen" okText="Reopened" onStale={fr.onStale} fn={(n) => act(n, "reopen")} />
             )}
             <span className="spacer"></span>
             <Button
@@ -306,7 +350,12 @@ function QuestionCard({ x }: { x: Question }) {
                 ed.setEdit({
                   fields: [{ key: "text", label: "Question", value: x.text, multiline: true, rows: 3, max: 500 }],
                   saveLabel: "Save changes",
-                  onSave: (n, v) => api.api("/questions/" + x.id, "POST", { from: n, action: "edit", text: v.text }),
+                  base: x.updated,
+                  onStale: stale,
+                  onSave: async (n, v, base) => {
+                    await api.api("/questions/" + x.id, "POST", { from: n, action: "edit", text: v.text, base_updated: base });
+                    fr.clear();
+                  },
                 })
               }
             >
@@ -386,15 +435,25 @@ function whenLabel(date: string): { text: string; rel: string; tone: PillTone } 
   return { text: txt, rel: "In " + n + " days", tone: n <= 7 ? "warn" : "muted" };
 }
 
-function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
+// How a stake reads, for the stale-edit line.
+const stakeText = (k: Stake) =>
+  k.title + (k.date ? " (" + k.date + ")" : "") + (k.note ? "\n\n" + k.note : "") + (k.done_by ? "\n\nDone by " + k.done_by : "");
+
+function StakeCard({ x: board, isDone: listedDone }: { x: Stake; isDone: boolean }) {
   const api = useBoardApi();
   const ed = useEditing();
+  const fr = useFresh(board, "stake");
+  const x = fr.cur;
+  // a refused write may bring back a stake someone closed or reopened
+  // meanwhile: the card follows it until the board reload moves it
+  const isDone = x === board ? listedDone : !!x.done_by;
   return (
     <Card className={isDone ? "subtle" : undefined}>
       {ed.edit ? (
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
+          {fr.changed ? <StaleLine /> : null}
           <CardTitle>{x.title}</CardTitle>
           {x.note ? (
             <CardText>
@@ -423,7 +482,10 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
               size="sm"
               label={isDone ? "Reopen" : "Mark done"}
               okText={isDone ? "Reopened" : "Marked done"}
-              fn={(n) => api.api("/stakes/" + x.id, "POST", { from: n, action: isDone ? "reopen" : "done" })}
+              onStale={fr.onStale}
+              fn={(n) =>
+                api.api("/stakes/" + x.id, "POST", { from: n, action: isDone ? "reopen" : "done", base_updated: x.updated }).then(() => fr.clear())
+              }
             />
             <span className="spacer"></span>
             <Button
@@ -437,8 +499,15 @@ function StakeCard({ x, isDone }: { x: Stake; isDone: boolean }) {
                     { key: "note", label: "Note (optional)", value: x.note || "", multiline: true, rows: 3, max: 1000 },
                   ],
                   saveLabel: "Save changes",
-                  onSave: (n, v) =>
-                    api.api("/stakes/" + x.id, "POST", { from: n, action: "edit", title: v.title, date: (v.date || "").trim(), note: v.note }),
+                  base: x.updated,
+                  onStale: (e) => {
+                    const it = fr.take(e);
+                    return it && { updated: it.updated, theirs: stakeText(it) };
+                  },
+                  onSave: async (n, v, base) => {
+                    await api.api("/stakes/" + x.id, "POST", { from: n, action: "edit", title: v.title, date: (v.date || "").trim(), note: v.note, base_updated: base });
+                    fr.clear();
+                  },
                 })
               }
             >
@@ -535,9 +604,11 @@ export function StakesView() {
 
 /* ---------- Memory (digests) ---------- */
 
-function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string> }) {
+function DigestCard({ x: board, avatars }: { x: Digest; avatars: Record<string, string> }) {
   const api = useBoardApi();
   const ed = useEditing();
+  const fr = useFresh(board, "digest");
+  const x = fr.cur;
   const d = parseDay(x.day);
   return (
     <Card>
@@ -545,6 +616,7 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
         <EditForm edit={ed.edit} close={ed.close} />
       ) : (
         <>
+          {fr.changed ? <StaleLine /> : null}
           <CardMeta style={{ marginTop: 0, marginBottom: 8 }}>
             <span className="chip">
               <Avatar name={x.author} ctx={{ avatars, invite: api.invite, onAvatar: api.openAvatar }} />
@@ -564,7 +636,15 @@ function DigestCard({ x, avatars }: { x: Digest; avatars: Record<string, string>
                 ed.setEdit({
                   fields: [{ key: "text", label: "Digest", value: x.text, multiline: true, rows: 8, max: 8000 }],
                   saveLabel: "Save changes",
-                  onSave: (n, v) => api.api("/digests/" + x.id, "POST", { from: n, text: v.text }),
+                  base: x.updated,
+                  onStale: (e) => {
+                    const it = fr.take(e);
+                    return it && { updated: it.updated, theirs: it.text };
+                  },
+                  onSave: async (n, v, base) => {
+                    await api.api("/digests/" + x.id, "POST", { from: n, text: v.text, base_updated: base });
+                    fr.clear();
+                  },
                 })
               }
             >

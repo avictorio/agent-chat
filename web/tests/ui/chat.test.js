@@ -347,6 +347,94 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       return { text, titles: titles.length };
     });
   }
+  // Board writes from a stale copy. Every edit form and card action
+  // sends base_updated, the updated of the copy on screen; the server
+  // (staleRefusing, below, plays its part) refuses one whose item someone
+  // else changed first with 409 and the item as it is now. Before, the
+  // app sent no base, so an edit form opened before another member's
+  // edit saved over it unseen.
+  const staleRefusing = async (page, S, calls) => {
+    await page.route(/\/api\/rooms\/demo\/(decisions|questions)\/(\d+)$/, (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      const [, kind, id] = req.url().match(/\/(decisions|questions)\/(\d+)$/);
+      const body = JSON.parse(req.postData() || '{}');
+      const item = (kind === 'decisions' ? S.dc : S.q.concat(S.qr)).find((x) => x.id === +id);
+      if (item && body.base_updated !== undefined && body.base_updated !== item.updated) {
+        const key = kind === 'decisions' ? 'decision' : 'question';
+        calls.push('POST ' + new URL(req.url()).pathname + ' ' + req.postData());
+        return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'That ' + key + ' changed since you read it.', [key]: item }) });
+      }
+      // a write moves updated, a signature does not (as the server)
+      if (item && !(kind === 'decisions' && body.action !== 'edit')) item.updated += 1;
+      return route.fallback();
+    });
+  };
+  for (const [label, o] of [['board-stale-edit', {}], ['board-stale-edit-phone', { w: 390, h: 844, touch: true }]]) {
+    await run(label, o, async (page, S, calls) => {
+      await staleRefusing(page, S, calls);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="decisions"]'); await settle(page);
+      const card = '#dcList .card:has-text("Huaca Pucllana")';
+      await page.click(card + ' button:has-text("Edit")'); await settle(page);
+      // an open form shows its text in fields, which has-text does not read
+      const form = '#dcList .card:has(form.edit)';
+      await page.fill(form + ' textarea', 'Then a ceviche lunch in Miraflores.');
+      // meanwhile Henry rewrites the note
+      const base = S.dc[0].updated;
+      S.dc[0].note = 'Henry: dinner moved to Barranco at 8.'; S.dc[0].updated = base + 50;
+      const from = calls.length;
+      await page.click(form + ' button:has-text("Save changes")');
+      await page.waitForSelector(form + ' .stale-note', { timeout: 5000 });
+      await settle(page);
+      const first = calls.slice(from).find((c) => /^POST .*\/decisions\/1 /.test(c)) || '';
+      must(first.includes('"base_updated":' + base), 'the edit sends the copy\'s updated: ' + first);
+      const line = (await page.textContent(form + ' .stale-note')).replace(/\s+/g, ' ');
+      must(/changed this while you were editing/.test(line) && line.includes('Henry: dinner moved to Barranco at 8.'), 'the form says so and shows their text: ' + line);
+      const typed = await page.$eval(form + ' textarea', (t) => t.value);
+      must(typed === 'Then a ceviche lunch in Miraflores.', 'the typed text is kept: ' + typed);
+      must(S.dc[0].note === 'Henry: dinner moved to Barranco at 8.', 'nothing was written over theirs');
+      await shot(page, label + '.png');
+      // saving again goes on top of theirs, from its updated
+      const again = calls.length;
+      await page.click(form + ' button:has-text("Save changes")');
+      await page.waitForSelector('#dcList form.edit', { state: 'detached', timeout: 5000 });
+      await settle(page);
+      const second = calls.slice(again).find((c) => /^POST .*\/decisions\/1 /.test(c)) || '';
+      must(second.includes('"base_updated":' + (base + 50)), 'the second save sends the new base: ' + second);
+      const note = await page.textContent(card + ' .card-text');
+      must(note === 'Then a ceviche lunch in Miraflores.' && S.dc[0].note === note, 'the second save went through: ' + note);
+      return { line, typed, note };
+    });
+  }
+  // A sign from a stale copy: the decision was reworded after the card was
+  // drawn. The sign is refused, nothing is signed, and the card shows the
+  // decision as it is now with a line saying why; signing again then works.
+  for (const [label, o] of [['board-stale-sign', {}], ['board-stale-sign-phone', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, o, async (page, S, calls) => {
+      await staleRefusing(page, S, calls);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="decisions"]'); await settle(page);
+      const card = '#dcList .card:has-text("Digests rotate")';
+      const base = S.dc[1].updated;
+      S.dc[1].title = 'Digests rotate by who posted last'; S.dc[1].note = 'Changed after the vote.'; S.dc[1].updated = base + 70;
+      const from = calls.length;
+      await page.click(card + ' button:has-text("Sign")');
+      await page.waitForSelector('#dcList .card .stale-note', { timeout: 5000 });
+      await settle(page);
+      const post = calls.slice(from).find((c) => /^POST .*\/decisions\/2 /.test(c)) || '';
+      must(post.includes('"base_updated":' + base), 'the sign sends the copy\'s updated: ' + post);
+      must(S.dc[1].signers.length === 0, 'nothing was signed: ' + JSON.stringify(S.dc[1].signers));
+      const fresh = page.locator('#dcList .card:has(.stale-note)');
+      const title = await fresh.locator('.card-title').textContent();
+      must(title === 'Digests rotate by who posted last', 'the card shows the decision as it is now: ' + title);
+      await shot(page, label + '.png');
+      await fresh.locator('button:has-text("Sign")').click(); await settle(page);
+      must(S.dc[1].signers.includes('Anthony'), 'signing the fresh card goes through');
+      must(!(await page.locator('#dcList .stale-note').count()), 'the line clears once a write goes through');
+      return { title, signers: S.dc[1].signers };
+    });
+  }
   await run('reactions', {}, async (page, S, calls) => {
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));

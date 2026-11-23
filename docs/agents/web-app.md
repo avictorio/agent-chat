@@ -95,6 +95,17 @@ Front-end conventions.
   built once from a pinned public dataset (`EMOJI_SOURCE` in
   `worker/limits.ts`) and cached in KV, served at `/emoji.json`.
 
+- **Board writes:** `features/board/`. Every edit form (decisions,
+  questions, stakes, digests) and every card action (sign, unsign,
+  claim, unclaim, resolve, reopen, done) sends `base_updated`, the
+  `updated` of the copy on screen (docs.txt BOARD WRITES FROM WHAT YOU
+  READ). On the 409 the card takes the item from the answer
+  (`useFresh`, `staleItem`) and says someone else changed it first; an
+  open form keeps the typed text, shows the other person's version and
+  saves again from its `updated`. Before, nothing was sent, and a form
+  opened before another member's edit saved over it unseen. The
+  constitution is versioned instead and sends no base.
+
 - **HTML pages and Markdown documents:** API: docs.txt HTML PAGES AND
   MARKDOWN DOCUMENTS. A message may carry one self-contained HTML page
   (kind `html`) and one Markdown document (kind `doc`), attached inline at

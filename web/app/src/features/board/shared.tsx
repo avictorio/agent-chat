@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { BoardData, RoomState } from "@chat/contract";
+import { ApiError, type BoardData, type RoomState } from "@chat/contract";
 import { toast } from "../../lib/index";
 import { linkLength } from "../feed/mdlines";
 import { useBoardApi } from "../room/ctx";
@@ -34,12 +34,16 @@ export function errText(e: unknown): string {
 
 // Run a board action: gate on a name, disable the button, toast the
 // outcome, reload the board. An fn that resolves to exactly false
-// was called off (a cancelled confirm): no toast, no reload.
+// was called off (a cancelled confirm): no toast, no reload. onStale
+// takes a refusal first: when it returns true the card has already said
+// what happened (a stale write), so no error toast, and the board
+// reloads to the item as it is now.
 export async function runWith(
   api: BoardApi,
   btn: HTMLButtonElement | null,
   fn: (name: string) => Promise<unknown>,
-  okText?: string
+  okText?: string,
+  onStale?: (e: unknown) => boolean
 ): Promise<void> {
   const n = api.who();
   if (!n) return;
@@ -49,7 +53,8 @@ export async function runWith(
     if (okText) toast(okText);
     await api.loadAll();
   } catch (e) {
-    toast(errText(e), true);
+    if (onStale && onStale(e)) void api.loadAll();
+    else toast(errText(e), true);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -59,16 +64,18 @@ export function ActionButton({
   label,
   fn,
   okText,
+  onStale,
   ...look
 }: {
   label: string;
   fn: (name: string) => Promise<unknown>;
   okText?: string;
+  onStale?: (e: unknown) => boolean;
 } & Pick<ButtonProps, "variant" | "size" | "danger">) {
   const api = useBoardApi();
   const ref = useRef<HTMLButtonElement | null>(null);
   return (
-    <Button type="button" {...look} ref={ref} onClick={() => void runWith(api, ref.current, fn, okText)}>
+    <Button type="button" {...look} ref={ref} onClick={() => void runWith(api, ref.current, fn, okText, onStale)}>
       {label}
     </Button>
   );
@@ -145,6 +152,60 @@ export function BoardPending() {
   );
 }
 
+/* ---------- writes from the copy on screen (base_updated) ---------- */
+
+export type BoardKey = "decision" | "question" | "stake" | "digest";
+type Stamped = { id: number; updated?: number };
+
+/** The item a refused write handed back as it is now: every board write
+ *  sends the updated of the copy on screen as base_updated, and when
+ *  someone else changed the item first the answer is 409 with it under
+ *  its kind's key. null for any other failure. */
+export function staleItem<T extends Stamped>(e: unknown, key: BoardKey): T | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const b = e.body as Record<string, unknown> | null | undefined;
+  const it = b && typeof b === "object" ? (b[key] as T | undefined) : undefined;
+  return it && typeof it === "object" && typeof it.updated === "number" ? it : null;
+}
+
+/** A card's item, newer than the board's copy when a refused write
+ *  brought it back first. Before, every form and button wrote from the
+ *  copy the board showed with no check, so a member who opened an edit
+ *  before someone else's edit saved over it unseen (and a sign went on
+ *  a text the signer never read). Now the server refuses the stale write
+ *  and the card shows what it refused it for; the board reload that
+ *  follows catches up, and its newer copy wins again. */
+export function useFresh<T extends Stamped>(x: T, key: BoardKey) {
+  const [over, setOver] = useState<T | null>(null);
+  const [changed, setChanged] = useState(false);
+  const cur = over && over.id === x.id && (over.updated ?? 0) > (x.updated ?? 0) ? over : x;
+  const take = (e: unknown): T | null => {
+    const it = staleItem<T>(e, key);
+    if (!it) return null;
+    setOver(it);
+    setChanged(true);
+    return it;
+  };
+  return {
+    cur,
+    /** the line on the card: the last write was refused as stale */
+    changed,
+    clear: () => setChanged(false),
+    /** for ActionButton's onStale */
+    onStale: (e: unknown) => !!take(e),
+    take,
+  };
+}
+
+/** The card's line after a refused action. */
+export function StaleLine() {
+  return (
+    <div className="stale-note" role="status">
+      Someone else changed this first, so that did not go through. This is how it reads now.
+    </div>
+  );
+}
+
 /* ---------- inline editing (startEdit) ---------- */
 
 export interface FieldSpec {
@@ -161,7 +222,12 @@ interface EditState {
   fields: FieldSpec[];
   saveLabel: string;
   context?: string;
-  onSave: (name: string, vals: Record<string, string>) => Promise<unknown>;
+  /** the updated of the copy the form was opened on, sent as base_updated */
+  base?: number;
+  /** A refusal because someone else changed the item first: its new
+   *  updated and how it reads now (null for any other failure). */
+  onStale?: (e: unknown) => { updated?: number; theirs: string } | null;
+  onSave: (name: string, vals: Record<string, string>, base: number | undefined) => Promise<unknown>;
 }
 
 export function EditForm({
@@ -178,6 +244,11 @@ export function EditForm({
     return v;
   });
   const [busy, setBusy] = useState(false);
+  // The base moves to the item a stale save brought back, and the form
+  // keeps what was typed: saving again puts it on top of the other
+  // person's change, which the form shows, instead of losing either.
+  const [base, setBase] = useState(edit.base);
+  const [theirs, setTheirs] = useState<string | null>(null);
   const firstRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     firstRef.current?.focus();
@@ -191,18 +262,30 @@ export function EditForm({
     if (!n) return;
     setBusy(true);
     try {
-      await edit.onSave(n, vals);
+      await edit.onSave(n, vals, base);
       toast("Saved");
       await api.loadAll();
       close();
     } catch (err) {
-      toast(errText(err), true);
+      const s = edit.onStale ? edit.onStale(err) : null;
+      if (s) {
+        setBase(s.updated);
+        setTheirs(s.theirs);
+        void api.loadAll();
+      } else toast(errText(err), true);
       setBusy(false);
     }
   };
   return (
     <form className="edit" onSubmit={submit}>
       {edit.context ? <CardTitle>{edit.context}</CardTitle> : null}
+      {theirs !== null ? (
+        <div className="stale-note" role="status">
+          <p>Someone else changed this while you were editing. It now reads:</p>
+          <div className="stale-theirs">{theirs}</div>
+          <p>Your text is still in the form. Save again to put it in place of theirs, or cancel to keep theirs.</p>
+        </div>
+      ) : null}
       {edit.fields.map((f, i) =>
         f.multiline ? (
           <label key={f.key} className="field">
