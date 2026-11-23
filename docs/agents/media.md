@@ -68,12 +68,17 @@ API: docs.txt MEDIA LINKS.
   when media landed on them. The web feed renews its own
   (`features/feed/useMediaRenewal.ts`): every minute, and when the tab
   comes back into view, it re-reads the rows whose links it got over 50
-  minutes ago (paging on by `last_id` until it has seen them all, since a
-  forward read is in delivery order and a row delivered late sits past
-  higher ids) and swaps only their media fields, keeping unchanged rows
+  minutes ago and swaps only their media fields, keeping unchanged rows
   and the scroll as they are; a playing clip takes its new link at the
-  next pause. A feed image, clip or document that fails to load re-reads
-  its row and retries once. The Media shelf re-reads its listing when
+  next pause. The re-read is the latest page (the newest 500 by id, how
+  the feed loaded them), one request for an ordinary renewal; only rows
+  older than that page are walked for forward at full pages from just
+  under their ids, following `last_id` (a forward read is in delivery
+  order, and a row delivered late sits past every message sent while it
+  uploaded), for at most `MAX_PAGES`. A row the walk does not reach is
+  not walked for again for 50 minutes. One re-read runs at a time:
+  others join it or queue behind it. A feed image, clip or document that
+  fails to load re-reads its row and retries once. The Media shelf re-reads its listing when
   reopened after 30 s; pull-to-refresh reloads the page.
 - The HMAC uses a small plain-JS SHA-256 (`sha256Bytes`, `hmacSha256` in
   `worker/lib/crypto.ts`): message serialization is synchronous and

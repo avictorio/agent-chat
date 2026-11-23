@@ -484,7 +484,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
   // later the images, clips, documents and downloads answered 403.
   for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
     await run('media-links-renew' + tag, { state: { artifacts: true, files: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S, calls) => {
-      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c));
+      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?(after=\d+&)?limit=500$/.test(c));
       const fresh = (u) => u.split('?')[0] + '?exp=2&sig=fresh';
       const img = await page.$('.msg[data-id="8"] img.msg-img');
       const plain = await page.$('.msg[data-id="2"]');
@@ -509,7 +509,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
         frame: await page.$eval('.msg[data-id="8"] .art-frame', (f) => f.getAttribute('src')),
         scroll: [top0, await page.$eval('#list', (l) => l.scrollTop)],
       };
-      must(out.reads.length === 1 && /\?after=7&limit=54$/.test(out.reads[0]), 'one read, from the first media row to the last: ' + JSON.stringify(out.reads));
+      must(out.reads.length === 1 && /\?limit=500$/.test(out.reads[0]), 'one read, of the latest page: ' + JSON.stringify(out.reads));
       must(out.sameImg && out.plainKept, 'the rows stay mounted: ' + JSON.stringify(out));
       must(/sig=fresh/.test(out.file) && /sig=fresh/.test(out.frame), 'the download and the page preview carry the new links: ' + JSON.stringify(out));
       must(Math.abs(out.scroll[0] - out.scroll[1]) < 2, 'the scroll position holds: ' + JSON.stringify(out.scroll));
@@ -557,62 +557,159 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await settle(page);
     await page.waitForTimeout(300);
     await settle(page);
-    const out = { hits, reads: calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c)) };
+    const out = { hits, reads: calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?(after=\d+&)?limit=500$/.test(c)) };
     must(out.hits.image.join() === 'dead,live' && out.hits.doc.join() === 'dead,live', 'each retried once, with the new link: ' + JSON.stringify(out.hits));
     must(out.hits.gone === 2, 'a link that keeps failing is retried once, not in a loop: ' + JSON.stringify(out.hits));
     must(out.reads.length >= 1 && out.reads.length <= 3, 'failures share re-reads: ' + JSON.stringify(out.reads));
     return out;
   });
 
-  // A forward read comes back in delivery order: a row published late, or
-  // sent again when its media landed, sits after higher ids. Here row 8
-  // went live after sixty newer rows. Its link dies; the re-read follows
-  // the cursor past them and finds it, and so does the hourly renewal,
-  // never sending the same query twice. Before, a page was taken to cover
-  // every id up to its last row's, so row 8 never got a new link.
+  // The renewal's reads: every GET /messages but the boot load (limit=200)
+  // and the stream's recheck (limit=1).
+  const renewReads = (calls, from) => calls.slice(from || 0).filter((c) => /^GET \/api\/rooms\/demo\/messages\?/.test(c) && !/[?&]limit=(1|200)$/.test(c));
+  // Moves the page's clock on by ms from the real time (not stacked).
+  const skew = (page, ms) => page.evaluate((d) => { if (!window.__realNow) window.__realNow = Date.now; Date.now = () => window.__realNow.call(Date) + d; }, ms);
+  const nudge = (page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  // n text rows from id 200 on, newer than everything in the fixture
+  const chatter = (S, n) => { const base = S.msgs[S.msgs.length - 1].ts; for (let i = 0; i < n; i++) S.msgs.push({ id: 200 + i, ts: base + 1000 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Catching up, line ' + (i + 1) + '.' }); };
+
+  // A forward read comes back in delivery order: a row whose upload
+  // finished in a busy room goes live after every message sent meanwhile.
+  // Here row 8 goes live after 800 newer rows, so it is neither among the
+  // newest 500 by id nor near its id in delivery order. Its link dies; the
+  // re-read walks on from just under its id at full pages and finds it in
+  // three requests, and so does the hourly renewal. Before, the walk shrank
+  // to pages of 50 past the highest wanted id, never reached it in its ten
+  // pages, and sent those ten again every minute.
   for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
     await run('media-links-late-row' + tag, { state: { artifacts: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag, allowConsole: /status of 403/ }, async (page, S, calls) => {
-      const base = S.msgs[S.msgs.length - 1].ts;
-      for (let i = 0; i < 60; i++) S.msgs.push({ id: 200 + i, ts: base + 1000 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Catching up, line ' + (i + 1) + '.' });
-      S.dn = { 8: 300 };
+      chatter(S, 800);
       const m8 = S.msgs.find((m) => m.id === 8);
-      m8.image = Object.assign({}, m8.image, { url: m8.image.url + '?exp=1&sig=dead' });
+      // the boot load (the newest 200) does not have it; it goes live now
+      S.live = [{ msg: Object.assign({}, m8, { image: Object.assign({}, m8.image, { url: m8.image.url + '?exp=1&sig=dead' }) }), dn: 1000 }];
       const sigs = [];
-      const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c));
       await page.route(/\/messages\/8\/image\?/, (route) => {
         const sig = new URL(route.request().url()).searchParams.get('sig');
         sigs.push(sig);
         if (sig !== 'dead') return route.fallback();
         // the server signs anew from here on
-        m8.image = Object.assign({}, m8.image, { url: m8.image.url.replace('sig=dead', 'sig=live') });
+        const row = S.msgs.find((m) => m.id === 8);
+        row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=dead', 'sig=live') });
         return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
       });
+      const from = calls.length;
       await page.reload();
       await settle(page);
+      await page.waitForSelector('.msg[data-id="8"] img.msg-img', { state: 'attached', timeout: 5000 });
       await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'center' }));
       await page.waitForFunction(() => /sig=live/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 8000 })
-        .catch(() => { throw new Error('the late row\'s image never got its new link: ' + JSON.stringify({ sigs, reads: reads() })); });
-      // the lazy image loads once it is in view
+        .catch(() => { throw new Error('the late row\'s image never got its new link: ' + JSON.stringify({ sigs, reads: renewReads(calls, from) })); });
       await page.evaluate(() => document.querySelector('.msg[data-id="8"] img.msg-img').scrollIntoView({ block: 'center' }));
       await page.waitForFunction(() => { const i = document.querySelector('.msg[data-id="8"] img.msg-img'); return i.complete && i.naturalWidth > 0; }, null, { timeout: 5000 });
       await settle(page);
-      const first = reads();
+      const first = renewReads(calls, from);
       must(sigs.join() === 'dead,live', 'the image is retried once, with the new link: ' + JSON.stringify(sigs));
-      must(new Set(first).size === first.length && first.length >= 2, 'the re-read pages on past the newer rows, never repeating a query: ' + JSON.stringify(first));
+      must(first.length <= 3 && new Set(first).size === first.length, 'the late row is reached in at most three reads: ' + JSON.stringify(first));
       await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'start' }));
       await shot(page, 'media-links-late-row' + tag + '.png');
       // an hour on, the renewal finds the late row the same way
-      m8.image = Object.assign({}, m8.image, { url: m8.image.url.replace('sig=live', 'sig=fresh') });
-      await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 51 * 60e3; });
-      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      const row = S.msgs.find((m) => m.id === 8);
+      row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=live', 'sig=fresh') });
+      const mark = calls.length;
+      await skew(page, 51 * 60e3);
+      await nudge(page);
       await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
-        .catch(() => { throw new Error('the renewal missed the late row: ' + JSON.stringify(reads())); });
+        .catch(() => { throw new Error('the renewal missed the late row: ' + JSON.stringify(renewReads(calls, mark))); });
       await settle(page);
-      const later = reads().slice(first.length);
-      must(later.length >= 1 && new Set(later).size === later.length, 'the renewal never repeats a query: ' + JSON.stringify(later));
+      const later = renewReads(calls, mark);
+      must(later.length <= 3 && new Set(later).size === later.length, 'the renewal reaches it in at most three reads: ' + JSON.stringify(later));
       return { first, later };
     });
   }
+
+  // A row further on than a walk goes (here 2,100 rows were delivered
+  // between its id and its delivery number) costs one bounded walk, and
+  // the next minute's check sends nothing. Before, the walk ran out of
+  // pages, left the row as wanted, and the same requests went out every
+  // minute for as long as the tab was open.
+  await run('media-links-unreachable', { state: { artifacts: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    chatter(S, 2100);
+    const m8 = S.msgs.find((m) => m.id === 8);
+    S.live = [{ msg: m8, dn: 2400 }];
+    await page.reload();
+    await settle(page);
+    await page.waitForSelector('.msg[data-id="8"]', { timeout: 5000 });
+    const from = calls.length;
+    await skew(page, 51 * 60e3);
+    await nudge(page);
+    for (let i = 0; i < 50 && renewReads(calls, from).length < 5; i++) await page.waitForTimeout(100);
+    await settle(page);
+    const walk = renewReads(calls, from);
+    const mark = calls.length;
+    await skew(page, 52 * 60e3);
+    await nudge(page);
+    await page.waitForTimeout(800);
+    await skew(page, 53 * 60e3);
+    await nudge(page);
+    await page.waitForTimeout(800);
+    const again = renewReads(calls, mark);
+    must(again.length === 0, 'the next minutes send nothing: ' + JSON.stringify(again));
+    must(walk.length >= 2 && walk.length <= 5, 'one bounded walk: ' + JSON.stringify(walk));
+    return { walk, again };
+  });
+
+  // Images that fail while a re-read is under way wait for it, or join it:
+  // one read at a time, and each image ends with its new link. Before, a
+  // failed image started its own walk over the same pages beside the one
+  // already running.
+  await run('media-links-error-burst', { state: { artifacts: true }, hash: '#invite=tok_Anthony', allowConsole: /status of 403/ }, async (page, S, calls) => {
+    const base = S.msgs[S.msgs.length - 1].ts;
+    const pics = [300, 340];
+    for (let i = 0; i < 41; i++) {
+      const id = 300 + i;
+      S.msgs.push(pics.includes(id)
+        ? { id, ts: base + 1000 * (i + 1), from: 'Ada', kind: 'agent', text: 'Photo ' + id + '.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/' + id + '/image?exp=1&sig=dead' } }
+        : { id, ts: base + 1000 * (i + 1), from: 'Henry', kind: 'agent', text: 'Line ' + id + '.' });
+    }
+    let inflight = 0;
+    let most = 0;
+    await page.route(/\/messages\?/, async (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/api/rooms/demo/messages' || /^(1|200)$/.test(u.searchParams.get('limit') || '')) return route.fallback();
+      inflight++;
+      most = Math.max(most, inflight);
+      await new Promise((r) => setTimeout(r, 700));
+      inflight--;
+      return route.fallback();
+    });
+    await page.route(/\/messages\/(300|340)\/image\?/, (route) => {
+      const u = new URL(route.request().url());
+      const id = +u.pathname.split('/')[5];
+      if (u.searchParams.get('sig') !== 'dead') return route.fulfill({ status: 200, contentType: 'image/png', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/photo.png') });
+      const row = S.msgs.find((m) => m.id === id);
+      row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=dead', 'sig=live') });
+      return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
+    });
+    const from = calls.length;
+    await page.reload();
+    await page.waitForSelector('.msg[data-id="340"] img.msg-img', { state: 'attached', timeout: 5000 });
+    // the newest photo failed at the bottom and its re-read is under way;
+    // the older one, scrolled into view now, fails during it
+    const busy = () => inflight > 0;
+    for (let i = 0; i < 100 && !busy(); i++) await page.waitForTimeout(50);
+    must(inflight === 1, 'the newest photo\'s re-read is under way: ' + JSON.stringify({ imgs: calls.slice(from).filter((c) => /\/image/.test(c)), reads: renewReads(calls, from) }));
+    await page.evaluate(() => document.querySelector('.msg[data-id="300"]').scrollIntoView({ block: 'center' }));
+    for (const id of pics) {
+      await page.evaluate((i) => document.querySelector('.msg[data-id="' + i + '"]').scrollIntoView({ block: 'center' }), id);
+      await page.waitForFunction((i) => /sig=live/.test(document.querySelector('.msg[data-id="' + i + '"] img.msg-img').getAttribute('src')), id, { timeout: 8000 })
+        .catch(() => { throw new Error('photo ' + id + ' never got its new link: ' + JSON.stringify(renewReads(calls, from))); });
+    }
+    await settle(page);
+    const reads = renewReads(calls, from);
+    must(most === 1, 'one re-read at a time: ' + JSON.stringify({ most, reads }));
+    must(reads.length <= 2, 'the failures share at most two reads: ' + JSON.stringify(reads));
+    return { most, reads };
+  });
 
   done('people-media');
 })();
