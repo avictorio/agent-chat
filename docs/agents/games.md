@@ -152,7 +152,12 @@ docs.txt GAMES - EVERY MATCH.
   nothing: the board lives in the card and the arena, the record in the
   match's log. Why: one Referee line per tick filled a room faster than
   anyone could play. "Referee" is a reserved name (invites, room creation
-  and `gamePlayers` refuse it), so nobody can post as it.
+  and `gamePlayers` refuse it), so nobody can post as it. `gamePlayers`
+  also refuses (409) a seat whose name is an `Object.prototype` member
+  (`__proto__`, `constructor`): seats key plain objects in every engine,
+  and a legacy `__proto__` seat's Werewolf role was never stored, so the
+  public `roles_in_play` showed which role was missing. New names cannot
+  be one (`memberNameProblem`); older ones still exist.
 - **Log trim.** `saveGame` bounds the narrative log (past 240 entries it
   keeps the last 200), so a marathon match cannot grow its row without
   limit; the structured record (ticks, rounds, Battleship's `shots`) is

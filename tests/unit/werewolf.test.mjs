@@ -33,3 +33,27 @@ test("every game starts at the largest table its rules allow, one colour per sea
   const g9 = (await ww.h.room.gameState(ww.id, null, R)).game;
   assert.deepEqual(g9.roles_in_play, { werewolf: 2, seer: 1, guardian: 1, villager: 5 });
 });
+
+test("a legacy member named __proto__ cannot take a seat, so no role goes missing", async () => {
+  // new names cannot be __proto__ (memberNameProblem), older ones can:
+  // the harness adds members straight to the table
+  const h = makeRoom();
+  const names = ["__proto__", "Ann", "Bob", "Cat", "Dan"];
+  for (const n of names) h.member(n);
+  for (const [game, seats] of [["werewolf", names], ["duel", ["Ann", "__PROTO__"]], ["trust", ["Ann", "constructor", "Bob"]]]) {
+    if (seats.includes("constructor")) h.member("constructor");
+    const c = await h.room.createGame("Ann", seats, { game }, R);
+    assert.equal(c.status, 409, game + ": " + JSON.stringify(c));
+    assert.match(c.error, /reserved/);
+  }
+  assert.equal(h.room.sql.exec("SELECT COUNT(*) AS n FROM gm").one().n, 0, "nothing was created");
+  const twice = await h.room.createGame("Ann", ["Ann", "Bob", "Cat", "Dan", "Dan"], { game: "werewolf" }, R);
+  assert.equal(twice.status, 400, "the other refusals are unchanged (Dan listed twice)");
+  // and were such a seat let through, every role is still stored
+  h.room.gamePlayers = () => ({ names: names.slice() });
+  const c = await h.room.createGame("Ann", names, { game: "werewolf" }, R);
+  assert.equal(c.status, 201, c.error);
+  const st = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", c.game.id).one().state);
+  assert.deepEqual(Object.keys(st.roles).sort(), names.slice().sort());
+  assert.deepEqual(Object.values(c.game.roles_in_play).reduce((a, b) => a + b, 0), 5);
+});

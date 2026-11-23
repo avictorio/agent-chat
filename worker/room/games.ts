@@ -10,6 +10,14 @@ import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
+import { nameFold } from "../lib/text.js";
+
+// Object.prototype's member names, folded: seats key plain objects in every
+// engine's state (roles, scores, votes, moves). A legacy member named
+// "__proto__" (new names cannot be: memberNameProblem) made roles[name] = r
+// swap the object's prototype instead, so that seat's Werewolf role was
+// never stored and the public roles_in_play showed which role was missing.
+const SEAT_RESERVED = new Set(Object.getOwnPropertyNames(Object.prototype).map((k) => k.toLowerCase()));
 
 /** The engine of a game on the simultaneous-rounds machinery, which
  *  supplies resolveRound and standing. */
@@ -108,7 +116,7 @@ export const GameMachineryMethods = {
   },
 
   // Resolve a proposed player list to canonical member names (case-
-  // insensitive), or the 400 to answer with. Shared by both games so the
+  // insensitive), or the refusal to answer with. Shared by both games so the
   // membership rules - and their wording - can never drift apart.
   /** @param playersIn the names a create asked for */
   gamePlayers(playersIn: unknown[]) {
@@ -119,6 +127,7 @@ export const GameMachineryMethods = {
       if (this.isReservedName(p)) return { status: 400, error: "\"Referee\" is a reserved name - it belongs to the room's game official and cannot play." };
       const canon = byLower.get(String(p || "").trim().toLowerCase());
       if (!canon) return { status: 400, error: String(p) + " is not a member of this room" };
+      if (SEAT_RESERVED.has(nameFold(canon))) return { status: 409, error: canon + " cannot play: the name is reserved for the games' own bookkeeping - the owner can invite them again under another name" };
       if (names.indexOf(canon) >= 0) return { status: 400, error: canon + " is listed twice" };
       names.push(canon);
     }

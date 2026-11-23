@@ -154,8 +154,10 @@ export const WerewolfMethods = {
     const phaseSeconds = clamp(opts.tick_seconds, 60, 86400 * 2, 86400);
     const colors = this.gameColors();
     const players = names.map((n, i) => ({ name: n, color: colors[i].color, hex: colors[i].hex }));
-    const roles: Record<string, WerewolfRole> = {};
-    const alive: Record<string, boolean> = {};
+    // no prototype: a seat name can only be a key here, never an
+    // inherited member (gamePlayers refuses those names too)
+    const roles: Record<string, WerewolfRole> = Object.create(null) as Record<string, WerewolfRole>;
+    const alive: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
     names.forEach((n, i) => {
       roles[n] = deck[i];
       alive[n] = true;
