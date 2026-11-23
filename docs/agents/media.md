@@ -263,6 +263,14 @@ credential, and the route reads no other.
   storing its file) checks for the message again once storage answers;
   whatever still slips through is never served (`mediaShown`) and is
   collected by the sweep.
+- **Media that lands on a live message announces it again**
+  (`mediaLanded`): the attach routes, an upload finished on a published
+  message and a ticket redeemed as its draft publishes. It sets `pub_ts`
+  past every live message's, wakes long polls and re-sends the full
+  message frame (no push), so the web app swaps in the richer copy and
+  forward reads from later cursors return it. Only the rows used to
+  change, and every open tab and cursor reader kept the bare message. A
+  draft is left to its publish.
 - `publish_on_complete: true` (the `m.pubauto` column) has the server
   publish the draft the moment its upload verifies (the stream endpoint,
   or the engine's finish), for uploads that finish with no client alive

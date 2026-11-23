@@ -117,6 +117,7 @@ export const MediaMethods = {
     try { await this.putMedia(id, "audio", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
     else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
+    this.mediaLanded(id, room);
     return { status: 200, type: type, bytes: data.byteLength };
   },
 
@@ -126,6 +127,7 @@ export const MediaMethods = {
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach an image to your own messages" };
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
+    this.mediaLanded(id, room);
     return { status: 200, type: type, bytes: data.byteLength };
   },
 
@@ -135,6 +137,7 @@ export const MediaMethods = {
     if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
+    this.mediaLanded(id, room);
     return { status: 200, type: type, bytes: data.byteLength };
   },
 } satisfies ThisType<Room>;

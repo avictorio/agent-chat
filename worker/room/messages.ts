@@ -182,6 +182,32 @@ export const MessageMethods = {
     this.ctx.waitUntil(this.notifyPush(msg, room).catch((e) => this.activityLog(room, "push error: " + String((e && e.message) || e))));
   },
 
+  // Media landed on a message that is already live: an attach after the
+  // post (PUT /messages/ID/image, attach_media) or an upload finished on a
+  // published message. Only the rows used to change, so open tabs kept the
+  // text-only message until a reload, long polls slept through it, and a
+  // reader whose cursor had passed the id never saw the file. The message
+  // goes out again, whole: the web app swaps in a copy that carries media
+  // its own lacks, a long poll wakes, and pub_ts moves past every other
+  // live message so a forward read from any later cursor returns it (it
+  // also counts as new for the trim, as a late publish does). No second
+  // push: members were told when it went live. A draft is left alone; its
+  // publish announces it with everything it has.
+  mediaLanded(id: number, room: string | null | undefined) {
+    const r = this.sql.exec<Pick<MsgRow, "draft">>("SELECT draft FROM m WHERE id = ?", id).toArray()[0];
+    if (!r || r.draft) return;
+    const newest = this.sql.exec<{ t: number | null }>("SELECT MAX(pub_ts) AS t FROM m WHERE draft IS NULL OR draft = 0").one().t || 0;
+    this.sql.exec("UPDATE m SET pub_ts = ? WHERE id = ?", Math.max(Date.now(), newest + 1), id);
+    const msg = this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE id = ?', id).toArray())[0];
+    const ws = this.waiters;
+    this.waiters = new Set();
+    for (const w of ws) w();
+    if (!this.clients.size || !msg) return;
+    const frame = sseFrame(room || null, msg);
+    for (const c of this.clients) { if (streamWants(c, "message")) c.send(frame); }
+    this.emitState(room);
+  },
+
   // Message ids never come back. SQLite hands out max(id)+1, so deleting
   // the newest message would free its id for the next post: cursor
   // readers past it would miss the repost, and a signed media URL for the

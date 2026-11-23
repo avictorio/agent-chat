@@ -149,3 +149,57 @@ test("deleting a message removes its rows before storage is asked", async () => 
   assert.equal(rowsAtDelete, 0, "the rows were gone by the time storage was called");
   assert.equal(h.objects.size, 0);
 });
+
+// A stream client that records the message frames it gets.
+const watch = (h) => {
+  const frames = [];
+  h.room.clients.add({ token: "t", owner: false, name: "Bob", kinds: null, games: null, stateSub: false, stateKey: null, send: (s) => { if (s.includes("event: message")) frames.push(JSON.parse(s.split("data: ")[1])); }, close: () => {} });
+  return frames;
+};
+const tick = () => new Promise((r) => setTimeout(r, 3));
+
+test("media attached to a live message reaches the stream, a long poll and a later cursor", async () => {
+  const h = makeRoom();
+  h.member("Ada"); h.member("Bob");
+  const msg = await h.room.post("Ada", "here is the chart", R, false);
+  await tick();
+  const later = await h.room.post("Bob", "waiting for it", R, false);
+  const frames = watch(h);
+  const poll = h.room.list(later.id, 50, 5, "Bob", R);
+  const t0 = Date.now();
+  assert.equal((await h.room.attachImage(msg.id, "Ada", PNG, "image/png", false, R)).status, 200);
+  const woke = await poll;
+  assert.ok(Date.now() - t0 < 1000, "the long poll woke at once instead of waiting out its 5 s");
+  assert.deepEqual(woke.messages.map((m) => [m.id, m.image && m.image.type]), [[msg.id, "image/png"]], "and returned the message with its picture");
+  assert.deepEqual(frames.map((f) => [f.id, f.image && f.image.type]), [[msg.id, "image/png"]], "open tabs got the message again, with its picture");
+  assert.deepEqual(h.room.read(later.id, 50).map((m) => m.id), [msg.id], "a cursor past its id still gets it");
+  await h.settled();
+});
+
+test("an upload finished on a live message is sent again; one on a draft waits for its publish", async () => {
+  const h = makeRoom();
+  h.member("Ada"); h.member("Bob");
+  const msg = await h.room.post("Ada", "notes to follow", R, false);
+  await tick();
+  const later = await h.room.post("Bob", "ok", R, false);
+  const draft = await h.room.post("Ada", "a draft", R, false, null, null, null, true, false);
+  const frames = watch(h);
+  const finish = async (id) => {
+    assert.equal((await h.room.uploadStart(id, "file", "Ada", false, R, 5, "text/plain", "n.txt", null, false)).status, 200);
+    const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'file'", id);
+    h.multipart.get(up.upload_id).data = new Uint8Array([1, 2, 3, 4, 5]);
+    assert.equal(h.room.uploadPartDone(id, "file", up.upload_id, 1, "etag").status, 200);
+    assert.equal((await h.room.uploadFinish(id, "file", "Ada", false, R, null)).status, 200);
+  };
+  await finish(msg.id);
+  assert.deepEqual(frames.map((f) => [f.id, f.file && f.file.name]), [[msg.id, "n.txt"]]);
+  assert.deepEqual(h.room.read(later.id, 50).map((m) => m.id), [msg.id]);
+  const pub = h.one("SELECT pub_ts FROM m WHERE id = ?", draft.id).pub_ts;
+  await finish(draft.id);
+  assert.equal(frames.length, 1, "nothing is sent for a draft");
+  assert.equal(h.one("SELECT pub_ts FROM m WHERE id = ?", draft.id).pub_ts, pub);
+  assert.equal((await h.room.publishMessage(draft.id, "Ada", false, R, undefined)).status, 200);
+  assert.deepEqual(frames.map((f) => f.id), [msg.id, draft.id], "its publish announces it once, with its file");
+  assert.equal(frames[1].file.name, "n.txt");
+  await h.settled();
+});

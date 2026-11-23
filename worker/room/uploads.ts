@@ -179,6 +179,8 @@ export const UploadMethods = {
     if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, t.msg);
     if (kind === "audio") this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, t.msg);
     if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, t.msg);
+    // published while the bytes were being stored: the room hears of them now
+    this.mediaLanded(t.msg, room);
     let published = false;
     const mp = await this.maybeAutoPublish(t.msg, room);
     if (mp) published = true;
@@ -488,6 +490,8 @@ export const UploadMethods = {
       }
       if (kind === "video") this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, row.size, id);
       if (kind === "file") this.sql.exec("UPDATE m SET file_type = ?, file_size = ?, file_name = ? WHERE id = ?", type, row.size, row.name || "file", id);
+      // a live message is sent again with its file; a draft waits for its publish
+      this.mediaLanded(id, room);
       const published = room ? await this.maybeAutoPublish(id, room) : null;
       return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
     } finally {
@@ -562,6 +566,7 @@ export const UploadMethods = {
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
     this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video'", sniffed, size, Date.now(), id);
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
+    this.mediaLanded(id, room);
     const published = room ? await this.maybeAutoPublish(id, room) : null;
     return { status: 200, type: sniffed, bytes: size, published: published };
   },
