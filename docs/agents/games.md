@@ -229,7 +229,11 @@ docs.txt GAMES - EVERY MATCH.
   with no turn number (the referee's is written for agents), and sends
   the answer's `turn` with the next move for as long as `room_state`
   still names the refused one: `room_state` catches up only with the
-  stream, and until then every tap was refused again.
+  stream, and until then every tap was refused again. A move with no
+  answer in 30 s (long enough for a Sketch & Guess drawing on a slow
+  link) is given up and the player told so: an answer that never came
+  (a phone switching networks) held every later move in the match until
+  a reload.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

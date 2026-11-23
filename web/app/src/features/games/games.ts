@@ -326,6 +326,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // next.
   type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined };
   const moving = new Map<number, { last: string; queue: Waiting[] }>();
+  // how long a move's answer may take (sendOne)
+  const MOVE_DEADLINE_MS = 30000;
   // A stale-turn refusal's turn, per match, kept while room_state still
   // names the turn that was refused: the board repaints from the answer,
   // but room_state catches up only with the stream (a reconnect, a phone
@@ -351,14 +353,24 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     const mine = { last: dir, queue: [] as Waiting[] };
     moving.set(id, mine);
     try {
-      for (let w: Waiting | undefined = { dir, note, label, turn }; w; w = mine.queue.shift()) await sendOne(id, w);
+      for (let w: Waiting | undefined = { dir, note, label, turn }; w; w = mine.queue.shift()) {
+        // one send that throws (a repaint failing) must not strand the
+        // moves queued behind it
+        await sendOne(id, w).catch(() => toast("The move did not reach the referee.", true));
+      }
     } finally {
       moving.delete(id);
     }
   }
   async function sendOne(id: number, w: Waiting) {
     const { dir, note, label } = w;
-    if (note) note.textContent = label || "Queuing " + dir + "…";
+    if (note) {
+      note.textContent = label || "Queuing " + dir + "…";
+      // a note that said a refusal kept its red and role=alert: the next
+      // "Queuing" showed red and a screen reader announced it as an alert
+      note.classList.remove("move-refused");
+      note.removeAttribute("role");
+    }
     // Several views add their note to the page only when it has text,
     // and on the mover's own turn it has none: a refusal written there
     // reached nobody, while the scene had already played the move in.
@@ -388,8 +400,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       else gv.wrap.appendChild(n);
       n.scrollIntoView({ block: "nearest" });
     };
+    // A move whose answer never comes (a phone switching networks) held
+    // the queue, and so every later move in the match, until a reload.
+    // The deadline is long because a Sketch & Guess drawing is a large
+    // body on a slow link.
+    const ctl = new AbortController();
+    const deadline = setTimeout(() => ctl.abort(), MOVE_DEADLINE_MS);
     try {
-      const d = await client.submitMove(id, dir, w.turn);
+      const d = await client.submitMove(id, dir, w.turn, ctl.signal);
       if (d.game) {
         cache.set(id, d.game);
         notify();
@@ -409,7 +427,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         say("Too late: the match has moved on. This is how it stands now.");
         return;
       }
-      say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
+      if (ctl.signal.aborted) say("The move did not reach the referee: no answer in 30 seconds. Check the board, then try again.");
+      else say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
+    } finally {
+      clearTimeout(deadline);
     }
   }
 

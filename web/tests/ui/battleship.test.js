@@ -404,6 +404,45 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     if (!/"turn":7/.test(out.drop)) throw new Error('a Four in a Row move names its turn: ' + out.drop);
     return out;
   });
+  /* A move whose answer never comes (a phone switching networks) held the
+     queue, and so every later move in the match, until a reload. It now
+     has a deadline (30 s, cut short here): the player is told the move did
+     not reach the referee, and the next move goes out and lands. */
+  for (const [label, o] of [['move-deadline', {}], ['move-deadline-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page, S, calls) => {
+      await page.addInitScript(() => { const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, ms === 30000 ? 1000 : ms, ...a); });
+      await page.reload();
+      await settle(page);
+      S.moveHold = 1;
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+      await page.click('#viewer .c4-drop:nth-child(2)');
+      await page.waitForSelector('#viewer .move-refused', { timeout: 10000 }).catch(() => {});
+      const out = { said: await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => '') };
+      await shot(page, label + '.png');
+      await page.click('#viewer .c4-drop:nth-child(3)');
+      await page.waitForFunction(() => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === 7, null, { timeout: 10000 }).catch(() => {});
+      out.posts = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c));
+      out.discs = await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length);
+      if (!/did not reach the referee/.test(out.said)) throw new Error('the player is told the move did not arrive: ' + JSON.stringify(out));
+      if (out.posts.length !== 2 || !/"dir":"3"/.test(out.posts[1]) || out.discs !== 7) throw new Error('the next move goes out and lands: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  /* A note that said a refusal kept its red and role=alert: the next move
+     sent through it showed "Queuing ..." in red, announced as an alert. */
+  await run('move-note-reset', { state: { c4: true }, init: noGl, allowConsole: [/400/] }, async (page, S) => {
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+    S.moveRefuse = 'The referee refused that move';
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await page.waitForSelector('#viewer .move-refused', { timeout: 10000 });
+    S.moveDelay = 1500;
+    await page.click('#viewer .c4-drop:nth-child(3)');
+    const out = await page.$eval('#viewer .lc-note', (e) => ({ text: e.textContent, cls: e.className, role: e.getAttribute('role') }));
+    if (!/^Queuing 3/.test(out.text) || /move-refused/.test(out.cls) || out.role) throw new Error('a new send clears the refusal look: ' + JSON.stringify(out));
+    return out;
+  });
   /* A different move tapped while one is out is not a copy: it goes next,
      naming the turn it was tapped on. Here that turn has passed by then,
      so the referee refuses it rather than playing it on the next turn.

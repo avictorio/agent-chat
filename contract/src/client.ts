@@ -345,12 +345,14 @@ export class RoomClient {
     });
   }
 
-  /** turn: the step the move was decided on (room_state.awaiting_you's
-   *  turn); a match past it refuses with 409 and a StaleTurnBody. */
-  submitMove(id: number, dir: string, turn?: number | string): Promise<GameResponse & { resolved: boolean }> {
+  /** turn: the step the move was decided on (the turn room_state's
+   *  awaiting_you call names); a match past it refuses with 409 and a
+   *  StaleTurnBody. signal: to give up on an answer that never comes. */
+  submitMove(id: number, dir: string, turn?: number | string, signal?: AbortSignal): Promise<GameResponse & { resolved: boolean }> {
     return this.call("/games/" + id + "/moves" + FULL_LOG, {
       method: "POST",
       body: JSON.stringify(turn === undefined ? { dir } : { dir, turn }),
+      signal,
     });
   }
 
