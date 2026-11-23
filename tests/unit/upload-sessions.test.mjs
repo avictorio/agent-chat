@@ -561,6 +561,12 @@ test("a revoke leaves an upload through the site in flight, and the name's next 
   const id = await draft(h);
   const up = await imageSession(h, id, 100);
   assert.equal(h.room.revoke("tok-Ada"), true);
+  // A draft is the earlier holder's when it was written before the new
+  // invite was made, by the clock. Here both happen in one turn of the
+  // loop, and now and then in one millisecond, where the draft counted as
+  // the new holder's and this test failed; a real re-invite is a request
+  // of its own, later than any post the revoked holder could send.
+  await new Promise((r) => setTimeout(r, 5));
   h.room.invite("Ada", "human", null);
   await h.settled();
   assert.ok(h.multipart.has(up), "storage still has the upload and its parts");
