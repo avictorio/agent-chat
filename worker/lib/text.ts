@@ -111,14 +111,70 @@ export function capped(o: object, key: string, list: unknown[], n: number) {
   if (list.length > n) (o as Record<string, unknown>)[key + "_more"] = list.length - n;
 }
 
-export function htmlToText(html: string) {
-  const t = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "";
-  let s = html.replace(/<(script|style|noscript|svg|head)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ");
+// A page's title and text. Every step is one pass: the three regexes this
+// replaced (the title, script/style/svg/head blocks, any tag) each rescanned
+// to the end of the page from every opening that had no close, so a page of
+// a million "<" took 17 s of Worker CPU and held every other request on the
+// isolate meanwhile (the fetch's timer cannot stop a synchronous loop). An
+// opener with no close now ends the search for its kind: a later one has
+// none either.
+/** @param max the most of the page converted (the fetch reads no more) */
+export function htmlToText(html: string, max: number) {
+  if (html.length > max) html = html.slice(0, max);
+  let t = "";
+  const to = /<title\b/i.exec(html);
+  if (to) {
+    const open = html.indexOf(">", to.index);
+    const close = open < 0 ? null : findFrom(html, /<\/title>/gi, open + 1);
+    if (close) t = html.slice(open + 1, close.index);
+  }
+  let s = dropBlocks(html)
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, "\n");
+  s = dropTags(s);
   const dec = function (x: string) { return x.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/&#(\d+);/g, function (m0: string, n: string) { return String.fromCharCode(+n); }); };
   s = dec(s).replace(/[ \t\f\v\r]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   return { title: dec(t).replace(/\s+/g, " ").trim(), text: s };
+}
+
+/** the first match of a global regex at or after from */
+function findFrom(s: string, re: RegExp, from: number) {
+  re.lastIndex = from;
+  return re.exec(s);
+}
+
+// script, style, noscript, svg and head elements, whole, each as one space.
+// An opener with no close is left to dropTags, as a tag.
+function dropBlocks(html: string) {
+  const opener = /<(script|style|noscript|svg|head)\b/gi;
+  /** names with no close left after some opener: none further on either */
+  const dead = new Set<string>();
+  let out = "", at = 0, m;
+  while ((m = opener.exec(html))) {
+    const name = m[1].toLowerCase();
+    if (dead.has(name)) continue;
+    const close = findFrom(html, new RegExp("</" + name + ">", "gi"), m.index + m[0].length);
+    if (!close) { dead.add(name); continue; }
+    out += html.slice(at, m.index) + " ";
+    at = close.index + close[0].length;
+    opener.lastIndex = at;
+  }
+  return out + html.slice(at);
+}
+
+// Every other tag (a "<", at least one character, the next ">") as one
+// space. Once a "<" has no ">" after it, no later one has: the rest is text.
+function dropTags(s: string) {
+  let out = "", at = 0;
+  for (;;) {
+    const lt = s.indexOf("<", at);
+    if (lt < 0) break;
+    const gt = s.indexOf(">", lt + 1);
+    if (gt < 0) break;
+    if (gt === lt + 1) { out += s.slice(at, gt + 1); at = gt + 1; continue; }
+    out += s.slice(at, lt) + " ";
+    at = gt + 1;
+  }
+  return out + s.slice(at);
 }
 
 // Does this message @-mention this member name? Word-bounded, case-insensitive.

@@ -52,7 +52,7 @@ export async function webFetch(target: URL) {
       let off = 0;
       for (const c of chunks) { buf.set(c, off); off += c.length; }
       const body = new TextDecoder().decode(buf);
-      const conv = /html/.test(type) ? htmlToText(body) : { title: "", text: body };
+      const conv = /html/.test(type) ? htmlToText(body, FETCH_MAX_BYTES) : { title: "", text: body };
       return { url: u.toString(), status: res.status, content_type: type, title: conv.title, text: conv.text.slice(0, FETCH_MAX_TEXT), truncated: cut || conv.text.length > FETCH_MAX_TEXT };
     }
     return { url: u.toString(), error: "Too many redirects" };

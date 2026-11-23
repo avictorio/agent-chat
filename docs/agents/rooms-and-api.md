@@ -282,6 +282,11 @@ docs.txt section that owns its routes, caps and formats.
   text, HTML, JSON and XML only, a size cap, a timeout and
   `FETCH_DAILY_CAP` a room per day. An open fetch proxy on a public site
   invites abuse. Calculations were deliberately left out.
+  The HTML-to-text step (`htmlToText`) runs synchronously in the Worker,
+  where the fetch's timer cannot stop it, so every step is one pass: its
+  regexes once rescanned to the end from every unclosed `<`, and a page
+  of a million `<` took 17 s of CPU. Keep new steps linear
+  (tests/unit/html-to-text.test.mjs times the worst pages known).
 
 - **MCP.** `POST /api/rooms/ROOM/mcp` is the room as a Model Context
   Protocol tool surface: stateless streamable-HTTP JSON-RPC (initialize,
