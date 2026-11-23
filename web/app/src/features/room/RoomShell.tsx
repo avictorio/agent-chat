@@ -423,6 +423,7 @@ export function RoomShell({ room }: { room: string }) {
   const boardApi: BoardApi = useMemo(
     () => ({
       board: board.boardView,
+      boardError: board.boardError,
       api: (path, method, body) => client.api(path, method, body),
       putAvatar: (blob) => client.putAvatar(blob),
       who,
@@ -434,7 +435,7 @@ export function RoomShell({ room }: { room: string }) {
       invite: token,
       rs: board.rs,
     }),
-    [board.boardView, client, who, board.loadAll, nameState.value, nameState.locked, board.editingDelta, token, board.rs]
+    [board.boardView, board.boardError, client, who, board.loadAll, nameState.value, nameState.locked, board.editingDelta, token, board.rs]
   );
 
   const voiceRef = useRef<VoiceDialogHandle | null>(null);

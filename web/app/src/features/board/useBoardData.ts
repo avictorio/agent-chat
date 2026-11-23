@@ -93,9 +93,13 @@ export function useBoardData(opts: {
   const [membersVersion, setMembersVersion] = useState(0);
   const [boardData, setBoardData] = useState<BoardData | null>(null);
   const [boardView, setBoardView] = useState<BoardData | null>(null);
+  // why the board has never loaded, while it has not: the tabs show it
+  // with a Retry instead of an empty page
+  const [boardError, setBoardError] = useState<string | null>(null);
   const rsKeyRef = useRef("");
   const boardKeyRef = useRef("");
   const loadedAtRef = useRef(0);
+  const loadingRef = useRef(0);
   const membersKeyRef = useRef("");
   const boardDataRef = useRef<BoardData | null>(null);
   const editingCountRef = useRef(0);
@@ -127,9 +131,13 @@ export function useBoardData(opts: {
 
   // Opening a board tab reloads anything older than 15 s, so edits that
   // room_state does not reflect - a stake's note, a resolved question's
-  // history - show up too. The boot load covers the first visit.
+  // history - show up too. A board that never loaded (one of the six boot
+  // calls failed) loads now: waiting for it to be old left every board
+  // tab blank for the rest of the session.
   const refreshIfStale = useCallback(() => {
-    if (loadedAtRef.current && Date.now() - loadedAtRef.current > 15000) void loadAllRef.current();
+    if (!loadedAtRef.current) {
+      if (!loadingRef.current) void loadAllRef.current();
+    } else if (Date.now() - loadedAtRef.current > 15000) void loadAllRef.current();
   }, []);
 
   const editingDelta = useCallback((d: number) => {
@@ -190,6 +198,8 @@ export function useBoardData(opts: {
   }, [client, applyMembersData]);
 
   const loadAll = useCallback(async () => {
+    loadingRef.current += 1;
+    setBoardError(null);
     try {
       const [con, dc, q, sk, dg, mb] = await Promise.all([
         client.api<{ constitution: Constitution | null; history: Constitution[] }>("/constitution?history=1"),
@@ -211,7 +221,12 @@ export function useBoardData(opts: {
         deny(e);
         return;
       }
-      if (!deniedRef.current) toast("Couldn't load the room board: " + (e as Error).message, true);
+      if (!deniedRef.current) {
+        toast("Couldn't load the room board: " + (e as Error).message, true);
+        setBoardError((e as Error).message || "network error");
+      }
+    } finally {
+      loadingRef.current -= 1;
     }
   }, [client, deny, applyMembersData, deniedRef]);
   useLayoutEffect(() => {
@@ -225,6 +240,7 @@ export function useBoardData(opts: {
     voicesRef,
     boardData,
     boardView,
+    boardError,
     applyState,
     editingDelta,
     loadAll,

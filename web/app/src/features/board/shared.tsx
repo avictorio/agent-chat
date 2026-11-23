@@ -13,6 +13,8 @@ import { CardTitle } from "../../ui/Card";
 
 export interface BoardApi {
   board: BoardData | null;
+  /** why the board has not loaded yet, after a failed load */
+  boardError: string | null;
   api: <T>(path: string, method?: string, body?: unknown) => Promise<T>;
   putAvatar: (blob: Blob) => Promise<unknown>;
   who: () => string | null;
@@ -123,6 +125,24 @@ export function Linkify({ text }: { text: string }) {
 
 export function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>;
+}
+
+// What a board list shows before the board has loaded: a loading line,
+// or, after a failed load, the reason and a Retry. Without it a failed
+// first load left every tab blank, and the empty Decisions page invited
+// recording a decision a second time.
+export function BoardPending() {
+  const api = useBoardApi();
+  if (api.board) return null;
+  if (!api.boardError) return <div className="empty-state board-pending">Loading the board…</div>;
+  return (
+    <div className="empty-state board-pending" role="alert">
+      <p>Couldn't load the board: {api.boardError}</p>
+      <Button type="button" size="sm" onClick={() => void api.loadAll()}>
+        Retry
+      </Button>
+    </div>
+  );
 }
 
 /* ---------- inline editing (startEdit) ---------- */

@@ -47,6 +47,7 @@
 .add .row { display: flex; gap: 8px; flex-wrap: wrap; width: 100%; align-items: center; }
 .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 24px 2px 8px; }
 .empty-state { text-align: center; color: var(--muted); padding: 32px 16px; border: 1px dashed var(--line); border-radius: 12px; }
+.board-pending p { margin: 0 0 12px; overflow-wrap: anywhere; }
 .filters { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; gap: 8px; flex-wrap: wrap; }
 .edit .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
 .edit .field input, .edit .field textarea { width: 100%; }

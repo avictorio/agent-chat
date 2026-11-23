@@ -7,6 +7,7 @@ import { same } from "../../lib/index";
 import {
   ActionButton,
   DeleteButton,
+  BoardPending,
   EditForm,
   EmptyState,
   Linkify,
@@ -24,7 +25,7 @@ export function ConstitutionView() {
   const api = useBoardApi();
   const board = api.board;
   const ed = useEditing();
-  if (!board) return <div id="conBody"></div>;
+  if (!board) return <div id="conBody"><BoardPending /></div>;
   const c = board.con.constitution;
   const older = (board.con.history || [])
     .filter((h) => !c || h.version !== c.version)
@@ -228,6 +229,7 @@ export function DecisionsView({ avatars }: { avatars: Record<string, string> }) 
         </div>
       </form>
       <div id="dcList">
+        <BoardPending />
         {list &&
           (list.length === 0 ? (
             <EmptyState text="No decisions recorded yet. When the room settles something, add it here." />
@@ -357,6 +359,7 @@ export function QuestionsView() {
         </div>
       </div>
       <div id="qList">
+        <BoardPending />
         {api.board &&
           (items.length === 0 ? (
             <EmptyState text={filter === "open" ? "No open questions. Nice." : "Nothing resolved yet."} />
@@ -491,6 +494,7 @@ export function StakesView() {
         </div>
       </form>
       <div id="sList">
+        <BoardPending />
         {api.board && (
           <>
             {open.length === 0 && (
@@ -622,6 +626,7 @@ export function MemoryView({ avatars }: { avatars: Record<string, string> }) {
         </div>
       </form>
       <div id="dList">
+        <BoardPending />
         {api.board &&
           (api.board.dg.length === 0 ? (
             <EmptyState text="No digests yet." />

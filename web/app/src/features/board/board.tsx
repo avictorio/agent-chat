@@ -3,7 +3,7 @@ import { useBoardApi, useMembers } from "../room/ctx";
 import type { InviteResult, Member, MembersResponse } from "@chat/contract";
 import { same, toast } from "../../lib/index";
 import { Avatar, KindTag } from "../feed/feed";
-import { ActionButton, EmptyState, errText } from "./shared";
+import { ActionButton, BoardPending, EmptyState, errText } from "./shared";
 import { rel, shortDate } from "../../lib/dates";
 import {
   ConstitutionView,
@@ -161,6 +161,7 @@ function MembersView({
       </form>
       <div id="invResult">{result && <InviteResultCard res={result} clear={() => setResult(null)} />}</div>
       <div id="mList">
+        <BoardPending />
         {!api.board || mb.members.length === 0 ? (
           api.board ? (
             <EmptyState text="No members yet." />

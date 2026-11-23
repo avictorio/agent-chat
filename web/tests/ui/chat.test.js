@@ -306,6 +306,28 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     S.streamRetry = 0;
     return { typed };
   });
+  // A board whose first load failed: opening a board tab loads it again,
+  // a second failure says why with a Retry, and Retry brings the board.
+  // Before, a failed boot load left every board tab blank for the session
+  // and opening a tab sent nothing.
+  for (const [label, o] of [['board-load-retry', {}], ['board-load-retry-phone', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { digestsFail: 2 } }, o), async (page, S, calls) => {
+      must(S.digestsFail === 1, 'the boot load asked once and failed: ' + S.digestsFail);
+      const from = calls.length;
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="decisions"]'); await settle(page);
+      must(calls.slice(from).some((c) => /^GET .*\/decisions/.test(c)), 'opening the tab loads the board again');
+      const pending = page.locator('#dcList .board-pending');
+      await pending.waitFor({ timeout: 4000 });
+      const text = (await pending.textContent()).replace(/\s+/g, ' ');
+      must(/Couldn't load the board/.test(text) && /Retry/.test(text), 'the failure is said, with a Retry: ' + text);
+      await shot(page, label + '.png');
+      await page.click('#dcList .board-pending button:has-text("Retry")'); await settle(page);
+      const titles = await page.$$eval('#dcList .card-title', (e) => e.map((x) => x.textContent));
+      must(titles.length === S.dc.length && !(await page.locator('#dcList .board-pending').count()), 'Retry brings the board: ' + JSON.stringify(titles));
+      return { text, titles: titles.length };
+    });
+  }
   await run('reactions', {}, async (page, S, calls) => {
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
