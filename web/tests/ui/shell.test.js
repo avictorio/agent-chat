@@ -298,6 +298,15 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     await page.click('.pushMenu button[data-mode="off"]');
     await settle(page);
   };
+  // A toast, an error line or the bell's label is painted after the
+  // request settle() waits for, so reading it right after settle() can
+  // find it empty or stale on a busy machine (push-off-refused once read an
+  // empty toast). Wait up to 2 s for the text to match, then return what is
+  // there, so a check that never comes true still fails on the must.
+  const textWhen = async (page, sel, re) => {
+    await page.waitForFunction(([s, src]) => { const e = [...document.querySelectorAll(s)].find((x) => x.offsetParent) || document.querySelector(s); return !!e && new RegExp(src).test(e.getAttribute('title') || e.textContent || ''); }, [sel, re.source], { timeout: 2000 }).catch(() => {});
+    return page.$$eval(sel, (es) => { const e = es.find((x) => x.offsetParent) || es[0]; return e ? e.getAttribute('title') || e.textContent || '' : ''; });
+  };
   const forgetKeys = (page) => page.evaluate(() => Object.keys(localStorage).filter((k) => /demo/.test(k) && k !== '__fake_push_sub').sort());
   // Forget on Home turns the room's notifications off on this device
   // first, with the invite it is about to delete (the server asks for
@@ -314,6 +323,7 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       // offers Forget anyway
       S.pushFail = 503;
       await forget();
+      await textWhen(page, '#forgetErr', /Couldn't turn off this room's notifications/);
       const refused = await page.evaluate(() => ({ open: document.getElementById('forgetDlg').open, err: (document.getElementById('forgetErr') || {}).textContent || '', shown: !!(document.getElementById('forgetErr') || {}).offsetParent, yes: document.getElementById('forgetYes').textContent, invite: localStorage.getItem('chat-invite:demo') }));
       must(refused.open && refused.shown && /Couldn't turn off this room's notifications/.test(refused.err) && refused.yes === 'Forget anyway' && refused.invite === 'tok_Anthony', 'a refused unsubscribe must keep the room and say so: ' + JSON.stringify(refused));
       await page.screenshot({ path: OUT + 'push-forget-refused-' + vp.tag + '.png' });
@@ -434,7 +444,7 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
       const sent = S.pushLog.length;
       await page.click('#forgetRetry');
       await settle(page);
-      const again = { err: await page.$eval('#forgetErr', (e) => e.textContent), log: S.pushLog.slice(sent) };
+      const again = { err: await textWhen(page, '#forgetErr', /^Still couldn't turn off/), log: S.pushLog.slice(sent) };
       must(/^Still couldn't turn off/.test(again.err) && again.log.some((l) => l.startsWith('unsubscribe')), 'Try again must unsubscribe again and say it failed again: ' + JSON.stringify(again));
       // Try again while the server is slow: every button waits
       S.pushFail = 0;
@@ -490,11 +500,11 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     must(before === 'Notifications on', 'the bell must start on: ' + before);
     S.pushFail = 503;
     await bellOff(page);
-    const out = { toast: await page.$eval('#toast', (t) => t.textContent), bell: await bellLabel(page), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
+    const out = { toast: await textWhen(page, '#toast', /Couldn't change notifications/), bell: await textWhen(page, '.pushBtn', /^Notifications on$/), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
     must(/Couldn't change notifications/.test(out.toast) && out.bell === 'Notifications on' && out.mode === 'all' && S.push[EP] === 'all', 'a refused Off must say so and leave the bell on: ' + JSON.stringify(out));
     S.pushFail = 0;
     await bellOff(page);
-    out.after = { toast: await page.$eval('#toast', (t) => t.textContent), bell: await bellLabel(page), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
+    out.after = { toast: await textWhen(page, '#toast', /Notifications off for this room/), bell: await textWhen(page, '.pushBtn', /^Notifications off$/), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
     must(/Notifications off for this room/.test(out.after.toast) && out.after.bell === 'Notifications off' && out.after.mode === null && !S.push[EP], 'Off must turn the room off: ' + JSON.stringify(out.after));
     return out;
   });
