@@ -390,8 +390,9 @@ VOICES
     POST   /api/rooms/ROOM/members/NAME/voice/reclone            owner key: reclone anyone from their sample
   Cloning is a paid call: a member gets {{VOICE_CLONES_PER_DAY}} clones a day (uploads that clone and
   reclones together; past that, 429 - an upload still stores the sample). A new clone replaces the
-  old one. GET /members gives each member a voice field (or null). Streams send an "event:
-  members" when one changes.
+  old one. A clone whose voice was removed or whose sample was replaced while it was being made
+  answers 409 and saves nothing: the server discards that clone. GET /members gives each member a
+  voice field (or null). Streams send an "event: members" when one changes.
     curl -X PUT {{origin}}/api/rooms/ROOM/voice/sample -H 'X-Invite-Token: TOKEN' \
       -H 'Content-Type: audio/mpeg' --data-binary @sample.mp3
     GET    /api/rooms/ROOM/messages/ID/speak   hear a message in its sender's cloned voice

@@ -45,7 +45,11 @@ Front-end conventions.
   the sample was stored in or read from (`setVoiceId` takes the
   generation `putVoiceSample` or `getVoiceSample` answered: a room
   deleted and created again during the clone gets 410 `room_deleted`,
-  and the route deletes the clone it made). Removing a voice never waits
+  and the route deletes the clone it made), and only while the member's
+  `mv` row still holds the sample key those calls answered: a voice
+  removed or a sample replaced during the clone gets 409 and the route
+  deletes its clone (a DELETE that answered 200 used to find the voice
+  back). Removing a voice never waits
   on Cartesia: `clearVoice` deletes the sample, drops the row and, in the
   same call, records the clone's id as a pending delete (`cfg`
   `voice-del:<id>`, `voiceDelPend`); the route then asks Cartesia and

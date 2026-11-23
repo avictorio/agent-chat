@@ -87,7 +87,8 @@ export const VoiceMethods = {
       const obj = await this.env.MEDIA.get(r.sample_key);
       if (!obj) return null;
       // read before the read's await: the room this sample is from (setVoiceId)
-      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg", gen };
+      // and the sample's key, which the clone must still match (setVoiceId)
+      return { data: await obj.arrayBuffer(), type: r.sample_type || "audio/mpeg", gen, key: r.sample_key };
     } catch { return null; }
   },
 
@@ -97,13 +98,20 @@ export const VoiceMethods = {
   // member's voice. gen is the room the sample belongs to (putVoiceSample,
   // getVoiceSample); in any other the clone is refused with goneError,
   // and the route deletes it at the provider.
-  /** @param gen this.gen as putVoiceSample or getVoiceSample answered it */
-  async setVoiceId(name: string, provider: string, voiceId: string, gen: number) {
+  // sampleKey is the sample the clone was made from, as those calls
+  // answered it. The member's row must still hold it: a DELETE /voice
+  // that answered 200 during the wait used to find its voice back, the
+  // clone INSERTed on the invite alone, and a clone of an older sample
+  // landed on a row whose sample was replaced meanwhile. Otherwise
+  // "changed", nothing saved, and the route deletes its clone.
+  /** @param gen this.gen as putVoiceSample or getVoiceSample answered it
+   *  @param sampleKey the sample key putVoiceSample or getVoiceSample answered */
+  async setVoiceId(name: string, provider: string, voiceId: string, gen: number, sampleKey: string) {
     this.fence(gen);
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     const prev = this.voiceRow(name);
-    this.sql.exec("INSERT OR REPLACE INTO mv (name, provider, voice_id, sample_key, sample_type, sample_ts, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      String(name).toLowerCase(), provider, voiceId, (prev && prev.sample_key) || null, (prev && prev.sample_type) || null, (prev && prev.sample_ts) || null, Date.now());
+    if (!prev || !sampleKey || prev.sample_key !== sampleKey) return "changed" as const;
+    this.sql.exec("UPDATE mv SET provider = ?, voice_id = ?, ts = ? WHERE name = ?", provider, voiceId, Date.now(), String(name).toLowerCase());
     this.notifyMembers(name);
     await this.invalidateSpeakCache(name);
     return this.voiceOf(name);

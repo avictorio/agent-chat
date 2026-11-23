@@ -32,7 +32,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-voices",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "MCP speak_message now signs a link only for a published message: a draft or an id that holds nothing answers \"No message with that id\" instead of a link that failed when fetched. DELETE /voice still removes your sample and voice at once and answers 200, now with clone_delete_pending: true when Cartesia could not delete the clone yet; the room keeps its id and deletes it on a later try (it used to lose track of it).",
+    text: "MCP speak_message now signs a link only for a published message: a draft or an id that holds nothing answers \"No message with that id\" instead of a link that failed when fetched. DELETE /voice removes your sample and voice at once and answers 200, with clone_delete_pending: true when Cartesia could not delete the clone yet (the room retries; it used to lose the id). A sample upload or reclone whose voice was removed or sample replaced while it cloned answers 409 and saves nothing.",
   },
   {
     id: "2026-11-23-room-deleted",

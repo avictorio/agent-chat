@@ -32,8 +32,9 @@ function cartesia(answer) {
 async function withVoice(hooks) {
   const h = makeRoom(hooks);
   h.member("Ada");
-  assert.ok(await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", "unit"));
-  await h.room.setVoiceId("Ada", "cartesia", "v-old", h.room.gen);
+  const put = await h.room.putVoiceSample("Ada", MP3, "audio/mpeg", "unit");
+  assert.ok(put);
+  await h.room.setVoiceId("Ada", "cartesia", "v-old", put.gen, put.key);
   return h;
 }
 
@@ -232,3 +233,76 @@ for (const [what, method, rest] of [["a sample upload", "PUT", "voice/sample"], 
     } finally { c.restore(); }
   });
 }
+
+/** a stub Cartesia whose clone call waits for release(); reached resolves once it is waiting */
+function gatedClone(id) {
+  let cloned, release;
+  const reached = new Promise((r) => { cloned = r; });
+  const gate = new Promise((r) => { release = r; });
+  const c = cartesia(async (x) => {
+    if (x.url.endsWith("/voices/clone")) { cloned(); await gate; return Response.json({ id }); }
+    return new Response(null, { status: 200 });
+  });
+  return { ...c, reached, release };
+}
+
+// A clone already waiting on Cartesia when the member withdrew their
+// voice used to land afterwards: the DELETE answered 200 and the member
+// then spoke in a clone of the recording they withdrew.
+for (const [what, method, rest] of [["a reclone", "POST", "voice/reclone"], ["a sample upload", "PUT", "voice/sample"]]) {
+  test("a DELETE /voice answered 200 while " + what + " clones stays withdrawn: the clone answers 409 and is deleted", async () => {
+    const h = await withVoice();
+    const c = gatedClone("v-late");
+    try {
+      const r = call(h, method, rest, method === "PUT" ? MP3 : undefined);
+      await c.reached;
+      const d = await call(h, "DELETE", "voice");
+      assert.equal(d.status, 200, JSON.stringify(d.json));
+      c.release();
+      const late = await r;
+      assert.equal(late.status, 409, JSON.stringify(late.json));
+      assert.equal(mv(h), undefined, "the withdrawn voice stays withdrawn");
+      assert.ok(c.calls.some((x) => x.method === "DELETE" && x.url.endsWith("/voices/v-late")), "its clone is deleted at Cartesia");
+      assert.deepEqual(pending(h), []);
+    } finally { c.restore(); }
+  });
+}
+
+test("a reclone of a sample replaced while it cloned answers 409, and the newer sample's clone stands", async () => {
+  const h = await withVoice();
+  const c = gatedClone("v-stale");
+  try {
+    const r = call(h, "POST", "voice/reclone");
+    await c.reached;
+    // a new sample lands meanwhile (its own clone was not made yet: no key)
+    const s = await call(h, "PUT", "voice/sample", MP3, { key: false });
+    assert.equal(s.status, 202, JSON.stringify(s.json));
+    const key = mv(h).sample_key;
+    c.release();
+    const late = await r;
+    assert.equal(late.status, 409, JSON.stringify(late.json));
+    assert.deepEqual(mv(h), { voice_id: "v-old", sample_key: key }, "the clone of the old sample did not land on the new one");
+    assert.ok(c.calls.some((x) => x.method === "DELETE" && x.url.endsWith("/voices/v-stale")));
+  } finally { c.restore(); }
+});
+
+test("a clone Cartesia will not delete after a 409 is kept as a pending delete", async () => {
+  const h = await withVoice();
+  let cloned, release;
+  const reached = new Promise((r) => { cloned = r; });
+  const gate = new Promise((r) => { release = r; });
+  const c = cartesia(async (x) => {
+    if (x.url.endsWith("/voices/clone")) { cloned(); await gate; return Response.json({ id: "v-late" }); }
+    return new Response("{}", { status: 503 });
+  });
+  try {
+    const r = call(h, "POST", "voice/reclone");
+    await reached;
+    const d = await call(h, "DELETE", "voice");
+    assert.equal(d.status, 200, JSON.stringify(d.json));
+    release();
+    assert.equal((await r).status, 409);
+    assert.equal(mv(h), undefined);
+    assert.deepEqual(pending(h), ["v-late", "v-old"]);
+  } finally { c.restore(); }
+});

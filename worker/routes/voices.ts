@@ -53,15 +53,25 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
   // delete. It used to be only logged, and its id was lost.
   const dropClone = async (vid: string) => { if (!(await cartesiaDelete(env, vid, { room }))) await stub.voiceDelPend([vid]); };
   const dropOld = async (keep: string | null) => { if (oldVoice && oldVoice.provider === "cartesia" && oldVoice.voice_id && oldVoice.voice_id !== keep) await dropClone(oldVoice.voice_id); };
-  // A clone the room refused because it was deleted while the clone was
-  // made (setVoiceId) is this request's own and attached to no one: it
-  // goes at Cartesia, and the request answers 410 room_deleted.
-  const saveClone = async (gen: number, vid: string) => {
-    try { return await stub.setVoiceId(who, "cartesia", vid, gen); }
+  // A clone the room would not take (setVoiceId) is this request's own
+  // and attached to no one, so it goes at Cartesia: the room deleted
+  // while the clone was made answers 410 room_deleted; the voice removed
+  // or its sample replaced meanwhile, 409 (a DELETE that answered 200
+  // used to find the voice back, cloned from the recording withdrawn).
+  const saveClone = async (gen: number, key: string, vid: string) => {
+    let v;
+    try { v = await stub.setVoiceId(who, "cartesia", vid, gen, key); }
     catch (e) {
       if (isGoneError(e)) await dropClone(vid);
       throw e;
     }
+    if (!v || v === "changed") {
+      await dropClone(vid);
+      if (!v) return json({ error: "No member with that name" }, 404);
+      return json({ error: "The voice was removed or replaced while it was being cloned, so nothing was saved and this clone was discarded. Send the request again if you still want it." }, 409);
+    }
+    await dropOld(vid);
+    return json({ room, name: who, voice: v, cloned: true });
   };
   const capMsg = "You can clone a voice up to " + VOICE_CLONES_PER_DAY + " times a day. Try again tomorrow.";
   if (request.method === "DELETE" && !action) {
@@ -94,10 +104,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!smp) return json({ error: "No stored sample to clone from" }, 404);
     let vid;
     try { vid = await cartesiaClone(env, smp.data, smp.type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e) }, 502); }
-    const v = await saveClone(smp.gen, vid);
-    if (!v) { await dropClone(vid); return json({ error: "No member with that name" }, 404); }
-    await dropOld(vid);
-    return json({ room, name: who, voice: v, cloned: true });
+    return saveClone(smp.gen, smp.key, vid);
   }
   if ((request.method === "PUT" || request.method === "POST") && action === "sample") {
     if (+(request.headers.get("Content-Length") || 0) > VOICE_SAMPLE_MAX * 1.4 + 1000) return json({ error: "Voice samples can be up to " + mb(VOICE_SAMPLE_MAX) }, 413);
@@ -123,9 +130,7 @@ export async function voiceRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (!owner && !(await stub.cloneTake(who))) return rateLimited(capMsg, secondsToUtcMidnight(), { room, name: who, voice: await stub.voiceOf(who), cloned: false, sample_stored: true });
     let vid;
     try { vid = await cartesiaClone(env, buf, type, who); } catch (e) { return json({ error: String((e && (e as Error).message) || e), sample_stored: true }, 502); }
-    const v = await saveClone(put.gen, vid);
-    await dropOld(vid);
-    return json({ room, name: who, voice: v, cloned: true });
+    return saveClone(put.gen, put.key, vid);
   }
   return json({ error: "Method not allowed" }, 405);
 }
