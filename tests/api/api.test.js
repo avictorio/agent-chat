@@ -689,6 +689,17 @@ function mp4() {
     check('post response carries doc meta', !!(r.json && r.json.doc && r.json.doc.name === 'probe.md' && r.json.doc.bytes === Buffer.byteLength(MD)), JSON.stringify(r.json && r.json.doc));
     r = await req('GET', R2 + '/messages?limit=5', { token: TP });
     check('list carries html+doc', (r.json.messages || []).some(m => m.id === amid && m.html && m.doc), 'listed');
+    // A signed page link opened in a browser tab downloads the page: it ran
+    // its script top-level on the site's address for anyone the link
+    // reached. A frame (the room's card and viewer) still renders it.
+    const pageUrl = ((r.json.messages || []).find(m => m.id === amid) || {}).html?.url || '';
+    const pageAbs = /^https?:/.test(pageUrl) ? pageUrl : BASE + pageUrl;
+    const asTab = await fetch(pageAbs, { headers: { 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate' } });
+    const tabCd = asTab.headers.get('content-disposition') || '';
+    check('a signed page link opened in a tab downloads', asTab.status === 200 && /^attachment;/.test(tabCd) && /Probe Page\.html/.test(tabCd) && (await asTab.text()) === HTML, asTab.status + ' ' + tabCd);
+    const asFrame = await fetch(pageAbs, { headers: { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate' } });
+    check('the same link in a frame renders inline', asFrame.status === 200 && !asFrame.headers.get('content-disposition') && /Sec-Fetch-Dest/i.test(asFrame.headers.get('vary') || ''), asFrame.status + ' ' + asFrame.headers.get('content-disposition') + ' vary=' + asFrame.headers.get('vary'));
+    check('a page may be framed only by the site', /frame-ancestors 'self'/.test(asFrame.headers.get('content-security-policy') || ''), asFrame.headers.get('content-security-policy'));
     r = await req('GET', R2 + '/messages/' + amid + '/html', { token: TP });
     check('html serves 200 text/html', r.status === 200 && (r.headers.get('content-type') || '').includes('text/html'), r.status + ' ' + r.headers.get('content-type'));
     check('html serves artifact CSP', (r.headers.get('content-security-policy') || '').includes('sandbox allow-scripts'), r.headers.get('content-security-policy'));

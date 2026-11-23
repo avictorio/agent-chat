@@ -82,7 +82,7 @@ export async function mediaSigParams(env: Env, room: string, id: number | string
 // makes that a download). One stays open: no browser lets a CSP stop WebRTC,
 // so a page's script can still send packets (STUN) to a host it names.
 export function mediaCsp(kind: string) {
-  if (kind === "html") return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; sandbox allow-scripts";
+  if (kind === "html") return "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; frame-ancestors 'self'; sandbox allow-scripts";
   return "default-src 'none'; sandbox";
 }
 
@@ -90,14 +90,40 @@ export function mediaCsp(kind: string) {
 // is only ever a download: octet-stream, Content-Disposition attachment
 // under its own name, nosniff and the locked-down CSP, so no file - an
 // .html, an .svg, a PDF - is ever rendered as a page on this origin.
-export function mediaHeaders(kind: string, type: string, name: string | null | undefined) {
+// An HTML page renders only inside a frame (pageOpenedOutsideFrame).
+export function mediaHeaders(request: Request, kind: string, type: string, name: string | null | undefined) {
   const h: Record<string, string> = {
     "Content-Type": kind === "file" ? "application/octet-stream" : type, "Cache-Control": MEDIA_CACHE,
     "X-Content-Type-Options": "nosniff", "Content-Security-Policy": mediaCsp(kind),
     "Accept-Ranges": "bytes",
   };
   if (kind === "file") h["Content-Disposition"] = attachmentDisposition(name || "file");
+  if (kind === "html") {
+    if (pageOpenedOutsideFrame(request)) h["Content-Disposition"] = attachmentDisposition(pageFileName(name));
+    // The answer depends on how the browser asked: without Vary, the copy
+    // a frame cached for the hour would be reused when the same link is
+    // opened in a tab.
+    h["Vary"] = "Sec-Fetch-Dest";
+  }
   return Object.assign(h, CORS);
+}
+
+// A signed page link needs no credential, so anyone it reached could open
+// it in a tab: the member's page then ran its script top-level on the
+// site's own address, where it could imitate the site, ask for an invite
+// link or the owner key, and forward the tab anywhere. Opened by a browser
+// as a document (or an object or embed), it is now a download; a frame
+// (the room's card and viewer) still renders it, and so does a read that
+// is not a navigation (an agent's GET, a fetch). A browser too old to send
+// Sec-Fetch-Dest still gets the page inline.
+export function pageOpenedOutsideFrame(request: Request) {
+  const dest = request.headers.get("Sec-Fetch-Dest");
+  return !!dest && dest !== "iframe" && dest !== "frame" && dest !== "empty";
+}
+
+function pageFileName(name: string | null | undefined) {
+  const n = String(name || "page").trim() || "page";
+  return /\.html?$/i.test(n) ? n : n + ".html";
 }
 
 // RFC 6266: an ASCII fallback name plus the exact UTF-8 one (RFC 5987).
@@ -133,7 +159,7 @@ export async function serveMedia(request: Request, env: Env, stub: DurableObject
       } else {
         const obj = await env.MEDIA.get(meta.r2key, rr ? { range: rr.r2 } : {});
         if (obj) {
-          const headers = mediaHeaders(kind, meta.type, meta.name);
+          const headers = mediaHeaders(request, kind, meta.type, meta.name);
           if (rr) {
             headers["Content-Range"] = "bytes " + rr.start + "-" + rr.end + "/" + meta.size;
             headers["Content-Length"] = String(rr.end - rr.start + 1);
@@ -159,7 +185,7 @@ export async function serveMedia(request: Request, env: Env, stub: DurableObject
  *  whole: a range when partial, start and end inclusive. */
 export type MediaBytes = { type: string, size: number, name: string | null, partial: boolean, start: number, end: number, data: ArrayBuffer | null };
 export function mediaResponse(request: Request, a: MediaBytes, kind: string) {
-  const headers = mediaHeaders(kind, a.type, a.name);
+  const headers = mediaHeaders(request, kind, a.type, a.name);
   if (a.partial) {
     headers["Content-Range"] = "bytes " + a.start + "-" + a.end + "/" + a.size;
     headers["Content-Length"] = String(a.end - a.start + 1);

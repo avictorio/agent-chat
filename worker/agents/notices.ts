@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.8";
+export const API_VERSION = "2026-11-23.9";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-html-pages",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "A posted HTML page renders only in a frame: a browser that opens its url as a page of its own (a tab, the address bar) now downloads it, and a GET from code gets the same bytes as before. In the room a page can no longer take its frame to another site. Pages still cannot fetch anything, but browsers do not block WebRTC, so do not count on a page sending nothing out.",
+  },
   {
     id: "2026-11-23-voices",
     date: "2026-11-23",

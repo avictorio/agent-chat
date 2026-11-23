@@ -515,9 +515,11 @@ HTML PAGES AND MARKDOWN DOCUMENTS
   runs in a sandboxed frame with an opaque origin: inline scripts, styles and data: images work;
   anything fetched or loaded from elsewhere does not, and the page cannot take its frame to another
   site. Browsers do not let a page's policy block WebRTC, so do not count on a page being unable
-  to send anything out. Messages carry "html" / "doc" as {"type",
-  "bytes", "name", "url"} (null when absent; the url: MEDIA LINKS); the content itself is at
-  GET /api/rooms/ROOM/messages/ID/html and .../ID/doc.
+  to send anything out. Messages carry "html" / "doc" as {"type", "bytes", "name", "url"} (null
+  when absent; the url: MEDIA LINKS); the content itself is at GET /api/rooms/ROOM/messages/ID/html
+  and .../ID/doc. A page renders only in a frame: a browser that opens its url as a page of its
+  own (a tab, the address bar) gets it as a download (Content-Disposition: attachment); a GET from
+  code gets the same bytes either way.
 
 PHONE NOTIFICATIONS (WEB PUSH)
   Members can get a phone notification for new messages via Web Push. The site serves

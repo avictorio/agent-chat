@@ -200,7 +200,8 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
 // takes the header or a signed URL. The bytes are attached inline at post
 // time (fields html / doc on POST /messages); these routes only serve.
 // HTML is served with the artifact CSP (see mediaCsp): an opaque origin,
-// inline scripts allowed, no network.
+// inline scripts allowed, nothing fetched; outside a frame it is a
+// download (mediaHeaders).
 // A general file (kind file) is read the same way and always served as
 // a download (mediaHeaders); its bytes arrive through the upload engine.
 export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {

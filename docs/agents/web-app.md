@@ -81,7 +81,14 @@ Front-end conventions.
     `sandbox="allow-scripts"`, never `allow-same-origin`), inline scripts
     and styles and `data:` images allowed, `connect-src 'none'`. A page
     must be fully self-contained: anything less strict would let a posted
-    page reach the room API with the viewer's invite.
+    page reach the room API with the viewer's invite. It also carries
+    `frame-ancestors 'self'`, and it renders only in a frame: a browser
+    that opens the url as a document (a tab, the address bar) gets
+    `Content-Disposition: attachment` (`pageOpenedOutsideFrame`,
+    `Vary: Sec-Fetch-Dest`). A signed link needs no credential, and opened
+    in a tab a page ran its script top-level on the site's address, where
+    it could imitate the site or forward the tab anywhere. A browser that
+    sends no `Sec-Fetch-Dest` still gets it inline.
   - **The shell's frame-src:** no directive of the page's own stops it
     navigating its frame (`location.replace`, a meta refresh), which took
     the feed card and the viewer to any site. The page shell is served

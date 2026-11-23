@@ -23,6 +23,11 @@ export function hiddenDraft(r: DraftCols, who: string | null | undefined, owner:
   return !!r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase();
 }
 
+// One stored file's row for serving it. A page's name is on its message
+// (html_name), not on the md row: it names the download a page becomes
+// when opened outside a frame (mediaHeaders).
+const MEDIA_ROW_SQL = "SELECT md.type AS type, md.r2key AS r2key, md.size AS size, COALESCE(md.name, CASE WHEN md.kind = 'html' THEN m.html_name END) AS name FROM md LEFT JOIN m ON m.id = md.msg WHERE md.msg = ? AND md.kind = ? AND md.upload_id IS NULL";
+
 export const MediaMethods = {
   // ---- Message media (images, audio, video): bytes live in R2, the index lives here ----
   // md maps (msg, kind) to an R2 key. An R2 failure fails the request:
@@ -155,14 +160,14 @@ export const MediaMethods = {
   mediaMeta(id: number, kind: string, viewer?: MediaViewer) {
     if (!this.mediaShown(id, viewer)) return null;
     // An upload still in flight has no object yet.
-    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>(MEDIA_ROW_SQL, id, kind).toArray()[0];
     return row ? { type: row.type, r2key: row.r2key, size: row.size, name: row.name || null } : null;
   },
 
   /** @param range the request's Range header */
   async getMedia(id: number, kind: string, range: string | null | undefined, viewer?: MediaViewer): Promise<MediaBytes | null> {
     if (!this.mediaShown(id, viewer)) return null;
-    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>("SELECT type, r2key, size, name FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    const row = this.sql.exec<Pick<MdRow, "type" | "r2key" | "size" | "name">>(MEDIA_ROW_SQL, id, kind).toArray()[0];
     if (row && row.r2key && this.env && this.env.MEDIA) {
       try {
         const rr = parseRange(range, row.size);
