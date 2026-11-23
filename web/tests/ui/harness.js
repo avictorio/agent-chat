@@ -529,6 +529,8 @@ function roomState(S) {
     decisions_awaiting_signatures: S.dc.filter(d => d.signers.length < 3).map(d => ({ id: d.id, title: d.title, signed_by: d.signers, missing: ['Anthony', 'Henry', 'Ada'].filter(n => d.signers.indexOf(n) < 0) })),
     stakes_due: S.sk.filter(s => s.date && s.date <= ymd(7)).map(s => ({ id: s.id, title: s.title, date: s.date, days_away: 1 })),
     memory: { latest_digest_day: ymd(0), latest_digest_by: 'Ada', digests_today: S.dg.length, awaiting_digest_from: 'Henry', digest_due_at: now + 10 * H },
+    // S.boardRev: the server's board write counter (left out, as an older room object does)
+    ...(S.boardRev !== undefined ? { board_rev: S.boardRev } : {}),
     // Four in a Row on your turn names its turn, as stateAttempt does
     // (S.c4AwaitTurn: the turn room_state still names once the match moved on).
     // S.lcAwait: live Light Cycles' entry, whose call leaves the turn out (lateMoveCarries)

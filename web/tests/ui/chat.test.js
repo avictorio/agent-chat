@@ -435,6 +435,38 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       return { title, signers: S.dc[1].signers };
     });
   }
+  // A text-only edit by someone else (a decision's note, which no list in
+  // room_state carries) shows on an open board when room_state's board_rev
+  // moves. Before, the board reloaded only when its room_state lists
+  // changed, so the old note stayed until a reload. A room object from
+  // before board_rev sends none: the lists still key the reload then.
+  await run('board-rev-reload', {}, async (page, S, calls) => {
+    S.boardRev = 4;
+    S.streamRetry = 150;
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="decisions"]'); await settle(page);
+    const card = '#dcList .card:has-text("Huaca Pucllana")';
+    const from = calls.length;
+    S.dc[0].note = 'Edited elsewhere: lunch at noon.';
+    S.boardRev = 5;
+    await page.waitForFunction(() => /Edited elsewhere/.test(document.getElementById('dcList').textContent), null, { timeout: 8000 }).catch(() => {});
+    const note = await page.textContent(card + ' .card-text');
+    must(note === 'Edited elsewhere: lunch at noon.', 'the open board shows the edited note: ' + note);
+    must(calls.slice(from).some((c) => /^GET .*\/decisions/.test(c)), 'board_rev reloaded the board');
+    S.streamRetry = 0;
+    return { note };
+  });
+  await run('board-rev-absent', {}, async (page, S) => {
+    S.streamRetry = 150;
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="questions"]'); await settle(page);
+    S.q[0].text = 'Who books the dinner, and for how many?';
+    await page.waitForFunction(() => /for how many/.test(document.getElementById('qList').textContent), null, { timeout: 8000 }).catch(() => {});
+    const titles = await page.$$eval('#qList .card-title', (e) => e.map((x) => x.textContent));
+    must(titles.includes('Who books the dinner, and for how many?'), 'without board_rev the lists still reload the board: ' + JSON.stringify(titles));
+    S.streamRetry = 0;
+    return { titles };
+  });
   await run('reactions', {}, async (page, S, calls) => {
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
