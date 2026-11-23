@@ -140,7 +140,10 @@ way; the routes are in docs.txt UPLOADING FILES.
   byte progress (percent, size, speed, time left), per-part retries with
   backoff, a pause while offline that resumes on reconnect, a Cancel
   that aborts and deletes the draft, and an "interrupted upload" note
-  after a reload (re-attach the same file to resume, or Discard). Cancel
+  after a reload (re-attach the same file to resume, or Discard). A
+  draft found by `upload/resume` is taken over only when it holds no
+  other upload kind: one that also carries a photo from an earlier send
+  would publish that photo too, so a new draft starts instead. Cancel
   and Discard delete with `?draft_only=1`: the note is per browser, and
   another tab or device may have published the draft (or this tab's
   publish landed with its answer lost); on the 409 the composer forgets

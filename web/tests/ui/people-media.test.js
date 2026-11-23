@@ -199,6 +199,38 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     must((await page.locator('#uplResume').count()) === 0, 'a cancelled upload leaves no interrupted note');
     return { aborted, deleted };
   });
+  // Resending one file finds its earlier draft by fingerprint. That draft
+  // also holds a photo sent with it the first time (finished, then removed
+  // from the composer): it must not be taken over, or its publish posts the
+  // photo too. A draft holding only this file is taken over and resumed.
+  for (const [label, withPhoto] of [['upload-resume-other-kinds', true], ['upload-resume-adopts', false]]) {
+    await run(label, { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+      const ts = S.msgs[S.msgs.length - 1].ts + 1000;
+      S.drafts = [{ id: 77, ts, from: 'Anthony', text: 'Photo and survey' }];
+      S.ups = { '77:file': { size: 300000, name: 'survey.bin', type: 'application/octet-stream', ps: 65536, parts: 5, got: new Set([1, 2]) } };
+      if (withPhoto) {
+        S.ups['77:image'] = { size: 4000, type: 'image/png', ps: 65536, parts: 1, got: new Set([1]), done: true };
+        S.drafts[0].image = { type: 'image/png', bytes: 4000, url: '/api/rooms/demo/messages/77/image?exp=1&sig=x' };
+      }
+      S.resume = { found: true, id: 77, kind: 'file', received: [1, 2] };
+      await page.setInputFiles('#anyFile', { name: 'survey.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(300000, 3) });
+      await page.fill('#text', 'Just the survey');
+      await page.click('#send');
+      await page.locator('#uplCard').waitFor({ timeout: 3000 });
+      await page.locator('#uplCard').waitFor({ state: 'detached', timeout: 20000 });
+      await settle(page);
+      const published = calls.filter((c) => /^POST .*\/messages\/\d+\/publish/.test(c)).map((c) => +c.match(/messages\/(\d+)\/publish/)[1]);
+      const live = S.msgs.find((x) => x.text === 'Just the survey');
+      if (withPhoto) {
+        must(published.length === 1 && published[0] !== 77, 'a new draft is published, not the one with the photo: ' + JSON.stringify(published));
+        must(live && !live.image && S.drafts.some((x) => x.id === 77), 'the photo stays out of the post: ' + JSON.stringify(live));
+      } else {
+        must(published.length === 1 && published[0] === 77, 'the draft holding only this file is resumed: ' + JSON.stringify(published));
+        must(!calls.some((c) => /^POST .*\/messages ./.test(c) && /"draft":true/.test(c)), 'no new draft is made');
+      }
+      return { published };
+    });
+  }
   await run('upload-interrupted', {
     hash: '#invite=tok_Anthony', w: 390, h: 844, touch: true,
     init: () => { try { localStorage.setItem('chat-upl:demo', JSON.stringify([{ key: 'chat-draft:demo:x', id: 77, names: ['holiday.mp4'], total: 5e9, kinds: ['video'], ts: Date.now() - 3600e3 }])); } catch {} },

@@ -505,6 +505,18 @@ export async function discardPending(client: RoomClient, room: string, p: Pendin
   return out;
 }
 
+// A draft found by one file's fingerprint can carry more than that file:
+// an earlier send of a photo and this file, where the photo finished and
+// the file did not. Resending the file alone adopted that draft and its
+// publish posted the photo too, even after the person had removed it.
+// Only a draft that holds no other upload kind is taken over; otherwise
+// a new draft starts and the old one stays under its interrupted note.
+const UPLOAD_KINDS: UploadKind[] = ["image", "audio", "video", "file"];
+async function holdsNothingElse(client: RoomClient, id: number, kind: UploadKind): Promise<boolean> {
+  const others = await Promise.all(UPLOAD_KINDS.filter((k) => k !== kind).map((k) => client.uploadStatus(id, k)));
+  return others.every((st) => !st.uploading && !st.complete);
+}
+
 export async function sendWithUploads(
   client: RoomClient,
   room: string,
@@ -570,7 +582,7 @@ export async function sendWithUploads(
     if (!id && items.length === 1 && fps[0]) {
       try {
         const rj = await client.uploadResume(items[0]!.blob.size, fps[0], items[0]!.kind);
-        if (rj.found && rj.id) id = rj.id;
+        if (rj.found && rj.id && (await holdsNothingElse(client, rj.id, items[0]!.kind))) id = rj.id;
       } catch {
         // the lookup is best-effort
       }
