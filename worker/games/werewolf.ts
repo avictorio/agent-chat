@@ -15,11 +15,13 @@ export type WwSeat = { name: string, color: string, hex: string };
  *  the den) to the viewers they belong to. roles and alive are per
  *  player; acts is tonight's picks (actor -> target), votes today's
  *  (voter -> target); phase is null once the match is over; winner stays
- *  null (a side wins: side and winners). */
+ *  null (a side wins: side and winners). talk is the town's lines and den
+ *  the wolves', each numbered and capped on its own (wwChannels: a match
+ *  stored before den existed kept both in talk). */
 export type WwStored = {
   type: "werewolf", phase_seconds: number, order: string[], roles: Record<string, WerewolfRole>, alive: Record<string, boolean>,
   phase: "night" | "day" | null, night: number, day: number, acts: Record<string, string>, last_guard: string | null,
-  checks: WerewolfCheck[], votes: Record<string, string>, talk: WerewolfTalk[], events: WerewolfEvent[], quiet: number, said: number,
+  checks: WerewolfCheck[], votes: Record<string, string>, talk: WerewolfTalk[], den?: WerewolfTalk[], events: WerewolfEvent[], quiet: number, said: number,
   deadline: number | null, lobby_deadline: number, accepted: Record<string, boolean>, players: WwSeat[], log: GameLogLine[],
   winner: null, winners: string[] | null, side: "village" | "wolves" | null, places: string[] | null, draw: boolean, announced: boolean,
   declined_by?: string, ended?: number
@@ -32,6 +34,8 @@ export type WwItemSeat = { name: string, alive: boolean, moved: boolean, accepte
 
 // Werewolf: a line of talk's cap.
 export const WW_TALK_MAX = 400;
+// Werewolf: the lines each channel keeps (the town's and the den's apart).
+const WW_TALK_KEEP = 600;
 
 export const WerewolfMethods = {
   /* ---------- games: Werewolf ----------
@@ -70,6 +74,21 @@ export const WerewolfMethods = {
     return this.wwAlive(st).filter((n) => this.wwVerb(st, n));
   },
 
+  /** The town and the den as two lists. Both channels used to share
+   *  st.talk, one counter and one 600-line cut: the gaps in the town's
+   *  public numbers counted the den's lines (and their times placed
+   *  them), and 600 den lines, which send no frame, pushed every town
+   *  line out unseen. A match stored that way is split here when it is
+   *  read, each channel numbered from 1 in its own order; every line is
+   *  kept, and the next save stores the split. */
+  wwChannels(st: WwStored) {
+    if (Array.isArray(st.den)) return;
+    const all = Array.isArray(st.talk) ? st.talk : [];
+    const renumber = (lines: WerewolfTalk[]) => lines.map((t, i) => Object.assign({}, t, { n: i + 1 }));
+    st.den = renumber(all.filter((t) => t.ch === "den"));
+    st.talk = renumber(all.filter((t) => t.ch !== "den"));
+  },
+
   wwRolesInPlay(st: WwStored) {
     const out = { werewolf: 0, seer: 0, guardian: 0, villager: 0 };
     for (const n of st.order) out[st.roles[n]] = (out[st.roles[n]] || 0) + 1;
@@ -78,6 +97,7 @@ export const WerewolfMethods = {
 
   wwSummary(g: WwGame): WerewolfState {
     const st = g.st;
+    this.wwChannels(st);
     const live = g.status === "running";
     const over = g.status === "finished" || g.status === "cancelled";
     return {
@@ -85,7 +105,7 @@ export const WerewolfMethods = {
       phase: live ? st.phase : null, night: st.night, day: st.day, phase_seconds: st.phase_seconds, deadline: st.deadline, lobby_deadline: g.status === "lobby" ? (st.lobby_deadline || null) : null,
       order: st.order, roles_in_play: this.wwRolesInPlay(st), alive_count: this.wwAlive(st).length,
       events: st.events, votes: live && st.phase === "day" ? st.votes : null,
-      talk: st.talk.filter((t) => t.ch === "town").slice(-120),
+      talk: st.talk.slice(-120),
       side: st.side || null, winners: st.winners || null, winner: null, draw: false, places: st.places || null, declined_by: st.declined_by || null,
       players: st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, accepted: st.accepted ? !!st.accepted[p.name] : true, alive: !!st.alive[p.name], role: over || !st.alive[p.name] ? st.roles[p.name] : null, voted: live && st.phase === "day" ? st.votes[p.name] !== undefined : false })),
     };
@@ -99,7 +119,9 @@ export const WerewolfMethods = {
     const over = g.status === "finished" || g.status === "cancelled";
     out.awaiting = live && st.phase === "day" ? this.wwAlive(st).filter((n) => st.votes[n] === undefined) : [];
     out.awaiting_accept = g.status === "lobby" ? st.players.filter((p) => !(st.accepted || {})[p.name]).map((p) => p.name) : [];
-    if (over) out.den = st.talk.filter((t) => t.ch === "den");
+    // wwSummary above split the channels
+    const den = st.den as WerewolfTalk[];
+    if (over) out.den = den;
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     if (!me) {
       out.you = { playing: false };
@@ -110,7 +132,7 @@ export const WerewolfMethods = {
     const you: WerewolfYou = { playing: true, accepted: st.accepted ? !!st.accepted[me.name] : true, role: role, alive: alive, legal_moves: [] };
     if (role === "werewolf") {
       you.pack = st.order.filter((n) => st.roles[n] === "werewolf" && n !== me.name);
-      if (!over) out.den = st.talk.filter((t) => t.ch === "den").slice(-120);
+      if (!over) out.den = den.slice(-120);
       if (live && st.phase === "night") you.pack_picks = Object.fromEntries(this.wwLivingWolves(st).filter((n) => st.acts[n]).map((n) => [n, st.acts[n]]));
     }
     if (role === "seer") you.checks = st.checks;
@@ -164,7 +186,7 @@ export const WerewolfMethods = {
     });
     const st: WwStored = {
       type: "werewolf", phase_seconds: phaseSeconds, order: names.slice(), roles: roles, alive: alive, phase: "night", night: 1, day: 0,
-      acts: {}, last_guard: null, checks: [], votes: {}, talk: [], events: [], quiet: 0, said: 0,
+      acts: {}, last_guard: null, checks: [], votes: {}, talk: [], den: [], events: [], quiet: 0, said: 0,
       deadline: null, lobby_deadline: Date.now() + this.lobbySeconds(opts) * 1000, accepted: this.lobbyAccepted(creator, names), players: players,
       log: [{ tick: 0, text: "Werewolf created by " + creator + " - " + names.length + " players; roles are dealt in secret. The first night falls when everyone accepts." }],
       winner: null, winners: null, side: null, places: null, draw: false, announced: false,
@@ -296,9 +318,15 @@ export const WerewolfMethods = {
       const den = talk[1].toLowerCase() === "den" || st.phase === "night";
       if (den && !isWolf) return { status: 409, error: st.phase === "night" ? "The village sleeps - talk resumes at dawn" : "Only the wolves have a den" };
       const body = talk[2].slice(0, WW_TALK_MAX);
+      this.wwChannels(st);
+      // each channel apart: a den line never moves the town's numbers or
+      // pushes a town line out (n follows the channel's last line, so it
+      // stays an id once the oldest lines are cut)
+      const lines = (den ? st.den : st.talk) as WerewolfTalk[];
+      const last = lines[lines.length - 1];
       // a running match is always in a phase
-      st.talk.push({ n: st.talk.length + 1, by: me.name, text: body, ch: den ? "den" : "town", phase: st.phase as "night" | "day", day: st.phase === "day" ? st.day : st.night, at: Date.now() });
-      if (st.talk.length > 600) st.talk = st.talk.slice(-600);
+      lines.push({ n: (last ? last.n : 0) + 1, by: me.name, text: body, ch: den ? "den" : "town", phase: st.phase as "night" | "day", day: st.phase === "day" ? st.day : st.night, at: Date.now() });
+      if (lines.length > WW_TALK_KEEP) lines.splice(0, lines.length - WW_TALK_KEEP);
       if (!den) st.said += 1;
       this.saveGame(g);
       // the den is secret: no frame (a frame names its speaker)

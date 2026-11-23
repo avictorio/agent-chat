@@ -1802,13 +1802,21 @@ function mp4() {
     await ldMove(ww.id, SE, 'say: I checked ' + WW + ' - a werewolf.');
     rww = await req('GET', R2 + '/games/' + ww.id, { token: ldTok[VS[1]] });
     check('the town talk is in the game for everyone', (rww.json.game.talk || []).some((t) => t.by === SE && t.text.includes('a werewolf')), JSON.stringify(rww.json.game.talk));
+    // the town's numbers used to share a counter with the den, so their
+    // gaps counted the den's lines for anyone reading the list
+    await ldMove(ww.id, WW, 'den: they know');
+    await ldMove(ww.id, WW, 'den: lie low');
+    await ldMove(ww.id, VS[1], 'say: then vote ' + WW);
+    rww = await req('GET', R2 + '/games', { token: TP });
+    const wwTown = (((rww.json.games || []).find((x) => x.id === ww.id) || {}).talk || []).map((t) => t.n);
+    check('the town is numbered 1, 2 with den lines between', JSON.stringify(wwTown) === '[1,2]', JSON.stringify(wwTown));
     await ldMove(ww.id, SE, 'vote ' + WW);
     await ldMove(ww.id, VS[1], WW);
     await ldMove(ww.id, VS[2], 'vote ' + WW);
     rww = await ldMove(ww.id, WW, 'vote ' + SE);
     wwEv = ((rww.json.game || {}).events || [])[1] || {};
     check('the village votes the werewolf out and wins', rww.json.resolved === true && wwEv.kind === 'eliminated' && wwEv.who === WW && wwEv.role === 'werewolf' && rww.json.game.status === 'finished' && rww.json.game.side === 'village' && rww.json.game.winners.length === 4 && rww.json.game.winners.indexOf(WW) < 0, JSON.stringify(rww.json.game).slice(0, 260));
-    check('the end reveals every role and the den', rww.json.game.players.every((p) => !!p.role) && (rww.json.game.den || []).length === 1, JSON.stringify(rww.json.game.players));
+    check('the end reveals every role and the den', rww.json.game.players.every((p) => !!p.role) && (rww.json.game.den || []).map((t) => t.n).join() === '1,2,3', JSON.stringify(rww.json.game.players) + ' ' + JSON.stringify(rww.json.game.den));
     rww = await req('GET', R2 + '/games', { token: TP });
     const wwRec = (rww.json.record || {}).werewolf || [];
     check('a team win counts for everyone on the side', wwRec.find((x) => x.name === SE).w === 1 && wwRec.find((x) => x.name === VS[0]).w === 1 && wwRec.find((x) => x.name === WW).l === 1, JSON.stringify(wwRec));

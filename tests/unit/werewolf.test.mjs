@@ -57,3 +57,83 @@ test("a legacy member named __proto__ cannot take a seat, so no role goes missin
   assert.deepEqual(Object.keys(st.roles).sort(), names.slice().sort());
   assert.deepEqual(Object.values(c.game.roles_in_play).reduce((a, b) => a + b, 0), 5);
 });
+
+/** a 5-seat Werewolf at dawn of day 1: its roles, and one villager already dead */
+async function day1() {
+  const names = NINE.slice(0, 5);
+  const { h, id } = await running("werewolf", names);
+  const role = {};
+  for (const n of names) role[n] = (await h.room.gameState(id, n, R)).game.you.role;
+  const wolf = names.find((n) => role[n] === "werewolf");
+  const seer = names.find((n) => role[n] === "seer");
+  const vill = names.filter((n) => role[n] === "villager");
+  const move = async (who, dir) => {
+    const r = await h.room.gameMove(id, who, dir, R);
+    assert.equal(r.status, 200, who + " " + dir + ": " + r.error);
+    return r;
+  };
+  for (let i = 0; i < 3; i++) await move(wolf, "den: night plan " + i);
+  await move(seer, "check " + wolf);
+  assert.equal((await move(wolf, "kill " + vill[2])).game.phase, "day");
+  return { h, id, wolf, seer, vill, move };
+}
+
+test("the town's numbers count town lines only, whatever the den says", async () => {
+  const { h, id, wolf, seer, vill, move } = await day1();
+  await move(vill[0], "say: one");
+  await move(wolf, "den: they suspect nothing");
+  await move(wolf, "den: vote with them");
+  await move(seer, "say: two");
+  await move(wolf, "say: three");
+  // the public view: the games list (what any member reads) and a
+  // non-player's state; each town number is the line's place in the town
+  const listed = h.room.listGames().games.find((g) => g.id === id);
+  const pub = (await h.room.gameState(id, null, R)).game;
+  for (const g of [listed, pub]) {
+    assert.deepEqual(g.talk.map((t) => [t.n, t.text]), [[1, "one"], [2, "two"], [3, "three"]]);
+    assert.equal(g.den, undefined);
+  }
+  const mine = (await h.room.gameState(id, wolf, R)).game;
+  assert.deepEqual(mine.den.map((t) => t.n), [1, 2, 3, 4, 5], "the den is numbered on its own too");
+});
+
+test("den lines never push the town's lines out", async () => {
+  const { h, id, wolf, vill, move } = await day1();
+  await move(vill[0], "say: the seer said it was " + wolf);
+  await move(vill[1], "say: agreed");
+  // den lines send no frame and nobody else sees them: 600 of them used
+  // to cut every town line from the shared 600-line store
+  for (let i = 0; i < 650; i++) await move(wolf, "den: x" + i);
+  const pub = (await h.room.gameState(id, vill[0], R)).game;
+  assert.deepEqual(pub.talk.map((t) => t.text), ["the seer said it was " + wolf, "agreed"]);
+  const st = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", id).one().state);
+  assert.equal(st.talk.length, 2);
+  assert.equal(st.den.length, 600, "each channel keeps its own 600");
+  assert.equal(st.den[599].n, 653, "a den number stays an id once the oldest are cut");
+  assert.equal(st.den[599].text, "x649");
+});
+
+test("a match stored with both channels in one list still reads, and keeps every line", async () => {
+  const { h, id, wolf, vill } = await day1();
+  // the shape before den was stored on its own: one list, one counter
+  const st = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", id).one().state);
+  const line = (n, by, text, ch) => ({ n, by, text, ch, phase: ch === "den" ? "night" : "day", day: 1, at: 1000 + n });
+  st.talk = [line(1, wolf, "d1", "den"), line(2, wolf, "d2", "den"), line(3, vill[0], "t1", "town"), line(4, wolf, "d3", "den"), line(5, vill[1], "t2", "town")];
+  delete st.den;
+  h.room.sql.exec("UPDATE gm SET state = ? WHERE id = ?", JSON.stringify(st), id);
+  const pub = (await h.room.gameState(id, null, R)).game;
+  assert.deepEqual(pub.talk.map((t) => [t.n, t.text]), [[1, "t1"], [2, "t2"]], "the town, numbered in its own order");
+  assert.equal(pub.den, undefined);
+  assert.equal(h.room.listGames().games.find((g) => g.id === id).talk.length, 2);
+  const mine = (await h.room.gameState(id, wolf, R)).game;
+  assert.deepEqual(mine.den.map((t) => [t.n, t.text]), [[1, "d1"], [2, "d2"], [3, "d3"]]);
+  // reading changed nothing stored
+  assert.equal(JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", id).one().state).talk.length, 5);
+  // the next line follows on in its channel, and the save keeps all six
+  const r = await h.room.gameMove(id, vill[0], "say: t3", R);
+  assert.equal(r.status, 200, r.error);
+  assert.deepEqual(r.game.talk.map((t) => t.n), [1, 2, 3]);
+  const after = JSON.parse(h.room.sql.exec("SELECT state FROM gm WHERE id = ?", id).one().state);
+  assert.deepEqual(after.talk.map((t) => t.text), ["t1", "t2", "t3"]);
+  assert.deepEqual(after.den.map((t) => t.text), ["d1", "d2", "d3"]);
+});

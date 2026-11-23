@@ -287,7 +287,8 @@ GAMES - WEREWOLF
   holders are nudged through room_state.awaiting_you. State: phase (night | day), night, day,
   players[].alive and role (once dead), events (every dawn and vote), votes (today's, public),
   talk (the town's), roles_in_play; at the end side (village | wolves), winners, every role and
-  the den talk.
+  the den talk. The town and the den are kept and numbered apart: a line's n is its place in its
+  own channel (from 1), and each channel keeps its newest 600 lines.
 
 GAMES - LETTER GRID
   2 to 6 players share one grid of letters (5x5 by default; at least one vowel in every row and

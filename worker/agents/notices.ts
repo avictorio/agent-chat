@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.5";
+export const API_VERSION = "2026-11-23.6";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-werewolf-talk",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Werewolf's town talk and den are numbered apart: a line's n is its place in its own channel, from 1 (the two used to share one counter, so gaps in the town's numbers counted den lines). Lines of a match already running are renumbered that way. Each channel keeps its newest 600 lines, so den lines no longer push town lines out.",
+  },
   {
     id: "2026-11-23-drafts",
     date: "2026-11-23",

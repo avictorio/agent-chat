@@ -459,7 +459,14 @@ Build notes only; the rules are in each engine module's comment and its
   living player has voted. A team win sets `winners` (`winner` stays
   null), and the record counts a win for everyone on the side. Secret:
   roles, night picks (`acts`) and seer `checks`; the dead's roles and
-  every dawn and vote (`events`) are public; all opens at the end.
+  every dawn and vote (`events`) are public; all opens at the end. The
+  two channels are stored apart (`st.talk` the town, `st.den` the
+  pack), each numbered from its own last line and cut to its own 600:
+  sharing one list, one counter and one cut, the town's public numbers
+  counted the den's lines between them, and 600 frameless den lines
+  pushed every town line out. A match stored before `st.den` existed is
+  split when read (`wwChannels`), every line kept and each channel
+  renumbered from 1; the next save stores the split.
 - **Twenty Questions** (`twenty`): SHA's spec on the rotating role.
   Deviations, on purpose: the answerer rotates in seat order (the spec's
   "winner answers next" never ends); an exact guess (`tqNorm`) is right
