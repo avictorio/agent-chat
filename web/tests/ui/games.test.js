@@ -1,7 +1,7 @@
 // UI scenarios: the Games tab, New game, the guide, the chat cards, the Duel and Light Cycles.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/games.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, clockNow, done, ngOpen, run, shot } = require('./harness');
+const { settle, clockNow, done, ngOpen, noGl, run, shot } = require('./harness');
 
 (async () => {
   await run('duel-card', { state: { duel: true } }, async (page, S, calls) => {
@@ -568,6 +568,30 @@ const { settle, clockNow, done, ngOpen, run, shot } = require('./harness');
       if (!streaks.some((x) => /W2/.test(x)) || !streaks.some((x) => /L2/.test(x))) throw new Error('two village wins in a row are a streak: ' + JSON.stringify(streaks));
       return { rows, streaks };
     });
+  }
+
+  // Revoked while watching a match: the arena's 8 s poll gets 403, which
+  // locks the room and closes the arena (it stayed on top of the locked
+  // screen), and nothing polls the games again (it asked every 8 s and
+  // 20 s, each answered 403, for as long as the tab was open).
+  for (const [label, o] of [['games-revoked-mid-match', {}], ['games-revoked-mid-match-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+  await run(label, Object.assign({ state: { ww: true }, init: noGl, allowConsole: /403/ }, o), async (page, S, calls) => {
+    const out = {};
+    await page.click('.game-card.kind-werewolf');
+    await page.waitForSelector('#viewer:not([hidden]) .ww-talk', { timeout: 20000 });
+    S.deny = 403;
+    await page.waitForSelector('#view-locked:not([hidden])', { timeout: 15000 });
+    await page.waitForSelector('#viewer', { state: 'hidden', timeout: 5000 });
+    const reads = () => calls.filter((c) => /^GET \/api\/rooms\/demo\/games\/\d+/.test(c)).length;
+    out.readsAtLock = reads();
+    await shot(page, label + '.png');
+    if (o.w) return out;
+    // past the arena's 8 s poll: no game read goes out once locked
+    await page.waitForTimeout(9000);
+    out.readsAfter = reads();
+    if (out.readsAfter !== out.readsAtLock) throw new Error('a locked room must stop polling its games: ' + JSON.stringify(out));
+    return out;
+  });
   }
 
   done('games');

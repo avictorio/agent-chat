@@ -1,4 +1,4 @@
-import { staleTurn, type BattleshipState, type DuelState, type LightCyclesState } from "@chat/contract";
+import { ApiError, staleTurn, type BattleshipState, type DuelState, type LightCyclesState } from "@chat/contract";
 import type { Placing as BsPlacing } from "./battleship/BsArena3D";
 import { createElement, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -917,6 +917,9 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // or the poll landing mid-fetch rides the request already out.
   const fetching = new Map<number, Promise<void>>();
   function fetchGame(id: number): Promise<void> {
+    // A revoked member's tab kept asking every 8 s (an open arena) and
+    // 20 s (the cards), each answered 403, for as long as it stayed open.
+    if (opts.denied?.()) return Promise.resolve();
     const cur = fetching.get(id);
     if (cur) return cur;
     const p = (async () => {
@@ -929,8 +932,10 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         // badge) only hear about real changes, not every poll
         if (!prev || prev.__frameOnly || JSON.stringify(prev) !== JSON.stringify(d.game)) notify();
         if (gameView && gameView.id === id) renderGameView(d.game);
-      } catch {
-        // a failed refresh keeps the last known state
+      } catch (e) {
+        // the invite was revoked (or never held): lock the room, which
+        // closes the arena; any other failure keeps the last known state
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) opts.deny?.(e);
       } finally {
         fetching.delete(id);
       }

@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
-import type { BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
+import type { ApiError, BattleshipState, DuelState, LightCyclesState, RoomClient } from "@chat/contract";
 import type { ViewerApi } from "../../shell/viewer";
 import type { GL } from "./render";
 import type { LgDraft } from "../lettergrid/lettergrid";
@@ -21,6 +21,10 @@ export type GameStoreOptions = {
   // undefined when the call names none (live Light Cycles, where a late
   // steer should carry to the next tick)
   turnFor?: (id: number) => number | string | undefined;
+  // the room's lock: a 401/403 on a game read hands the refusal to deny
+  // (the locked screen), and while denied() the store sends nothing
+  deny?: (e: ApiError) => void;
+  denied?: () => boolean;
 };
 
 /* A 3D arena's host element, its React root and its status layer

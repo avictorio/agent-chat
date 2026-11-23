@@ -137,11 +137,16 @@ export function RoomShell({ room }: { room: string }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [setNavOpen]);
 
+  // closes the viewer (set once the viewer host exists, below)
+  const viewerShutRef = useRef<() => void>(() => {});
   const deny = useCallback((e: ApiError) => {
     deniedRef.current = true;
     setStatus("locked");
     setLockedText(String(e.message || "").replace(/^This room is invite-only\.\s*/i, "").trim());
     streamCloseRef.current();
+    // the viewer renders outside the room's sections, so an open arena
+    // (or photo, or page) stayed on top of the locked screen
+    viewerShutRef.current();
   }, []);
   const board = useBoardData({ client, tabRef, deny, deniedRef });
   const { refreshIfStale } = board;
@@ -236,6 +241,9 @@ export function RoomShell({ room }: { room: string }) {
 
   const viewerCloseRef = useRef<(() => void) | null>(null);
   const viewerHost = useViewerHost({ onCloseRef: viewerCloseRef });
+  useLayoutEffect(() => {
+    viewerShutRef.current = viewerHost.api.close;
+  }, [viewerHost.api]);
   const gameHelpRef = useRef<GameHelpHandle | null>(null);
   // the latest room_state, for the turn a game move names
   const rsRef = useLatest(board.rs);
@@ -256,6 +264,8 @@ export function RoomShell({ room }: { room: string }) {
         const t = (rsRef.current?.awaiting_you || []).find((a) => a.type === "game" && a.id === id && a.action === "move")?.call.body.turn;
         return typeof t === "number" || typeof t === "string" ? t : undefined;
       },
+      deny,
+      denied: () => deniedRef.current,
     })
   );
   const gamesRef = useRef<GameStore | null>(games);
