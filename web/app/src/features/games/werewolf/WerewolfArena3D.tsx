@@ -56,6 +56,17 @@ const roleInfo = (r?: string | null): RoleInfo => (r && ROLE[r]) || VILLAGER;
 // The seer's check ring wears the seer's colour: it was the violet of seat
 // 5, so checking that player drew a violet ring on a violet seat.
 const PICK_HEX: Record<string, string> = { kill: "#ef4444", check: "#c4b5fd", guard: "#60a5fa" };
+// Hue alone did not say which pick a ring was, next to nine seat colours
+// (seats 7 to 9 are white, sand and blush): a colour-blind player could
+// not tell a guard ring from a check ring or from a seat's own colour. So
+// each pick also has its own ring shape (PickRing) and a word with the
+// role's icon on the picked player's plate; the viewer's own vote says
+// "yours" on its plate the same way.
+type PickKind = "kill" | "check" | "guard";
+const PICK_WORD: Record<PickKind, string> = { kill: "🐺 your kill", check: "🔮 your check", guard: "🛡️ your guard" };
+// the word's colour: the ring's hue, light enough to read on the night
+// square (and in greyscale: the kill's red was nearly black there)
+const PICK_TEXT: Record<PickKind, string> = { kill: "#fca5a5", check: "#ddd6fe", guard: "#bfdbfe" };
 
 type Seat = { name: string; hex: string; you: boolean; x: number; z: number; a: number };
 
@@ -176,6 +187,50 @@ function Figure({ s, fall, dead, eyes, still }: { s: Seat; fall: number; dead: b
           </mesh>
         </group>
       ) : null}
+    </group>
+  );
+}
+
+/* The ring under tonight's pick, shaped by its kind so it reads without
+   its hue: a kill is one heavy ring with four teeth pointing in, a check
+   a ring of dashes, a guard two thin rings. */
+function PickRing({ kind, at }: { kind: PickKind; at: [number, number] }) {
+  const col = useMemo(() => new Color(PICK_HEX[kind]).multiplyScalar(1.8), [kind]);
+  const mat = <meshBasicMaterial color={col} toneMapped={false} />;
+  return (
+    <group rotation={[-Math.PI / 2, 0, 0]} position={[at[0], 0.01, at[1]]}>
+      {kind === "kill" ? (
+        <>
+          <mesh>
+            <ringGeometry args={[0.38, 0.5, 40]} />
+            {mat}
+          </mesh>
+          {[0, 1, 2, 3].map((i) => (
+            <mesh key={i} rotation={[0, 0, (i * Math.PI) / 2 + Math.PI / 4]} position={[Math.cos((i * Math.PI) / 2 + Math.PI / 4) * 0.33, Math.sin((i * Math.PI) / 2 + Math.PI / 4) * 0.33, 0]}>
+              <planeGeometry args={[0.14, 0.05]} />
+              {mat}
+            </mesh>
+          ))}
+        </>
+      ) : kind === "check" ? (
+        Array.from({ length: 10 }, (_, i) => (
+          <mesh key={i}>
+            <ringGeometry args={[0.38, 0.48, 6, 1, (i * Math.PI) / 5, Math.PI / 9]} />
+            {mat}
+          </mesh>
+        ))
+      ) : (
+        <>
+          <mesh>
+            <ringGeometry args={[0.34, 0.38, 40]} />
+            {mat}
+          </mesh>
+          <mesh>
+            <ringGeometry args={[0.46, 0.5, 40]} />
+            {mat}
+          </mesh>
+        </>
+      )}
     </group>
   );
 }
@@ -492,7 +547,8 @@ export default function WerewolfArena3D({
   // dusk), else the live phase
   const night = ev ? !!ev.night && rt < fallAt : running ? g.phase === "night" : false;
   const pickTarget = running && !ev && g.phase === "night" && you.act ? you.act : null;
-  const pickHex = PICK_HEX[myRole === "werewolf" ? "kill" : myRole === "seer" ? "check" : "guard"] || "#ef4444";
+  const pickKind: PickKind = myRole === "werewolf" ? "kill" : myRole === "seer" ? "check" : "guard";
+  const myVote = running && !ev && g.phase === "day" && you.vote ? you.vote : null;
   const winners = finished ? seats.filter((s) => (g.winners || []).indexOf(s.name) >= 0 && !deadNow.has(s.name)).slice(0, 4) : [];
   const tally: Record<string, number> = {};
   if (running && !ev && g.phase === "day") for (const v of Object.values(g.votes || {}) as string[]) tally[v] = (tally[v] || 0) + 1;
@@ -502,7 +558,7 @@ export default function WerewolfArena3D({
   const label =
     "Werewolf, 3D view: " +
     (running ? (g.phase === "night" ? "night " + g.night + ", the village sleeps. " : "day " + g.day + ", " + alive + " alive, " + Object.keys(g.votes || {}).length + " voted. ") : finished ? (g.side === "wolves" ? "the wolves won. " : "the village won. ") : "") +
-    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !((players.find((p) => p.name === s.name) || {}) as Partial<WerewolfPlayer>).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "")).join(", ") +
+    seats.map((s) => s.name + (s.you ? " (you)" : "") + (deadNow.has(s.name) || !((players.find((p) => p.name === s.name) || {}) as Partial<WerewolfPlayer>).alive ? " (dead" + (roleOf(s.name) ? ", " + roleOf(s.name) : "") + ")" : "") + (pickTarget === s.name ? " (" + PICK_WORD[pickKind].replace(/^\S+ /, "") + " tonight)" : myVote === s.name ? " (your vote)" : "")).join(", ") +
     ".";
   const intro = firstVisit ? { title: "Werewolf", sub: seats.map((s) => s.name).join(" · ") || "Night falls", color: "#93c5fd" } : null;
   return (
@@ -573,20 +629,26 @@ export default function WerewolfArena3D({
             return (
               <group key={s.name}>
                 <Figure s={s} fall={fall} dead={dead && fall > 0.95} eyes={packEyes} still={still} />
-                {pickTarget === s.name ? (
-                  <mesh rotation={[-Math.PI / 2, 0, 0]} position={[s.x, 0.01, s.z]}>
-                    <ringGeometry args={[0.38, 0.48, 40]} />
-                    <meshBasicMaterial color={new Color(pickHex).multiplyScalar(1.8)} toneMapped={false} />
-                  </mesh>
-                ) : null}
+                {pickTarget === s.name ? <PickRing kind={pickKind} at={[s.x, s.z]} /> : null}
                 <sprite position={s.you ? [s.x + ox * 0.8, 0.05, s.z + oz * 0.8] : [s.x, 1.55, s.z]} scale={big ? [2.6, 1.04, 1] : [1.9, 0.76, 1]} renderOrder={5}>
                   <spriteMaterial
                     map={textTex([
                       { text: s.name + (s.you ? " (you)" : ""), color: dead ? "#a1a1aa" : s.hex, size: 42 },
                       {
-                        text: role ? roleInfo(role).icon + " " + roleInfo(role).name : mineRole ? mineRole.icon + " you're the " + mineRole.name.toLowerCase() : tally[s.name] ? tally[s.name] + (tally[s.name] === 1 ? " vote" : " votes") : running && g.phase === "day" && p.voted ? "voted" : "",
-                        color: role ? roleInfo(role).hex : mineRole ? mineRole.hex : "#fde68a",
-                        size: 30,
+                        text: role
+                          ? roleInfo(role).icon + " " + roleInfo(role).name
+                          : pickTarget === s.name
+                            ? PICK_WORD[pickKind]
+                            : mineRole
+                              ? mineRole.icon + " you're the " + mineRole.name.toLowerCase()
+                              : tally[s.name]
+                                ? tally[s.name] + (tally[s.name] === 1 ? " vote" : " votes") + (myVote === s.name ? " · yours" : "")
+                                : running && g.phase === "day" && p.voted
+                                  ? "voted"
+                                  : "",
+                        color: role ? roleInfo(role).hex : pickTarget === s.name ? PICK_TEXT[pickKind] : mineRole ? mineRole.hex : "#fde68a",
+                        // the pick word is the plate's news: a size up
+                        size: pickTarget === s.name && !role ? 36 : 30,
                       },
                     ])}
                     transparent

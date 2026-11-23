@@ -594,6 +594,26 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       return out;
     });
   }
+  // A pick must read without its hue (a colour-blind player could not tell
+  // a guard ring from a check ring, or either from seats 7 to 9's white,
+  // sand and blush): the scene names it - a word on the picked plate and in
+  // the scene's label - for a kill, a check and the viewer's own day vote.
+  for (const [label, o, set, want] of [
+    ['werewolf-pick-kill', {}, (g) => { g.you = Object.assign({}, g.you, { act: 'Lou' }); }, 'Lou (your kill tonight)'],
+    ['werewolf-pick-check-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }, (g) => { g.you = { playing: true, accepted: true, role: 'seer', alive: true, act: 'Mo', checks: [], legal_moves: ['check Mo'] }; }, 'Mo (your check tonight)'],
+    ['werewolf-pick-vote', { day: true }, (g) => { g.votes = { Ada: 'Lou', Anthony: 'Lou' }; g.you = Object.assign({}, g.you, { vote: 'Lou' }); }, 'Lou (your vote)'],
+  ]) {
+    await run(label, Object.assign({ state: { ww: true, ww9: true, wwWolf: !o.day } }, o), async (page, S) => {
+      set(S.ww);
+      await page.click('.game-card.kind-werewolf');
+      await page.waitForSelector('#viewer:not([hidden]) .ww-3d-host canvas', { timeout: 20000 });
+      await page.waitForFunction(() => { const s = document.querySelector('#viewer .arena3d-status'); return s && s.hidden; }, null, { timeout: 60000, polling: 100 });
+      const scene = await page.$eval('#viewer .ww-3d-host [role="img"]', (c) => c.getAttribute('aria-label'));
+      await shot(page, label + '.png');
+      must(scene.includes(want) && (scene.match(/\(your /g) || []).length === 1, 'the scene names the pick, once: ' + scene);
+      return { scene };
+    });
+  }
   // Frames and the games list carry only the newest town lines and a count
   // (they used to carry 120 lines, ~59 KB a frame): the square is the full
   // state's talk, so a frame keeps what it shows and the read after it

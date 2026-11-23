@@ -495,7 +495,11 @@ state carries: your role badge over your own figure, the pack's red
 eyes (a wolf's view), a ring under tonight's pick (a role holder's
 view). A spectator or villager sees none of it. By day the votes are
 public: a line from each voter to their pick in the voter's colour and
-a count on each plate.
+a count on each plate. A pick never rests on its hue (nine seat colours
+sit beside it): each kind has its own ring (`PickRing`: a kill one heavy
+ring with teeth, a check dashes, a guard two thin rings), the picked
+plate says "🐺 your kill", "🔮 your check" or "🛡️ your guard", your own
+vote's plate adds "· yours", and the scene's label names the pick.
 
 **Events.** Every dawn and every vote (`events`) plays: the sky shows
 the event's time, the victim falls (0.7 s) with a `Burst` - red for a
