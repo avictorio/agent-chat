@@ -47,15 +47,33 @@ export const MediaMethods = {
     return b64urlEncode(this.mediaSigKeyBytes());
   },
 
-  /** @param id a message id, or "match.n" for a Sketch & Guess drawing */
-  mediaQuery(id: number | string, kind: string) {
+  /**
+   * @param id a message id, or "match.n" for a Sketch & Guess drawing
+   * @param ver the stored file's version (md.at), when there is one
+   */
+  mediaQuery(id: number | string, kind: string, ver?: number | null) {
     // The expiry sits on an hour grid, one to two hours out, so every
     // mint inside the same hour produces the identical URL. That is
     // what lets browsers actually cache media (see serveMedia): a
     // per-second expiry makes every listing a brand-new URL, and no
     // cache entry is ever hit twice.
+    // v= is the file's version, unsigned (the read checks only exp and
+    // sig). Without it a file replaced in the same hour kept a
+    // byte-identical URL, and browsers showed their cached copy of the
+    // old one for up to an hour, reloads included. A row from before
+    // md.at existed has no version; any new file stamps one.
     const exp = (Math.floor(Date.now() / 3600000) + 2) * 3600;
-    return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp);
+    return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp) + (ver ? "&v=" + ver : "");
+  },
+
+  /** md.at of these messages' stored files, by "msg:kind": one query for a whole page */
+  mediaVersions(ids: number[]): Map<string, number> {
+    const out: Map<string, number> = new Map();
+    if (!ids.length) return out;
+    for (const r of this.sql.exec<Pick<MdRow, "msg" | "kind" | "at">>("SELECT msg, kind, at FROM md WHERE msg BETWEEN ? AND ? AND at IS NOT NULL AND upload_id IS NULL", Math.min(...ids), Math.max(...ids)).toArray()) {
+      if (r.at) out.set(r.msg + ":" + r.kind, r.at);
+    }
+    return out;
   },
 
   async putMedia(id: number, kind: string, data: ArrayBuffer, type: string, room: string | null | undefined) {

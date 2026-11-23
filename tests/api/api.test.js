@@ -450,6 +450,38 @@ function mp4() {
     check('avatar read with only ?invite= -> 401', r.status === 401, r.status);
     await req('DELETE', R + '/avatar', { token: TA });
 
+    // A media url names the stored file: v= (the file's version, unsigned)
+    // changes when the file is replaced and nothing else does. Before, a
+    // replacement in the same hour had the identical url, and a browser
+    // kept showing its cached copy of the old file (media answers are
+    // cacheable for an hour) even after a reload.
+    r = await req('POST', R + '/messages', { token: TA, json: { from: 'ApiA', text: 'replaced pic', image: PNG.toString('base64'), html: '<!doctype html><title>V</title><p>page</p>', html_name: 'v.html' } });
+    const vId = r.json && r.json.id;
+    const vRead = async () => { const l = await req('GET', R + '/messages?limit=20', { token: TA }); return (l.json.messages || []).find((x) => x.id === vId) || {}; };
+    const v1 = await vRead();
+    const v1b = await vRead();
+    const u1 = v1.image && v1.image.url;
+    check('media version: the url carries v= after exp and sig', /[?&]exp=\d+&sig=[A-Za-z0-9_-]+&v=\d+$/.test(u1 || ''), u1);
+    check('media version: reading again without a change gives the same url', !!u1 && u1 === (v1b.image && v1b.image.url) && v1.html.url === v1b.html.url, u1 + ' / ' + (v1b.image && v1b.image.url));
+    const b1 = Buffer.from(await (await fetch(BASE + u1)).arrayBuffer());
+    r = await req('PUT', R + '/messages/' + vId + '/image', { token: TA, headers: { 'Content-Type': 'image/gif' }, body: GIF });
+    check('media version: PUT a different image -> 200', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    const v2 = await vRead();
+    const u2 = v2.image && v2.image.url;
+    const qs = (u) => new URL(u, BASE).searchParams;
+    check('media version: the replaced image has a new url, the same signature', !!u2 && u2 !== u1 && (qs(u2).get('exp') !== qs(u1).get('exp') || qs(u2).get('sig') === qs(u1).get('sig')) && qs(u2).get('v') !== qs(u1).get('v'), u1 + ' -> ' + u2);
+    check('media version: the untouched page keeps its url', v2.html && v2.html.url === v1.html.url, v1.html && v1.html.url);
+    const g2 = await fetch(BASE + u2);
+    const b2 = Buffer.from(await g2.arrayBuffer());
+    check('media version: the new url serves the new image, not the old bytes', g2.status === 200 && b2.equals(GIF) && !b2.equals(b1) && b1.equals(PNG), g2.status + ' ' + b1.length + '/' + b2.length);
+    const g2r = await fetch(BASE + u2, { headers: { Range: 'bytes=0-3' } });
+    check('media version: a range request with v= -> 206', g2r.status === 206 && Buffer.from(await g2r.arrayBuffer()).equals(GIF.subarray(0, 4)), g2r.status);
+    const gh = await fetch(BASE + v2.html.url);
+    check('media version: the page opens with v= in its url', gh.status === 200 && /text\/html/.test(gh.headers.get('content-type') || '') && /<p>page<\/p>/.test(await gh.text()), gh.status);
+    r = await req('GET', R + '/attachments?kind=image&limit=5', { token: TA });
+    const vAtt = (r.json.attachments || []).find((a) => a.id === vId);
+    check('media version: the attachments listing carries the same url', !!vAtt && vAtt.url === u2, vAtt && vAtt.url);
+
     // Revocation.
     const invC = await req('POST', R + '/invites', { owner: true, json: { name: 'ApiC', kind: 'agent' } });
     await req('DELETE', R + '/invites/' + invC.json.token, { owner: true });

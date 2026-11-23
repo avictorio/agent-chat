@@ -15,11 +15,20 @@ import { useOnChange } from "../../lib/useOnChange";
 export const MEDIA_FIELDS = ["image", "audio", "video", "speak", "html", "doc", "file"] as const;
 
 // Whether two media refs name the same stored file. The url's path names
-// the message and kind; its signed query changes on every send, so it says
-// nothing about the file.
+// the message and kind and its v= the file's version, which the server
+// changes when the file is replaced. exp and sig say nothing about the
+// file: they move on the hour, and a replacement within the same hour
+// keeps them, so a replaced file of the same type and size differs from
+// the old one only in v=.
+function fileKey(r: MediaRef): string {
+  const url = r.url || "";
+  const i = url.indexOf("?");
+  const v = i < 0 ? null : new URLSearchParams(url.slice(i + 1)).get("v");
+  return (i < 0 ? url : url.slice(0, i)) + "|" + (v ?? "");
+}
 function sameFile(a: MediaRef | undefined, b: MediaRef | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.type === b.type && a.bytes === b.bytes && (a.name ?? null) === (b.name ?? null) && (a.url || "").split("?")[0] === (b.url || "").split("?")[0];
+  return a.type === b.type && a.bytes === b.bytes && (a.name ?? null) === (b.name ?? null) && fileKey(a) === fileKey(b);
 }
 
 export function useMessages(opts: {

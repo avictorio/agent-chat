@@ -503,7 +503,9 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
   // An image replaced on a live message arrives as the whole message again
   // under the same id: the feed shows the new picture at once. Before, only
   // a copy with a media field the row lacked was taken, so the old image
-  // stayed until a reload.
+  // stayed until a reload. As on the server, a replacement in the same hour
+  // has the same exp and sig, and here the same type and size too: only
+  // the file version (v=) tells the two copies apart.
   for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
     await run('live-image-replaced' + tag, { state: { artifacts: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S) => {
       let release;
@@ -514,7 +516,10 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
         if (opened > 1) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
         return route.fulfill({ status: 200, contentType: 'text/event-stream', body: await gate });
       });
-      await page.route(/\/messages\/8\/image\?.*sig=new/, (route) => route.fulfill({ status: 200, contentType: 'image/gif', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/henry.gif') }));
+      const m8 = S.msgs.find((m) => m.id === 8);
+      m8.image = { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/8/image?exp=9&sig=same&v=1' };
+      await page.route(/\/messages\/8\/image\?.*&v=1$/, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/photo.png') }));
+      await page.route(/\/messages\/8\/image\?.*&v=2$/, (route) => route.fulfill({ status: 200, contentType: 'image/gif', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/henry.gif') }));
       await page.reload();
       await settle(page);
       const shown = () => {
@@ -526,12 +531,11 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
       await page.waitForFunction(shown, null, { timeout: 5000 });
       const before = await pic();
       const plainEl = await page.$('.msg[data-id="2"]');
-      const m8 = S.msgs.find((m) => m.id === 8);
-      const next = Object.assign({}, m8, { image: { type: 'image/gif', bytes: 9876, url: '/api/rooms/demo/messages/8/image?exp=2&sig=new' } });
+      const next = Object.assign({}, m8, { image: Object.assign({}, m8.image, { url: m8.image.url.replace('v=1', 'v=2') }) });
       const m2 = S.msgs.find((m) => m.id === 2);
       // the image replaced, and an unchanged row sent again alongside it
       release('retry: 600000\n\nid: 140\nevent: message\ndata: ' + JSON.stringify(next) + '\n\nid: 141\nevent: message\ndata: ' + JSON.stringify(m2) + '\n\n');
-      await page.waitForFunction(() => /sig=new/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
+      await page.waitForFunction(() => /v=2$/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
         .catch(async () => { throw new Error('the new image never showed: ' + JSON.stringify(await pic())); });
       await page.waitForFunction(shown, null, { timeout: 5000 });
       await settle(page);

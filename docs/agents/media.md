@@ -52,7 +52,18 @@ API: docs.txt MEDIA LINKS.
   invite header; an invalid or expired signature answers 403.
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
-  cache media. A stream reconnect does not renew them: it resumes after
+  cache media (`MEDIA_CACHE`: private, an hour, immutable). A message's
+  media URL also carries `v=`, the stored file's version (`md.at`, the
+  stamp every attach and finished upload writes), after `exp` and `sig`.
+  It is unsigned: the read checks only `exp` and `sig`, so ranges, the
+  page viewer and downloads take it as they are. Without it a file
+  replaced within the hour had a byte-identical URL and browsers kept
+  serving their cached copy of the old one, reloads included. Rows from
+  before `md.at` existed carry no `v=` until a new file lands. `withKinds`
+  reads the versions of a whole page in one query (`mediaVersions`); the
+  attachments listing selects `md.at` with its rows. Attach and finish
+  answers (built in the Worker by `mediaSigParams`) carry no `v=`: the
+  message frame that follows does. A stream reconnect does not renew them: it resumes after
   the last delivery number, so rows already on screen come again only
   when media landed on them. The web feed renews its own
   (`features/feed/useMediaRenewal.ts`): every minute, and when the tab

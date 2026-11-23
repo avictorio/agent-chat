@@ -385,37 +385,40 @@ export const MessageMethods = {
       for (const r of rows as MsgBag[]) r.reactions = by.get(r.id) || {};
     }
     // Audio and images: listings carry type, size and URL; the bytes live behind the URL.
+    const withMedia = (rows as MsgBag[]).filter((r) => r.audio_type || r.image_type || r.video_type || r.html_type || r.doc_type || r.file_type).map((r) => r.id);
+    const vers = this.mediaVersions(withMedia);
+    const q = (id: number, kind: string) => this.mediaQuery(id, kind, vers.get(id + ":" + kind));
     for (const r of rows as MsgBag[]) {
       if ("audio_type" in r) {
-        r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" + this.mediaQuery(r.id, "audio") : null, transcript: r.audio_transcript || null } : null;
+        r.audio = r.audio_type ? { type: r.audio_type, bytes: r.audio_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/audio" + q(r.id, "audio") : null, transcript: r.audio_transcript || null } : null;
         delete r.audio_type;
         delete r.audio_size;
         delete r.audio_transcript;
       }
       if ("image_type" in r) {
-        r.image = r.image_type ? { type: r.image_type, bytes: r.image_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/image" + this.mediaQuery(r.id, "image") : null } : null;
+        r.image = r.image_type ? { type: r.image_type, bytes: r.image_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/image" + q(r.id, "image") : null } : null;
         delete r.image_type;
         delete r.image_size;
       }
       if ("video_type" in r) {
-        r.video = r.video_type ? { type: r.video_type, bytes: r.video_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/video" + this.mediaQuery(r.id, "video") : null } : null;
+        r.video = r.video_type ? { type: r.video_type, bytes: r.video_size || 0, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/video" + q(r.id, "video") : null } : null;
         delete r.video_type;
         delete r.video_size;
       }
       if ("html_type" in r) {
-        r.html = r.html_type ? { type: r.html_type, bytes: r.html_size || 0, name: r.html_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/html" + this.mediaQuery(r.id, "html") : null } : null;
+        r.html = r.html_type ? { type: r.html_type, bytes: r.html_size || 0, name: r.html_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/html" + q(r.id, "html") : null } : null;
         delete r.html_type;
         delete r.html_size;
         delete r.html_name;
       }
       if ("doc_type" in r) {
-        r.doc = r.doc_type ? { type: r.doc_type, bytes: r.doc_size || 0, name: r.doc_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/doc" + this.mediaQuery(r.id, "doc") : null } : null;
+        r.doc = r.doc_type ? { type: r.doc_type, bytes: r.doc_size || 0, name: r.doc_name || null, url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/doc" + q(r.id, "doc") : null } : null;
         delete r.doc_type;
         delete r.doc_size;
         delete r.doc_name;
       }
       if ("file_type" in r) {
-        r.file = r.file_type ? { type: r.file_type, bytes: r.file_size || 0, name: r.file_name || "file", url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/file" + this.mediaQuery(r.id, "file") : null } : null;
+        r.file = r.file_type ? { type: r.file_type, bytes: r.file_size || 0, name: r.file_name || "file", url: this.roomName ? "/api/rooms/" + this.roomName + "/messages/" + r.id + "/file" + q(r.id, "file") : null } : null;
         delete r.file_type;
         delete r.file_size;
         delete r.file_name;
@@ -495,13 +498,13 @@ export const MessageMethods = {
     for (const r of this.sql.exec<{ kind: string, n: number }>("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
       if (r.kind in counts) { (counts as Record<string, number>)[r.kind] = r.n; counts.all += r.n; }
     }
-    let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes " + base + fromSql + " AND md.kind IN (" + inList + ")";
+    let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes, md.at AS at " + base + fromSql + " AND md.kind IN (" + inList + ")";
     const args: Array<string | number> = from ? [from, ...kinds] : [...kinds];
     // curKind is set together with curMsg
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind as string); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";
     args.push(limit + 1);
-    const rows = this.sql.exec<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: AttachmentKind, type: string, bytes: number }>(sql, ...args).toArray();
+    const rows = this.sql.exec<{ id: number, ts: number, from: string, text: string, transcript: string | null, html_name: string | null, doc_name: string | null, file_name: string | null, kind: AttachmentKind, type: string, bytes: number, at: number | null }>(sql, ...args).toArray();
     const more = rows.length > limit;
     if (more) rows.pop();
     const out = rows.map((r) => ({
@@ -514,7 +517,7 @@ export const MessageMethods = {
       name: r.kind === "html" ? (r.html_name || null) : r.kind === "doc" ? (r.doc_name || null) : r.kind === "file" ? (r.file_name || "file") : null,
       text: String(r.text || "").slice(0, 300),
       transcript: r.kind === "audio" ? (r.transcript || null) : null,
-      url: "/api/rooms/" + this.roomName + "/messages/" + r.id + "/" + r.kind + this.mediaQuery(r.id, r.kind),
+      url: "/api/rooms/" + this.roomName + "/messages/" + r.id + "/" + r.kind + this.mediaQuery(r.id, r.kind, r.at),
     }));
     const last = out[out.length - 1];
     return { attachments: out, counts: counts, next_cursor: more && last ? last.id + ":" + last.kind : null };
