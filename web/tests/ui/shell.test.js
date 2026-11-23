@@ -374,6 +374,44 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     must(!out.keys.some((k) => /[:/]demo($|:)/.test(k)), 'Forget must remove the room\'s keys: ' + JSON.stringify(out));
     return out;
   });
+  // Forget clears the bell's mode before its unsubscribe reaches the
+  // server, and an open tab of the room repaints on that change: its status
+  // check, answered before the unsubscribe, says "registered" and the bell
+  // reads on. The invite's removal after the unsubscribe repaints it off;
+  // before, nothing did and the bell stayed on with nothing registered.
+  await run('push-forget-open-tab-label', { init: pushInitSrc }, async (page, S, calls) => {
+    S.push = { [EP]: 'all' };
+    const b = await page.context().newPage();
+    await installClock(b);
+    await setup(b, S, calls);
+    await b.addInitScript(pushInitSrc);
+    await b.goto('https://chat.victorio.cloud/r/demo');
+    await b.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].some((x) => x.getAttribute('title') === 'Notifications on'), null, { timeout: 10000 });
+    await page.goto('https://chat.victorio.cloud/');
+    await settle(page);
+    // Home's unsubscribe waits before the fake server sees it
+    let openUnsub, unsubHeld;
+    const gate = new Promise((r) => (openUnsub = r));
+    const held = new Promise((r) => (unsubHeld = r));
+    await page.route('**/push/unsubscribe', async (route) => { unsubHeld(); await gate; await route.fallback(); });
+    const before = S.pushLog.length;
+    await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+    await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 });
+    await page.click('#forgetYes');
+    await held;
+    // tab B's repaint after the mode went: its status check still hears "registered"
+    for (let i = 0; i < 150 && !S.pushLog.slice(before).some((x) => x.startsWith('status')); i++) await new Promise((r) => setTimeout(r, 20));
+    await settle(b);
+    const mid = await bellLabel(b);
+    openUnsub();
+    await settle(page);
+    await b.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].some((x) => x.getAttribute('title') === 'Notifications off'), null, { timeout: 2000 }).catch(() => {});
+    const out = { mid, end: await bellLabel(b), push: S.push, log: S.pushLog.slice(before), keys: await forgetKeys(page) };
+    must(out.log.some((x) => x.startsWith('status')) && mid === 'Notifications on', 'tab B should have repainted on while the unsubscribe was held: ' + JSON.stringify(out));
+    must(!Object.keys(S.push).length && !out.keys.some((k) => /[:/]demo($|:)/.test(k)), 'Forget must finish: ' + JSON.stringify(out));
+    must(out.end === 'Notifications off', 'tab B must read off once the room is forgotten: ' + JSON.stringify(out));
+    return out;
+  });
   // A failed unsubscribe offers Try again, which runs it again (busy
   // meanwhile); the error line used to say "Try again" with no button for it.
   for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) {

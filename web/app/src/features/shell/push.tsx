@@ -86,6 +86,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   const stateRef = useLatest(state);
   const modeRef = useLatest(mode);
   const modeKey = "chat-push-mode:" + client.basePath();
+  const inviteKey = "chat-invite:" + client.room;
 
   const paint = useCallback((s: PushState, m: PushMode) => {
     setState(s);
@@ -217,9 +218,13 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     const onVis = () => {
       if (!document.hidden) void paintPushState();
     };
-    // another tab of this room turned the bell on or off
+    // Another tab of this room turned the bell on or off, or Home forgot
+    // the room. Forget clears the mode before its unsubscribe, so the
+    // repaint that change sets off can hear "registered" from the server
+    // and paint the bell on; the invite goes only after the unsubscribe
+    // succeeded, and repainting then leaves the bell saying off.
     const onStore = (e: StorageEvent) => {
-      if (e.key === null || e.key === modeKey) void paintPushState();
+      if (e.key === null || e.key === modeKey || e.key === inviteKey) void paintPushState();
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("storage", onStore);
@@ -227,7 +232,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("storage", onStore);
     };
-  }, [paintPushState, modeKey]);
+  }, [paintPushState, modeKey, inviteKey]);
 
   const choose = useCallback(
     async (m: PushMode | "off") => {

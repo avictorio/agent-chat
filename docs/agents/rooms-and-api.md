@@ -268,7 +268,9 @@ docs.txt section that owns its routes, caps and formats.
   Home unsubscribes the room before it deletes the invite. Both clear the
   room's saved mode before the unsubscribe and put it back if it fails:
   an open tab of the room re-registers quietly when its status check
-  hears "not registered" and still finds a mode. When the
+  hears "not registered" and still finds a mode. That tab also repaints
+  when the room's invite goes, so a bell painted on while Forget's
+  unsubscribe was in flight ends up off. When the
   browser has dropped its subscription, an open room turned on here
   (saved mode, permission granted) subscribes again quietly; other rooms
   re-register when they are opened (the service worker has no
