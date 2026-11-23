@@ -1,18 +1,26 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
-import type { Message, RoomState } from "@chat/contract";
+import type { MediaRef, Message, RoomState } from "@chat/contract";
 import { same } from "../../lib/index";
 import { atBottom } from "./feed";
 import { useLatest } from "../../lib/useLatest";
 import { useOnChange } from "../../lib/useOnChange";
 
 // The feed's message state, colocated with the feed: the list and
-// its add() semantics (dedupe, richer-copy swap, the 1200 cap),
+// its add() semantics (dedupe, the swap to a changed copy, the 1200 cap),
 // the scroll discipline (stick to bottom, the jump pill, the
 // initial settle window), and the unread count. The stream and
 // the composer feed it; ChatFeed renders it.
 
 // The fields that carry a signed media link (MEDIA LINKS in docs.txt).
 export const MEDIA_FIELDS = ["image", "audio", "video", "speak", "html", "doc", "file"] as const;
+
+// Whether two media refs name the same stored file. The url's path names
+// the message and kind; its signed query changes on every send, so it says
+// nothing about the file.
+function sameFile(a: MediaRef | undefined, b: MediaRef | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.type === b.type && a.bytes === b.bytes && (a.name ?? null) === (b.name ?? null) && (a.url || "").split("?")[0] === (b.url || "").split("?")[0];
+}
 
 export function useMessages(opts: {
   tabRef: RefObject<string>;
@@ -69,24 +77,24 @@ export function useMessages(opts: {
   const addMsg = useCallback((m: Message) => {
     if (!m) return;
     if (seenRef.current.has(m.id)) {
-      // A richer copy of a message already on screen (its media arrived
-      // when the upload published): swap it in instead of dropping it.
+      // A message already on screen comes again, whole, when media lands
+      // on it, a second file of a kind it already had included. Before,
+      // only a copy with a media field the shown one lacked was taken, so
+      // an image replaced on a live message kept the old one until a
+      // reload. A copy that differs in nothing a person sees keeps the
+      // shown object, so the row does not re-render.
       setMessages((arr) => {
         const i = arr.findIndex((x) => x.id === m.id);
         if (i < 0) return arr;
         const old = arr[i]!;
-        const richer =
-          (m.video && !old.video) ||
-          (m.image && !old.image) ||
-          (m.audio && !old.audio) ||
-          (m.html && !old.html) ||
-          (m.doc && !old.doc) ||
-          (m.file && !old.file) ||
-          (m.text || "") !== (old.text || "");
-        if (!richer) return arr;
+        if ((m.text || "") === (old.text || "") && MEDIA_FIELDS.every((k) => !m[k] || sameFile(m[k], old[k]))) return arr;
+        // A field the new copy lacks is kept: a lighter copy of the row (a
+        // post's own answer racing its stream frame) never takes media away.
+        let row: Message = m;
+        for (const k of MEDIA_FIELDS) if (!m[k] && old[k]) row = { ...row, [k]: old[k] };
         linksAtRef.current.set(m.id, Date.now());
         const next = [...arr];
-        next[i] = m;
+        next[i] = row;
         return next;
       });
       return;

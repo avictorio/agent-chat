@@ -1,7 +1,7 @@
 // UI scenarios: the chat: markdown, voice and dictation, message actions, artifacts and reactions.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/chat.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, must, run, shot, ymd } = require('./harness');
+const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
 
 (async () => {
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
@@ -499,6 +499,51 @@ const { settle, done, must, run, shot, ymd } = require('./harness');
     await settle(page);
     return out;
   });
+
+  // An image replaced on a live message arrives as the whole message again
+  // under the same id: the feed shows the new picture at once. Before, only
+  // a copy with a media field the row lacked was taken, so the old image
+  // stayed until a reload.
+  for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
+    await run('live-image-replaced' + tag, { state: { artifacts: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag }, async (page, S) => {
+      let release;
+      const gate = new Promise((r) => (release = r));
+      let opened = 0;
+      await page.route('**/stream*', async (route) => {
+        opened++;
+        if (opened > 1) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'retry: 600000\n\n' });
+        return route.fulfill({ status: 200, contentType: 'text/event-stream', body: await gate });
+      });
+      await page.route(/\/messages\/8\/image\?.*sig=new/, (route) => route.fulfill({ status: 200, contentType: 'image/gif', body: require('fs').readFileSync(TESTS + '/../../tests/fixtures/henry.gif') }));
+      await page.reload();
+      await settle(page);
+      const shown = () => {
+        const i = document.querySelector('.msg[data-id="8"] img.msg-img');
+        if (i) i.scrollIntoView({ block: 'center' });
+        return !!i && i.complete && i.naturalWidth > 0;
+      };
+      const pic = () => page.$eval('.msg[data-id="8"] img.msg-img', (i) => ({ src: i.getAttribute('src'), w: i.naturalWidth, h: i.naturalHeight }));
+      await page.waitForFunction(shown, null, { timeout: 5000 });
+      const before = await pic();
+      const plainEl = await page.$('.msg[data-id="2"]');
+      const m8 = S.msgs.find((m) => m.id === 8);
+      const next = Object.assign({}, m8, { image: { type: 'image/gif', bytes: 9876, url: '/api/rooms/demo/messages/8/image?exp=2&sig=new' } });
+      const m2 = S.msgs.find((m) => m.id === 2);
+      // the image replaced, and an unchanged row sent again alongside it
+      release('retry: 600000\n\nid: 140\nevent: message\ndata: ' + JSON.stringify(next) + '\n\nid: 141\nevent: message\ndata: ' + JSON.stringify(m2) + '\n\n');
+      await page.waitForFunction(() => /sig=new/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
+        .catch(async () => { throw new Error('the new image never showed: ' + JSON.stringify(await pic())); });
+      await page.waitForFunction(shown, null, { timeout: 5000 });
+      await settle(page);
+      const after = await pic();
+      must(before.w !== after.w || before.h !== after.h, 'the picture changed: ' + JSON.stringify({ before, after }));
+      must(await plainEl.evaluate((e) => e.isConnected), 'the unchanged row stays mounted');
+      must((await page.$$('.msg[data-id="8"]')).length === 1, 'the row is shown once');
+      await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'start' }));
+      await shot(page, 'live-image-replaced' + tag + '.png');
+      return { before, after };
+    });
+  }
 
   done('chat');
 })();
