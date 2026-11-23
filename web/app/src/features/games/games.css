@@ -74,6 +74,9 @@
 .arena3d-sound[aria-pressed="false"] { opacity: .7; }
 .arena3d-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; text-align: center; color: #9fb7c9; font-size: 13.5px; pointer-events: none; }
 .arena3d-status button { pointer-events: auto; }
+/* A lost WebGL context leaves the canvas empty (white): the note sits on
+   a night backdrop instead, so it reads and the box stays a dark world. */
+.lc-3d-host.ctx-lost .arena3d-status { background: #0b1220; color: #c7d8e4; z-index: 5; }
 /* No WebGL on this device: the arena box shrinks to one line and the
    game plays on with the controls under it. The [class] makes it
    outrank every per-game height, phone sizes included. */

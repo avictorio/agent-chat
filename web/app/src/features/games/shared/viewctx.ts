@@ -28,8 +28,14 @@ export type GameStoreOptions = {
 };
 
 /* A 3D arena's host element, its React root and its status layer
-   (see makeHost3d). */
-export type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean };
+   (see makeHost3d); ready once its scene has drawn. */
+export type Host3d = { root: Root; host: HTMLElement; status: HTMLElement; failed: boolean; ready?: boolean };
+
+/* The event a scene's canvas sends up to its host (FirstFrame in
+   three/arena3d.tsx, heard in makeHost3d) when its WebGL context is lost
+   (detail.lost true) and when it comes back. Here, not in arena3d, so the
+   store reads it without loading three.js. */
+export const CONTEXT_EVENT = "arena3d-context";
 
 /* A 3D arena's props: its match (its game's state S) and the hooks a scene may take. */
 export type Arena3dProps<S = GL> = { g: S; me?: string; aspect?: number; onReady?: () => void; registerCommit?: (fn: (() => void) | null) => void; onDrop?: (col: number) => void; draft?: { word: string; path: number[][] | null } | null; onCell?: (r: number, c: number) => void };

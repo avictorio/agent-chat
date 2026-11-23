@@ -6,7 +6,7 @@ import { flushSync } from "react-dom";
 import { el, toast } from "../../lib/index";
 import { gameDef, matchTitle } from "./shared/catalog";
 import { clockSeconds, formatLeft, setClockBar, setTurnClock, type GL, type GLPlayer, type GLYou } from "./shared/render";
-import type { Arena3dProps, GameStoreOptions, GameView, GameViewCtx, Host3d, Kind3d } from "./shared/viewctx";
+import { CONTEXT_EVENT, type Arena3dProps, type GameStoreOptions, type GameView, type GameViewCtx, type Host3d, type Kind3d } from "./shared/viewctx";
 import { GAMES } from "./registry";
 import type { HistPlayer } from "./shared/history";
 
@@ -653,6 +653,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     const h: Host3d = { root: null as unknown as Root, host, status, failed: false };
     h.root = createRoot(mount, { onUncaughtError: (err) => fail3d(h, err) });
     status.textContent = "Loading the 3D arena…";
+    lostContext(h);
     // no WebGL at all: say so at once (no scene will ever draw, and a
     // reload will not help) - the game plays on with the controls below
     if (!webglOk()) {
@@ -677,7 +678,54 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     return webglKnown;
   }
   function ready3d(h: Host3d) {
+    h.ready = true;
     if (!h.failed) h.status.hidden = true;
+  }
+  /* A scene whose WebGL context is lost (FirstFrame tells its host) was
+     a blank box with no word. Now the box says it paused; a context the
+     browser gives back draws again and the note goes; one that has not
+     come back after LOST_MS offers Restore, which builds the scene anew
+     on a fresh canvas. */
+  const LOST_MS = 5000;
+  function lostContext(h: Host3d) {
+    let timer = 0;
+    h.host.addEventListener(CONTEXT_EVENT, (e) => {
+      if (h.failed) return;
+      const lost = !!(e as CustomEvent<{ lost: boolean }>).detail?.lost;
+      clearTimeout(timer);
+      h.status.textContent = "";
+      h.host.classList.toggle("ctx-lost", lost);
+      if (!lost) {
+        // a scene lost before its first frame reports ready again itself
+        if (h.ready) h.status.hidden = true;
+        else h.status.textContent = "Loading the 3D arena…";
+        return;
+      }
+      h.status.appendChild(el("div", "", "The 3D view paused - it should come back in a moment."));
+      h.status.hidden = false;
+      timer = window.setTimeout(() => {
+        if (h.failed) return;
+        h.status.textContent = "";
+        h.status.appendChild(el("div", "", "The 3D view was lost. The controls below still work."));
+        const b = el("button", "btn sm", "Restore the 3D view") as HTMLButtonElement;
+        b.type = "button";
+        b.addEventListener("click", () => restore3d(h));
+        h.status.appendChild(b);
+      }, LOST_MS);
+    });
+  }
+  // drops the host from the open view and paints it again: the view
+  // makes a new host, so a new canvas and context
+  function restore3d(h: Host3d) {
+    const gv = gameView;
+    if (!gv) return;
+    if (gv.r3d === h) drop3d();
+    else if (gv.bs3d === h) dropBs3d();
+    else if (gv.lc3d === h) dropLc3d();
+    else if (gv.duel3d === h) dropDuel3d();
+    else return;
+    const cg = cache.get(gv.id);
+    if (cg) renderGameView(cg, true);
   }
   /* Whether the open arena plays on its flat panels: no WebGL, or its
      scene failed (a WebGL error, a chunk that did not load, a scene that

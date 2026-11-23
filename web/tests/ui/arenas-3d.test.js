@@ -164,5 +164,59 @@ const { ARENA_KIDS, settle, done, run, shot } = require('./harness');
       return out;
     });
   }
+  /* A lost WebGL context (a phone backgrounding the tab) left a blank
+     box with no word; under reduced motion a restored one stayed blank,
+     since nothing asked for a frame. Now the box says it paused, a
+     restore draws the scene again, and a context that never comes back
+     offers Restore, which builds the scene on a fresh canvas. */
+  const loseCtx = (page, back) => page.$eval('#viewer .c4-3d-host canvas', (c, back) => {
+    const x = (window.__lc = window.__lc || c.getContext('webgl2').getExtension('WEBGL_lose_context'));
+    if (back) x.restoreContext(); else x.loseContext();
+  }, back);
+  const statusIs = (page, re) => page.waitForFunction((re) => { const s = document.querySelector('#viewer .c4-3d-host .arena3d-status'); return s && (re ? !s.hidden && new RegExp(re).test(s.textContent) : s.hidden); }, re, { timeout: 20000, polling: 100 });
+  // counts the scene's WebGL draw calls: a restored context that nothing
+  // asks to draw makes none, and shows a cleared canvas
+  const countDraws = () => {
+    const P = WebGL2RenderingContext.prototype;
+    window.__draws = 0;
+    for (const k of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']) {
+      const f = P[k];
+      P[k] = function (...a) { window.__draws++; return f.apply(this, a); };
+    }
+  };
+  const draws = (page) => page.evaluate(() => window.__draws);
+  // a few frames: a draw asked for lands within them
+  const frames = (page) => page.evaluate(() => new Promise((r) => { let n = 0; const f = () => (++n > 10 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
+  for (const [label, o] of [['arena-context-lost', {}], ['arena-context-lost-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { c4: true }, reducedMotion: 'reduce', init: countDraws }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .c4-grid', { timeout: 10000 });
+      await page.click('.game-card.kind-fourinarow');
+      await page.waitForSelector('#viewer:not([hidden]) .c4-3d-host canvas', { timeout: 20000 });
+      await statusIs(page, null);
+      await loseCtx(page, false);
+      await statusIs(page, 'paused');
+      await shot(page, label + '-paused.png');
+      const d0 = await draws(page);
+      await loseCtx(page, true);
+      await statusIs(page, null);
+      await frames(page);
+      out.restored = (await draws(page)) - d0;
+      if (out.restored < 1) throw new Error('a restored context draws the scene again, even under reduced motion: ' + JSON.stringify(out));
+      // never given back: Restore builds the scene anew
+      await loseCtx(page, false);
+      await statusIs(page, 'was lost');
+      await shot(page, label + '-lost.png');
+      const old = await page.$('#viewer .c4-3d-host canvas');
+      await page.click('#viewer .c4-3d-host .arena3d-status button');
+      await page.waitForFunction((o) => { const c = document.querySelector('#viewer .c4-3d-host canvas'); return c && c !== o; }, old, { timeout: 20000 });
+      const d1 = await draws(page);
+      await statusIs(page, null);
+      await frames(page);
+      out.rebuilt = (await draws(page)) - d1;
+      if (out.rebuilt < 1) throw new Error('Restore draws the scene on a fresh canvas: ' + JSON.stringify(out));
+      return out;
+    });
+  }
   done('arenas-3d');
 })();

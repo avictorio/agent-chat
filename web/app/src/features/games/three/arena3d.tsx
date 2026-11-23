@@ -38,6 +38,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import type { CameraControls } from "@react-three/drei";
 import type { PerspectiveCamera } from "three";
 import { useLatest } from "../../../lib/useLatest";
+import { CONTEXT_EVENT } from "../shared/viewctx";
 
 export type Ctl = ComponentRef<typeof CameraControls>;
 /* tz: the look-at point's z (default 0, the board's centre); a
@@ -111,6 +112,31 @@ export function Ticker({ fps }: { fps: number }) {
 
 export function FirstFrame({ onReady }: { onReady?: () => void }) {
   const done = useRef(false);
+  const gl = useThree((s) => s.gl);
+  const invalidate = useThree((s) => s.invalidate);
+  // A lost WebGL context (a phone backgrounding the tab, a GPU reset)
+  // left a blank scene with no word, and under reduced motion (no
+  // Ticker) a restored one stayed blank until the next move: nothing
+  // asked for a frame. three.js already lets the context come back
+  // (it calls preventDefault on the loss). So the host is told, to say
+  // so, and a restore draws again - through this first-frame path, so
+  // a loss during the shader compile still reports ready.
+  useEffect(() => {
+    const c = gl.domElement;
+    const tell = (lost: boolean) => c.dispatchEvent(new CustomEvent(CONTEXT_EVENT, { bubbles: true, detail: { lost } }));
+    const onLost = () => tell(true);
+    const onRestored = () => {
+      done.current = false;
+      invalidate();
+      tell(false);
+    };
+    c.addEventListener("webglcontextlost", onLost);
+    c.addEventListener("webglcontextrestored", onRestored);
+    return () => {
+      c.removeEventListener("webglcontextlost", onLost);
+      c.removeEventListener("webglcontextrestored", onRestored);
+    };
+  }, [gl, invalidate]);
   useFrame((state) => {
     if (done.current) return;
     done.current = true;
@@ -122,8 +148,8 @@ export function FirstFrame({ onReady }: { onReady?: () => void }) {
       state.invalidate();
       if (onReady) requestAnimationFrame(() => requestAnimationFrame(() => onReady()));
     };
-    const gl = state.gl as unknown as { compileAsync?: (s: unknown, c: unknown) => Promise<unknown> };
-    if (typeof gl.compileAsync === "function") gl.compileAsync(state.scene, state.camera).then(after, after);
+    const r = state.gl as unknown as { compileAsync?: (s: unknown, c: unknown) => Promise<unknown> };
+    if (typeof r.compileAsync === "function") r.compileAsync(state.scene, state.camera).then(after, after);
     else after();
   });
   return null;
