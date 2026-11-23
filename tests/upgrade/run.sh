@@ -37,11 +37,23 @@ git -C "$ROOT" worktree add --detach -q "$OLD" "$OLD_REF" || exit 1
 ln -s "$ROOT/node_modules" "$OLD/node_modules"
 [ -d "$OLD/web/app/dist" ] || { mkdir -p "$OLD/web/app"; ln -s "$ROOT/web/app/dist" "$OLD/web/app/dist"; }
 VARS='OWNER_KEY=upg-owner\nTEST_HOOKS=1\n'
-up() { for _ in $(seq 1 90); do curl -s -o /dev/null "http://localhost:$PORT/api" && return 0; sleep 1; done; return 1; }
+# Up means OUR wrangler: still running, its own log says it is ready, and
+# the port reports the build id of the index.html it serves. Any answer on
+# the port used to do, so a leftover server on 8799 (or another run's) was
+# filled and read in place of the Worker under test.
+up() { # $1: the wrangler pid, $2: its log, $3: the checkout
+  local want; want=$(sha256sum "$3/web/app/dist/index.html" | cut -c1-16)
+  for _ in $(seq 1 90); do
+    kill -0 "$1" 2>/dev/null || return 1
+    if grep -q "Ready on " "$2" && curl -s "http://localhost:$PORT/api/build" | grep -q "\"build\":\"$want\""; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
 start() { # $1: the checkout to run
   printf "$VARS" > "$1/.dev.vars"
   (cd "$1" && exec npx wrangler dev --port $PORT --persist-to "$STATE" > "$WORK/wrangler-$2.log" 2>&1) &
-  up || { echo "wrangler dev did not come up"; tail -20 "$WORK/wrangler-$2.log"; exit 1; }
+  up $! "$WORK/wrangler-$2.log" "$1" || { echo "wrangler dev did not come up on port $PORT (is another server on it?)"; tail -20 "$WORK/wrangler-$2.log" | grep -v '^env\.'; exit 1; }
   echo "   wrangler dev is up ($2)"
 }
 echo "== $OLD_REF fills the rooms"

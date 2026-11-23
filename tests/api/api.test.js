@@ -10,14 +10,15 @@
 //                      its assets come from web/app/dist)
 //   npm run test:api
 //
-// Hermetic (tests/api/server.js): each run gets its own port (8798 unless
-// API_PORT says otherwise), its own local state directory, removed
+// Hermetic (tests/api/server.js): each run gets its own port (a free one
+// unless API_PORT names it; start() fails rather than use a port another
+// process answers on), its own local state directory, removed
 // afterwards, and reaches nothing outside this machine. The create-room caps
 // count in KV and one of them is room-wide (30 a day), so shared state would
 // fail a later same-day run's create checks as 429s. Room names, emails and
 // client IPs stay unique per run as well.
 const http = require('http');
-const { start, OWNER } = require('./server.js');
+const { start, OWNER, localBuildId } = require('./server.js');
 
 let BASE = '';
 const SUF = Date.now().toString(36);
@@ -96,10 +97,28 @@ function mp4() {
   return b;
 }
 
+// A port some other process already answers on must fail the start, not
+// hand the suite that process: start() used to take any answer on the
+// port, so a run that met a leftover server (or another run's, even of
+// this same tree: the stand-in reports this tree's build id) tested it.
+async function takenPortRefused() {
+  const holder = http.createServer((q, r) => { r.setHeader('Content-Type', 'application/json'); r.end(JSON.stringify({ build: localBuildId() })); });
+  await new Promise((r) => holder.listen(0, r));
+  const t0 = Date.now();
+  let got = null;
+  try { const s = await start({ port: holder.address().port }); s.stop(); got = 'started'; } catch (e) { got = String((e && e.message) || e); }
+  holder.close();
+  return { refused: got !== 'started' && /exited before it was ready/.test(got), got: got.split('\n')[0], ms: Date.now() - t0 };
+}
+
 (async () => {
   let server;
+  let taken;
   try {
-    server = await start({ port: Number(process.env.API_PORT) || 8798 });
+    taken = await takenPortRefused();
+    // API_PORT is kept exactly when given (trees run side by side on fixed
+    // ports); otherwise start() picks a free port.
+    server = await start();
   } catch (e) {
     console.error('test:api: ' + ((e && e.message) || e));
     process.exit(2);
@@ -107,6 +126,7 @@ function mp4() {
   BASE = server.base;
   try {
     check('wrangler dev comes up', true);
+    check('a port another process answers on fails the start instead of testing that process', taken.refused, taken.got + ' (' + taken.ms + ' ms)');
     // Today's promises first (tests/api/golden.js): every case keeps its
     // status, error sentence and fields, whatever this commit adds.
     await golden({ req, BASE, OWNER, SUF, IPO }, check);

@@ -43,8 +43,11 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   stripped (a `./x.js` import finds `x.ts`, as wrangler's bundler does).
   Add a test there with any new pure helper.
 - **The API suite:** `npm run test:api` boots `wrangler dev` through
-  `tests/api/server.js` (port 8798 unless `API_PORT` says otherwise, its
-  own temp state per run through `--persist-to`) against the build, so
+  `tests/api/server.js` (the port `API_PORT` names, else a free one; its
+  own temp state per run through `--persist-to`; the start fails unless
+  its own wrangler child, still running, said it is ready and the port
+  reports this checkout's build id, so a run never tests a leftover or
+  another run's server) against the build, so
   run `npm run build` first. It reaches nothing outside the machine. What it covers is listed in the header of
   `tests/api/api.test.js`. Run it after Worker changes. It takes about 35
   seconds, nearly all of it real requests: it first compares today's
@@ -72,7 +75,7 @@ They live in `tests/api/`, `tests/unit/`, `tests/upgrade/` and
   state, fills two throwaway rooms, ages one by hand (drops newer
   columns, clears its schema version), then reads both back on this
   checkout and checks every room reached the latest schema step. About 2
-  minutes, port 8799, local only. Run it before shipping a schema step
+  minutes, port 8799 (it stops if another server holds it), local only. Run it before shipping a schema step
   (`AGENTS.md` section 13, Schema changes).
 - **The UI suite:** see Visual checks for UI changes, step 1.
 
