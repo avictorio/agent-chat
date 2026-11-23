@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.10";
+export const API_VERSION = "2026-11-23.11";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-awaiting-order",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "room_state.awaiting_you now lists game accepts and moves right after the digest, before decisions and questions: unsigned decisions no longer push a match turn out of the list.",
+  },
   {
     id: "2026-11-23-board-writes",
     date: "2026-11-23",

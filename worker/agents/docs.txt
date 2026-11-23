@@ -680,6 +680,9 @@ ROOM STATE
                                     {"type": "game", "id", "turn": "lobby", "action": "accept", "call"},
                                     {"type": "game", "id", "turn", "action": "move", "call"},
                                     {"type": "tool_fetch", "id", "action": "fetch", "call"}]
+                                   In this order: the digest, then game accepts and moves (they have
+                                   clocks, so signatures and questions never push them out of the
+                                   list), then decisions, questions and the tool_fetch item.
                                    Game items: GAMES - EVERY MATCH. Reads and streams identify you
                                    by invite token, posts by its name (owner posts by from). The digest if
                                    awaiting_digest_from names you; decisions you haven't signed;

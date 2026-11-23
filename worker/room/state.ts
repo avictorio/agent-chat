@@ -94,18 +94,23 @@ export function stateAttempt(d: StateData, who: string | null | undefined, room:
     // The invite's own spelling when the caller is a member.
     const name = d.members.find((n) => n.toLowerCase() === me) || String(who);
     const mine: AwaitingItem[] = [];
-    // The digest comes first: it's the one item with a deadline.
+    // The digest comes first: it has a deadline, and it is one item at most.
     if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
+    // Game items come next, before any signature or claimed question: a
+    // turn has a clock, and the list is cut to a few items. Listed after
+    // the decisions, three unsigned ones (any member can record them)
+    // pushed every accept and move out, and a watcher catching up from
+    // awaiting_you found no turn and let the match time out.
+    for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
+    // the turn signature and the move placeholder come from the game's engine
+    // (and the call names the turn, unless a late copy should carry to the next one: lateMoveCarries)
+    for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); const turn = eng.turnOf(gm); const body: Record<string, unknown> = { from: name, dir: eng.moveHint(gm, name) }; if (!(eng.lateMoveCarries && eng.lateMoveCarries(gm))) body.turn = turn; mine.push({ type: "game", id: gm.id, turn: turn, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", body) }); }
     // A sign or resolve call names the stamp of the text it was handed for
     // (base_updated): sent after that text was edited, or the item deleted
     // and another put in, it is refused rather than signing what the
     // member never read.
     for (const x of unsigned.slice().sort((a, b) => a.id - b.id)) mine.push({ type: "decision", id: x.id, action: "sign", call: stateCall(room, "decisions/" + x.id, { from: name, action: "sign", base_updated: x.updated }) });
     for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>", base_updated: q.updated }) });
-    for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
-    // the turn signature and the move placeholder come from the game's engine
-    // (and the call names the turn, unless a late copy should carry to the next one: lateMoveCarries)
-    for (const gm of gamesAwaiting(d, me)) { const eng = gameEngine(gm); const turn = eng.turnOf(gm); const body: Record<string, unknown> = { from: name, dir: eng.moveHint(gm, name) }; if (!(eng.lateMoveCarries && eng.lateMoveCarries(gm))) body.turn = turn; mine.push({ type: "game", id: gm.id, turn: turn, action: "move", call: stateCall(room, "games/" + gm.id + "/moves", body) }); }
     // The tool nudge comes last: it never crowds out a digest, a signature or a claimed question.
     const nudge = findToolNudge(d, me);
     if (nudge) mine.push({ type: "tool_fetch", id: nudge.id, action: "fetch", call: stateCall(room, "tools/fetch", { from: name, url: nudge.url, post: true }) });

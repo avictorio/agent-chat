@@ -2318,6 +2318,29 @@ function mp4() {
     check('board: a question action with a stale base_updated answers 409', r.status === 409 && r.json.question && r.json.question.status === 'open', r.status + ' ' + r.text.slice(0, 160));
     await req('DELETE', R2 + '/questions/' + bwQ.id, { token: TP });
     await req('DELETE', R2 + '/decisions/' + bwB.id, { token: TP });
+
+    // Unsigned decisions must not push a game turn out of awaiting_you: it
+    // is cut to a few items, and decisions were listed first, so three of
+    // them (any member can record them) hid the accept and every move, and
+    // a watcher catching up from awaiting_you let the match time out.
+    {
+      const RA = '/api/rooms/apitest-await-' + SUF;
+      await req('POST', RA, { owner: true });
+      const tMal = (await req('POST', RA + '/invites', { owner: true, json: { name: 'Mal', kind: 'agent' } })).json.token;
+      const tBob = (await req('POST', RA + '/invites', { owner: true, json: { name: 'Bob', kind: 'agent' } })).json.token;
+      await req('GET', RA + '/members', { token: tMal });
+      await req('GET', RA + '/members', { token: tBob });
+      r = await req('POST', RA + '/games', { token: tMal, json: { players: ['Mal', 'Bob'], tick_seconds: 3600 } });
+      const awG = r.json.game;
+      for (let i = 1; i <= 3; i++) await req('POST', RA + '/decisions', { token: tMal, json: { title: 'Decision ' + i } });
+      const bobItems = async () => (((await req('GET', RA + '/messages?limit=1', { token: tBob })).json.room_state || {}).awaiting_you || []).map((x) => x.type + ':' + x.action + ':' + x.id);
+      let items = await bobItems();
+      check('awaiting_you: three unsigned decisions leave the game accept in', items.includes('game:accept:' + awG.id), JSON.stringify(items));
+      await req('POST', RA + '/games/' + awG.id + '/accept', { token: tBob });
+      items = await bobItems();
+      check('awaiting_you: three unsigned decisions leave the owed move in', items.includes('game:move:' + awG.id), JSON.stringify(items));
+      await req('DELETE', RA + '?confirm=apitest-await-' + SUF, { owner: true });
+    }
     // Envelope: every frame kind carries from + kind + targets, and
     // message objects carry targets on reads and post responses too.
     function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch { return null; } }

@@ -1,11 +1,13 @@
 // The room board (worker/room/board.ts) on the real Room class
 // (room-harness.mjs): a call a member was handed lands on the item they
-// read, or is refused. Each test is a way a sign, a resolve or an edit
-// used to land on other text.
+// read, or is refused (each a way a sign, a resolve or an edit used to
+// land on other text), and the board never hides a game turn in
+// room_state.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
-import { KEEP_DIGESTS } from "../../worker/limits.ts";
+import { KEEP_DIGESTS, STATE_ITEMS } from "../../worker/limits.ts";
+import { renderRoomState } from "../../worker/room/state.ts";
 
 const R = "unit";
 
@@ -131,4 +133,15 @@ test("the newest KEEP_DIGESTS digests are kept when ids have gaps", () => {
   for (let i = 0; i < KEEP_DIGESTS; i++) h.db.prepare("INSERT INTO dg (id, ts, day, author, text) VALUES (?, 1, '2026-01-01', 'Ada', 'd')").run(i * 2 + 1);
   h.room.addDigest("today", "Ada");
   assert.equal(h.one("SELECT COUNT(*) AS n FROM dg").n, KEEP_DIGESTS);
+});
+
+test("unsigned decisions do not push a game accept out of awaiting_you", () => {
+  const h = makeRoom();
+  h.member("Mallory"); h.member("Bob");
+  for (let i = 1; i <= STATE_ITEMS; i++) h.room.addDecision("decision " + i, null, "Mallory");
+  const d = h.room.stateData();
+  d.games = [{ id: 7, type: "duel", status: "lobby", players: [{ name: "Mallory", alive: true, moved: false, accepted: true }, { name: "Bob", alive: true, moved: false, accepted: false }] }];
+  const s = renderRoomState(d, "Bob", R);
+  assert.deepEqual(s.awaiting_you.map((a) => a.type + ":" + a.action), ["game:accept", "decision:sign", "decision:sign"]);
+  assert.equal(s.awaiting_you_more, 1, "the cut falls on a decision");
 });
