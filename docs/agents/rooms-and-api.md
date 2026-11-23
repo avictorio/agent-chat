@@ -538,6 +538,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 | `tf` | timestamps of tool fetches (`FETCH_DAILY_CAP` per 24 hours) |
 | `con`, `oq`, `dg`, `sk`, `dc` | constitution, open questions, digests, stakes, decisions (the board) |
 | `gm` | game matches, one row per match of any game in `GAME_ENGINES`: status, creator, card message id, and the whole match state as one JSON row |
+| `gr` | ended matches' results, one row per finished or called-off match (`GrRow`): type, status, `ended`, winner, winners, draw, places, seats, the seat pair and the games-list entry (`pub`). What the games list's history, the record, the ladder and Duel's head-to-head read (`games.md`, The match lifecycle). Schema step 6, backfilled from `gm` in SQL; `pub` is null on a backfilled row until the list first shows it. |
 | (object `__vapid`) | Web Push VAPID keys, self-provisioned. **Never delete.** |
 | (object `__create-quota`, `CREATE_QUOTA_ROOM`) | table `cq`: public room creation's counters, one row per cap key (`all:<day>`, `email:<hash>:<day>`, `ip:<hash>:<day>`) with its UTC day and count; a day's rows go when the next day's first creation comes in (`createReserve`). |
 

@@ -118,7 +118,19 @@ Every game shares this machinery, in `worker/room/games.ts`. API:
 docs.txt GAMES - EVERY MATCH.
 
 - **Storage and card.** A match is one `gm` row (status, creator, card
-  message id, the state as JSON). Creating it posts a card message
+  message id, the state as JSON), kept for the room's life. Once it ends
+  (finished or called off) it also has a `gr` row, its result: type,
+  status, `ended`, winner, winners, draw, places, seats (`{name, hex}`),
+  the seat pair (`a|b`, 2-seat matches) and `pub`, its games-list entry
+  (`gameListEntry`). `saveGame` writes it in the turn the match ends and
+  on every save after (`gameResultSave`); schema step 6 backfilled the
+  ended matches already stored, in SQL, with `pub` left null until the
+  list first shows the match. An engine whose summary mints something
+  from the clock or the room re-mints it on the stored entry (`relist`:
+  Sketch & Guess's signed drawing link). Why: the list, the record, the
+  ladder and Duel's head-to-head each re-read and parsed the whole match
+  history on every call (211 ms per list at 1,500 matches; 54 MB held by
+  one Duel throw). Creating it posts a card message
   (`m.game_id` links them); message listings carry the engine's
   `card(g)` as the message's `game`.
 - **Lobby.** A match opens in status `lobby`. A creator who plays is
@@ -216,15 +228,19 @@ docs.txt GAMES - EVERY MATCH.
   with the same players and the catalog entry's `rematch(g)` settings.
   Any member may run one. One rematch per match is in flight at a time,
   because a double tap once opened two lobbies.
-- **Record and ladder.** `listGames` returns the games (live first, then
-  recent finished ones, boards stripped), `record` and `ladder`. The
+- **Record and ladder.** `listGames` returns the games (live first,
+  summarised from their state, then the most recent ended ones from
+  `gr.pub`, boards stripped), `record` and `ladder`, 40 games in all. The
   record is all-time wins and losses per player per game over every
   finished match: a team win counts for each winner, Code Race adds
-  `p2`/`p3` placements, and matches past the 500-row scan count through a
-  light SQL pass. The ladder (`gameLadder`; the owner's call: every
+  `p2`/`p3` placements. The ladder (`gameLadder`; the owner's call: every
   2-player game) is an Elo rating per player per game, replayed over
-  every finished 2-player match on each read, so no stored table can
-  drift. Free-for-alls stay in the record only. Seasons are not built.
+  every finished 2-player match on each read. Both read `gr`
+  (`gameResults`), never a stored state; the ladder is still replayed,
+  not stored, so it cannot drift from the results. Free-for-alls stay in
+  the record only. Seasons are not built.
+  `tests/unit/match-results.test.mjs` holds the list, record, ladder and
+  head-to-head to the answers of the old full scan.
 - **Test hooks** (`/api/test-hooks/*`, armed only by `TEST_HOOKS`, never
   live): `game-expire` runs a match's clock out for the next read, and
   `alarm` runs the room's alarm and reports the stored match. The API
@@ -441,6 +457,8 @@ Build notes only; the rules are in each engine module's comment and its
   it, a lone throw wins by forfeit and a round with no throws ends the
   match where it stands; an unthrown round 1 calls it off instead of
   recording a 0-0 finish. REST takes the throw as `dir` or `throw`.
+  The full state's `h2h` is the pair's finished duels in the room
+  (`duelH2H`), counted in SQL from `gr` by the seat pair.
   Secret: the round's throws (only `thrown` shows until `rounds`
   publishes them). Web: the card shows the scoreboard, the last face-off,
   the YOUR THROW / LOCKED pill and a clock bar that a 1 s interval in

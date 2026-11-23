@@ -111,6 +111,15 @@ export type MvRow = { name: string, provider: string | null, voice_id: string | 
   sample_ts: number | null, ts: number | null };
 /** gm: a match of any game; state is its JSON. */
 export type GmRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, state: string };
+/** gr: an ended match's result (schema step 6), what the games list, the
+ *  record, the ladder and Duel's head-to-head read in place of the state.
+ *  type is the state's as stored (a match from before types carries null:
+ *  read it as Light Cycles); winners, places and players are JSON lists
+ *  (players: {name, hex}); pair names the two seats ("a|b", in seat
+ *  order) of a 2-seat match; pub is the match's games-list entry, null on
+ *  a row the step backfilled until the list first shows it. */
+export type GrRow = { id: number, type: string | null, status: GameStatus, ended: number | null, winner: string | null, winners: string | null,
+  draw: number | null, places: string | null, players: string, pair: string | null, pub: string | null };
 /** con: a constitution version. */
 export type ConRow = { v: number, ts: number, editor: string, text: string };
 /** oq: an open question. */
@@ -317,8 +326,29 @@ function schemaDeletesAndPostIds(sql: SqlStorage) {
   addColumn(sql, "dg", "updated", "INTEGER");
 }
 
+// Step 6. gr: one row per ended match (finished or called off), with
+// what the games list, the record, the ladder and Duel's head-to-head
+// read (GrRow). Each of those used to re-read the whole match history and
+// parse every stored state on every call - a games list in a room of
+// 1,500 matches took 211 ms and a Duel throw held 54 MB - on the room's
+// one thread, and gm is never trimmed. saveGame writes the row in the
+// turn a match ends and keeps it in step after. The backfill is one SQL
+// pass over the ended matches already stored, reading the state with
+// json_extract (a state that is not valid JSON is skipped, as gameRow
+// skips it); pub, the list entry, needs each game's own summary code, so
+// it stays null here and the list fills it the first time it shows the
+// match (listGames). gm keeps every row as it was.
+function schemaMatchResults(sql: SqlStorage) {
+  sql.exec("CREATE TABLE IF NOT EXISTS gr (id INTEGER PRIMARY KEY, type TEXT, status TEXT NOT NULL, ended INTEGER, winner TEXT, winners TEXT, draw INTEGER, places TEXT, players TEXT NOT NULL, pair TEXT, pub TEXT)");
+  sql.exec("CREATE INDEX IF NOT EXISTS gr_pair ON gr (pair)");
+  sql.exec("INSERT OR IGNORE INTO gr (id, type, status, ended, winner, winners, draw, places, players, pair) SELECT id, json_extract(state, '$.type'), status, json_extract(state, '$.ended'), json_extract(state, '$.winner'), json_extract(state, '$.winners'), json_extract(state, '$.draw'), json_extract(state, '$.places'), " +
+    "(SELECT json_group_array(json_object('name', json_extract(p.value, '$.name'), 'hex', json_extract(p.value, '$.hex'))) FROM json_each(gm.state, '$.players') AS p), " +
+    "CASE WHEN json_type(state, '$.players') = 'array' AND json_array_length(state, '$.players') = 2 THEN json_extract(state, '$.players[0].name') || '|' || json_extract(state, '$.players[1].name') END " +
+    "FROM gm WHERE status NOT IN ('lobby', 'running') AND json_valid(state)");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber, schemaPushFailures, schemaDeletesAndPostIds, schemaMatchResults];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
