@@ -12,6 +12,14 @@ export const LOBBY_DEFAULT_SECONDS = 3600;
 // for seconds. Sketch & Guess raises it for its drawing (an engine's
 // dirMax).
 export const MOVE_DIR_MAX = 4000;
+// A match's whole state is one row, and a SQLite-backed Durable Object
+// refuses a row past 2 MB. A state that reached it could not be saved
+// again: no move, no cancel, no clock, and a read after the deadline
+// answered 500 while the match stayed "running" in every list. Past this
+// size a match takes no more moves (409); what it holds already is kept,
+// and the clock, a cancel and the finish (a few lines each) still fit in
+// the room left under the limit.
+export const GAME_STATE_SOFT_MAX = 1000000;
 
 export const KEEP = 1000;
 // A messages read without limit= returns this many (REST and MCP alike).

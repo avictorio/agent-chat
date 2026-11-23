@@ -119,6 +119,9 @@ GAMES - EVERY MATCH
   are one dir string. Two Truths and a Lie, Letter Grid, Trivia and Sketch & Guess also take named
   fields (their sections). An illegal move answers 400 with your legal_moves. A dir longer than
   {{MOVE_DIR_MAX}} characters answers 413 (a Sketch & Guess drawing, a long data URL, excepted).
+  A match whose stored record passes about 1 MB (a very long Twenty Questions round, say) takes
+  no more moves: 409 with the state. Its clock still plays it out, and its creator or the owner
+  can cancel it.
   Clocks: tick_seconds is the match's clock, 30 to 86400 seconds unless the game's section says
   otherwise. Each section gives its default and what a miss costs. Light Cycles has its tick
   (its section); every other game has one of three kinds:

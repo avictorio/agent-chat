@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { makeRoom } from "./room-harness.mjs";
 import { gameEngine } from "../../worker/games/engine.ts";
+import { GAME_STATE_SOFT_MAX } from "../../worker/limits.ts";
 import { FOUR_IN_A_ROW } from "../../web/app/src/features/games/fourinarow/catalog.ts";
 
 const R = "unit";
@@ -203,4 +204,33 @@ test("Twenty Questions: a flag and a re-ask each give a new turn, and a question
   await h.room.gameState(id, null, R);
   assert.equal(stored().rounds.length, 0, "the round is still being played: " + JSON.stringify(stored().rounds));
   assert.equal(stored().idle, 1);
+});
+
+test("a match whose stored state passes the soft cap refuses moves (409) but can still be cancelled and clocked", async () => {
+  // the row limit is 2 MB: a state that reached it could not be saved again,
+  // so no move, cancel or clock could ever end the match
+  const { h, id, stored, status, edit } = await running("twenty", ["Ann", "Bob"]);
+  const answerer = stored().answerer;
+  const asker = answerer === "Ann" ? "Bob" : "Ann";
+  assert.equal((await h.room.gameMove(id, answerer, "a lighthouse", R)).status, 200);
+  // just over the cap in UTF-8 bytes while under it in characters: the cap counts bytes
+  edit((st) => { st.qa = [{ n: 1, by: asker, kind: "q", q: "é".repeat(GAME_STATE_SOFT_MAX / 2), a: "yes", note: null, flagged: false, at: 1 }]; });
+  const r = await h.room.gameMove(id, asker, "Is it tall?", R);
+  assert.equal(r.status, 409, JSON.stringify(r).slice(0, 200));
+  assert.match(r.error, /record is full/);
+  assert.equal(r.game.id, id, "the refusal carries the state");
+  assert.equal(stored().qa.length, 1, "nothing was added");
+  // the clock still runs it
+  edit((st) => { st.deadline = Date.now() - 1; });
+  assert.equal((await h.room.gameState(id, null, R)).status, 200);
+  assert.equal(stored().idle, 1);
+  const c = await h.room.gameCancel(id, "Ann", false, R);
+  assert.equal(c.status, 200, JSON.stringify(c).slice(0, 200));
+  assert.equal(status(), "cancelled");
+  // a state under the cap still takes moves
+  const t = await running("twenty", ["Ann", "Bob"]);
+  const a2 = t.stored().answerer;
+  assert.equal((await t.h.room.gameMove(t.id, a2, "a lighthouse", R)).status, 200);
+  t.edit((st) => { st.qa = [{ n: 1, by: "x", kind: "q", q: "e".repeat(GAME_STATE_SOFT_MAX - 5000), a: "yes", note: null, flagged: false, at: 1 }]; });
+  assert.equal((await t.h.room.gameMove(t.id, a2 === "Ann" ? "Bob" : "Ann", "Is it tall?", R)).status, 200);
 });

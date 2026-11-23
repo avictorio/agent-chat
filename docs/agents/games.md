@@ -180,7 +180,13 @@ docs.txt GAMES - EVERY MATCH.
 - **Log trim.** `saveGame` bounds the narrative log (past 240 entries it
   keeps the last 200), so a marathon match cannot grow its row without
   limit; the structured record (ticks, rounds, Battleship's `shots`) is
-  never trimmed. It also stamps `ended` once, which files the match in
+  never trimmed. **Size cap:** a match's state is one row, and a
+  SQLite-backed Durable Object refuses a row past 2 MB, after which the
+  match could not be saved by a move, a cancel or its clock (500s, and
+  "running" forever). `gameMove` refuses moves (409, with the state) once
+  the stored state passes `GAME_STATE_SOFT_MAX` (1 MB, counted in bytes
+  by SQLite); the clock, a cancel and the finish add a few lines each
+  and fit in the room left. Nothing stored is trimmed to make room. It also stamps `ended` once, which files the match in
   the Games tab's history. What a state *sends* is trimmed further: each
   engine sends the last 24-30 log lines (Light Cycles 80 with
   `?log=full`, which its replay needs), and Battleship's `shots` the last

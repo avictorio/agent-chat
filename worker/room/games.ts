@@ -4,7 +4,7 @@
 
 import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
-import { LOBBY_DEFAULT_SECONDS, MOVE_DIR_MAX } from "../limits.js";
+import { GAME_STATE_SOFT_MAX, LOBBY_DEFAULT_SECONDS, MOVE_DIR_MAX } from "../limits.js";
 import type { GameLogLine, GameStatus } from "@chat/contract";
 import type { CfgRow, GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
@@ -466,6 +466,12 @@ export const GameMachineryMethods = {
     this.advanceLobby(g, room);
     if (g.status === "lobby") return { status: 409, error: "That match is still in the lobby - it starts when every player accepts" };
     if (g.status !== "running") return { status: 409, error: "That match is " + g.status };
+    // the stored size in bytes (UTF-8), as the row limit counts it
+    const bytes = this.sql.exec<{ n: number }>("SELECT length(CAST(state AS BLOB)) AS n FROM gm WHERE id = ?", id).toArray()[0];
+    if (bytes && bytes.n > GAME_STATE_SOFT_MAX) {
+      await this.armGameAlarm();
+      return { status: 409, error: "This match's record is full: it takes no more moves. Its clock still plays it out, and its creator or the owner can cancel it", game: this.gameStateFull(g, who) };
+    }
     const eng = gameEngine(g.st);
     if (turn !== undefined && turn !== null) {
       if (typeof turn !== "number" && typeof turn !== "string") return { status: 400, error: "turn is the match's turn number, as room_state.awaiting_you gives it" };
