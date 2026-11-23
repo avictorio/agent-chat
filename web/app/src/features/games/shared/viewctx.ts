@@ -16,9 +16,10 @@ export type GameStoreOptions = {
   openViewer: ViewerApi["open"];
   // the ? in the arena header: How to play for this game
   showHelp?: (game: string) => void;
-  // the turn room_state.awaiting_you hands this viewer for a match, sent
-  // with the move so a late or repeated one cannot land on a later turn;
-  // undefined when the room names none (some clocked games have none)
+  // the turn room_state.awaiting_you's call for a match names, sent with
+  // the move so a late or repeated one cannot land on a later turn;
+  // undefined when the call names none (live Light Cycles, where a late
+  // steer should carry to the next tick)
   turnFor?: (id: number) => number | string | undefined;
 };
 

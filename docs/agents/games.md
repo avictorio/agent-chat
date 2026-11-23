@@ -217,9 +217,11 @@ docs.txt GAMES - EVERY MATCH.
   the absence rule could take it out. Every other engine's move is a
   decision about the turn it saw (a disc, a throw, a vote, a bid), so its
   call keeps `turn`. The web app's `sendMove`
-  (`features/games/games.ts`) sends the turn `room_state.awaiting_you`
-  names for the match (`turnFor`, from `RoomShell`) and nothing when it
-  names none, and keeps one move per match in flight: a second tap of
+  (`features/games/games.ts`) sends the turn the match's
+  `room_state.awaiting_you` call names (`call.body.turn`, read by
+  `turnFor` in `RoomShell`), not the entry's own `turn`, which is always
+  there: sending that one refused a live steer a moment late. It sends
+  none when the call has none, and keeps one move per match in flight: a second tap of
   the same move is dropped (a double tap sends one), a different move
   tapped meanwhile waits and goes next with the turn it was tapped on (a
   rider steering again, a second line in the Werewolf square). On the

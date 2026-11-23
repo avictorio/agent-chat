@@ -514,8 +514,11 @@ function roomState(S) {
     stakes_due: S.sk.filter(s => s.date && s.date <= ymd(7)).map(s => ({ id: s.id, title: s.title, date: s.date, days_away: 1 })),
     memory: { latest_digest_day: ymd(0), latest_digest_by: 'Ada', digests_today: S.dg.length, awaiting_digest_from: 'Henry', digest_due_at: now + 10 * H },
     // Four in a Row on your turn names its turn, as stateAttempt does
-    // (S.c4AwaitTurn: the turn room_state still names once the match moved on)
-    ...(S.c4 && S.c4.status === 'running' && S.c4.you && S.c4.you.your_turn ? { awaiting_you: [{ type: 'game', id: S.c4.id, turn: S.c4AwaitTurn || S.c4.turn, action: 'move', call: { method: 'POST', path: '/api/rooms/demo/games/' + S.c4.id + '/moves', body: { from: 'Anthony', dir: '<a column 1-7>', turn: S.c4AwaitTurn || S.c4.turn } } }] } : {}) };
+    // (S.c4AwaitTurn: the turn room_state still names once the match moved on).
+    // S.lcAwait: live Light Cycles' entry, whose call leaves the turn out (lateMoveCarries)
+    ...((aw) => (aw.length ? { awaiting_you: aw } : {}))([
+      S.c4 && S.c4.status === 'running' && S.c4.you && S.c4.you.your_turn ? { type: 'game', id: S.c4.id, turn: S.c4AwaitTurn || S.c4.turn, action: 'move', call: { method: 'POST', path: '/api/rooms/demo/games/' + S.c4.id + '/moves', body: { from: 'Anthony', dir: '<a column 1-7>', turn: S.c4AwaitTurn || S.c4.turn } } } : null,
+      S.lcAwait && S.game ? { type: 'game', id: S.game.id, turn: S.game.tick, action: 'move', call: { method: 'POST', path: '/api/rooms/demo/games/' + S.game.id + '/moves', body: { from: 'Anthony', dir: '<up|down|left|right>' } } } : null].filter(Boolean)) };
 }
 async function setup(page, S, calls) {
   await page.route('https://chat.victorio.cloud/**', async (route) => {

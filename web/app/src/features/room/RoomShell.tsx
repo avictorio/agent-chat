@@ -247,7 +247,15 @@ export function RoomShell({ room }: { room: string }) {
       meName: () => nameRef.current,
       openViewer: viewerHost.api.open,
       showHelp: (game) => gameHelpRef.current?.open(game),
-      turnFor: (id) => (rsRef.current?.awaiting_you || []).find((a) => a.type === "game" && a.id === id && a.action === "move")?.turn,
+      // The turn the handed-out call names, not the entry's own turn: the
+      // entry always has one, but live Light Cycles leaves it out of the
+      // call so a steer a moment late steers the next tick. Sending the
+      // entry's turn had the referee refuse such a steer: the rider went
+      // straight on, and three misses took it out.
+      turnFor: (id) => {
+        const t = (rsRef.current?.awaiting_you || []).find((a) => a.type === "game" && a.id === id && a.action === "move")?.call.body.turn;
+        return typeof t === "number" || typeof t === "string" ? t : undefined;
+      },
     })
   );
   const gamesRef = useRef<GameStore | null>(games);

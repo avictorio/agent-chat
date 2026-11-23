@@ -380,6 +380,30 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     if (!/"turn":7/.test(posts[0]) || !/"dir":"2"/.test(posts[0])) throw new Error('the move names the turn room_state gave: ' + posts[0]);
     return out;
   });
+  /* A move names the turn of the call room_state hands out, not the
+     entry's own turn. Live Light Cycles' call leaves it out, so a steer a
+     moment late steers the next tick: naming the entry's turn had the
+     referee refuse such a steer (the rider went straight on, and three
+     misses took it out). Four in a Row's call names it, and so does its move. */
+  await run('move-turn-live-steer', { state: { game: true, c4: true }, init: noGl }, async (page, S, calls) => {
+    S.lcAwait = true;
+    await page.reload();
+    await settle(page);
+    await page.click('.game-card.kind-lightcycles');
+    await page.waitForSelector('#viewer .lc-btn[aria-label="Steer left"]', { timeout: 15000 });
+    await page.click('#viewer .lc-btn[aria-label="Steer left"]');
+    await page.waitForFunction(() => document.querySelector('#viewer .lc-note').textContent.includes('Queued: left'), null, { timeout: 10000 });
+    await page.goBack();
+    await page.waitForFunction(() => document.getElementById('viewer').hidden, null, { timeout: 10000 });
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await page.waitForFunction(() => !document.querySelector('#viewer .c4-drop'), null, { timeout: 10000 });
+    const out = { steer: calls.filter((c) => /^POST .*\/games\/1\/moves/.test(c)).pop() || '', drop: calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).pop() || '' };
+    if (!/"dir":"left"/.test(out.steer) || /"turn"/.test(out.steer)) throw new Error('a live steer names no turn: ' + out.steer);
+    if (!/"turn":7/.test(out.drop)) throw new Error('a Four in a Row move names its turn: ' + out.drop);
+    return out;
+  });
   /* A different move tapped while one is out is not a copy: it goes next,
      naming the turn it was tapped on. Here that turn has passed by then,
      so the referee refuses it rather than playing it on the next turn.
