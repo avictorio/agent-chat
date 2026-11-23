@@ -575,16 +575,21 @@ Build notes only; the rules are in each engine module's comment and its
   a day, per the spec. Secret: until the reveal (`phase` "vote"), views
   carry only counts; then `seed`, `story` and `constraints` open.
   The 1-to-3 sentence count is `worker/games/corpse-sentences.ts`, and
-  the composer uses an identical copy (`corpse/sentences.ts`):
-  `Intl.Segmenter` by sentence, a piece ending on a known abbreviation
-  or a dotted one ("U.S.", "p.m.") runs on, any script counts. A
-  one-letter word before a full stop runs on only before a capital and
-  only as a run of initials ("J. R. R. Tolkien") or, once a segment, a
-  middle initial after a capitalised word ("George W. Bush"); anything
-  else is a sentence end, or "Plan A. Plan B. ... Plan F." counts 1.
-  Change both files together; `tests/unit/corpse-sentences.test.mjs`
-  fails when they differ. The old split counted "Dr. Watson ... St.
-  Nobody answered." as 4 and Russian as 0.
+  the composer uses an identical copy (`corpse/sentences.ts`). One code
+  path everywhere, no `Intl.Segmenter`: the segmenter and a fallback
+  split disagreed, runtimes ship different sentence data, and it never
+  split before a lowercase letter. It splits after stops (any script)
+  followed by a space, counts pieces with a letter or digit, and lets a
+  piece ending in one full stop run on only as the file's header lists:
+  initials ("J. R. R. Tolkien", and once a segment "George W. Bush"),
+  titles ("Dr."), other abbreviations ("U.S.", "etc.") before a
+  lowercase letter or digit and once a segment before anything else, and
+  "p." before a lowercase letter or digit. So "Plan A. ... Plan F."
+  counts 6 and "We ran to the U.S. We hid in the U.K. ..." can hide at
+  most one sentence. Change both files together;
+  `tests/unit/corpse-sentences.test.mjs` fails when they differ. The old
+  split counted "Dr. Watson ... St. Nobody answered." as 4 and Russian
+  as 0.
 - **Letter Grid** (`lettergrid`): Henry's letter-grid brawl, 2 to 6
   players, on rounds. The dictionary (`worker/data/lettergrid-words.txt`,
   SCOWL minus crude words, one a line, sorted: regenerate it, don't

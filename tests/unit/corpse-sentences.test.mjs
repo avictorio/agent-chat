@@ -11,7 +11,7 @@ import { ecSentences as web } from "../../web/app/src/features/games/corpse/sent
 const SERVER = new URL("../../worker/games/corpse-sentences.ts", import.meta.url);
 const WEB = new URL("../../web/app/src/features/games/corpse/sentences.ts", import.meta.url);
 
-// [text, count]: with the runtime's segmenter and with the fallback split
+// [text, count]
 const CORPUS = [
   ["It was a dark night.", 1],
   ["The rain fell. A door creaked.", 2],
@@ -37,25 +37,38 @@ const CORPUS = [
   ["I saw George W. Bush. He waved.", 2],
   ["J. K. Rowling wrote it. Then she rested.", 2],
   ["We ate at noon and left at e. Then we slept.", 2],
-  // 2 by grammar, but "St." is a known abbreviation and runs on into
-  // "Nobody" (the "St. Louis" reading): ambiguous stops count fewer
+  // 2 by grammar, but "St." is a title here and runs on into "Nobody"
+  // (the "St. Louis" reading): ambiguous stops count fewer
   ["Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.", 1],
+  // an abbreviation before a capital runs on once a segment, so the most
+  // they can hide is one sentence (they used to run on without limit)
+  ["We ran to the U.S. We hid in the U.K. We fled to the E.U. We slept in the U.S. We woke.", 4],
+  ["We ran etc. We hid etc. We fled etc. We slept etc. We woke.", 4],
+  // ambiguous: one abbreviation before a capital runs on, so it counts fewer
+  ["Come at 5 p.m. Bring wine.", 1],
+  // a lowercase start does not hide a sentence end (the segmenter's did)
+  ["it rained. we ran. they hid. nobody came.", 4],
+  ["Well... maybe not. Fine.", 2],
+  ["We went to see p. 5 of the book. It was dull.", 2],
+  ["Stop!!! Go?! Now.", 3],
+  ["He said 3.5 is enough.", 1],
+  ["मैं घर गया। वह सो गई।", 2],
+  // 3 by grammar: two middle initials in one segment over-count by one.
+  // The once-a-segment cap is kept because it is what stops "We like Plan
+  // A. We like Plan B. ..." from hiding a sentence behind every letter.
+  ["She met John F. Kennedy and Martin L. King. They talked. It rained.", 4],
 ];
 
 test("the server and web copies are the same file", () => {
   assert.equal(readFileSync(WEB, "utf8"), readFileSync(SERVER, "utf8"));
 });
 
-for (const [label, seg] of [["the segmenter", undefined], ["the fallback split", null]]) {
-  test("both copies count the corpus the same, with " + label, () => {
-    for (const [text, n] of CORPUS) {
-      const a = seg === undefined ? server(text) : server(text, seg);
-      const b = seg === undefined ? web(text) : web(text, seg);
-      assert.equal(a, b, JSON.stringify(text));
-      assert.equal(a, n, JSON.stringify(text) + " with " + label);
-    }
-  });
-}
+test("both copies count the corpus the same", () => {
+  for (const [text, n] of CORPUS) {
+    assert.equal(web(text), server(text), JSON.stringify(text));
+    assert.equal(server(text), n, JSON.stringify(text));
+  }
+});
 
 test("the finding's line is taken: abbreviations and initials end no sentence", () => {
   const n = server("Dr. Watson knocked at 5 p.m. on Baker St. Nobody answered.");
