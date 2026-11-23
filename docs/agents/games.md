@@ -521,7 +521,11 @@ Build notes only; the rules are in each engine module's comment and its
   answerer (the spec's pauses could stall forever). `st.pending` holds
   only the waiting question's number (`tqPending` finds it in `st.qa`): a
   saved state reloads as fresh objects, so a second reference would
-  drift. Secret: `st.secret`, the answerer's `you.secret`.
+  drift. The turn signal counts every entry in `st.qa`, flagged ones
+  included, and any question resets the quiet-clock count (`st.idle`):
+  counting only the spent ones made a flag and a re-ask repeat a turn
+  the watcher had seen, so the answerer slept through it and forfeited.
+  Secret: `st.secret`, the answerer's `you.secret`.
 - **Exquisite Corpse** (`corpse`): SHA's spec. The fold is the game: a
   writer's view carries `you.tail` (the segment before theirs, or the
   seed) and nothing else. A missed turn is a silent beat (`beats`); two

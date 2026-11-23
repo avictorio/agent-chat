@@ -30,6 +30,8 @@ export type TqGame = Omit<GameRow, "st"> & { st: TqStored };
 export const TQ_BUDGET = 20;
 export const TQ_Q_MAX = 160;
 export const TQ_SECRET_MAX = 60;
+// the turn's step per round (stateItem)
+export const TQ_TURN_ROUND = 100000;
 export let tqSecretsCache: string[] | null = null;
 export function tqSecrets() {
   if (!tqSecretsCache) tqSecretsCache = dataLines(TQ_SECRETS_TXT);
@@ -288,6 +290,11 @@ export const TwentyMethods = {
       return done(true);
     }
     st.pending = { n: entry.n };
+    // a question is the table asking: the quiet clocks before it no
+    // longer count. Only a yes or no reset them, so after a flag the
+    // earlier quiet clocks still stood, and one more ended the round as
+    // "the table stopped asking" in the middle of play.
+    st.idle = 0;
     st.phase = "answer";
     st.deadline = Date.now() + st.round_seconds * 1000;
     st.log.push({ tick: st.round, text: me.name + (isGuess ? " guesses" : " asks") + " (question " + (st.asked + 1) + " of " + TQ_BUDGET + ")." });
@@ -343,7 +350,14 @@ export const twentyEngine = {
     for (const r of g.st.rounds) for (const n of Object.keys(r.points || {})) t[n] += r.points[n];
     return { id: g.id, type: "twenty", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, answerer: g.status === "running" ? g.st.answerer : null, asked: g.st.asked, budget: TQ_BUDGET, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, score: t[p.name] || 0 })) };
   },
-  stateItem: (r, st: TqStored) => ({ id: r.id, type: "twenty", status: r.status, phase: st.phase, answerer: st.answerer, turn: (st.round || 0) * 100 + (st.asked || 0) * 2 + (st.phase === "answer" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "ask" ? p.name === st.answerer : p.name !== st.answerer), accepted: seatAccepted(st, p) })) }),
+  // The turn counts every question in the log, flagged ones included: it
+  // counted only the spent ones (asked), so a flag and a re-ask brought
+  // both seats back to a turn they had seen, a watcher that woke on a new
+  // turn stayed asleep, and the answerer lost the round on the clock. The
+  // waiting question is already in the log, hence the minus. A
+  // round's steps stay under TQ_TURN_ROUND: a log entry takes 90 bytes or
+  // more, so a row of 2 MB holds fewer than 25,000 of them.
+  stateItem: (r, st: TqStored) => ({ id: r.id, type: "twenty", status: r.status, phase: st.phase, answerer: st.answerer, turn: (st.round || 0) * TQ_TURN_ROUND + (st.qa || []).length * 2 - (st.phase === "answer" ? 1 : 0), players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "ask" ? p.name === st.answerer : p.name !== st.answerer), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => Number(gm.turn),
   moveHint: (gm, name) => (gm.answerer === name ? (gm.phase === "secret" ? "<your secret: a noun phrase, or random>" : "<yes or no; a guess: right or wrong; or unanswerable>") : "<a yes/no question, or guess: your answer>"),
   result: (room, g) => room.tqResultText(g),

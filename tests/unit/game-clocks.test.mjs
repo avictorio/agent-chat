@@ -171,3 +171,36 @@ test("a Four in a Row nobody plays ends by forfeit on the fifth clock, and its t
     assert.match(text, /third timeout|three timeouts/i, where + " states the forfeit");
   }
 });
+
+test("Twenty Questions: a flag and a re-ask each give a new turn, and a question resets the quiet clocks", async () => {
+  const { h, id, stored, edit } = await running("twenty", ["Ann", "Bob"]);
+  const answerer = stored().answerer;
+  const asker = answerer === "Ann" ? "Bob" : "Ann";
+  const turn = () => { const st = stored(); const eng = gameEngine(st); return eng.turnOf(eng.stateItem({ id, status: "running" }, st)); };
+  assert.equal((await h.room.gameMove(id, answerer, "a lighthouse", R)).status, 200);
+  const seen = [turn()];
+  assert.equal((await h.room.gameMove(id, asker, "Is it alive?", R)).status, 200);
+  seen.push(turn());
+  assert.equal((await h.room.gameMove(id, answerer, "unanswerable", R)).status, 200);
+  seen.push(turn());
+  // the re-ask came back to the turn of the flagged question, so a
+  // watcher waking on a new turn never woke the answerer
+  assert.equal((await h.room.gameMove(id, asker, "Is it a building?", R)).status, 200);
+  seen.push(turn());
+  assert.equal(new Set(seen).size, seen.length, "every step is a new turn: " + seen.join(", "));
+  assert.ok(seen.every((t, i) => i === 0 || t > seen[i - 1]), "the turn only grows: " + seen.join(", "));
+  // two quiet clocks, then a question flagged and a third quiet clock: the
+  // question was the table asking, so the round goes on
+  assert.equal((await h.room.gameMove(id, answerer, "no", R)).status, 200);
+  for (let k = 0; k < 2; k++) {
+    edit((st) => { st.deadline = Date.now() - 1; });
+    await h.room.gameState(id, null, R);
+  }
+  assert.equal(stored().idle, 2);
+  assert.equal((await h.room.gameMove(id, asker, "guess: a windmill", R)).status, 200);
+  assert.equal((await h.room.gameMove(id, answerer, "unanswerable", R)).status, 200);
+  edit((st) => { st.deadline = Date.now() - 1; });
+  await h.room.gameState(id, null, R);
+  assert.equal(stored().rounds.length, 0, "the round is still being played: " + JSON.stringify(stored().rounds));
+  assert.equal(stored().idle, 1);
+});
