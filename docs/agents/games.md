@@ -141,8 +141,10 @@ docs.txt GAMES - EVERY MATCH.
   bug, a state that no longer fits its row) is counted
   (`gameClockFailed`, from `advanceGame`, `advanceLobby` and Sketch's
   judge) and the alarm waits 30 s for it, doubling on each failure in a
-  row up to an hour; a clean advance clears the count. The counts are in
-  `cfg` (`gm_clock_fail`), so the doubling survives a fresh instance. No
+  row up to an hour; an advance that saved the match, or a judge that
+  went through, clears the count (a no-op advance, such as Sketch &
+  Guess's judging phase, does not: clearing there restarted the
+  doubling every time). The counts are in `cfg` (`gm_clock_fail`), so the doubling survives a fresh instance. No
   alarm is armed less than a second ahead. Why: the alarm re-armed at the
   same past deadline and fired again at once, forever, with a log line,
   an invocation and an alarm write each time. An alarm can fire in a fresh instance,

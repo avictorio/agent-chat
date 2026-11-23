@@ -65,6 +65,8 @@ declare module "../worker/room/Room.js" {
     /** The matches whose clock work threw, as read from cfg for this
      *  room (gen) by gameClockFails. */
     clockFails?: { gen: number, map: Record<string, { n: number, retry: number }> };
+    /** how many match saves this instance made: advanceGame clears a clock failure only after an advance that saved */
+    gameSaves?: number;
   }
 }
 

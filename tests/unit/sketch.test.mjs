@@ -182,3 +182,34 @@ test("the Referee is sent ids, not names; a verdict naming anything else is void
     globalThis.fetch = realFetch;
   }
 });
+
+// The judging phase's sync advance does nothing, and advanceGame cleared
+// the clock failure count after it, so the throw that followed always
+// counted 1 and a judge that kept failing was retried every 30 s.
+test("a judge that keeps failing is retried later each time, and one that goes through clears the count", async (t) => {
+  const { h, id } = await running(["Ann", "Bob", "Cat"]);
+  const artist = h.room.gameRow(id).st.artist;
+  assert.equal((await h.room.gameMove(id, artist, null, R, { image: PIC })).status, 200);
+  const g = h.room.gameRow(id);
+  g.st.phase = "judging";
+  g.st.judge_at = Date.now();
+  g.st.deadline = Date.now() - 5;
+  h.room.saveGame(g);
+  const armed = [];
+  h.room.ctx.storage.setAlarm = async (at) => { armed.push(at - Date.now()); };
+  const errors = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = errors; });
+  h.room.sgJudgeNow = async () => { throw new Error("judge down"); };
+  const count = () => { const r = h.one("SELECT v FROM cfg WHERE k = 'gm_clock_fail'"); return r ? JSON.parse(r.v)[id].n : 0; };
+  const seen = [];
+  for (let i = 0; i < 3; i++) {
+    await h.room.alarm();
+    seen.push([count(), Math.round(armed.at(-1) / 1000)]);
+  }
+  assert.deepEqual(seen.map((x) => x[0]), [1, 2, 3], "the count grows: " + JSON.stringify(seen));
+  for (const [n, s] of seen) assert.ok(s >= 30 * 2 ** (n - 1) - 1 && s <= 30 * 2 ** (n - 1), "failure " + n + " waits " + s + " s");
+  h.room.sgJudgeNow = async () => {};
+  await h.room.alarm();
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'gm_clock_fail'"), undefined, "a judge that went through clears the count");
+});

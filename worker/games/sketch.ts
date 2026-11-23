@@ -560,8 +560,9 @@ export const SketchMethods = {
 
   // The alarm's path: the clock work, then the judge when it is due.
   // advanceGame and the catch here count a throw for the alarm's backoff
-  // (gameClockFailed), so a judge that keeps failing is not retried in a
-  // tight loop
+  // (gameClockFailed), so a judge that keeps failing is retried later each
+  // time, not in a tight loop; only a judge that went through clears the
+  // count (the judging phase's sync advance does nothing, so it does not)
   async sgAdvanceAsync(g: SgGame, room: string) {
     this.advanceGame(g, room);
     const g2 = this.gameRowOf<SgStored>(g.id, "sketch");
@@ -572,6 +573,7 @@ export const SketchMethods = {
       this.gameClockFailed(g2.id);
       throw e;
     }
+    this.gameClockOk(g2.id);
   },
 
   // Ties go to more exact guesses, then more right guesses, then the

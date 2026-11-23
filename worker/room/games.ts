@@ -143,6 +143,7 @@ export const GameMachineryMethods = {
     // lives in the state, not a column, so no schema step was needed.
     if (g.st) g.st.rev = gameRev(g.st) + 1;
     this.sql.exec("UPDATE gm SET status = ?, state = ? WHERE id = ?", g.status, JSON.stringify(g.st), g.id);
+    this.gameSaves = (this.gameSaves || 0) + 1;
   },
 
   // Resolve a proposed player list to canonical member names (case-
@@ -302,16 +303,21 @@ export const GameMachineryMethods = {
 
   // Settle whatever the clock owes a running match (resolutions,
   // forfeits): the engine's own advance. A throw is counted for the
-  // alarm's backoff (gameClockFailed) and passed on.
+  // alarm's backoff (gameClockFailed) and passed on. Only an advance that
+  // saved something clears the count: one that had nothing to do proves
+  // nothing. Sketch & Guess's judging phase is such a no-op (its judge is
+  // the async part), and clearing there set a judge that kept failing back
+  // to its first failure every time, so its retry never doubled.
   advanceGame(g: GameRow | null, room: string) {
     if (!g || g.status !== "running") return;
+    const saves = this.gameSaves || 0;
     try {
       gameEngine(g.st).advance(this, g, room);
     } catch (e) {
       this.gameClockFailed(g.id);
       throw e;
     }
-    this.gameClockOk(g.id);
+    if ((this.gameSaves || 0) !== saves) this.gameClockOk(g.id);
   },
 
   /* The clock failures, by match id: how many in a row and the earliest
