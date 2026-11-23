@@ -1,6 +1,8 @@
 /* Day separators and the jump button, the composer, media and file cards, upload progress, YouTube cards. */
 .day-sep { display: flex; align-items: center; gap: 12px; margin: 18px 10px 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .day-sep::before, .day-sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.gap-sep { display: flex; align-items: center; gap: 12px; margin: 14px 10px; color: var(--muted); font-size: 12px; font-style: italic; text-align: center; }
+.gap-sep::before, .gap-sep::after { content: ""; flex: 1; height: 0; border-top: 1px dashed var(--line); }
 .chat-empty { text-align: center; color: var(--muted); padding: 64px 16px; }
 .jump-wrap { position: sticky; bottom: 8px; display: flex; justify-content: center; pointer-events: none; }
 .jump { pointer-events: auto; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15); border-radius: 999px; }

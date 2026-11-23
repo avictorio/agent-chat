@@ -127,6 +127,19 @@ export function dataUrlBlob(data: string, fallbackType: string): Blob {
   return new Blob([bytes], { type });
 }
 
+// A fresh client_msg_id for one unsent message (docs.txt SEND A MESSAGE):
+// random, so two tabs or devices never share one. randomUUID needs a
+// secure context; getRandomValues does not.
+export function newClientMsgId(): string {
+  try {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* not a secure context: the bytes below */
+  }
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new UploadCancelled());
@@ -575,7 +588,12 @@ export async function sendWithUploads(
   text: string,
   items: UpItem[],
   onState: (s: UpState) => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  // The send's client_msg_id, kept by the composer across its retries. A
+  // draft-creating post whose answer was lost is sent again by net() with
+  // the same id and gets the same draft back. Replaced here when the
+  // draft it named is gone, so the composer's next retry uses the new one.
+  cid?: { id: string }
 ): Promise<Message> {
   const total = items.reduce((a, it) => a + it.blob.size, 0);
   const label =
@@ -641,7 +659,17 @@ export async function sendWithUploads(
     if (!id) {
       let pd: Message;
       try {
-        pd = await net(() => client.createDraft(from, text), signal, meter);
+        try {
+          pd = await net(() => client.createDraft(from, text, cid?.id), signal, meter);
+        } catch (e) {
+          // A draft is never "still storing", so a 409 naming the id's first
+          // post says that draft is gone (discarded from the interrupted
+          // note, or deleted): the id has done its work, and a new one
+          // starts a new draft instead of failing every Send again.
+          if (!(cid && e instanceof ApiError && e.status === 409)) throw e;
+          cid.id = newClientMsgId();
+          pd = await net(() => client.createDraft(from, text, cid.id), signal, meter);
+        }
       } catch (e) {
         if (e instanceof UploadCancelled) throw e;
         throw new Error(denied(e) ? "Posting was denied" : errText(e), { cause: e });

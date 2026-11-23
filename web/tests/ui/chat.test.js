@@ -347,6 +347,182 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
       return { text, titles: titles.length };
     });
   }
+  // Board writes from a stale copy. Every edit form and card action
+  // sends base_updated, the updated of the copy on screen; the server
+  // (staleRefusing, below, plays its part) refuses one whose item someone
+  // else changed first with 409 and the item as it is now. Before, the
+  // app sent no base, so an edit form opened before another member's
+  // edit saved over it unseen.
+  const staleRefusing = async (page, S, calls) => {
+    await page.route(/\/api\/rooms\/demo\/(decisions|questions)\/(\d+)$/, (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      const [, kind, id] = req.url().match(/\/(decisions|questions)\/(\d+)$/);
+      const body = JSON.parse(req.postData() || '{}');
+      const item = (kind === 'decisions' ? S.dc : S.q.concat(S.qr)).find((x) => x.id === +id);
+      if (item && body.base_updated !== undefined && body.base_updated !== item.updated) {
+        const key = kind === 'decisions' ? 'decision' : 'question';
+        calls.push('POST ' + new URL(req.url()).pathname + ' ' + req.postData());
+        return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'That ' + key + ' changed since you read it.', [key]: item }) });
+      }
+      // a write moves updated, a signature does not (as the server)
+      if (item && !(kind === 'decisions' && body.action !== 'edit')) item.updated += 1;
+      return route.fallback();
+    });
+  };
+  for (const [label, o] of [['board-stale-edit', {}], ['board-stale-edit-phone', { w: 390, h: 844, touch: true }]]) {
+    await run(label, o, async (page, S, calls) => {
+      await staleRefusing(page, S, calls);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="decisions"]'); await settle(page);
+      const card = '#dcList .card:has-text("Huaca Pucllana")';
+      await page.click(card + ' button:has-text("Edit")'); await settle(page);
+      // an open form shows its text in fields, which has-text does not read
+      const form = '#dcList .card:has(form.edit)';
+      await page.fill(form + ' textarea', 'Then a ceviche lunch in Miraflores.');
+      // meanwhile Henry rewrites the note
+      const base = S.dc[0].updated;
+      S.dc[0].note = 'Henry: dinner moved to Barranco at 8.'; S.dc[0].updated = base + 50;
+      const from = calls.length;
+      await page.click(form + ' button:has-text("Save changes")');
+      await page.waitForSelector(form + ' .stale-note', { timeout: 5000 });
+      await settle(page);
+      const first = calls.slice(from).find((c) => /^POST .*\/decisions\/1 /.test(c)) || '';
+      must(first.includes('"base_updated":' + base), 'the edit sends the copy\'s updated: ' + first);
+      const line = (await page.textContent(form + ' .stale-note')).replace(/\s+/g, ' ');
+      must(/changed this while you were editing/.test(line) && line.includes('Henry: dinner moved to Barranco at 8.'), 'the form says so and shows their text: ' + line);
+      const typed = await page.$eval(form + ' textarea', (t) => t.value);
+      must(typed === 'Then a ceviche lunch in Miraflores.', 'the typed text is kept: ' + typed);
+      must(S.dc[0].note === 'Henry: dinner moved to Barranco at 8.', 'nothing was written over theirs');
+      await shot(page, label + '.png');
+      // saving again goes on top of theirs, from its updated
+      const again = calls.length;
+      await page.click(form + ' button:has-text("Save changes")');
+      await page.waitForSelector('#dcList form.edit', { state: 'detached', timeout: 5000 });
+      await settle(page);
+      const second = calls.slice(again).find((c) => /^POST .*\/decisions\/1 /.test(c)) || '';
+      must(second.includes('"base_updated":' + (base + 50)), 'the second save sends the new base: ' + second);
+      const note = await page.textContent(card + ' .card-text');
+      must(note === 'Then a ceviche lunch in Miraflores.' && S.dc[0].note === note, 'the second save went through: ' + note);
+      return { line, typed, note };
+    });
+  }
+  // A sign from a stale copy: the decision was reworded after the card was
+  // drawn. The sign is refused, nothing is signed, and the card shows the
+  // decision as it is now with a line saying why; signing again then works.
+  for (const [label, o] of [['board-stale-sign', {}], ['board-stale-sign-phone', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, o, async (page, S, calls) => {
+      await staleRefusing(page, S, calls);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="decisions"]'); await settle(page);
+      const card = '#dcList .card:has-text("Digests rotate")';
+      const base = S.dc[1].updated;
+      S.dc[1].title = 'Digests rotate by who posted last'; S.dc[1].note = 'Changed after the vote.'; S.dc[1].updated = base + 70;
+      const from = calls.length;
+      await page.click(card + ' button:has-text("Sign")');
+      await page.waitForSelector('#dcList .card .stale-note', { timeout: 5000 });
+      await settle(page);
+      const post = calls.slice(from).find((c) => /^POST .*\/decisions\/2 /.test(c)) || '';
+      must(post.includes('"base_updated":' + base), 'the sign sends the copy\'s updated: ' + post);
+      must(S.dc[1].signers.length === 0, 'nothing was signed: ' + JSON.stringify(S.dc[1].signers));
+      const fresh = page.locator('#dcList .card:has(.stale-note)');
+      const title = await fresh.locator('.card-title').textContent();
+      must(title === 'Digests rotate by who posted last', 'the card shows the decision as it is now: ' + title);
+      await shot(page, label + '.png');
+      await fresh.locator('button:has-text("Sign")').click(); await settle(page);
+      must(S.dc[1].signers.includes('Anthony'), 'signing the fresh card goes through');
+      must(!(await page.locator('#dcList .stale-note').count()), 'the line clears once a write goes through');
+      return { title, signers: S.dc[1].signers };
+    });
+  }
+  // The resolve form's stale box: a resolution does not replace the
+  // question's text, so it says what saving again does instead (it used
+  // the edit form's "put it in place of theirs").
+  for (const [label, o] of [['board-stale-resolve', {}], ['board-stale-resolve-phone', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, o, async (page, S, calls) => {
+      S.q[0].updated = S.dc[0].updated;
+      await staleRefusing(page, S, calls);
+      await page.reload(); await settle(page);
+      if (o.w) { await page.click('#menu'); await settle(page); }
+      await page.click('.tab[data-tab="questions"]'); await settle(page);
+      const card = '#qList .card:has-text("Who books the dinner")';
+      await page.click(card + ' button:has-text("Resolve")'); await settle(page);
+      const form = '#qList .card:has(form.edit)';
+      await page.fill(form + ' textarea', 'Henry booked it for 8.');
+      // meanwhile Ada rewords the question
+      S.q[0].text = 'Who books the dinner reservation in Barranco?'; S.q[0].updated += 40;
+      await page.click(form + ' button:has-text("Mark resolved")');
+      await page.waitForSelector(form + ' .stale-note', { timeout: 5000 });
+      await settle(page);
+      const line = (await page.textContent(form + ' .stale-note')).replace(/\s+/g, ' ');
+      must(line.includes('Who books the dinner reservation in Barranco?'), 'the box shows the question as it reads now: ' + line);
+      must(line.includes('Save again to resolve it as it now reads, or cancel.') && !/in place of theirs/.test(line), 'the box says what saving again does: ' + line);
+      must(S.q[0].status === 'open', 'nothing was resolved');
+      await page.evaluate((f) => document.querySelector(f).scrollIntoView({ block: 'center' }), form);
+      await shot(page, label + '.png');
+      await page.click(form + ' button:has-text("Mark resolved")');
+      await page.waitForSelector('#qList form.edit', { state: 'detached', timeout: 5000 });
+      must(S.qr[0].id === 1 && S.qr[0].resolution === 'Henry booked it for 8.', 'saving again resolves it: ' + JSON.stringify(S.qr[0]));
+      return { line };
+    });
+  }
+  // The card's "This is how it reads now" line describes the copy a
+  // refusal brought back. When a later edit by someone else reaches the
+  // board (a board reload), the card shows that instead and the line
+  // goes. Before, it stayed until a write from this tab went through.
+  await run('board-stale-line-clears', {}, async (page, S, calls) => {
+    S.boardRev = 4;
+    S.streamRetry = 150;
+    await staleRefusing(page, S, calls);
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="decisions"]'); await settle(page);
+    const base = S.dc[1].updated;
+    S.dc[1].title = 'Digests rotate by who posted last'; S.dc[1].updated = base + 70;
+    await page.click('#dcList .card:has-text("Digests rotate") button:has-text("Sign")');
+    await page.waitForSelector('#dcList .card .stale-note', { timeout: 5000 });
+    await settle(page);
+    // Henry edits it again; the board reloads on board_rev
+    S.dc[1].title = 'Digests rotate weekly'; S.dc[1].updated = base + 90;
+    S.boardRev = 5;
+    await page.waitForFunction(() => /Digests rotate weekly/.test(document.getElementById('dcList').textContent), null, { timeout: 8000 }).catch(() => { throw new Error('the board did not reload'); });
+    await settle(page);
+    const out = { lines: await page.locator('#dcList .stale-note').count() };
+    must(out.lines === 0, 'the line goes once the board has a newer copy: ' + JSON.stringify(out));
+    S.streamRetry = 0;
+    return out;
+  });
+  // A text-only edit by someone else (a decision's note, which no list in
+  // room_state carries) shows on an open board when room_state's board_rev
+  // moves. Before, the board reloaded only when its room_state lists
+  // changed, so the old note stayed until a reload. A room object from
+  // before board_rev sends none: the lists still key the reload then.
+  await run('board-rev-reload', {}, async (page, S, calls) => {
+    S.boardRev = 4;
+    S.streamRetry = 150;
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="decisions"]'); await settle(page);
+    const card = '#dcList .card:has-text("Huaca Pucllana")';
+    const from = calls.length;
+    S.dc[0].note = 'Edited elsewhere: lunch at noon.';
+    S.boardRev = 5;
+    await page.waitForFunction(() => /Edited elsewhere/.test(document.getElementById('dcList').textContent), null, { timeout: 8000 }).catch(() => {});
+    const note = await page.textContent(card + ' .card-text');
+    must(note === 'Edited elsewhere: lunch at noon.', 'the open board shows the edited note: ' + note);
+    must(calls.slice(from).some((c) => /^GET .*\/decisions/.test(c)), 'board_rev reloaded the board');
+    S.streamRetry = 0;
+    return { note };
+  });
+  await run('board-rev-absent', {}, async (page, S) => {
+    S.streamRetry = 150;
+    await page.reload(); await settle(page);
+    await page.click('.tab[data-tab="questions"]'); await settle(page);
+    S.q[0].text = 'Who books the dinner, and for how many?';
+    await page.waitForFunction(() => /for how many/.test(document.getElementById('qList').textContent), null, { timeout: 8000 }).catch(() => {});
+    const titles = await page.$$eval('#qList .card-title', (e) => e.map((x) => x.textContent));
+    must(titles.includes('Who books the dinner, and for how many?'), 'without board_rev the lists still reload the board: ' + JSON.stringify(titles));
+    S.streamRetry = 0;
+    return { titles };
+  });
   await run('reactions', {}, async (page, S, calls) => {
     const out = {};
     const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', cs => cs.map(c => c.textContent + (c.classList.contains('mine') ? '*' : '')));
@@ -800,6 +976,298 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     must(later.slice(opened).some((c) => /^GET \/api\/rooms\/demo\/members/.test(c)), 'the members are read again once it opens: ' + JSON.stringify(later));
     S.streamRetry = 0;
     return { streams: later.filter((c) => /\/stream\?/.test(c)).length };
+  });
+
+  // A message deleted while the tab watches (or while it was away: a
+  // delete frame replays with the messages) leaves the feed, its clip and
+  // its reading aloud stop, its reaction bar closes, and a reconnect
+  // resumes after the delete's own number. Before, the stream sent no
+  // delete and the row stayed on every open screen until a reload.
+  await run('stream-delete-frame', { init: heldStream }, async (page, S, calls) => {
+    const base = S.msgs[S.msgs.length - 1];
+    S.msgs.push({ id: 40, ts: base.ts + 1000, from: 'Ada', kind: 'agent', text: 'A voice note.', audio: { type: 'audio/mpeg', bytes: 22100, url: '/api/rooms/demo/messages/40/audio?exp=1&sig=x' } });
+    // the reconnect delay the stream hands out, read when it opens
+    S.streamRetry = 200;
+    await page.reload(); await settle(page);
+    await page.waitForSelector('.msg[data-id="40"] audio', { state: 'attached', timeout: 5000 });
+    // the clip "plays" and the row is being read aloud
+    await page.evaluate(() => {
+      window.__paused = 0; window.__cancels = 0;
+      const a = document.querySelector('.msg[data-id="40"] audio');
+      Object.defineProperty(a, 'paused', { configurable: true, get: () => false });
+      a.pause = () => { window.__paused++; };
+      // a headless browser has no voice and fails the utterance at once:
+      // here it is taken and "spoken" until cancelled
+      if (window.speechSynthesis) { window.speechSynthesis.speak = () => {}; window.speechSynthesis.cancel = () => { window.__cancels++; }; }
+    });
+    const speak = await page.$('.msg[data-id="40"] button.speak');
+    // read aloud where this browser has a voice (headless ones may not)
+    if (speak) await speak.click();
+    const speaking = !!(await page.waitForSelector('.msg[data-id="40"] button.speak.on', { timeout: 1500 }).catch(() => null));
+    await page.hover('.msg[data-id="40"]'); await page.click('.msg[data-id="40"] .react-btn'); await settle(page);
+    must(await page.$('.rx-bar'), 'the reaction bar is open on the row');
+    const cancels0 = await page.evaluate(() => window.__cancels);
+    S.msgs = S.msgs.filter((m) => m.id !== 40);
+    const frame = { type: 'delete', room: 'demo', from: 'Ada', kind: 'agent', targets: [], id: 40 };
+    await page.evaluate((f) => window.__streams[0].send('id: 57\nevent: delete\ndata: ' + JSON.stringify(f) + '\n\n'), frame);
+    await page.waitForSelector('.msg[data-id="40"]', { state: 'detached', timeout: 3000 }).catch(() => { throw new Error('the deleted row stayed on screen'); });
+    await settle(page);
+    const out = { paused: await page.evaluate(() => window.__paused), cancels: (await page.evaluate(() => window.__cancels)) - cancels0, bar: !!(await page.$('.rx-bar')), speaking };
+    must(out.paused >= 1, 'its clip stopped: ' + JSON.stringify(out));
+    must(speaking && out.cancels >= 1, 'its reading aloud stopped: ' + JSON.stringify(out));
+    must(!out.bar, 'the reaction bar on it closed: ' + JSON.stringify(out));
+    must(await page.$('.msg[data-id="5"]'), 'the other rows stay');
+    // the reconnect resumes after the delete's own number
+    S.streamRetry = 200;
+    const from = calls.length;
+    await page.evaluate(() => window.__streams[0].end());
+    for (let i = 0; i < 60 && !calls.slice(from).some((c) => /\/stream\?/.test(c)); i++) await page.waitForTimeout(50);
+    const reopen = calls.slice(from).filter((c) => /\/stream\?/.test(c));
+    must(reopen.length >= 1 && /[?&]after=57&/.test(reopen[0]), 'the reconnect asks after the delete: ' + JSON.stringify(reopen));
+    must(/events=[^&\s]*delete/.test(reopen[0]) && /events=[^&\s]*gap/.test(reopen[0]), 'the stream asks for delete and gap frames: ' + reopen[0]);
+    S.streamRetry = 0;
+    return out;
+  });
+
+  // A tab whose cursor is older than what the room keeps gets a gap frame:
+  // the newest page is read again, the rows it brings show under one quiet
+  // divider, and a held row the read no longer returns (deleted while the
+  // tab was away) leaves. Before, the old history was joined straight
+  // onto the new with no sign of the hole.
+  for (const [tag, w, h, scheme] of [['', 1280, 860, 'light'], ['-phone', 390, 844, 'dark']]) {
+    await run('stream-gap-divider' + tag, { init: heldStream, w, h, scheme, touch: !!tag }, async (page, S, calls) => {
+      // the reconnect delay the stream hands out, read when it opens
+      S.streamRetry = 200;
+      await page.reload(); await settle(page);
+      const top = Math.max(...(await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id))));
+      // the tab slept and its stream dropped: the gap comes on the reconnect
+      // (a gap on the boot's own stream, before any frame, is ignored:
+      // stream-gap-at-boot)
+      await page.evaluate(() => window.__streams[0].end());
+      await page.waitForFunction(() => window.__streams.length >= 2 && window.__streams[1].open, null, { timeout: 5000 });
+      S.streamRetry = 0;
+      await settle(page);
+      const sid = await page.evaluate(() => window.__streams.length - 1);
+      // while the tab slept: row 2 was deleted and many messages came; the
+      // room keeps the newest, from 1500 on
+      S.msgs = S.msgs.filter((m) => m.id !== 2);
+      const base = S.msgs[S.msgs.length - 1].ts;
+      for (let i = 0; i < 6; i++) S.msgs.push({ id: 1500 + i, ts: base + 60e3 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Back on line ' + (i + 1) + '.' });
+      const from = calls.length;
+      const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through: 1499 }) + '\n\n';
+      await page.evaluate(([t, i]) => window.__streams[i].send(t), [gap, sid]);
+      await page.waitForSelector('.msg[data-id="1505"]', { state: 'attached', timeout: 5000 }).catch(() => { throw new Error('the gap did not re-read the newest page: ' + JSON.stringify(calls.slice(from))); });
+      await page.waitForSelector('.gap-sep', { timeout: 3000 });
+      await settle(page);
+      // the feed in page order, the divider as "|"
+      const order = () => page.$$eval('.msg, .gap-sep', (rs) => rs.map((r) => (r.classList.contains('gap-sep') ? '|' : r.dataset.id)).join(' '));
+      const seps = () => page.$$eval('.gap-sep', (rs) => rs.map((r) => r.textContent));
+      const first = { order: await order(), seps: await seps() };
+      const reads = calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages\?limit=200$/.test(c));
+      must(first.seps.length === 1 && first.seps[0] === 'Some earlier messages were not loaded', 'one divider: ' + JSON.stringify(first));
+      must(first.order.includes(' ' + top + ' | 1500 '), 'the divider sits between the rows the tab had and the rows it read: ' + JSON.stringify(first));
+      must(!/(^| )2 /.test(first.order), 'the row deleted while away leaves: ' + JSON.stringify(first));
+      must(reads.length === 1, 'the newest page is read again, once: ' + JSON.stringify(calls.slice(from)));
+      await page.evaluate(() => document.querySelector('.gap-sep').scrollIntoView({ block: 'center' }));
+      await settle(page);
+      await shot(page, 'stream-gap-divider' + tag + '.png');
+      // another long sleep, another gap: still one divider, at the new hole
+      for (let i = 0; i < 3; i++) S.msgs.push({ id: 1600 + i, ts: base + 60e3 * (i + 20), from: 'Ada', kind: 'agent', text: 'Later still ' + (i + 1) + '.' });
+      await page.evaluate(([t, i]) => window.__streams[i].send(t), [gap.replace('"through":1499', '"through":1599'), sid]);
+      await page.waitForSelector('.msg[data-id="1602"]', { state: 'attached', timeout: 5000 });
+      await settle(page);
+      const second = { order: await order(), seps: await seps() };
+      must(second.seps.length === 1 && second.order.includes(' 1505 | 1600 '), 'one divider, at the newest hole: ' + JSON.stringify(second));
+      return { first: first.order, second: second.order };
+    });
+  }
+
+  // A gap on a feed with no rows (an empty room that once dropped
+  // something) has nothing out of date: no read, no divider.
+  await run('stream-gap-empty-feed', { init: heldStream }, async (page, S, calls) => {
+    S.msgs = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?limit=200$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ room: 'demo', messages: [], last_id: 0, you: 'Anthony', you_kind: 'human' }) }));
+    await page.reload(); await settle(page);
+    await page.waitForSelector('.chat-empty', { timeout: 5000 });
+    const from = calls.length;
+    const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: 0, through: 1200 }) + '\n\n';
+    await page.evaluate((t) => window.__streams[window.__streams.length - 1].send(t), gap);
+    await page.waitForTimeout(500);
+    await settle(page);
+    const out = { seps: (await page.$$('.gap-sep')).length, empty: !!(await page.$('.chat-empty')), reads: calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages/.test(c)) };
+    must(out.seps === 0 && out.empty && out.reads.length === 0, 'the gap is ignored: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // A gap as the first frame of the stream opened right after the boot
+  // read is not a hole: the boot page is the room's newest page. The
+  // server sends one there when over 1,000 messages after the newest live
+  // one were posted and deleted (its forgotten mark sits above the boot's
+  // last_id). Before, every page load drew a false divider and read the
+  // page again. After a message frame, a gap still marks the hole.
+  await run('stream-gap-at-boot', { init: heldStream }, async (page, S, calls) => {
+    await page.reload(); await settle(page);
+    const top = Math.max(...(await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id))));
+    const gap = (through) => 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through }) + '\n\n';
+    const reads = (from) => calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages\?limit=200$/.test(c));
+    const from = calls.length;
+    await page.evaluate((t) => window.__streams[0].send(t), gap(top + 1001));
+    await page.waitForTimeout(600);
+    await settle(page);
+    const boot = { seps: (await page.$$('.gap-sep')).length, reads: reads(from).length };
+    must(boot.seps === 0 && boot.reads === 0, 'a gap right after the boot read is ignored: ' + JSON.stringify(boot));
+    // a message frame, then a gap: the cursor has moved, the hole is real
+    const m = { id: top + 1, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'Fresh after boot.' };
+    S.msgs.push(m);
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + m.id + '\nevent: message\ndata: ' + JSON.stringify(m) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + m.id + '"]', { timeout: 3000 });
+    const from2 = calls.length;
+    await page.evaluate((t) => window.__streams[0].send(t), gap(top + 2001));
+    await page.waitForSelector('.gap-sep', { timeout: 5000 }).catch(() => { throw new Error('a gap after a message frame drew no divider'); });
+    await settle(page);
+    const later = { seps: (await page.$$('.gap-sep')).length, reads: reads(from2).length };
+    must(later.seps === 1 && later.reads === 1, 'a gap after a message frame still marks the hole: ' + JSON.stringify(later));
+    return { boot, later };
+  });
+
+  // A delete frame that lands while a gap's re-read is out: the answer,
+  // built before the delete, still carries the row. Before, the merge put
+  // it back and it stayed until a reload.
+  await run('stream-gap-merge-deleted', { init: heldStream }, async (page, S) => {
+    await page.reload(); await settle(page);
+    const ids = await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id));
+    const top = Math.max(...ids);
+    const victim = ids[ids.length - 2];
+    // a message frame first: the gap below is a real hole (stream-gap-at-boot)
+    const m = { id: top + 1, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'Before the gap.' };
+    S.msgs.push(m);
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + m.id + '\nevent: message\ndata: ' + JSON.stringify(m) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + m.id + '"]', { timeout: 3000 });
+    // the re-read's answer is built when it is asked for (the row still
+    // there), then held back
+    let release; const gate = new Promise((r) => { release = r; });
+    const asked = { n: 0 };
+    await page.route(/\/api\/rooms\/demo\/messages\?limit=200$/, async (route) => {
+      asked.n++;
+      const rows = [...S.msgs].sort((a, b) => a.id - b.id).slice(-200);
+      const body = JSON.stringify({ room: 'demo', messages: rows, last_id: rows[rows.length - 1].id, you: 'Anthony', you_kind: 'human' });
+      await gate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body });
+    });
+    const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through: top + 1001 }) + '\n\n';
+    await page.evaluate((t) => window.__streams[0].send(t), gap);
+    for (let i = 0; i < 100 && !asked.n; i++) await page.waitForTimeout(30);
+    must(asked.n === 1, 'the gap re-reads the newest page');
+    await page.waitForTimeout(200);
+    // the delete frame, while the read is out
+    S.msgs = S.msgs.filter((x) => x.id !== victim);
+    const frame = { type: 'delete', room: 'demo', from: 'Ada', kind: 'agent', targets: [], id: victim };
+    await page.evaluate((t) => window.__streams[0].send(t), 'id: ' + (top + 2002) + '\nevent: delete\ndata: ' + JSON.stringify(frame) + '\n\n');
+    await page.waitForSelector('.msg[data-id="' + victim + '"]', { state: 'detached', timeout: 3000 });
+    release();
+    await page.waitForSelector('.gap-sep', { timeout: 5000 });
+    await page.waitForTimeout(300);
+    await settle(page);
+    const out = { back: !!(await page.$('.msg[data-id="' + victim + '"]')), rows: (await page.$$('.msg')).length };
+    must(!out.back, 'the deleted row stays gone after the merge: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // Every send carries one client_msg_id that stays with the unsent
+  // message through its retries. The posts sent so far, as [id, text].
+  const posts = (calls, from) => calls.slice(from || 0).filter((c) => /^POST \/api\/rooms\/demo\/messages \{/.test(c)).map((c) => { const b = JSON.parse(c.slice(c.indexOf('{'))); return [b.client_msg_id, b.text]; });
+  const rowsWith = (page, t) => page.$$eval('.msg', (rs, tx) => rs.filter((r) => r.textContent.includes(tx)).length, t);
+  const idle = (page) => page.waitForFunction(() => !document.querySelector('#send').disabled, null, { timeout: 15000 });
+
+  // The post lands but its answer is lost: the composer sends it again
+  // with the same id, the server answers with the first post (repeat),
+  // and the message shows once. Before, there was no id: the error
+  // showed, and sending again posted it twice.
+  await run('send-answer-lost', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost'];
+    const from = calls.length;
+    await page.fill('#text', 'Only once, please.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { posts: posts(calls, from), rows: await rowsWith(page, 'Only once, please.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)), box: await page.$eval('#text', (t) => t.value) };
+    must(out.posts.length === 2 && out.posts[0][0] && out.posts.every((x) => x[0] === out.posts[0][0]), 'the retry carries the same id: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err && out.box === '', 'one row, no error, the box clears: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // Every automatic try is lost: the error shows and the text stays.
+  // Pressing Send again carries the same id and gets the first post back:
+  // one row. A new message then gets a new id.
+  await run('send-again-same-id', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
+    const from = calls.length;
+    await page.fill('#text', 'Sent through a bad line.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 15000 });
+    await idle(page);
+    const failed = { posts: posts(calls, from).length, box: await page.$eval('#text', (t) => t.value) };
+    must(failed.posts === 4 && failed.box === 'Sent through a bad line.', 'four tries, the text kept: ' + JSON.stringify(failed));
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    await page.fill('#text', 'A different message.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const all = posts(calls, from);
+    const out = { ids: all.map((x) => x[0]), rows: await rowsWith(page, 'Sent through a bad line.'), err: await page.$eval('#err', (e) => e.hidden) };
+    must(all.length === 6 && out.ids.slice(0, 5).every((id) => id === out.ids[0]), 'Send again keeps the id: ' + JSON.stringify(all));
+    must(out.ids[5] && out.ids[5] !== out.ids[0], 'a new message gets a new id: ' + JSON.stringify(all));
+    must(out.rows === 1 && out.err, 'the message shows once and the error is gone: ' + JSON.stringify(out));
+    return { tries: all.length };
+  });
+
+  // A post with inline media is held while its files store: a 409 naming
+  // the id's first post waits and asks again with the same id, and the
+  // next answer posts it.
+  await run('send-409-media-retried', {}, async (page, S, calls) => {
+    S.postAnswers = ['409'];
+    const from = calls.length;
+    await page.setInputFiles('#imgFile', TESTS + '/../../tests/fixtures/photo.png');
+    await page.locator('#attachRow:not([hidden])').waitFor({ timeout: 3000 });
+    await page.fill('#text', 'Waiting on storage.');
+    await page.click('#send');
+    await idle(page);
+    await settle(page);
+    const out = { posts: posts(calls, from), rows: await rowsWith(page, 'Waiting on storage.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)) };
+    must(out.posts.length === 2 && out.posts[1][0] === out.posts[0][0], 'the same id, asked again: ' + JSON.stringify(out.posts));
+    must(out.rows === 1 && !out.err, 'one row, no error: ' + JSON.stringify(out));
+    return out;
+  });
+
+  // A text post is never held, so a 409 naming its id's first post can
+  // only mean that post went live and was deleted since. Pressing Send on
+  // text that is not in the room posts it once, under a new id, at once.
+  // Before, each Send waited about 7.5 s through four retries and then
+  // showed the server's sentence about client_msg_id.
+  await run('send-409-gone-text', { allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost', 'lost', 'lost', 'lost'];
+    await page.fill('#text', 'Posted, then deleted.');
+    await page.click('#send');
+    await page.waitForSelector('#err:not([hidden])', { timeout: 15000 });
+    await idle(page);
+    // the first copy landed; someone deletes it
+    const firstId = S.msgs[S.msgs.length - 1].id;
+    must(S.msgs[S.msgs.length - 1].text === 'Posted, then deleted.', 'the first copy landed');
+    S.msgs = S.msgs.filter((m) => m.id !== firstId);
+    const from = calls.length;
+    const t0 = Date.now();
+    await page.click('#send');
+    await idle(page);
+    const took = Date.now() - t0;
+    await settle(page);
+    const out = { posts: posts(calls, from), took, rows: await rowsWith(page, 'Posted, then deleted.'), err: await page.$eval('#err', (e) => (e.hidden ? '' : e.textContent)), box: await page.$eval('#text', (t) => t.value) };
+    must(out.posts.length === 2 && out.posts[1][0] && out.posts[1][0] !== out.posts[0][0], 'posted once more under a new id: ' + JSON.stringify(out.posts));
+    must(took < 3000, 'no wait through retries: ' + took + ' ms');
+    must(out.rows === 1 && !out.err && out.box === '', 'one row, no error, the box clears: ' + JSON.stringify(out));
+    must(S.msgs.filter((m) => m.text === 'Posted, then deleted.').length === 1, 'the room holds it once');
+    return out;
   });
 
   done('chat');

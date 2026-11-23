@@ -127,7 +127,17 @@ const SPEAK_PATHS = (
 );
 const STOP_PATHS = <rect x="7" y="7" width="10" height="10" rx="1.5" />;
 
-export function MsgRow({ m, prev }: { m: Message; prev: Message | null }) {
+// Where a gap frame left a hole (useMessages' gapAfter): the rows above
+// are what the tab held, those below what it read again.
+function GapSep() {
+  return (
+    <div className="gap-sep" role="separator">
+      Some earlier messages were not loaded
+    </div>
+  );
+}
+
+export function MsgRow({ m, prev, gapBefore }: { m: Message; prev: Message | null; gapBefore?: boolean }) {
   const session = useSession();
   const members = useMembers();
   const feed = useFeed();
@@ -139,6 +149,7 @@ export function MsgRow({ m, prev }: { m: Message; prev: Message | null }) {
   const showSpeak = canSpeak || !!members.voiceOf(m.from);
   return (
     <>
+      {gapBefore && <GapSep />}
       {newDay && (
         <div className="day-sep" role="separator">
           {dayLabel(m.ts)}
@@ -232,6 +243,7 @@ export function ChatFeed({
   onSettleKill,
   listRef,
   holdProps,
+  gapAfter = null,
 }: {
   messages: Message[];
   jumpVisible: boolean;
@@ -239,7 +251,10 @@ export function ChatFeed({
   onSettleKill: () => void;
   listRef: React.RefObject<HTMLDivElement | null>;
   holdProps: Record<string, (e: never) => void>;
+  /** the newest id the tab held before a gap: the divider follows that row */
+  gapAfter?: number | null;
 }) {
+  const last = messages[messages.length - 1];
   return (
     <div
       className="msgs"
@@ -263,10 +278,16 @@ export function ChatFeed({
               resetKey={m}
               fallback={<div className="err-box row" role="alert">Message {m.id} couldn't be shown.</div>}
             >
-              <MsgRow m={m} prev={i > 0 ? messages[i - 1]! : null} />
+              <MsgRow
+                m={m}
+                prev={i > 0 ? messages[i - 1]! : null}
+                gapBefore={gapAfter !== null && m.id > gapAfter && (i === 0 || messages[i - 1]!.id <= gapAfter)}
+              />
             </ErrorBoundary>
           ))
         )}
+        {/* nothing past the hole yet: it closes the list */}
+        {gapAfter !== null && last && last.id <= gapAfter && <GapSep />}
       </div>
       <div className="jump-wrap">
         <Button

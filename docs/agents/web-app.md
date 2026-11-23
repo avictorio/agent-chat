@@ -95,6 +95,24 @@ Front-end conventions.
   built once from a pinned public dataset (`EMOJI_SOURCE` in
   `worker/limits.ts`) and cached in KV, served at `/emoji.json`.
 
+- **Board writes:** `features/board/`. Every edit form (decisions,
+  questions, stakes, digests) and every card action (sign, unsign,
+  claim, unclaim, resolve, reopen, done) sends `base_updated`, the
+  `updated` of the copy on screen (docs.txt BOARD WRITES FROM WHAT YOU
+  READ). On the 409 the card takes the item from the answer
+  (`useFresh`, `staleItem`) and says someone else changed it first,
+  until the board's own copy is newer than the one the 409 carried; an
+  open form keeps the typed text, shows the other person's version and
+  saves again from its `updated` (the resolve form says it resolves the
+  question as it now reads: `staleNext`). Before, nothing was sent, and a form
+  opened before another member's edit saved over it unseen. The
+  constitution is versioned instead and sends no base. An open board
+  reloads when room_state's `board_rev` (a count of board writes) or its
+  board lists move (`applyState` in `useBoardData.ts`): the lists alone
+  missed another member's text-only edit, a note or a digest, until a
+  reload. A room object that sends no `board_rev` (for a few minutes
+  after a deploy) still reloads on the lists.
+
 - **HTML pages and Markdown documents:** API: docs.txt HTML PAGES AND
   MARKDOWN DOCUMENTS. A message may carry one self-contained HTML page
   (kind `html`) and one Markdown document (kind `doc`), attached inline at

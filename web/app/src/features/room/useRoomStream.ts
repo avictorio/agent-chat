@@ -15,9 +15,9 @@ import type { Speaker } from "./speak";
 import type { Status } from "./Sidebar";
 
 // The room's live connection: the initial load with its retry
-// loop, the SSE stream (message / reaction / game / members
-// frames), the recheck-on-close that re-opens it, and the re-sync
-// after a drop. Identity discoveries (your name, the agent gate)
+// loop, the SSE stream (message / reaction / game / members / state /
+// delete / gap frames), the recheck-on-close that re-opens it, and the
+// re-sync after a drop. Identity discoveries (your name, the agent gate)
 // report back through callbacks; everything else lands in the feed
 // and board hooks.
 
@@ -43,6 +43,9 @@ const RESYNC_GAP = 15_000;
 // a re-read takes along (sent while the stream was down).
 const PAGE = 500;
 const SLACK = 50;
+// The boot read's page: the newest messages by id. A gap frame reads it
+// again.
+const BOOT_PAGE = 200;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -80,6 +83,8 @@ export function useRoomStream(opts: {
   deny: (e: ApiError) => void;
   deniedRef: { current: boolean };
   closeRef: { current: () => void };
+  /** a message was deleted: close anything open on its row (the reaction bar) */
+  onDeleted?: (id: number) => void;
 }) {
   const { client, room, closeRef } = opts;
   const ctrlRef = useRef<AbortController | null>(null);
@@ -159,6 +164,62 @@ export function useRoomStream(opts: {
         }
       })();
     };
+    // A message deleted on the server (a delete frame, live or replayed
+    // after a reconnect): its row leaves the feed, and whatever plays from
+    // it stops first, a clip or video in the row and its reading aloud. A
+    // row removed while playing went on playing in some browsers, and
+    // before delete frames existed the row stayed on every open screen
+    // until a reload.
+    const dropMessage = (id: number) => {
+      const row = feed.listRef.current?.querySelector('.msg[data-id="' + id + '"]');
+      row?.querySelectorAll("audio, video").forEach((el) => {
+        try {
+          (el as HTMLMediaElement).pause();
+        } catch {
+          /* not playing */
+        }
+      });
+      if (speaker.speakingId === id) speaker.stopAll();
+      live.current.onDeleted?.(id);
+      feed.removeMsg(id);
+    };
+    // A gap frame: the stream's cursor was older than what the room still
+    // keeps, so deliveries in between are gone for this tab (messages and
+    // deletes). What follows it is everything the room has past the
+    // cursor; the rows the tab already shows may be out of date. The newest
+    // page is read again, as at boot, and the feed marks where its old rows
+    // end. Before, a tab that slept past the room's kept history joined the
+    // old history straight onto the new with no sign of the hole. A feed
+    // with no rows has nothing out of date: the gap is ignored.
+    // A gap on the first stream, before any message or delete frame and
+    // with the cursor still where the boot read left it, is not a hole:
+    // the boot page is the room's newest page, read a moment ago. The
+    // server can still send one there, as its forgotten mark can sit above
+    // the boot read's last_id (over 1,000 messages posted and deleted after
+    // the newest live one). Taken as a hole, every page load drew a false
+    // divider and read the page again until somebody posted.
+    let bootLast: number | null = null;
+    let sinceBoot = false;
+    let gapRunning = false;
+    const afterGap = async (first: boolean) => {
+      if (first && !sinceBoot && bootLast !== null && feed.lastRef.current === bootLast) return;
+      if (gapRunning || cancelled || deniedRef.current) return;
+      const held = new Set(feed.messagesRef.current.map((m) => m.id));
+      if (!held.size) return;
+      gapRunning = true;
+      let rows: Message[] = [];
+      try {
+        const d = await client.messages(undefined, BOOT_PAGE);
+        rows = d.messages || [];
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
+        // any other failure: the replay after the gap still brings what the
+        // room has, and the divider still marks the hole
+      } finally {
+        gapRunning = false;
+      }
+      if (!cancelled && !deniedRef.current) feed.mergeAfterGap(rows, held);
+    };
     // Whether a stream has been asked for since the initial load: every
     // later open follows a failed or dropped one, and re-syncs. Counting
     // from the first open that answered instead, a stream that failed for
@@ -181,7 +242,7 @@ export function useRoomStream(opts: {
     // X-Invite-Token header like every other call this client makes,
     // never in a URL. The reader below speaks just enough SSE —
     // event/data framing, the id: line (a message's delivery number) and
-    // the server's retry: hint — to carry the five frame kinds.
+    // the server's retry: hint — to carry the seven frame kinds.
     const stream = () => {
       ctrlRef.current?.abort();
       if (deniedRef.current || cancelled) return;
@@ -212,7 +273,18 @@ export function useRoomStream(opts: {
           } else if (kind === "state") {
             const d = JSON.parse(data) as { room_state?: RoomState };
             if (d.room_state) board.applyState(d.room_state);
+          } else if (kind === "delete") {
+            sinceBoot = true;
+            // The cursor moves past a delete like past a message: a delete
+            // frame has its own delivery number, and a reconnect from below
+            // it would replay it.
+            if (eventId !== null && (feed.lastRef.current === null || eventId > feed.lastRef.current)) feed.lastRef.current = eventId;
+            const d = JSON.parse(data) as { id?: number };
+            if (typeof d.id === "number") dropMessage(d.id);
+          } else if (kind === "gap") {
+            void afterGap(!later);
           } else if (kind === "message") {
+            sinceBoot = true;
             const m = JSON.parse(data) as Message;
             feed.addMsg(m);
             // The cursor is the frame's delivery number (its id: line), not
@@ -248,7 +320,9 @@ export function useRoomStream(opts: {
               (feed.lastRef.current ?? 0) +
               // state is opt-in on the server: naming it here is what subscribes
               // this client to room_state as its own event.
-              "&events=message,reaction,game,members,state",
+              // delete and gap are asked for by name too: the server sends
+              // only the kinds listed.
+              "&events=message,reaction,game,members,state,delete,gap",
             {
               headers: {
                 Accept: "text/event-stream",
@@ -340,7 +414,7 @@ export function useRoomStream(opts: {
       // oxlint-disable-next-line no-unmodified-loop-condition -- the effect's cleanup sets cancelled; the feed and a refusal set the refs
       while (!cancelled && feed.lastRef.current === null && !deniedRef.current) {
         try {
-          const d = await client.messages(undefined, 200);
+          const d = await client.messages(undefined, BOOT_PAGE);
           if (cancelled) return;
           if (d.you) onYou(d.you);
           if (d.you_kind === "agent" && d.you && !store("ac:agent-app:" + room)) {
@@ -349,6 +423,7 @@ export function useRoomStream(opts: {
           if (d.room_state) board.applyState(d.room_state);
           const sorted = [...d.messages].sort((a, b) => a.id - b.id);
           feed.loadInitial(sorted, d.last_id);
+          bootLast = d.last_id;
         } catch (e) {
           if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
             deny(e);

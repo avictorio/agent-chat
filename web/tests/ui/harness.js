@@ -529,6 +529,8 @@ function roomState(S) {
     decisions_awaiting_signatures: S.dc.filter(d => d.signers.length < 3).map(d => ({ id: d.id, title: d.title, signed_by: d.signers, missing: ['Anthony', 'Henry', 'Ada'].filter(n => d.signers.indexOf(n) < 0) })),
     stakes_due: S.sk.filter(s => s.date && s.date <= ymd(7)).map(s => ({ id: s.id, title: s.title, date: s.date, days_away: 1 })),
     memory: { latest_digest_day: ymd(0), latest_digest_by: 'Ada', digests_today: S.dg.length, awaiting_digest_from: 'Henry', digest_due_at: now + 10 * H },
+    // S.boardRev: the server's board write counter (left out, as an older room object does)
+    ...(S.boardRev !== undefined ? { board_rev: S.boardRev } : {}),
     // Four in a Row on your turn names its turn, as stateAttempt does
     // (S.c4AwaitTurn: the turn room_state still names once the match moved on).
     // S.lcAwait: live Light Cycles' entry, whose call leaves the turn out (lateMoveCarries)
@@ -656,9 +658,21 @@ async function setup(page, S, calls) {
     // with S.publishLost the publish lands but every answer is lost (a 503), as on a dropped connection; otherwise a second publish is 409 like the server's
     if ((am = p.match(/\/messages\/(\d+)\/publish$/))) { const dr = (S.drafts || []).find((x) => x.id === +am[1]); if (!dr && S.publishLost) return J({ error: 'upstream connect error' }, 503); if (!dr) return S.msgs.some((x) => x.id === +am[1]) ? J({ error: 'That message is already live' }, 409) : J({ error: 'No message with that id' }, 404); S.drafts = S.drafts.filter((x) => x !== dr); if (body.text) dr.text = body.text; S.msgs.push(dr); if (S.publishLost) return J({ error: 'upstream connect error' }, 503); return J(Object.assign({ room: 'demo' }, dr, { room_state: roomState(S) })); }
     if ((am = p.match(/\/messages\/(\d+)$/)) && m === 'DELETE') { if (u.searchParams.get('draft_only') === '1' && S.msgs.some((x) => x.id === +am[1])) return J({ error: 'That message is already live, so it was not deleted' }, 409); S.drafts = (S.drafts || []).filter((x) => x.id !== +am[1]); S.msgs = S.msgs.filter((x) => x.id !== +am[1]); return J({ room: 'demo', deleted: +am[1] }); }
-    if (p.endsWith('/messages') && m === 'POST' && body.draft) { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; (S.drafts = S.drafts || []).push(x); return J(Object.assign({ draft: true }, x, { room_state: roomState(S) }), 201); }
-    if (p.endsWith('/messages') && m === 'POST') { const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text }; S.msgs.push(x); return J(Object.assign({}, x, { room_state: roomState(S) }), 201); }
+    // client_msg_id, as on the server: a post that repeats one answers 200 with the first post and repeat: true (409 with its id when that is gone).
+    // S.postAnswers queues what the next posts get: 'lost' stores the post and drops its answer, '409' answers that the id's first post is still storing its files.
+    if (p.endsWith('/messages') && m === 'POST') {
+      const act = (S.postAnswers || []).shift(); const cid = body.client_msg_id; S.cids = S.cids || {};
+      if (act === '409') return J({ error: 'This client_msg_id\'s first post is still storing its files; nothing was posted. Ask again in a moment.', id: S.cids[cid] || 0 }, 409);
+      if (cid && S.cids[cid]) { if (act === 'lost') return route.abort('failed'); const r =(S.drafts || []).concat(S.msgs).find((x) => x.id === S.cids[cid]); return r ? J(Object.assign({ room: 'demo' }, (S.drafts || []).includes(r) ? { draft: true } : {}, r, { repeat: true, room_state: roomState(S) })) : J({ error: 'This client_msg_id already posted message ' + S.cids[cid] + ', which is no longer in the room; nothing was posted.', id: S.cids[cid] }, 409); }
+      const x = { id: ++S.nid, ts: clockNow(), from: body.from, text: body.text };
+      if (body.draft) (S.drafts = S.drafts || []).push(x); else S.msgs.push(x);
+      if (cid) S.cids[cid] = x.id;
+      if (act === 'lost') return route.abort('failed');
+      return J(Object.assign(body.draft ? { draft: true } : {}, x, { room_state: roomState(S) }), 201);
+    }
     if (p.endsWith('/messages') && m === 'GET') (S.hits = S.hits || []).push('GET /messages');
+    // A read by id (?ids=, at most 100): the live messages among them, in id order, as on the server
+    if (p.endsWith('/messages') && u.searchParams.has('ids')) { const want = new Set(u.searchParams.get('ids').split(',').map(Number)); if (want.size > 100) return J({ error: '"ids" takes at most 100 message ids' }, 400); return J({ room: 'demo', messages: S.msgs.filter((x) => want.has(x.id)).sort((a, b) => a.id - b.id), you: 'Anthony', you_kind: 'human' }); }
     // A read with after= is a forward read, as on the server: the messages
     // whose delivery number is past it, in delivery order, a page at a
     // time; has_more means the page is full (not that more rows exist: a

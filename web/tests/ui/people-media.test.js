@@ -219,6 +219,23 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     must(calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
     return { r2, viaSite, signs: signs.length };
   });
+  // The draft-creating post's answer is lost: the upload's retry sends it
+  // again with the same client_msg_id and gets the same draft back, so one
+  // draft is made and the file posts once. Before, the retry made a second
+  // draft, and the first stayed behind.
+  await run('upload-draft-answer-lost', { hash: '#invite=tok_Anthony', allowConsole: /ERR_FAILED/ }, async (page, S, calls) => {
+    S.postAnswers = ['lost'];
+    const from = calls.length;
+    await page.setInputFiles('#anyFile', { name: 'once.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(150000, 6) });
+    await page.click('#send');
+    await page.locator('.file-card', { hasText: 'once.bin' }).waitFor({ timeout: 20000 });
+    const drafts = calls.slice(from).filter((c) => /^POST \/api\/rooms\/demo\/messages \{/.test(c) && /"draft":true/.test(c)).map((c) => JSON.parse(c.slice(c.indexOf('{'))).client_msg_id);
+    must(drafts.length === 2 && drafts[0] && drafts[1] === drafts[0], 'the draft post is retried with the same id: ' + JSON.stringify(drafts));
+    must(S.nid === 101 && (S.drafts || []).length === 0, 'one draft, published: ' + JSON.stringify({ nid: S.nid, drafts: S.drafts }));
+    must((await page.$$('.file-card')).length === 1, 'the file shows once');
+    return { drafts: drafts.length };
+  });
+
   await run('upload-finish-names-file',{ hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     // Every finish, the retry after a lost answer included, names the file
     // by the size and fingerprint start gave, so the server can refuse one
@@ -688,9 +705,13 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     return { tiles, overflow };
   });
 
-  // The renewal's reads: every GET /messages but the boot load (limit=200)
-  // and the stream's recheck (limit=1).
-  const renewReads = (calls, from) => calls.slice(from || 0).filter((c) => /^GET \/api\/rooms\/demo\/messages\?/.test(c) && !/[?&]limit=(1|200)$/.test(c));
+  // The renewal's reads: reads by id (GET /messages?ids=).
+  const renewReads = (calls, from) => calls.slice(from || 0).filter((c) => /^GET \/api\/rooms\/demo\/messages\?ids=/.test(c));
+  // Page reads other than the boot load (limit=200) and the stream's
+  // recheck (limit=1): the renewal sends none.
+  const pageReads = (calls, from) => calls.slice(from || 0).filter((c) => /^GET \/api\/rooms\/demo\/messages\?/.test(c) && !/\?ids=/.test(c) && !/[?&]limit=(1|200)$/.test(c));
+  // The ids one read by id asked for.
+  const idsOf = (c) => (c.match(/[?&]ids=([\d,]+)/) || [null, ''])[1].split(',').filter(Boolean).map(Number);
   // Moves the page's clock on by ms from the real time (not stacked).
   const skew = (page, ms) => page.evaluate((d) => { if (!window.__realNow) window.__realNow = Date.now; Date.now = () => window.__realNow.call(Date) + d; }, ms);
   const nudge = (page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -730,7 +751,8 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
         frame: await page.$eval('.msg[data-id="8"] .art-frame', (f) => f.getAttribute('src')),
         scroll: [top0, await page.$eval('#list', (l) => l.scrollTop)],
       };
-      must(out.reads.length === 1 && /\?limit=\d+$/.test(out.reads[0]), 'one read, of the latest page: ' + JSON.stringify(out.reads));
+      must(out.reads.length === 1 && [8, 60, 61].every((id) => idsOf(out.reads[0]).includes(id)), 'one read, by id, of the rows with media: ' + JSON.stringify(out.reads));
+      must(pageReads(calls).length === 0, 'no page is read: ' + JSON.stringify(pageReads(calls)));
       must(out.sameImg && out.plainKept, 'the rows stay mounted: ' + JSON.stringify(out));
       must(/sig=fresh/.test(out.file) && /sig=fresh/.test(out.frame), 'the download and the page preview carry the new links: ' + JSON.stringify(out));
       must(Math.abs(out.scroll[0] - out.scroll[1]) < 2, 'the scroll position holds: ' + JSON.stringify(out.scroll));
@@ -785,14 +807,12 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     return out;
   });
 
-  // A forward read comes back in delivery order: a row whose upload
-  // finished in a busy room goes live after every message sent meanwhile.
-  // Here row 8 goes live after 800 newer rows, so it is neither among the
-  // newest 500 by id nor near its id in delivery order. Its link dies; the
-  // re-read walks on from just under its id at full pages and finds it in
-  // three requests, and so does the hourly renewal. Before, the walk shrank
-  // to pages of 50 past the highest wanted id, never reached it in its ten
-  // pages, and sent those ten again every minute.
+  // A row whose upload finished in a busy room goes live after every
+  // message sent meanwhile: here row 8 goes live after 800 newer rows, so
+  // it is neither among the newest 500 by id nor near its id in delivery
+  // order. Its link dies; one read by id renews it, and so does the hourly
+  // renewal. Before reads by id, the renewal walked forward from just
+  // under its id at full pages, and before that it never reached it.
   for (const [tag, w, h] of [['', 1280, 860], ['-phone', 390, 844]]) {
     await run('media-links-late-row' + tag, { state: { artifacts: true }, hash: '#invite=tok_Anthony', w, h, touch: !!tag, allowConsole: /status of 403/ }, async (page, S, calls) => {
       chatter(S, 800);
@@ -821,7 +841,7 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
       await settle(page);
       const first = renewReads(calls, from);
       must(sigs.join() === 'dead,live', 'the image is retried once, with the new link: ' + JSON.stringify(sigs));
-      must(first.length <= 3 && new Set(first).size === first.length, 'the late row is reached in at most three reads: ' + JSON.stringify(first));
+      must(first.length === 1 && idsOf(first[0]).includes(8), 'the late row is read by id, once: ' + JSON.stringify(first));
       await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'start' }));
       await shot(page, 'media-links-late-row' + tag + '.png');
       // an hour on, the renewal finds the late row the same way
@@ -834,29 +854,31 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
         .catch(() => { throw new Error('the renewal missed the late row: ' + JSON.stringify(renewReads(calls, mark))); });
       await settle(page);
       const later = renewReads(calls, mark);
-      must(later.length <= 3 && new Set(later).size === later.length, 'the renewal reaches it in at most three reads: ' + JSON.stringify(later));
+      must(later.length === 1 && idsOf(later[0]).includes(8), 'the renewal reads it by id, once: ' + JSON.stringify(later));
+      must(pageReads(calls, mark).length === 0, 'and reads no page: ' + JSON.stringify(pageReads(calls, mark)));
       return { first, later };
     });
   }
 
-  // A row further on than a walk goes (here 2,100 rows were delivered
-  // between its id and its delivery number) costs one bounded walk, and
-  // the next minute's check sends nothing. Before, the walk ran out of
-  // pages, left the row as wanted, and the same requests went out every
-  // minute for as long as the tab was open.
-  await run('media-links-unreachable', { state: { artifacts: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+  // A row delivered far later than its id (here 2,100 rows on) and then
+  // deleted without the tab hearing of it (no delete frame came): the
+  // read by id leaves it out, it counts as covered, and the next minutes
+  // send nothing. Before reads by id, such a row cost a bounded walk of
+  // page reads, and before that the same walk every minute.
+  await run('media-links-gone-row', { state: { artifacts: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     chatter(S, 2100);
     const m8 = S.msgs.find((m) => m.id === 8);
     S.live = [{ msg: m8, dn: 2400 }];
     await page.reload();
     await settle(page);
     await page.waitForSelector('.msg[data-id="8"]', { timeout: 5000 });
+    S.msgs = S.msgs.filter((m) => m.id !== 8);
     const from = calls.length;
     await skew(page, 51 * 60e3);
     await nudge(page);
-    for (let i = 0; i < 50 && renewReads(calls, from).length < 5; i++) await page.waitForTimeout(100);
+    for (let i = 0; i < 50 && !renewReads(calls, from).length; i++) await page.waitForTimeout(100);
     await settle(page);
-    const walk = renewReads(calls, from);
+    const first = renewReads(calls, from);
     const mark = calls.length;
     await skew(page, 52 * 60e3);
     await nudge(page);
@@ -865,9 +887,10 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     await nudge(page);
     await page.waitForTimeout(800);
     const again = renewReads(calls, mark);
+    must(first.length === 1 && idsOf(first[0]).includes(8), 'one read by id: ' + JSON.stringify(first));
+    must(pageReads(calls, from).length === 0, 'no page is read: ' + JSON.stringify(pageReads(calls, from)));
     must(again.length === 0, 'the next minutes send nothing: ' + JSON.stringify(again));
-    must(walk.length >= 2 && walk.length <= 5, 'one bounded walk: ' + JSON.stringify(walk));
-    return { walk, again };
+    return { first, again };
   });
 
   // Images that fail while a re-read is under way wait for it, or join it:
@@ -926,9 +949,9 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
   // A room with steady media: a photo lands every four minutes for two
   // hours. Each row has its own link time, so a few cross 50 minutes at
   // every check; renewing every row past 30 minutes with the one that is
-  // due spaces the re-reads about twenty minutes apart, and the latest
-  // page asks for no more rows than reach the oldest one wanted. Before,
-  // every check from the 50th minute began its own read of 500 rows.
+  // due spaces the re-reads about twenty minutes apart, each a read by id
+  // of just those rows. Before, every check from the 50th minute began its
+  // own read of 500 rows.
   await run('media-links-batched', { state: { artifacts: true }, hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     S.streamRetry = 150;
     await page.reload();
@@ -947,11 +970,12 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     }
     S.streamRetry = 0;
     const reads = renewReads(calls, from);
-    const limits = reads.map((c) => +(c.match(/[?&]limit=(\d+)/) || [])[1]);
+    const sizes = reads.map((c) => idsOf(c).length);
+    const media = S.msgs.filter((m) => m.image || m.html || m.doc || m.file || m.audio || m.video).length;
     must(reads.length >= 3 && reads.length <= 6, 'renewals come in batches, about twenty minutes apart: ' + JSON.stringify(reads));
-    must(reads.every((c) => !/after=/.test(c)), 'each is one read of the latest page: ' + JSON.stringify(reads));
-    must(limits.every((n) => n > 0 && n <= S.msgs.length + 50), 'the latest page is sized to the rows wanted, not 500: ' + JSON.stringify(limits));
-    return { reads: reads.length, limits };
+    must(sizes.every((n) => n > 0 && n <= media), 'each reads only rows with media, by id: ' + JSON.stringify(sizes));
+    must(!calls.slice(from).some((c) => /^GET \/api\/rooms\/demo\/messages\?after=/.test(c) && !/[?&]limit=1$/.test(c)), 'no forward walk: ' + JSON.stringify(pageReads(calls, from)));
+    return { reads: reads.length, sizes };
   });
 
   // With the network gone, the minute's check sends nothing while the
@@ -1066,64 +1090,36 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     return { tried, src: await src() };
   });
 
-  // A row a walk could not reach is held for 50 minutes; once a page has
-  // read it the hold is forgotten. Here row 8 is out of reach at minute 51,
-  // the room is cleared and its failed image reads it in the latest page,
-  // then 600 rows arrive, and at minute 91 its link comes due with a
-  // younger photo's: the walk from just under it renews it. Before, the
-  // hold outlived the read, the row was skipped unread and its link died.
-  await run('media-links-far-forgotten', { state: { artifacts: true }, hash: '#invite=tok_Anthony', allowConsole: /status of 403/ }, async (page, S, calls) => {
-    chatter(S, 2100);
-    const m8 = S.msgs.find((m) => m.id === 8);
-    S.live = [{ msg: Object.assign({}, m8, { image: Object.assign({}, m8.image, { url: m8.image.url + '?exp=1&sig=dead' }) }), dn: 2400 }];
-    await page.route(/\/messages\/8\/image\?/, (route) => {
-      if (new URL(route.request().url()).searchParams.get('sig') !== 'dead') return route.fallback();
-      const row = S.msgs.find((m) => m.id === 8);
-      row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=dead', 'sig=live') });
-      return route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"This media link is invalid or has expired."}' });
-    });
-    S.streamRetry = 150;
+  // A feed holding 250 rows with media renews them in three reads by id,
+  // of at most 100 ids each, one after another, and reads no page. Before,
+  // the renewal read the latest page and walked forward page by page.
+  await run('media-links-by-id-250', { state: { artifacts: true }, hash: '#invite=tok_Anthony', init: heldStream }, async (page, S, calls) => {
+    const photo = (id, ts) => ({ id, ts, from: 'Ada', kind: 'agent', text: 'Photo ' + id + '.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/' + id + '/image?exp=1&sig=x' } });
+    const base = S.msgs[S.msgs.length - 1].ts;
+    // the boot load takes the newest 200; 50 more come over the stream
+    for (let i = 0; i < 200; i++) S.msgs.push(photo(1000 + i, base + 1000 * (i + 1)));
     await page.reload();
     await settle(page);
-    await page.waitForSelector('.msg[data-id="8"]', { state: 'attached', timeout: 5000 });
-    const src = () => page.$eval('.msg[data-id="8"] img.msg-img', (i) => i.getAttribute('src'));
-    // a younger photo, at minute 40
-    await skew(page, 40 * 60e3);
-    S.msgs.push({ id: 2500, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'A younger photo.', image: { type: 'image/png', bytes: 4321, url: '/api/rooms/demo/messages/2500/image?exp=1&sig=x' } });
-    await page.waitForSelector('.msg[data-id="2500"]', { state: 'attached', timeout: 5000 });
-    // minute 51: row 8 is due and out of reach
-    let from = calls.length;
+    const late = [];
+    for (let i = 0; i < 50; i++) late.push(photo(1200 + i, base + 1000 * (201 + i)));
+    S.msgs.push(...late);
+    await page.evaluate((rows) => window.__streams[0].send(rows.map((m) => 'id: ' + m.id + '\nevent: message\ndata: ' + JSON.stringify(m) + '\n\n').join('')), late);
+    await page.waitForSelector('.msg[data-id="1249"]', { state: 'attached', timeout: 5000 });
+    await settle(page);
+    const held = await page.$$eval('.msg img.msg-img', (is) => is.length);
+    must(held === 250, 'the feed holds 250 photos: ' + held);
+    for (const m of S.msgs) if (m.image) m.image = Object.assign({}, m.image, { url: m.image.url.split('?')[0] + '?exp=2&sig=fresh' });
+    const from = calls.length;
     await skew(page, 51 * 60e3);
     await nudge(page);
-    for (let i = 0; i < 50 && renewReads(calls, from).length < 5; i++) await page.waitForTimeout(100);
+    await page.waitForFunction(() => [...document.querySelectorAll('.msg img.msg-img')].every((i) => /sig=fresh/.test(i.getAttribute('src'))), null, { timeout: 8000 })
+      .catch(() => { throw new Error('not every photo was renewed: ' + JSON.stringify(renewReads(calls, from))); });
     await settle(page);
-    const walk = renewReads(calls, from);
-    must(walk.length === 5 && /sig=dead/.test(await src()), 'row 8 is out of reach: ' + JSON.stringify(walk));
-    // minute 52: the chatter is deleted; row 8's image fails and the latest
-    // page, now the whole room, renews it
-    S.msgs = S.msgs.filter((m) => m.id < 200 || m.id >= 2400);
-    await skew(page, 52 * 60e3);
-    await page.evaluate(() => document.querySelector('.msg[data-id="8"]').scrollIntoView({ block: 'center' }));
-    await page.waitForFunction(() => /sig=live/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 8000 })
-      .catch(() => { throw new Error('the failed image was not renewed: ' + JSON.stringify(renewReads(calls, from))); });
-    await settle(page);
-    // 600 rows arrive; row 8 is now under the latest page but in a walk's reach
-    const base = S.msgs[S.msgs.length - 1].ts;
-    for (let i = 0; i < 600; i++) S.msgs.push({ id: 3000 + i, ts: base + 1000 * (i + 1), from: 'Henry', kind: 'agent', text: 'Later line ' + (i + 1) + '.' });
-    await page.waitForSelector('.msg[data-id="3599"]', { state: 'attached', timeout: 8000 });
-    S.streamRetry = 0;
-    const row = S.msgs.find((m) => m.id === 8);
-    row.image = Object.assign({}, row.image, { url: row.image.url.replace('sig=live', 'sig=fresh') });
-    // minute 91: the younger photo is due, and row 8 (39 minutes) goes with it
-    from = calls.length;
-    await skew(page, 91 * 60e3);
-    await nudge(page);
-    await page.waitForFunction(() => /sig=fresh/.test(document.querySelector('.msg[data-id="8"] img.msg-img').getAttribute('src')), null, { timeout: 5000 })
-      .catch(() => { throw new Error('row 8 was skipped: ' + JSON.stringify(renewReads(calls, from))); });
-    await settle(page);
-    const later = renewReads(calls, from);
-    must(later.some((c) => /[?&]after=7&/.test(c)), 'the walk starts just under row 8: ' + JSON.stringify(later));
-    return { walk: walk.length, later };
+    const reads = renewReads(calls, from);
+    const sizes = reads.map((c) => idsOf(c).length);
+    must(reads.length === 3 && sizes.every((n) => n <= 100) && sizes.reduce((a, b) => a + b, 0) === 250, 'three reads by id of at most 100: ' + JSON.stringify(sizes));
+    must(pageReads(calls, from).length === 0, 'no page is read: ' + JSON.stringify(pageReads(calls, from)));
+    return { sizes };
   });
 
   done('people-media');

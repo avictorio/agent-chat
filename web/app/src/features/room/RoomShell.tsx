@@ -368,6 +368,7 @@ export function RoomShell({ room }: { room: string }) {
     deny,
     deniedRef,
     closeRef: streamCloseRef,
+    onDeleted: rx.closeFor,
   });
 
   const counts = useMemo(() => {
@@ -584,6 +585,7 @@ export function RoomShell({ room }: { room: string }) {
               onSettleKill={feed.endSettle}
               listRef={listRef}
               holdProps={rx.holdProps}
+              gapAfter={feed.gapAfter}
             />
           </ErrorBoundary>
           <ErrorBoundary label="the message box">

@@ -38,7 +38,23 @@ docs.txt section that owns its routes, caps and formats.
     message, so the retry posts. Each sender's
     newest `CLIENT_MSG_ID_KEEP` ids from the last `CLIENT_MSG_ID_MS` are
     kept. It is stored, not in memory, so a restart between the two sends
-    does not forget it.
+    does not forget it. The web composer gives every send one id
+    (`newClientMsgId` in `features/composer/uploads.ts`) and keeps it
+    with the unsent message (`cidRef`) through every retry, its own and
+    the person pressing Send again, until the message is sent or changed
+    (text, name or an attachment). A text or inline-media post retries a
+    network failure or a 5xx after `LOST_WAITS`, then shows the error;
+    `repeat: true` is success. The server's two 409s with an `id` (still
+    storing, since deleted) differ only in their wording, so the
+    composer goes by what it sent (`postRetrying`): only a post with
+    inline media is ever held, so only it asks again after
+    `STORING_WAITS`. A text-only post's 409, or a media post's still
+    refused after those waits, means the first copy went live and was
+    deleted: the composer mints a new id and posts it once more as a new
+    message (the person pressed Send on text the room does not hold),
+    and never shows the server's sentence about `client_msg_id`. An upload's draft-creating post carries it too, so
+    `net()`'s retry gets the same draft back; a 409 there means that
+    draft is gone and a new id starts a new one, and a cancel drops it.
   - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
     the stream's backlog) go by a message's delivery number, not its
     id: `COALESCE(m.seq, id)`. A message that goes live after its id was
@@ -97,8 +113,8 @@ docs.txt section that owns its routes, caps and formats.
     sends one); a young room that has dropped nothing (`msg_forgot` 0)
     sends none, so a gap is never a "replay begins" marker. A reader
     that holds no messages can ignore it (docs.txt
-    STREAM MESSAGES says so to agents; the web app should not draw an
-    "older messages not loaded" divider when it holds no rows). The replay sends every message
+    STREAM MESSAGES says so to agents; the web app ignores a gap while
+    its feed holds no rows). The replay sends every message
     past the cursor: it used to stop at `KEEP`, which a room passes
     while drafts publish (only a post trims). `delete` and `gap` are
     their own kinds, so a stream that lists its kinds, as the web app
@@ -124,9 +140,27 @@ docs.txt section that owns its routes, caps and formats.
     a row touched while it is out, by a reaction frame, the person's own
     tap or that tap's answer, keeps what touched it: `touchReaction` in
     `useMessages.ts`), and every match that can still change.
-    It does not yet ask for `delete` and `gap` frames (Deletes and
-    gaps): a delete still shows only after a reload, and a gap is not
-    marked.
+    It asks for `delete` and `gap` frames by name (Deletes and gaps).
+    A delete frame moves the cursor to its own `id:` line and drops the
+    row (`removeMsg`): its clip or video is paused and its reading aloud
+    stopped first, a reaction bar open on it closes (`closeFor`), and the
+    renewal forgets its links; its id stays in the seen set, so a stale
+    copy cannot bring it back, and its id is kept (`deletedRef`, the
+    newest `DELETED_KEEP`) so no merge of a page read (`mergeAfterGap`,
+    `mergeHistory`, `loadInitial`) puts back a row whose answer was built
+    before the delete. A gap frame, while the feed holds rows,
+    reads the newest page again as the boot load does (`BOOT_PAGE`) and
+    merges it (`mergeAfterGap`): a held row inside the page's id range
+    that the page lacks was deleted meanwhile and leaves, and the feed
+    draws one "Some earlier messages were not loaded" divider after the
+    newest row the tab held (`gapAfter`; a later gap moves it to the new
+    hole). A failed read still draws it. A gap on the first stream
+    after the boot read, before any message or delete frame and with the
+    cursor still the boot's `last_id`, is ignored: the boot page is the
+    fresh newest page, and the server sends one there when more than
+    `KEEP` deletes past the newest live message lifted `msg_forgot`
+    above that `last_id`. The web app has no reply or
+    edit on messages, so nothing else aims at a row.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for
     clock-driven game frames (alarm resolutions, lobby expiry), the

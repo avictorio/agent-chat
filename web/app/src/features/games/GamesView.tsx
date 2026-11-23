@@ -304,9 +304,10 @@ export function GamesView({ active, onNewGame }: { active: boolean; onNewGame: (
   const [shown, setShown] = useState(PAGE);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ live: null, history: null, standings: null, guide: null });
 
-  // /games scans up to 500 matches on the server: the first open loads at
-  // once, later store changes (a burst of frames, a poll) coalesce into
-  // one reload a beat later.
+  // /games is a server read (each live match summarised, the finished ones
+  // from the room's results table), so it is not repeated per frame: the
+  // first open loads at once, later store changes (a burst of frames, a
+  // poll) coalesce into one reload a beat later.
   // the store version the list last loaded at (null: never loaded)
   const listedAt = useRef<number | null>(null);
   // "today" and "yesterday" in the history, as of the latest load

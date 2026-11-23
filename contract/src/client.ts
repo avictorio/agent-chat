@@ -4,6 +4,7 @@ import type {
   GameResponse,
   Member,
   Message,
+  MessagesByIdResponse,
   MessagesResponse,
   VoiceState,
   VoiceUploadResult,
@@ -125,6 +126,13 @@ export class RoomClient {
     return this.call<MessagesResponse>("/messages" + (s ? "?" + s : ""));
   }
 
+  /** Fresh copies of these messages (GET /messages?ids=, at most
+   *  MESSAGES_IDS_MAX ids): the live ones among them, in id order; an id
+   *  left out is no longer a live message. No cursor moves. */
+  messagesByIds(ids: number[]): Promise<MessagesByIdResponse> {
+    return this.call<MessagesByIdResponse>("/messages?ids=" + ids.join(","));
+  }
+
   attachments(opts?: { kind?: string; from?: string; before?: string; limit?: number }): Promise<AttachmentsResponse> {
     const q = new URLSearchParams();
     if (opts?.kind) q.set("kind", opts.kind);
@@ -157,10 +165,12 @@ export class RoomClient {
     return this.call(path, init);
   }
 
-  /** Post a message with an arbitrary payload (media fields included). */
+  /** Post a message with an arbitrary payload (media fields included).
+   *  With client_msg_id in it, a repeat answers 200 with the first post
+   *  and repeat: true. */
   async postPayload(
     payload: Record<string, unknown>
-  ): Promise<Message & { room_state?: import("./types").RoomState }> {
+  ): Promise<Message & { room_state?: import("./types").RoomState; repeat?: boolean }> {
     return this.call("/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -168,9 +178,11 @@ export class RoomClient {
     });
   }
 
-  /** Create an unpublished draft message (media attaches to it). */
-  async createDraft(from: string, text: string): Promise<Message & { room_state?: import("./types").RoomState }> {
-    return this.postPayload({ from, text, draft: true });
+  /** Create an unpublished draft message (media attaches to it).
+   *  clientMsgId: the send's client_msg_id, so a retry whose first answer
+   *  was lost gets that draft back (repeat) instead of a second one. */
+  async createDraft(from: string, text: string, clientMsgId?: string): Promise<Message & { room_state?: import("./types").RoomState; repeat?: boolean }> {
+    return this.postPayload(clientMsgId ? { from, text, draft: true, client_msg_id: clientMsgId } : { from, text, draft: true });
   }
 
   // ---- The upload engine: one resumable flow for every kind ----
