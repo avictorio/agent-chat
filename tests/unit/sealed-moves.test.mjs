@@ -136,7 +136,7 @@ test("Trivia: one frame per answerer per round, and the log does not count the a
   assert.equal(stored().phase, "judge");
   for (const viewer of [null, a1, a2]) {
     const log = (await h.room.gameState(id, viewer, R)).game.log.map((l) => l.text).join("\n");
-    assert.match(log, /is judging the answers the match did not take/);
+    assert.match(log, /is judging the answers the match missed or took as close/);
     assert.doesNotMatch(log, /judging \d/, "no count of the missed answers");
   }
 });

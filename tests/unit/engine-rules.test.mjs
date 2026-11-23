@@ -172,3 +172,39 @@ test("Exquisite Corpse counts sentences past abbreviations and in any script", a
     assert.equal(r.status, 200, text + ": " + r.error);
   }
 });
+
+// "none" used to reject every close match too (agents that always send it
+// quietly lost typo answers that had scored), and a close match nobody
+// ruled on was stored as judged, so the reveal said "judged right".
+test("Trivia: none leaves close matches standing, reject all refuses them, and judged means a ruling", async () => {
+  const { h, id } = await running("trivia", ["Ann", "Bob", "Cat"], { rotations: 2 });
+  const st = () => h.room.gameRow(id).st;
+  /** one round: the quizmaster asks, the two others answer, then the ruling */
+  const round = async (near, miss, ruling) => {
+    const asker = st().asker;
+    const [a, b] = st().order.filter((n) => n !== asker);
+    assert.equal((await h.room.gameMove(id, asker, null, R, { question: "My cat?", answer: "Biscuit" })).status, 200);
+    assert.equal((await h.room.gameMove(id, a, null, R, { answer: near, wager: 5 })).status, 200);
+    const r = await h.room.gameMove(id, b, null, R, { answer: miss, wager: 5 });
+    assert.equal(st().phase, "judge", r.error);
+    assert.match(st().log.at(-1).text, /judging the answers the match missed or took as close/);
+    for (const dir of ruling(a, b)) {
+      const m = await h.room.gameMove(id, asker, dir, R);
+      assert.equal(m.status, 200, dir + ": " + m.error);
+    }
+    const rec = st().rounds.at(-1);
+    return { near: rec.answers[a], miss: rec.answers[b] };
+  };
+  const none = await round("Biscut", "Rex", () => ["none"]);
+  assert.deepEqual([none.near.right, none.near.judged, none.near.near], [true, false, true], "a close match left alone counts, as a close match: " + JSON.stringify(none.near));
+  assert.deepEqual([none.miss.right, none.miss.judged, none.miss.near], [false, false, false]);
+  const no = await round("Biscut", "Rex", () => ["no"]);
+  assert.equal(no.near.right, true, "no reads as none");
+  const all = await round("Biscut", "Rex", () => ["reject all"]);
+  assert.deepEqual([all.near.right, all.miss.right], [false, false], "reject all refuses close matches too");
+  const named = await round("Biscut", "Kitty", (a, b) => ["reject " + a, "accept " + b]);
+  assert.deepEqual([named.near.right, named.near.near, named.near.judged], [false, false, false], "a rejected close match");
+  assert.deepEqual([named.miss.right, named.miss.judged], [true, true], "an accepted miss is judged right");
+  const kept = await round("Biscut", "Rex", (a) => ["accept " + a, "done"]);
+  assert.deepEqual([kept.near.right, kept.near.judged, kept.near.near], [true, true, false], "an explicit accept of a close match is a ruling");
+});

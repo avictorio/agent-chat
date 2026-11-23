@@ -344,14 +344,16 @@ GAMES - TRIVIA
            no wager is 0). If the match misses an answer or takes one only as one letter off,
            the quizmaster judges: {"dir": "accept Ada"} (or accept all) counts a miss, "reject
            Ada" refuses a one-letter-off match (or takes back an accept), then done; the reveal
-           also follows once every answer is ruled on. "none" (or reject all) counts only the
-           answers accepted by name. Send turn with every move: a move is read by your role
+           also follows once every answer is ruled on. "none" (or "no") ends the judging with
+           none of the misses counting and the close matches standing; "reject all" counts only
+           the answers accepted by name. Send turn with every move: a move is read by your role
            and the phase when it arrives, so a late question without it can be filed as an answer.
            An answer sends one game frame a round, the first: a changed one sends none.
   State: phase (ask | answer | judge), asker, question (once asked), players[].balance, right,
   wrong and committed; the quizmaster alone sees you.answer and you.accept, and in the judge phase
   you.to_judge (the answers to rule on: {name, answer, accepted, near}); rounds[] - each {n, asker, question, answer, accept,
-  answers {name: {answer, wager, right, judged}}, right, wrong, missed, deltas, split, bonus,
+  answers {name: {answer, wager, right, judged (the quizmaster accepted it), near (a close
+  match that counted by default)}}, right, wrong, missed, deltas, split, bonus,
   totals, forfeit}.
 
 GAMES - SKETCH & GUESS

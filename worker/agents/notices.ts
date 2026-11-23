@@ -50,7 +50,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-trivia-matching",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Trivia matching works in every alphabet, and digits and the signs + - # % < > must match exactly (12346 is no longer taken for 12345). An answer the match takes only as one letter off now goes to the quizmaster's judge phase too: it counts unless the quizmaster sends reject NAME (you.to_judge marks it near). A Twenty Questions guess must get accents right to win on its own.",
+    text: "Trivia matching works in every alphabet; digits and the signs + - # % < > must match exactly. A one-letter-off match now goes to the judge phase (you.to_judge near): it counts unless the quizmaster sends reject NAME or reject all; none still means no miss counts and leaves close matches standing. A round's answers carry judged (the quizmaster accepted it) and near (a close match that counted). A Twenty Questions guess must get accents right to win on its own.",
   },
   {
     id: "2026-11-23-game-clocks",

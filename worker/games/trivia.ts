@@ -240,21 +240,27 @@ export const TriviaMethods = {
       return { status: 200, game: this.tvStateFull(g, who), resolved: false };
     }
     if (st.phase === "judge") {
-      if (me.name !== st.asker) return { status: 409, error: st.asker + " is judging the answers that did not match - the reveal follows" };
+      if (me.name !== st.asker) return { status: 409, error: st.asker + " is judging the answers the match missed or took as close - the reveal follows" };
       const s = String(raw == null ? "" : raw).trim();
       const open = this.tvUnmatched(st);
       const legal = () => open.map((n) => (this.tvAccepted(st, n) ? "reject " : "accept ") + n).concat(["done"]);
-      // done and reveal keep the rulings as they stand; none, no and
-      // reject (all) count only what was accepted by name, so a close
-      // match left alone is rejected too
+      // done and reveal keep the rulings as they stand. none and no mean
+      // what they always have, none of the misses count: a close match left
+      // alone keeps its default and counts (they used to reject close
+      // matches too, which quietly voided typo answers that agents saying
+      // "none" had always seen scored). reject all refuses everything not
+      // accepted by name, close matches included.
       let done = /^(done|reveal)$/i.test(s);
-      if (/^(none|no|reject(\s+all)?)$/i.test(s)) {
+      if (/^(none|no)$/i.test(s)) {
+        for (const n of open) if (st.judged[n] === undefined && this.tvKind(st, n) !== "near") st.judged[n] = false;
+        done = true;
+      } else if (/^reject(\s+all)?$/i.test(s)) {
         for (const n of open) if (st.judged[n] !== true) st.judged[n] = false;
         done = true;
       }
       if (!done) {
         const m = s.match(/^(accept|reject)\s+(.+)$/i);
-        if (!m) return { status: 400, error: "As quizmaster, accept the answers you count as right (accept NAME, or accept all) and reject the close matches you don't (reject NAME), then done", legal_moves: legal() };
+        if (!m) return { status: 400, error: "As quizmaster, accept the answers you count as right (accept NAME, or accept all) and reject the close matches you don't (reject NAME, or reject all), then done", legal_moves: legal() };
         const ok = m[1].toLowerCase() === "accept";
         const names = /^all$/i.test(m[2].trim()) ? open : m[2].split(/[,;]+|\s+and\s+/).map((x) => x.trim()).filter(Boolean);
         for (const x of names) {
@@ -303,7 +309,7 @@ export const TriviaMethods = {
       st.deadline = Date.now() + st.round_seconds * 1000;
       // no count: with committed public, how many missed told each
       // answerer before the reveal whether their sealed answer had
-      st.log.push({ tick: st.round, text: "The answers are in - " + st.asker + " is judging the answers the match did not take." });
+      st.log.push({ tick: st.round, text: "The answers are in - " + st.asker + " is judging the answers the match missed or took as close." });
     } else this.tvResolve(g);
   },
 
@@ -321,13 +327,17 @@ export const TriviaMethods = {
         rec.deltas[n] = 0;
         continue;
       }
-      const auto = tvMatchKind(a.answer, keys) === "exact";
+      const kind = tvMatchKind(a.answer, keys);
+      const auto = kind === "exact";
       const ok = auto || this.tvAccepted(st, n);
+      // judged is the quizmaster's own ruling only; a close match nobody
+      // ruled on is near. Both used to be judged, so the reveal said
+      // "judged right" of an answer nobody had judged.
       const w = Math.min(a.wager, st.balance[n]);
       const d = ok ? w : -w;
       st.balance[n] += d;
       rec.deltas[n] = d;
-      rec.answers[n] = { answer: a.answer, wager: w, right: ok, judged: ok && !auto, at: a.at };
+      rec.answers[n] = { answer: a.answer, wager: w, right: ok, judged: ok && !auto && st.judged[n] === true, near: ok && kind === "near" && st.judged[n] === undefined, at: a.at };
       if (ok) {
         rec.right.push(n);
         st.prog[n].right += 1;
@@ -430,12 +440,12 @@ export const triviaEngine = {
   card: (g: TvGame) => ({ id: g.id, type: "trivia", status: g.status, round: g.st.round, rounds_total: g.st.rounds_total, phase: g.status === "running" ? g.st.phase : null, asker: g.status === "running" ? g.st.asker : null, question: g.status === "running" && g.st.cur ? g.st.cur.q : null, winner: g.st.winner || null, draw: !!g.st.draw, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, balance: g.st.balance[p.name] })) }),
   stateItem: (r, st: TvStored) => ({ id: r.id, type: "trivia", status: r.status, phase: st.phase, asker: st.asker, turn: (st.round || 0) * 3 + (st.phase === "answer" ? 1 : st.phase === "judge" ? 2 : 0), max_wager: TV_MAX_WAGER, players: (st.players || []).map((p) => ({ name: p.name, alive: true, moved: r.status !== "running" || (st.phase === "answer" ? p.name === st.asker || (st.answers || {})[p.name] !== undefined : p.name !== st.asker), accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => Number(gm.turn),
-  moveHint: (gm, name) => (gm.asker === name ? (gm.phase === "judge" ? "<accept NAME for each answer you count as right, then done>" : '{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}') : '{"answer": "<your answer>", "wager": <0-' + (gm.max_wager || TV_MAX_WAGER) + ">}"),
+  moveHint: (gm, name) => (gm.asker === name ? (gm.phase === "judge" ? "<accept NAME for each answer you count as right, reject NAME for a close match you do not, then done>" : '{"question": "<your question>", "answer": "<the answer>", "accept": ["<another way to say it>"]}') : '{"answer": "<your answer>", "wager": <0-' + (gm.max_wager || TV_MAX_WAGER) + ">}"),
   result: (room, g) => room.tvResultText(g),
   rules: (st: TvStored) =>
     "Trivia: each round one player is the quizmaster (in this order: " + st.order.join(", ") + (st.rotations > 1 ? ", " + st.rotations + " times round" : "") + ", " + st.rounds_total + " rounds) and asks a question of their own, answer sealed. " +
     "Everyone else answers, sealed until the round resolves, and wagers 0 to " + TV_MAX_WAGER + " of their balance (all start with " + TV_START + "). Right gains the wager, wrong loses it, no answer is 0. " +
-    "Matching is lenient (case, punctuation, articles, a one-letter typo in a word answer; numbers and signs must be exact); the quizmaster judges what it misses and may reject a one-letter-off match. The quizmaster scores " + TV_SPLIT + " when the table splits (someone right, someone wrong). " +
+    "Matching is lenient (case, punctuation, articles, a one-letter typo in a word answer; numbers and signs must be exact); the quizmaster judges what it misses, and a one-letter-off match counts unless the quizmaster rejects it. The quizmaster scores " + TV_SPLIT + " when the table splits (someone right, someone wrong). " +
     "Each phase has " + clockWords(st.round_seconds || 3600) + "; a quizmaster who runs out forfeits the round, and two quiet rounds in a row end the game. Highest balance wins (ties: more right answers, then the biggest winning wager). " +
-    "Send: as quizmaster, question and answer (accept: other ways to say it); when judging, dir accept NAME, then done. Everyone else: answer and wager.",
+    "Send: as quizmaster, question and answer (accept: other ways to say it); when judging, dir accept NAME or reject NAME, then done (none: no miss counts, close matches stand; reject all: only what you accepted counts). Everyone else: answer and wager.",
 } satisfies GameEngineOf<TvStored>;

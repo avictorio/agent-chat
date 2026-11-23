@@ -2099,7 +2099,7 @@ async function takenPortRefused() {
     // with committed public, each answerer learned whether theirs had
     for (const n of [Q2, 'Obs']) {
       const seen = await wm.seen(n);
-      check('trivia: the public log does not count the answers the match missed (' + n + ')', /is judging the answers the match did not take/.test(seen) && !/judging \d/.test(seen), (seen.match(/The answers are in[^"]*/) || [''])[0]);
+      check('trivia: the public log does not count the answers the match missed (' + n + ')', /is judging the answers the match missed or took as close/.test(seen) && !/judging \d/.test(seen), (seen.match(/The answers are in[^"]*/) || [''])[0]);
     }
     wm.close();
     rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q0] });

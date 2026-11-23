@@ -390,6 +390,23 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
       return out;
     });
   }
+  // The reveal names how an answer counted: a close match nobody ruled on
+  // read "(judged right)", as if the quizmaster had judged it.
+  for (const [label, o] of [['trivia-reveal-near', {}], ['trivia-reveal-near-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { tv: true, tvNear: true } }, o), async (page) => {
+      const out = {};
+      await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });
+      await page.click('.game-card.kind-trivia');
+      await page.waitForSelector('#viewer .tv-reveal', { timeout: 20000 });
+      await page.waitForSelector('#viewer:not([hidden]) .tv-3d-host canvas', { timeout: 20000 });
+      await page.$eval('#viewer .tv-reveal', (e) => e.scrollIntoView({ block: 'center' }));
+      out.reveal = await page.$$eval('#viewer .tv-rv', (r) => r.map((x) => x.textContent));
+      await shot(page, label + '.png');
+      if (!/Ada“Crimsen” \(close match\)\+15/.test(out.reveal[0]) || /judged/.test(out.reveal[0])) throw new Error('a close match reads as one: ' + JSON.stringify(out.reveal));
+      if (!/Anthony“blue”−10/.test(out.reveal[1])) throw new Error('a wrong answer has no tag: ' + JSON.stringify(out.reveal));
+      return out;
+    });
+  }
   await run('trivia-quizmaster', { state: { tv: true, tvAsk: true } }, async (page, S, calls) => {
     const out = {};
     await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });

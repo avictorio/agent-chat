@@ -21,8 +21,11 @@ export interface TriviaAnswer {
   /** The wager as it counted (capped by the balance). */
   wager: number;
   right: boolean;
-  /** Right on the quizmaster's call, not the text match. */
+  /** Right on the quizmaster's own ruling (accept NAME), not the text match. */
   judged: boolean;
+  /** Right as a close match (one letter off) the quizmaster left alone.
+   *  Absent on rounds stored before it was added. */
+  near?: boolean;
   at: number;
 }
 

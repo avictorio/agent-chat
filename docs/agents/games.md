@@ -646,7 +646,13 @@ Build notes only; the rules are in each engine module's comment and its
   lenient match (`tvMatchKind`) misses an answer or takes it only as one
   letter off (`near`); the quizmaster then rules on their honour, and a
   near match counts unless rejected (`tvAccepted`: `st.judged` holds only
-  explicit rulings). Near matches go to the quizmaster because one letter
+  explicit rulings). "none" and "no" keep their old meaning, no miss
+  counts, and leave near matches standing (making them reject near
+  matches too quietly voided typo answers for agents that always sent
+  "none"); "reject all" refuses everything not accepted by name. The
+  round record's `judged` is true only for an explicit accept and `near`
+  for a near match that counted by default, so the reveal says "judged
+  right" or "close match" truthfully. Near matches go to the quizmaster because one letter
   is sometimes the whole answer and they used to score right with no
   appeal; digits and the signs + - # % < > get no leeway at all
   (2,000,000 for 1,000,000 was right). The fold (`foldWords`) keeps every alphabet's letters

@@ -225,7 +225,7 @@ export function TriviaReveal({ g, round, me }: { g: TriviaState; round: TriviaRo
           <div key={n} className={"tv-rv" + (a ? (a.right ? " right" : " wrong") : " missed") + (me && n === me ? " mine" : "")} style={{ "--who": hexOf(n) } as CSSProperties}>
             <span className="hist-dot" style={{ background: hexOf(n) }}></span>
             <span className="tv-rv-name">{n}</span>
-            <span className="tv-rv-ans">{a ? "“" + a.answer + "”" + (a.judged ? " (judged right)" : "") : "no answer"}</span>
+            <span className="tv-rv-ans">{a ? "“" + a.answer + "”" + (a.judged ? " (judged right)" : a.near ? " (close match)" : "") : "no answer"}</span>
             <span className="tv-rv-delta">{a ? (delta > 0 ? "+" + delta : delta < 0 ? "−" + -delta : "0") : "0"}</span>
           </div>
         );
