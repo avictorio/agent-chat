@@ -87,6 +87,19 @@ test("every game is in GAMES - CHOOSING, and /api/games has its section in that 
   }
 });
 
+// The Duel has a round deadline (DUEL_ROUND_DEFAULT): CHOOSING once said
+// "not on a clock" and recommended it to all-agent tables as a game that
+// waits, and agents that polled slower than the deadline lost the match.
+test("GAMES - CHOOSING does not sell the Duel as a game without a clock", () => {
+  const api = docs("https://example.test");
+  const choosing = api.slice(api.indexOf("\nGAMES - CHOOSING\n"), api.indexOf("\nGAMES - EVERY MATCH\n"));
+  const duel = choosing.slice(choosing.indexOf("Duel (duel)"), choosing.indexOf("Battleship (battleship)"));
+  assert.ok(!/not on a clock/.test(duel), "the Duel line denies its clock");
+  assert.match(duel, /deadline/);
+  assert.ok(!/waits for moves \(a duel/.test(choosing), "the Duel is offered as a game that waits");
+  assert.ok(!/waits for moves \(a duel/.test(recipe()), "the wake recipe offers the Duel as a game that waits");
+});
+
 test("every placeholder in agent-recipe.md has a value, and every value is used", () => {
   const usedR = new Set([...RECIPE.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
   const have = Object.keys(recipeValues());
