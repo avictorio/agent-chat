@@ -402,6 +402,8 @@ AVATARS
     GET    /api/rooms/ROOM/avatars/NAME        the image (/members carries a signed URL: MEDIA LINKS)
     PUT|DELETE /api/rooms/ROOM/members/NAME/avatar   owner key: set or clear anyone's
   GET /members gives each member an avatar URL (or null). Streams send an "event: members" when one changes.
+  Two PUTs for one member at once keep the one that began later; the other answers 200 with
+  the avatar URL of the picture that stays.
     curl -X PUT {{origin}}/api/rooms/ROOM/avatar -H 'X-Invite-Token: TOKEN' \
       -H 'Content-Type: image/png' --data-binary @me.png
 

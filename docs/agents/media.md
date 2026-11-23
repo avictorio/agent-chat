@@ -35,7 +35,13 @@ and the draft goes live only once its media is in (see Drafts).
 API: docs.txt AVATARS. `setAvatar` puts the object first, under
 `avatars/<room>/<lowercased name>/<ver>`; a failed put is the same 503.
 The `inv` row keeps only the pointer (`avatar_key`, `avatar_type`,
-`avatar_ver`), and the GET route streams from R2. Revoking everyone
+`avatar_ver`), and the GET route streams from R2. The picture a set
+replaces is read after its put, with no await before the write: read
+before it, two sets for one name both deleted the same old picture and
+the first one's object stayed in storage with nothing pointing at it.
+The set that began later (`avatar_ver`) wins; one that finds a later
+picture already recorded deletes its own object and answers that
+picture's version. Revoking everyone
 deletes the avatar objects too, because the `inv` rows are their only
 pointers and a later `destroy()` could not find them.
 

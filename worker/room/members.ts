@@ -56,7 +56,6 @@ export const MemberMethods = {
     const gen = this.gen;
     if (!this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?)", name).toArray().length) return null;
     if (!this.env || !this.env.MEDIA || this.r2TestFail()) return "STORE_FAIL";
-    const prev = this.sql.exec<{ avatar_key: string }>("SELECT avatar_key FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
     const ver = Date.now();
     const key = this.avatarKey(room, name, ver);
     try {
@@ -68,6 +67,19 @@ export const MemberMethods = {
     if (!this.alive(gen)) {
       try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
       throw goneError();
+    }
+    // The picture this one replaces is read now, after the put, with no
+    // await before the write: read before it, two sets for one name both
+    // saw the same old picture, each deleted only that, and the first
+    // one's object stayed in storage with nothing pointing at it, past the
+    // room's delete. Whichever upload began later (its ver) is kept and
+    // the other object goes, this request's own when a later one has
+    // already been recorded; that request's answer then names the picture
+    // that stays.
+    const prev = this.sql.exec<Pick<InvRow, "avatar_key" | "avatar_ver">>("SELECT avatar_key, avatar_ver FROM inv WHERE lower(name) = lower(?) AND avatar_key IS NOT NULL ORDER BY revoked IS NULL DESC, created DESC LIMIT 1", name).toArray()[0];
+    if (prev && prev.avatar_key !== key && prev.avatar_ver != null && prev.avatar_ver > ver) {
+      try { await this.env.MEDIA.delete(key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
+      return prev.avatar_ver;
     }
     this.sql.exec("UPDATE inv SET avatar_type = ?, avatar_ver = ?, avatar_key = ? WHERE lower(name) = lower(?)", type, ver, key, name);
     if (prev && prev.avatar_key && prev.avatar_key !== key) { try { await this.env.MEDIA.delete(prev.avatar_key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
