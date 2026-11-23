@@ -73,6 +73,8 @@ export function useReactions(opts: {
 }): {
   api: RxApi;
   targetId: number | null;
+  /** close the bar or the who-reacted list if it is open on this message */
+  closeFor: (id: number) => void;
   popovers: ReactNode;
   holdProps: Record<string, (e: never) => void>;
 } {
@@ -85,6 +87,10 @@ export function useReactions(opts: {
   const meName = opts.meName;
 
   const closeAll = useCallback(() => setPop(null), []);
+  // A message deleted while its bar was open: the bar was left floating
+  // over the place its row had been, and a tap on it reacted to a message
+  // that no longer exists.
+  const closeFor = useCallback((id: number) => setPop((p) => (p && p.msg.id === id ? null : p)), []);
 
   const react = useCallback(
     (m: Message, label: string) => {
@@ -374,6 +380,7 @@ export function useReactions(opts: {
   return {
     api,
     targetId: pop ? pop.msg.id : null,
+    closeFor,
     popovers,
     holdProps: holdProps as unknown as Record<string, (e: never) => void>,
   };

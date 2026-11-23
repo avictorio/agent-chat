@@ -176,6 +176,59 @@ export function useMessages(opts: {
     });
   }, []);
 
+  // A message deleted on the server (the stream's delete frame): the row
+  // leaves the feed and the renewal forgets its links. Its id stays in the
+  // seen set, so a stale copy that comes after (a replay from an older
+  // cursor) finds no row to replace and cannot bring it back.
+  const removeMsg = useCallback((id: number) => {
+    linksAtRef.current.delete(id);
+    setMessages((arr) => {
+      const next = arr.filter((m) => m.id !== id);
+      return next.length === arr.length ? arr : next;
+    });
+  }, []);
+
+  // Where the feed shows "Some earlier messages were not loaded": after the
+  // row with this id, the newest the tab held when the stream said its
+  // cursor was older than what the room still keeps. Null: no such hole.
+  const [gapAfter, setGapAfter] = useState<number | null>(null);
+
+  // The newest page read again after a gap (useRoomStream), merged into
+  // what the tab holds. `held` is every id the feed held when the gap came:
+  // one of those inside the page's id range that the page does not return
+  // was deleted while the tab was away (its delete may be one the room no
+  // longer keeps), so it leaves. A row the stream delivered meanwhile is
+  // not in `held` and stays. A failed read passes no rows: the hole is
+  // still marked.
+  const mergeAfterGap = useCallback((rows: Message[], held: Set<number>) => {
+    if (!held.size) return;
+    const at = Date.now();
+    const fresh = new Set(rows.map((m) => m.id));
+    const lo = rows.length ? Math.min(...fresh) : Infinity;
+    const hi = rows.length ? Math.max(...fresh) : -Infinity;
+    const gone = new Set<number>();
+    for (const id of held) {
+      if (id >= lo && id <= hi && !fresh.has(id)) {
+        gone.add(id);
+        linksAtRef.current.delete(id);
+      }
+    }
+    for (const m of rows) {
+      seenRef.current.add(m.id);
+      if (!linksAtRef.current.has(m.id)) linksAtRef.current.set(m.id, at);
+    }
+    const list = listRef.current;
+    if (!list || atBottom(list)) pendingStickRef.current = true;
+    setMessages((arr) => {
+      const byId = new Map<number, Message>();
+      for (const m of arr) if (!gone.has(m.id)) byId.set(m.id, m);
+      for (const m of rows) if (!byId.has(m.id)) byId.set(m.id, m);
+      const next = [...byId.values()].sort((a, b) => a.id - b.id);
+      return next.length > 1200 ? next.slice(-1000) : next;
+    });
+    setGapAfter(Math.max(...held));
+  }, []);
+
   // The boot load: seed the seen set, arm the initial settle, and
   // set the stream cursor.
   const loadInitial = useCallback((sorted: Message[], lastId: number) => {
@@ -198,7 +251,12 @@ export function useMessages(opts: {
   // and asking again every minute would not change that.
   const renewLinks = useCallback((rows: Message[], covered: number[]) => {
     const at = Date.now();
-    covered.forEach((id) => linksAtRef.current.set(id, at));
+    // only rows still on screen: one deleted while the read was out is
+    // forgotten (removeMsg), not put back
+    const onFeed = new Set(messagesRef.current.map((m) => m.id));
+    covered.forEach((id) => {
+      if (onFeed.has(id)) linksAtRef.current.set(id, at);
+    });
     if (!rows.length) return;
     const fresh = new Map<number, Message>(rows.map((m) => [m.id, m] as const));
     setMessages((arr) => {
@@ -216,7 +274,7 @@ export function useMessages(opts: {
       });
       return changed ? next : arr;
     });
-  }, []);
+  }, [messagesRef]);
 
   // The rows whose reactions changed while a re-sync's read (below) was
   // out, or null when none is: a reaction frame, the person's own tap and
@@ -266,6 +324,9 @@ export function useMessages(opts: {
     endSettle,
     loadInitial,
     mergeHistory,
+    removeMsg,
+    mergeAfterGap,
+    gapAfter,
     linksAtRef,
     renewLinks,
     syncReactions,

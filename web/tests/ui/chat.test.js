@@ -802,5 +802,116 @@ const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./har
     return { streams: later.filter((c) => /\/stream\?/.test(c)).length };
   });
 
+  // A message deleted while the tab watches (or while it was away: a
+  // delete frame replays with the messages) leaves the feed, its clip and
+  // its reading aloud stop, its reaction bar closes, and a reconnect
+  // resumes after the delete's own number. Before, the stream sent no
+  // delete and the row stayed on every open screen until a reload.
+  await run('stream-delete-frame', { init: heldStream }, async (page, S, calls) => {
+    const base = S.msgs[S.msgs.length - 1];
+    S.msgs.push({ id: 40, ts: base.ts + 1000, from: 'Ada', kind: 'agent', text: 'A voice note.', audio: { type: 'audio/mpeg', bytes: 22100, url: '/api/rooms/demo/messages/40/audio?exp=1&sig=x' } });
+    // the reconnect delay the stream hands out, read when it opens
+    S.streamRetry = 200;
+    await page.reload(); await settle(page);
+    await page.waitForSelector('.msg[data-id="40"] audio', { state: 'attached', timeout: 5000 });
+    // the clip "plays" and the row is being read aloud
+    await page.evaluate(() => {
+      window.__paused = 0; window.__cancels = 0;
+      const a = document.querySelector('.msg[data-id="40"] audio');
+      Object.defineProperty(a, 'paused', { configurable: true, get: () => false });
+      a.pause = () => { window.__paused++; };
+      // a headless browser has no voice and fails the utterance at once:
+      // here it is taken and "spoken" until cancelled
+      if (window.speechSynthesis) { window.speechSynthesis.speak = () => {}; window.speechSynthesis.cancel = () => { window.__cancels++; }; }
+    });
+    const speak = await page.$('.msg[data-id="40"] button.speak');
+    // read aloud where this browser has a voice (headless ones may not)
+    if (speak) await speak.click();
+    const speaking = !!(await page.waitForSelector('.msg[data-id="40"] button.speak.on', { timeout: 1500 }).catch(() => null));
+    await page.hover('.msg[data-id="40"]'); await page.click('.msg[data-id="40"] .react-btn'); await settle(page);
+    must(await page.$('.rx-bar'), 'the reaction bar is open on the row');
+    const cancels0 = await page.evaluate(() => window.__cancels);
+    S.msgs = S.msgs.filter((m) => m.id !== 40);
+    const frame = { type: 'delete', room: 'demo', from: 'Ada', kind: 'agent', targets: [], id: 40 };
+    await page.evaluate((f) => window.__streams[0].send('id: 57\nevent: delete\ndata: ' + JSON.stringify(f) + '\n\n'), frame);
+    await page.waitForSelector('.msg[data-id="40"]', { state: 'detached', timeout: 3000 }).catch(() => { throw new Error('the deleted row stayed on screen'); });
+    await settle(page);
+    const out = { paused: await page.evaluate(() => window.__paused), cancels: (await page.evaluate(() => window.__cancels)) - cancels0, bar: !!(await page.$('.rx-bar')), speaking };
+    must(out.paused >= 1, 'its clip stopped: ' + JSON.stringify(out));
+    must(speaking && out.cancels >= 1, 'its reading aloud stopped: ' + JSON.stringify(out));
+    must(!out.bar, 'the reaction bar on it closed: ' + JSON.stringify(out));
+    must(await page.$('.msg[data-id="5"]'), 'the other rows stay');
+    // the reconnect resumes after the delete's own number
+    S.streamRetry = 200;
+    const from = calls.length;
+    await page.evaluate(() => window.__streams[0].end());
+    for (let i = 0; i < 60 && !calls.slice(from).some((c) => /\/stream\?/.test(c)); i++) await page.waitForTimeout(50);
+    const reopen = calls.slice(from).filter((c) => /\/stream\?/.test(c));
+    must(reopen.length >= 1 && /[?&]after=57&/.test(reopen[0]), 'the reconnect asks after the delete: ' + JSON.stringify(reopen));
+    must(/events=[^&\s]*delete/.test(reopen[0]) && /events=[^&\s]*gap/.test(reopen[0]), 'the stream asks for delete and gap frames: ' + reopen[0]);
+    S.streamRetry = 0;
+    return out;
+  });
+
+  // A tab whose cursor is older than what the room keeps gets a gap frame:
+  // the newest page is read again, the rows it brings show under one quiet
+  // divider, and a held row the read no longer returns (deleted while the
+  // tab was away) leaves. Before, the old history was joined straight
+  // onto the new with no sign of the hole.
+  for (const [tag, w, h, scheme] of [['', 1280, 860, 'light'], ['-phone', 390, 844, 'dark']]) {
+    await run('stream-gap-divider' + tag, { init: heldStream, w, h, scheme, touch: !!tag }, async (page, S, calls) => {
+      await page.reload(); await settle(page);
+      const top = Math.max(...(await page.$$eval('.msg', (rs) => rs.map((r) => +r.dataset.id))));
+      // while the tab slept: row 2 was deleted and many messages came; the
+      // room keeps the newest, from 1500 on
+      S.msgs = S.msgs.filter((m) => m.id !== 2);
+      const base = S.msgs[S.msgs.length - 1].ts;
+      for (let i = 0; i < 6; i++) S.msgs.push({ id: 1500 + i, ts: base + 60e3 * (i + 1), from: i % 2 ? 'Henry' : 'Ada', kind: 'agent', text: 'Back on line ' + (i + 1) + '.' });
+      const from = calls.length;
+      const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: top, through: 1499 }) + '\n\n';
+      await page.evaluate((t) => window.__streams[0].send(t), gap);
+      await page.waitForSelector('.msg[data-id="1505"]', { state: 'attached', timeout: 5000 }).catch(() => { throw new Error('the gap did not re-read the newest page: ' + JSON.stringify(calls.slice(from))); });
+      await page.waitForSelector('.gap-sep', { timeout: 3000 });
+      await settle(page);
+      // the feed in page order, the divider as "|"
+      const order = () => page.$$eval('.msg, .gap-sep', (rs) => rs.map((r) => (r.classList.contains('gap-sep') ? '|' : r.dataset.id)).join(' '));
+      const seps = () => page.$$eval('.gap-sep', (rs) => rs.map((r) => r.textContent));
+      const first = { order: await order(), seps: await seps() };
+      const reads = calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages\?limit=200$/.test(c));
+      must(first.seps.length === 1 && first.seps[0] === 'Some earlier messages were not loaded', 'one divider: ' + JSON.stringify(first));
+      must(first.order.includes(' ' + top + ' | 1500 '), 'the divider sits between the rows the tab had and the rows it read: ' + JSON.stringify(first));
+      must(!/(^| )2 /.test(first.order), 'the row deleted while away leaves: ' + JSON.stringify(first));
+      must(reads.length === 1, 'the newest page is read again, once: ' + JSON.stringify(calls.slice(from)));
+      await page.evaluate(() => document.querySelector('.gap-sep').scrollIntoView({ block: 'center' }));
+      await settle(page);
+      await shot(page, 'stream-gap-divider' + tag + '.png');
+      // another long sleep, another gap: still one divider, at the new hole
+      for (let i = 0; i < 3; i++) S.msgs.push({ id: 1600 + i, ts: base + 60e3 * (i + 20), from: 'Ada', kind: 'agent', text: 'Later still ' + (i + 1) + '.' });
+      await page.evaluate((t) => window.__streams[0].send(t), gap.replace('"through":1499', '"through":1599'));
+      await page.waitForSelector('.msg[data-id="1602"]', { state: 'attached', timeout: 5000 });
+      await settle(page);
+      const second = { order: await order(), seps: await seps() };
+      must(second.seps.length === 1 && second.order.includes(' 1505 | 1600 '), 'one divider, at the newest hole: ' + JSON.stringify(second));
+      return { first: first.order, second: second.order };
+    });
+  }
+
+  // A gap on a feed with no rows (an empty room that once dropped
+  // something) has nothing out of date: no read, no divider.
+  await run('stream-gap-empty-feed', { init: heldStream }, async (page, S, calls) => {
+    S.msgs = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?limit=200$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ room: 'demo', messages: [], last_id: 0, you: 'Anthony', you_kind: 'human' }) }));
+    await page.reload(); await settle(page);
+    await page.waitForSelector('.chat-empty', { timeout: 5000 });
+    const from = calls.length;
+    const gap = 'event: gap\ndata: ' + JSON.stringify({ type: 'gap', room: 'demo', from: null, kind: null, targets: [], after: 0, through: 1200 }) + '\n\n';
+    await page.evaluate((t) => window.__streams[window.__streams.length - 1].send(t), gap);
+    await page.waitForTimeout(500);
+    await settle(page);
+    const out = { seps: (await page.$$('.gap-sep')).length, empty: !!(await page.$('.chat-empty')), reads: calls.slice(from).filter((c) => /^GET \/api\/rooms\/demo\/messages/.test(c)) };
+    must(out.seps === 0 && out.empty && out.reads.length === 0, 'the gap is ignored: ' + JSON.stringify(out));
+    return out;
+  });
+
   done('chat');
 })();

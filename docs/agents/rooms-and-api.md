@@ -97,8 +97,8 @@ docs.txt section that owns its routes, caps and formats.
     sends one); a young room that has dropped nothing (`msg_forgot` 0)
     sends none, so a gap is never a "replay begins" marker. A reader
     that holds no messages can ignore it (docs.txt
-    STREAM MESSAGES says so to agents; the web app should not draw an
-    "older messages not loaded" divider when it holds no rows). The replay sends every message
+    STREAM MESSAGES says so to agents; the web app ignores a gap while
+    its feed holds no rows). The replay sends every message
     past the cursor: it used to stop at `KEEP`, which a room passes
     while drafts publish (only a post trims). `delete` and `gap` are
     their own kinds, so a stream that lists its kinds, as the web app
@@ -124,9 +124,19 @@ docs.txt section that owns its routes, caps and formats.
     a row touched while it is out, by a reaction frame, the person's own
     tap or that tap's answer, keeps what touched it: `touchReaction` in
     `useMessages.ts`), and every match that can still change.
-    It does not yet ask for `delete` and `gap` frames (Deletes and
-    gaps): a delete still shows only after a reload, and a gap is not
-    marked.
+    It asks for `delete` and `gap` frames by name (Deletes and gaps).
+    A delete frame moves the cursor to its own `id:` line and drops the
+    row (`removeMsg`): its clip or video is paused and its reading aloud
+    stopped first, a reaction bar open on it closes (`closeFor`), and the
+    renewal forgets its links; its id stays in the seen set, so a stale
+    copy cannot bring it back. A gap frame, while the feed holds rows,
+    reads the newest page again as the boot load does (`BOOT_PAGE`) and
+    merges it (`mergeAfterGap`): a held row inside the page's id range
+    that the page lacks was deleted meanwhile and leaves, and the feed
+    draws one "Some earlier messages were not loaded" divider after the
+    newest row the tab held (`gapAfter`; a later gap moves it to the new
+    hole). A failed read still draws it. The web app has no reply or
+    edit on messages, so nothing else aims at a row.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for
     clock-driven game frames (alarm resolutions, lobby expiry), the
