@@ -691,74 +691,70 @@ export const BattleshipMethods = {
   // the missing fleets at random (placement is busywork - nobody
   // loses a match to it), and a play turn that expires passes to the
   // rival. Three missed turns in a row forfeit the match to the
-  // player who is actually at the table. Catch-up anchors each new
-  // deadline to the expired one, like Light Cycles, so a long sleep
-  // burns the turns it slept through rather than restarting them.
+  // player who is actually at the table. One expired clock is settled
+  // per call and the next turn's clock starts now, as a shot's does. It
+  // used to loop, anchoring each new deadline to the expired one, so a
+  // late alarm burned the turns it slept through: a captain was charged
+  // a miss for a turn never announced, and a long delay ended a fresh
+  // match with no winner in one instant.
   advanceBattleship(g: BsGame | null, room: string) {
     if (!g || g.status !== "running") return;
     const st = g.st;
-    let changed = false;
-    let guard = 0;
-    while (g.status === "running" && st.deadline && Date.now() >= st.deadline && guard < 64) {
-      guard++;
-      changed = true;
-      if (st.phase === "setup") {
-        for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(st); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
-        st.phase = "play";
-        st.turn_of = st.players[randInt(st.players.length)].name;
-        st.turn = 1;
-        st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
-        this.bsBeginTurn(st);
-        st.deadline = st.deadline + st.tick_seconds * 1000;
-      } else {
-        const cur = st.players.find((p) => p.name === st.turn_of) || st.players[0];
-        if (!st.misses) st.misses = {};
-        st.misses[cur.name] = (st.misses[cur.name] || 0) + 1;
-        if (st.misses[cur.name] >= 3) {
-          // Three expired turns in a row - the forfeit counts silent
-          // turns, never shot outcomes. What it costs depends on the
-          // table: if every other living captain is also at two or
-          // more, the match is abandoned, not won; with exactly one
-          // rival left standing it is a forfeit win (the two-player
-          // rule, unchanged); in a free-for-all with captains still
-          // playing, the silent captain is eliminated and the sea
-          // fights on without them.
-          const others = this.bsLiving(st).filter((p) => p.name !== cur.name);
-          if (others.length && others.every((p) => (st.misses[p.name] || 0) >= 2)) {
-            g.status = "finished";
-            st.winner = null;
-            st.log.push({ tick: st.turn, text: this.bsFfa(st)
-              ? cur.name + " missed three turns in a row - and every captain still afloat has missed at least two as well. The whole table has abandoned the sea - no winner."
-              : cur.name + " missed three turns in a row - but " + others[0].name + " has missed " + st.misses[others[0].name] + " too. Both captains have abandoned the sea - no winner." });
-          } else if (others.length === 1) {
-            g.status = "finished";
-            st.winner = others[0].name;
-            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + others[0].name + " takes the sea by forfeit." });
-          } else {
-            cur.eliminated = true;
-            if (!st.eliminated) st.eliminated = [];
-            st.eliminated.push(cur.name);
-            st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row and is eliminated by forfeit (" + st.eliminated.length + " of " + (st.players.length - 1) + " out). The sea fights on." });
-            const nxt = this.bsNextLiving(st, cur.name);
-            st.turn_of = nxt ? nxt.name : cur.name;
-            st.turn += 1;
-            this.bsBeginTurn(st);
-            st.deadline = st.deadline + st.tick_seconds * 1000;
-          }
+    if (!st.deadline || Date.now() < st.deadline) return;
+    if (st.phase === "setup") {
+      for (const p of st.players) if (!p.fleet) { p.fleet = this.bsRandomFleet(st); st.log.push({ tick: st.turn, text: p.name + "'s fleet was placed at random - no placement arrived before the clock." }); }
+      st.phase = "play";
+      st.turn_of = st.players[randInt(st.players.length)].name;
+      st.turn = 1;
+      st.log.push({ tick: st.turn, text: "Both fleets are down - " + st.turn_of + " fires first." });
+      this.bsBeginTurn(st);
+      st.deadline = Date.now() + st.tick_seconds * 1000;
+    } else {
+      const cur = st.players.find((p) => p.name === st.turn_of) || st.players[0];
+      if (!st.misses) st.misses = {};
+      st.misses[cur.name] = (st.misses[cur.name] || 0) + 1;
+      if (st.misses[cur.name] >= 3) {
+        // Three expired turns in a row - the forfeit counts silent
+        // turns, never shot outcomes. What it costs depends on the
+        // table: if every other living captain is also at two or
+        // more, the match is abandoned, not won; with exactly one
+        // rival left standing it is a forfeit win (the two-player
+        // rule, unchanged); in a free-for-all with captains still
+        // playing, the silent captain is eliminated and the sea
+        // fights on without them.
+        const others = this.bsLiving(st).filter((p) => p.name !== cur.name);
+        if (others.length && others.every((p) => (st.misses[p.name] || 0) >= 2)) {
+          g.status = "finished";
+          st.winner = null;
+          st.log.push({ tick: st.turn, text: this.bsFfa(st)
+            ? cur.name + " missed three turns in a row - and every captain still afloat has missed at least two as well. The whole table has abandoned the sea - no winner."
+            : cur.name + " missed three turns in a row - but " + others[0].name + " has missed " + st.misses[others[0].name] + " too. Both captains have abandoned the sea - no winner." });
+        } else if (others.length === 1) {
+          g.status = "finished";
+          st.winner = others[0].name;
+          st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row - " + others[0].name + " takes the sea by forfeit." });
         } else {
-          const nxt = this.bsFfa(st) ? this.bsNextLiving(st, cur.name) : st.players.find((p) => p.name !== cur.name);
-          st.log.push({ tick: st.turn, text: cur.name + " let the turn clock run out (" + st.misses[cur.name] + " missed in a row) - the turn passes." });
+          cur.eliminated = true;
+          if (!st.eliminated) st.eliminated = [];
+          st.eliminated.push(cur.name);
+          st.log.push({ tick: st.turn, text: cur.name + " missed three turns in a row and is eliminated by forfeit (" + st.eliminated.length + " of " + (st.players.length - 1) + " out). The sea fights on." });
+          const nxt = this.bsNextLiving(st, cur.name);
           st.turn_of = nxt ? nxt.name : cur.name;
           st.turn += 1;
           this.bsBeginTurn(st);
-          st.deadline = st.deadline + st.tick_seconds * 1000;
+          st.deadline = Date.now() + st.tick_seconds * 1000;
         }
+      } else {
+        const nxt = this.bsFfa(st) ? this.bsNextLiving(st, cur.name) : st.players.find((p) => p.name !== cur.name);
+        st.log.push({ tick: st.turn, text: cur.name + " let the turn clock run out (" + st.misses[cur.name] + " missed in a row) - the turn passes." });
+        st.turn_of = nxt ? nxt.name : cur.name;
+        st.turn += 1;
+        this.bsBeginTurn(st);
+        st.deadline = Date.now() + st.tick_seconds * 1000;
       }
     }
-    if (changed) {
-      this.saveGame(g);
-      this.afterGameChange(g, room, "Referee");
-    }
+    this.saveGame(g);
+    this.afterGameChange(g, room, "Referee");
   },
 
   battleshipResultText(g: BsGame) {

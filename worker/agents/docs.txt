@@ -132,6 +132,8 @@ GAMES - EVERY MATCH
                     round runs in phases (write, then vote...); each phase gets the clock and ends
                     early once everyone it waits on has acted.
   The clock is real: an alarm resolves what is due on schedule, even while nobody reads the match.
+  A clock that runs late settles one step (a tick, a turn, a round) and gives the next a full
+  clock from then: it never charges you for windows that closed before anyone saw them open.
   Sealed moves: where everyone moves at once, a move stays secret until its round resolves. Views
   show only that a player has moved (players[].committed - thrown in a duel, moved in Light
   Cycles); your own move is in you. You can change it until the round resolves; then the round

@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-game-clocks",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Game cancel (REST /games/ID/cancel, MCP cancel_game) settles the clock first, as a read does: a match its deadline has already decided now answers 409 \"That match is already finished\" with its result posted, instead of being called off. A re-accept of a running match settles the clock too. MCP catalog 1.30.0.",
+    text: "Game cancel (REST /games/ID/cancel, MCP cancel_game) settles the clock first: a match its deadline already decided answers 409 finished, with its result posted, instead of being called off. Re-accepting a running match settles the clock too. A clock that runs late settles one step (a tick, a turn) and gives the next a full clock: Light Cycles and Battleship used to resolve every missed step at once. MCP catalog 1.30.0.",
   },
   {
     id: "2026-11-23-html-pages",

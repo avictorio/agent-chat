@@ -65,8 +65,11 @@ export const GameMachineryMethods = {
      message. Deadlines are real: a Durable Object alarm is kept armed at the
      nearest running match's deadline and resolves what is due when it
      fires, so a match keeps its cadence even while nobody is looking. Game
-     calls still catch up anything overdue when they touch a match, and the
-     deadline arithmetic (deadline += tick) keeps cadence honest regardless. */
+     calls still catch up anything overdue when they touch a match. A clock
+     settles one step per catch-up (a tick, a turn, a round) and the next
+     step's window opens from now: a late clock never resolves several
+     steps back to back, which once charged players absences for windows
+     that had already closed before anyone saw them open. */
   // One colour per seat, so there are as many as the largest game seats
   // (Werewolf's 9). With six, a Werewolf of 7 to 9 and a Trust of 7 or 8
   // answered 500 (the seventh seat read a colour that was not there). Like

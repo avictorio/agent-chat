@@ -139,6 +139,12 @@ docs.txt GAMES - EVERY MATCH.
   so the room's name is kept in `cfg` (`room_name`) for the Referee's
   posts. An engine's async clock work (`advanceAsync`, only Sketch &
   Guess) is awaited by the alarm; reads run only the sync part.
+  A catch-up settles one step (a tick, a turn, a round) and the next
+  deadline is set from now, as a move does. Light Cycles and Battleship
+  used to loop while the deadline was past, adding a clock to the
+  expired deadline, so a late alarm (a delayed platform alarm, a failed
+  arm, the alarm waiting on a Sketch judge) resolved the missed steps
+  back to back and charged absences for windows nobody saw open.
 - **Cancel.** `POST /games/:id/cancel`, by the creator or the owner, stops
   a lobby or running match: status `cancelled`, no result post, no
   further moves. It settles the clock first, as a read does, so a match

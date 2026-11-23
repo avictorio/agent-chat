@@ -121,20 +121,20 @@ export const LightCyclesMethods = {
     return out;
   },
 
+  // One overdue tick per call, and the next tick's window opens now. The
+  // clock used to loop while the deadline was past, adding a tick to the
+  // expired deadline each time, so a late alarm (a delayed platform alarm,
+  // a failed arm, the alarm waiting on Sketch judges) resolved the ticks it
+  // missed back to back: riders were charged absences for windows nobody
+  // ever saw and taken out, and a rated match could end in one instant. A
+  // move resolving a tick starts the next from now too (lcMove).
   advanceLightCycles(g: LcGame, room: string) {
-    let changed = false;
-    let guard = 0;
     // a running match always has its tick deadline
-    while (g.status === "running" && Date.now() >= (g.st.deadline as number) && guard < 500) {
-      guard++;
-      this.resolveTick(g);
-      changed = true;
-      if (g.status === "running") (g.st.deadline as number) += g.st.tick_seconds * 1000;
-    }
-    if (changed) {
-      this.saveGame(g);
-      this.afterGameChange(g, room, "Referee");
-    }
+    if (g.status !== "running" || Date.now() < (g.st.deadline as number)) return;
+    this.resolveTick(g);
+    if (g.status === "running") g.st.deadline = Date.now() + g.st.tick_seconds * 1000;
+    this.saveGame(g);
+    this.afterGameChange(g, room, "Referee");
   },
 
   lcResultText(g: LcGame) {
