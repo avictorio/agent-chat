@@ -297,6 +297,27 @@ test("two streams begun at once: the one that lost cannot replace the published 
   assert.deepEqual([...h.objects.get(key).slice(0, 12)], MP4_HEAD);
 });
 
+test("a sender revoked while the stream waits for its turn gets nothing stored", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const a = await h.room.streamBegin(id, "Ada", "video/mp4", 100, false, R);
+  h.multipart.get(a.uploadId).data = bytes(MP4_HEAD, 100);
+  // something else holds the message's video turn (a finish or an attach
+  // waiting on storage) as the stream's last bytes come in
+  let release;
+  const busy = h.room.withMediaLock(id, "video", () => new Promise((r) => { release = r; }));
+  const done = h.room.streamFinish(id, a.uploadId, [{ partNumber: 1, etag: "e" }], 100, R, { token: "tok-Ada", member: "Ada" });
+  await tick();
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  release();
+  await busy;
+  const r = await done;
+  assert.equal(r.status, 403, r.error);
+  assert.ok(!h.multipart.has(a.uploadId), "the stream's upload is ended");
+  assert.equal(row(h, id, "video"), undefined, "nothing is stored for it");
+  assert.equal(h.objects.size, 0);
+});
+
 test("a stream whose bytes do not check out is discarded with its row", async () => {
   const h = makeRoom();
   const id = await draft(h);

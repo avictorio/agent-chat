@@ -336,14 +336,10 @@ export async function videoStreamRoute(rc: RouteContext, m: RegExpMatchArray) {
   } catch (e) {
     return await fail(502, "Upload stream failed: " + String((e && (e as Error).message) || e));
   }
-  // the stream can take minutes: its sender must still be welcome when the video is attached
-  if (!owner) {
-    const l = await stub.lookupInvite(invite);
-    if (!l.ok) return await fail(l.status, l.error);
-  }
   // The Room completes the upload, only while it still owns the
-  // message's row, then checks and indexes it (streamFinish).
-  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room);
+  // message's row and only while its sender is still in the room (the
+  // stream can take minutes), then checks and indexes it (streamFinish).
+  const doneRes = await stub.streamFinish(id, uploadId, parts, counted, room, owner ? null : { token: invite, member: acc.name || "" });
   if (refused(doneRes)) {
     // replaced meanwhile: this upload is nobody's now
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }

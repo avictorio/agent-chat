@@ -671,14 +671,27 @@ export const UploadMethods = {
   // been replaced wrote its bytes over the key the newer one had published.
   // The object must then be exactly size bytes (what the Worker counted)
   // and start like a video; otherwise it is discarded with its row.
-  /** @param parts the parts the Worker uploaded, as R2's complete() takes them */
-  async streamFinish(id: number, uploadId: string, parts: R2UploadedPart[], size: number, room: string | null | undefined) {
+  /** @param parts the parts the Worker uploaded, as R2's complete() takes them
+   *  @param sender the streaming member's invite and name, asked again in the
+   *  turn (inviteStill, room/members.ts); null for the owner key */
+  async streamFinish(id: number, uploadId: string, parts: R2UploadedPart[], size: number, room: string | null | undefined, sender?: { token: string | null, member: string } | null) {
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const media = this.env.MEDIA;
     return this.withMediaLock(id, "video", async () => {
       const replaced = { status: 409, error: "This upload was replaced by a newer one for the same message" };
       const row = this.sql.exec<Pick<MdRow, "r2key" | "upload_id">>("SELECT r2key, upload_id FROM md WHERE msg = ? AND kind = 'video'", id).toArray()[0];
       if (!row || row.upload_id !== uploadId) return replaced;
+      // The sender must still be in the room as the video is attached, and
+      // that is asked here, in the turn, with no await before complete():
+      // the route asked before waiting for the turn, which can be long
+      // (another finish or attach of this message's video), so a revoke
+      // in that wait still attached the video.
+      const gone = sender ? this.inviteStill(sender.token, sender.member) : null;
+      if (gone) {
+        try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
+        this.upDrop(id, "video", uploadId);
+        return { status: gone.status, error: gone.error };
+      }
       const discard = async (status: number, error: string) => {
         if (this.upStill(id, "video", uploadId) || !this.upSession(id, "video")) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         this.upDrop(id, "video", uploadId);
