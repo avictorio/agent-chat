@@ -55,6 +55,42 @@ export function isTableSep(line: string): boolean {
   return t.split("|").every((c) => /^:?-{2,}:?$/.test(c.trim()));
 }
 
+// Links whose address holds parentheses (Wikipedia's Mercury_(planet), many
+// docs) used to be cut at the first ")": the [text](url) form ended its
+// address there and the bare form dropped a last ")", so both opened a
+// missing page with a stray ")" after the link. Both now follow GitHub's
+// rule, still in time proportional to the text.
+
+/** The address of a [text](url) link: no spaces, and a "(" only as one
+ *  closed pair with no parentheses inside, so the link's own ")" is the
+ *  first one left over. The two kinds of piece start differently, so a
+ *  failed match backs off once per piece, never tries mixes. */
+export const MD_LINK_URL = "(?:[^()\\s]|\\([^()\\s]{0,2000}\\)){1,2000}";
+
+/** How much of a bare address run (from "http" to the next space) is the
+ *  address: sentence punctuation at its end is not, and neither is a ")"
+ *  that closes nothing inside it ("(see https://x.org/a)"). 0 when nothing
+ *  is left past the scheme. One count, one walk back. */
+export function linkLength(run: string): number {
+  let open = 0;
+  let close = 0;
+  for (let i = 0; i < run.length; i++) {
+    if (run[i] === "(") open++;
+    else if (run[i] === ")") close++;
+  }
+  let end = run.length;
+  while (end > 0) {
+    const c = run[end - 1]!;
+    if (".,;:!?]".indexOf(c) >= 0) end--;
+    else if (c === ")" && close > open) {
+      close--;
+      end--;
+    } else break;
+  }
+  const head = /^(?:https?:\/\/|www\.)/i.exec(run);
+  return head && end > head[0].length ? end : 0;
+}
+
 // Text for reading aloud: the markdown's words without its symbols. What
 // was polynomial here (a table's dash line, a link, the pipes) is done
 // line by line with linear tests and a bounded pattern.
@@ -64,8 +100,11 @@ export function plainText(s: string): string {
     .map((l) => (/^[ \t]*(`{3,}|~{3,})/.test(l) || isDashLine(l) ? "" : l))
     .join("\n")
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d{1,9}[.)])\s+/gm, "")
-    .replace(/\[([^[\]\n]+)\]\(([^)\s]{1,2000})(?:\s[^)\n]{0,300})?\)/g, "$1")
-    .replace(/https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g, "a link")
+    .replace(new RegExp("\\[([^[\\]\\n]+)\\]\\((" + MD_LINK_URL + ")(?:\\s[^)\\n]{0,300})?\\)", "g"), "$1")
+    .replace(/https?:\/\/[^\s<>"']+/g, (run) => {
+      const n = linkLength(run);
+      return n ? "a link" + run.slice(n) : run;
+    })
     .replace(/(\*\*|__|~~|`)/g, "")
     .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?]|$)/gm, "$1$2")
     .split("\n")

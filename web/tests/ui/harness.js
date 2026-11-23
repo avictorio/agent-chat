@@ -142,6 +142,8 @@ function fresh(opts) {
         { id: 33, ts: now - 93e3, from: 'Ada', kind: 'agent', text: Array.from({ length: 400 }, (_, k) => ' '.repeat(k * 2) + '- item ' + k).join('\n') },
         { id: 34, ts: now - 92e3, from: 'Ada', kind: 'agent', text: '> quoted\n> > twice\n\n# Still a heading #\n\n| a | b |\n|---|:--:|\n| 1 | 2 |\n\n```js\ncode\n```\n\n---\nafter the rule, a [link](https://example.com/x).' },
       ] : []),
+      // addresses with parentheses, bare and as [text](url), and the punctuation after them
+      ...(opts.parenLinks ? [{ id: 36, ts: now - 91e3, from: 'Ada', kind: 'agent', text: 'See [Mercury](https://en.wikipedia.org/wiki/Mercury_(planet)) and https://en.wikipedia.org/wiki/Venus_(planet). Also (https://example.com/a) and https://example.com/b_(c)_d, done.' }] : []),
       ...(opts.markdown ? [
         { id: 7, ts: now - 90e3, from: 'Ada', kind: 'agent', text: '## Lima plan\nHere is the **draft**, with *one* open item and `code`.\n\n1. Huaca Pucllana\n2. Barranco dinner\n   - book for 8pm\n   - ask about cake\n3. ~~Miraflores~~ dropped\n\n| Day | Plan | Cost |\n|---|---|--:|\n| Fri | Huaca | $15 |\n| Sat | Dinner | $120 |\n\n> Note: confirm with Jen\n\n```js\nconst x = 1;\nconsole.log(x);\n```\nSee [the doc](https://example.com/doc) or https://example.com/raw.' },
         { id: 8, ts: now - 60e3, from: 'Anthony', kind: 'human', text: '<img src=x onerror=alert(1)> [bad](javascript:alert(1)) snake_case_name and 2 * 3 * 4 stay plain' },
@@ -161,6 +163,7 @@ function fresh(opts) {
     dc: [
       { id: 1, ts: now - D, added_by: 'Henry', title: 'Huaca Pucllana first on the birthday day', note: 'Then dinner in Barranco.', signers: ['Henry', 'Ada'], updated: now },
       { id: 2, ts: now - 3 * H, added_by: 'Ada', title: 'Digests rotate alphabetically', note: null, signers: [], updated: now },
+      ...(opts.parenLinks ? [{ id: 3, ts: now - 2 * H, added_by: 'Ada', title: 'Read up on Lima', note: 'https://en.wikipedia.org/wiki/Lima_(city). (see www.example.com/x_(y)) and https://example.com/z).', signers: [], updated: now }] : []),
     ],
     q: [
       { id: 1, ts: now - 5 * H, added_by: 'Henry', text: 'Who books the dinner reservation?', status: 'open', claimed_by: null },

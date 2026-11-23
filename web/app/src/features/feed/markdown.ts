@@ -1,5 +1,5 @@
 import { el } from "../../lib/index";
-import { fenceOf, headingOf, isRule, isTableSep, MD_BUDGET_MS, MD_INLINE_MAX, MD_MAX_DEPTH } from "./mdlines";
+import { fenceOf, headingOf, isRule, isTableSep, linkLength, MD_BUDGET_MS, MD_INLINE_MAX, MD_LINK_URL, MD_MAX_DEPTH } from "./mdlines";
 export { plainText } from "./mdlines";
 // The markdown renderer. It builds DOM nodes — text is never parsed as
 // HTML, so a message can never inject markup — and the React side
@@ -19,8 +19,14 @@ function safeUrl(u: string): string | null {
   return /^(https?:\/\/|mailto:)/i.test(u) ? u : null;
 }
 
-const INLINE =
-  /\\([\\`*_{}[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^[\]\n]+)\]\(([^)\s]{1,2000})(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]{1,40})/g;
+// The link arms: [text](url) takes MD_LINK_URL, and a bare address takes
+// its whole run, trimmed by linkLength in inline() (see mdlines.ts).
+const INLINE = new RegExp(
+  /\\([\\`*_{}[\]()#+\-.!~>|])|`([^`\n]+)`|\[([^[\]\n]+)\]\(/.source +
+    "(" + MD_LINK_URL + ")" +
+    /(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>"']+)|\*\*([^\n]+?)\*\*|__([^\n]+?)__|~~([^\n]+?)~~|\*([^\s*](?:[^*\n]*[^\s*])?)\*|(^|[^A-Za-z0-9_])_([^\s_](?:[^_\n]*[^\s_])?)_(?![A-Za-z0-9])|(^|[^A-Za-z0-9_])@([A-Za-z0-9_-]{1,40})/.source,
+  "g"
+);
 
 function inline(parent: Parent, s: string, memberSet: Set<string>): void {
   if (s.length > MD_INLINE_MAX) {
@@ -46,11 +52,17 @@ function inline(parent: Parent, s: string, memberSet: Set<string>): void {
         parent.appendChild(a);
       } else parent.appendChild(document.createTextNode(m[0]));
     } else if (m[5] !== undefined) {
-      const a2 = el("a", "", m[5]);
-      a2.setAttribute("href", m[5]);
-      a2.setAttribute("target", "_blank");
-      a2.setAttribute("rel", "noopener noreferrer");
-      parent.appendChild(a2);
+      // the run's tail (closing punctuation) is read again as text
+      const n = linkLength(m[5]);
+      if (n) {
+        const url = m[5].slice(0, n);
+        const a2 = el("a", "", url);
+        a2.setAttribute("href", url);
+        a2.setAttribute("target", "_blank");
+        a2.setAttribute("rel", "noopener noreferrer");
+        parent.appendChild(a2);
+        re.lastIndex = m.index + n;
+      } else parent.appendChild(document.createTextNode(m[0]));
     } else if (m[6] !== undefined || m[7] !== undefined) {
       const b = el("strong");
       inline(b, m[6] !== undefined ? m[6]! : m[7]!, memberSet);

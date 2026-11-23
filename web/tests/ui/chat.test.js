@@ -31,6 +31,25 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
   // Text that used to freeze or crash every open page of the room: 2,000
   // nested quotes (the renderer called itself once per level), a heading
   // followed by 7,990 spaces (a cubic expression), a list 400 deep.
+  // Addresses with parentheses (Wikipedia's Mercury_(planet)) used to be
+  // cut at the ")" in chat and on the board and opened a missing page; the
+  // punctuation after an address still stays out of it.
+  for (const vp of [{ tag: '', w: 1280, h: 860 }, { tag: '-phone', w: 390, h: 844, touch: true }]) await run('paren-links' + vp.tag, { state: { parenLinks: true }, w: vp.w, h: vp.h, touch: vp.touch }, async (page) => {
+    await settle(page);
+    const links = (sel) => page.$$eval(sel + ' a', (as) => as.map((a) => [a.textContent, a.getAttribute('href')]));
+    const text = (sel) => page.$eval(sel, (e) => e.textContent);
+    const out = { chat: await links('.msg[data-id="36"] .text'), chatText: await text('.msg[data-id="36"] .text') };
+    await shot(page, 'paren-links-chat' + vp.tag + '.png');
+    if (vp.tag) await page.click('#menu');
+    await page.click('.tab[data-tab="decisions"]'); await settle(page);
+    out.board = await page.$$eval('#view-decisions a[target=_blank]', (as) => as.map((a) => [a.textContent, a.getAttribute('href')]));
+    await shot(page, 'paren-links-board' + vp.tag + '.png');
+    const W = 'https://en.wikipedia.org/wiki/';
+    must(JSON.stringify(out.chat) === JSON.stringify([['Mercury', W + 'Mercury_(planet)'], [W + 'Venus_(planet)', W + 'Venus_(planet)'], ['https://example.com/a', 'https://example.com/a'], ['https://example.com/b_(c)_d', 'https://example.com/b_(c)_d']]), 'chat links: ' + JSON.stringify(out));
+    must(out.chatText === 'See Mercury and ' + W + 'Venus_(planet). Also (https://example.com/a) and https://example.com/b_(c)_d, done.', 'chat text: ' + JSON.stringify(out));
+    must(JSON.stringify(out.board) === JSON.stringify([[W + 'Lima_(city)', W + 'Lima_(city)'], ['www.example.com/x_(y)', 'https://www.example.com/x_(y)'], ['https://example.com/z', 'https://example.com/z']]), 'board links: ' + JSON.stringify(out));
+    return out;
+  });
   await run('markdown-hostile', { state: { hostileMarkdown: true } }, async (page) => {
     await settle(page);
     const t0 = Date.now();

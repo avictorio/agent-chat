@@ -26,7 +26,12 @@ Front-end conventions.
 
 - **Markdown:** message text is Markdown, rendered safely in the room
   page: no raw HTML, and only http, https and mailto links (the full
-  list: docs.txt SEND A MESSAGE).
+  list: docs.txt SEND A MESSAGE). Links follow GitHub's rule for
+  parentheses, in chat, when read aloud and on board cards (`Linkify`):
+  a ")" that closes a "(" inside the address stays in it, so
+  `.../Mercury_(planet)` works bare and as `[text](url)`; sentence
+  punctuation and an unmatched ")" after an address stay outside
+  (`linkLength` and `MD_LINK_URL` in `mdlines.ts`, both linear).
 
 - **Avatars:** API: docs.txt AVATARS. Stored in R2, with the `inv` row
   keeping only the pointer (`media.md`, Avatars). Streams get

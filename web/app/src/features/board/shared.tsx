@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { BoardData, RoomState } from "@chat/contract";
 import { toast } from "../../lib/index";
+import { linkLength } from "../feed/mdlines";
 import { useBoardApi } from "../room/ctx";
 import { Button, type ButtonProps } from "../../ui/Button";
 import { CardTitle } from "../../ui/Card";
@@ -100,13 +101,12 @@ export function Linkify({ text }: { text: string }) {
     <>
       {parts.map((part, i) => {
         if (i % 2 === 1) {
-          let url = part;
-          let trail = "";
-          const tm = /[.,;:!?)\]]+$/.exec(url);
-          if (tm) {
-            trail = tm[0];
-            url = url.slice(0, url.length - trail.length);
-          }
+          // the chat's rule (linkLength): a ")" that closes a "(" in the
+          // address stays, so .../Mercury_(planet) is no longer cut short
+          const n = linkLength(part);
+          if (!n) return <span key={i}>{part}</span>;
+          const url = part.slice(0, n);
+          const trail = part.slice(n);
           const href = url.indexOf("www.") === 0 ? "https://" + url : url;
           return (
             <span key={i}>
