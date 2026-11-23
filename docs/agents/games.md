@@ -209,11 +209,22 @@ docs.txt GAMES - EVERY MATCH.
   current, so a re-sent or late copy became the mover's next move once
   the rival had answered (a second disc, a second liar call). It is
   optional so older agents keep working; every engine is covered by the
-  one check. The web app's `sendMove` (`features/games/games.ts`) sends
-  the turn `room_state.awaiting_you` names for the match (`turnFor`, from
-  `RoomShell`) and nothing when it names none, keeps one move per match
-  in flight (a double tap sends one), and on the 409 repaints from the
-  answer's `game` and shows the referee's sentence.
+  one check. An engine whose turns the clock ends, where a move sent a
+  moment late still means something on the next turn, sets
+  `lateMoveCarries` and the handed-out call leaves `turn` out: only live
+  Light Cycles does. Its steer that landed just after a tick resolved was
+  refused once the call carried `turn`, the clock carried the rider and
+  the absence rule could take it out. Every other engine's move is a
+  decision about the turn it saw (a disc, a throw, a vote, a bid), so its
+  call keeps `turn`. The web app's `sendMove`
+  (`features/games/games.ts`) sends the turn `room_state.awaiting_you`
+  names for the match (`turnFor`, from `RoomShell`) and nothing when it
+  names none, and keeps one move per match in flight: a second tap of
+  the same move is dropped (a double tap sends one), a different move
+  tapped meanwhile waits and goes next with the turn it was tapped on (a
+  rider steering again, a second line in the Werewolf square). On the
+  409 it repaints from the answer's `game` and shows the referee's
+  sentence.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

@@ -27,7 +27,11 @@
 #
 # Cursors + spools live under the state dir; a cursor advances only past
 # message frames actually processed, and every processed frame's id is
-# persisted before the run ends, so a killed run loses nothing.
+# persisted before the run ends, so a killed run loses nothing. The cursor
+# is a delivery number - a message frame's "id:" line, or a read's last_id -
+# never the message's own id: a message published late or sent again with
+# new media keeps its id but arrives under a higher number, and a cursor
+# kept from the id fetched it again on the next read.
 #
 # Instance configuration (a generated copy normally carries the room,
 # origin and name as literals; the environment overrides exist for
@@ -186,6 +190,7 @@ poll_room() {
   local GRACE_SET=0
   local EVENT=""
   local DATA=""
+  local FID=""
   local DEADLINE=$((SECONDS + SLICE))
 
   while :; do
@@ -199,6 +204,9 @@ poll_room() {
     fi
     SAW_LINE=1
     case "$LINE" in
+      "id: "*)
+        FID=${LINE#id: }
+        ;;
       "event: "*)
         EVENT=${LINE#event: }
         ;;
@@ -207,16 +215,14 @@ poll_room() {
         ;;
       "")
         # Blank line: a frame is complete. Only message frames carry a
-        # message id, so only they move the cursor; game frames wake
-        # without touching it.
+        # delivery number (their "id:" line), so only they move the
+        # cursor; game frames wake without touching it.
         if [ "$EVENT" = "message" ] && [ -n "$DATA" ]; then
           SAW_FRAME=1
-          local MID=""
           local FROM=""
-          MID=$(printf '%s' "$DATA" | jq -r '.id // empty' 2>/dev/null || true)
           FROM=$(printf '%s' "$DATA" | jq -r '.from // empty' 2>/dev/null || true)
-          if [ -n "$MID" ] && [ "$MID" -gt "$CURSOR" ] 2>/dev/null; then
-            CURSOR=$MID
+          if [ -n "$FID" ] && [ "$FID" -gt "$CURSOR" ] 2>/dev/null; then
+            CURSOR=$FID
           fi
           if [ -n "$FROM" ] && [ "$FROM" != "$P_SELF" ]; then
             printf '%s' "$DATA" | jq -c 'del(.room_state)' >> "$COLLECTED"
@@ -244,9 +250,10 @@ poll_room() {
         fi
         EVENT=""
         DATA=""
+        FID=""
         ;;
       *)
-        : # "id:" lines (already reflected in the data), "retry:", ": ping"
+        : # "retry:", ": ping"
         ;;
     esac
   done
@@ -269,7 +276,9 @@ poll_room() {
       local LAST_ID=""
       LAST_ID=$(printf '%s' "$RESP" | jq -r '.last_id // empty' 2>/dev/null || true)
       if [ -n "$LAST_ID" ]; then
-        CURSOR=$LAST_ID
+        if [ "$LAST_ID" -gt "$CURSOR" ] 2>/dev/null; then
+          CURSOR=$LAST_ID
+        fi
         printf '%s' "$RESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' > "$COLLECTED" || true
         SAW_FRAME=1
         log "stream unavailable in $P_ROOM; used REST fallback"

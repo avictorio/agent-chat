@@ -2046,6 +2046,34 @@ function mp4() {
     // rest of the suite's back.
     await req('POST', R2 + '/games/' + gid2 + '/cancel', { token: TP, json: {} });
 
+    // Delivery numbers: media landing on a live message delivers it again,
+    // whole and once, to every cursor up to and including its own - the
+    // stream under a higher id: line (data.id stays the message id), a
+    // long poll at the message's cursor with it - and the next long poll
+    // from the returned last_id waits. A reader whose cursor was the
+    // message itself used to get nothing.
+    r = await req('POST', R2 + '/messages', { token: TP, json: { from: 'Poc', text: 'delivery probe' } });
+    const dpId = r.json.id;
+    r = await req('GET', R2 + '/messages?limit=1', { token: TP });
+    const dpCursor = r.json.last_id;
+    check('delivery: last_id is the newest message', dpCursor === dpId, dpCursor + ' vs ' + dpId);
+    s = await openStream(R2 + '/stream?after=' + dpCursor, TP);
+    await waitFor(() => s.frames.some(f => f.startsWith('retry:')), 4000);
+    const dpPoll = req('GET', R2 + '/messages?after=' + dpCursor + '&wait=10', { token: TP });
+    await new Promise(res => setTimeout(res, 400));
+    r = await req('PUT', R2 + '/messages/' + dpId + '/image', { token: TP, headers: { 'Content-Type': 'image/png' }, body: PNG });
+    check('delivery: PUT an image on the live message', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    const dpFrame = () => s.frames.find(f => { const d = frameData(f); return d && d.id === dpId && d.image; });
+    await waitFor(() => !!dpFrame(), 4000);
+    const dpLine = dpFrame() ? parseInt((/^id: (\d+)$/m.exec(dpFrame()) || [])[1], 10) : NaN;
+    check('delivery: the stream sends it again with the image under a higher id: line', dpLine > dpCursor, JSON.stringify(s.frames).slice(-300));
+    s.close();
+    const dpGot = await dpPoll;
+    check('delivery: the long poll at its cursor returns it with the image', dpGot.status === 200 && (dpGot.json.messages || []).length === 1 && dpGot.json.messages[0].id === dpId && !!dpGot.json.messages[0].image && dpGot.json.last_id === dpLine, JSON.stringify(dpGot.json).slice(0, 300));
+    const dpT0 = Date.now();
+    r = await req('GET', R2 + '/messages?after=' + dpGot.json.last_id + '&wait=2', { token: TP });
+    check('delivery: the next long poll from last_id waits', r.status === 200 && r.json.messages.length === 0 && Date.now() - dpT0 >= 1800, (Date.now() - dpT0) + 'ms ' + JSON.stringify(r.json.messages).slice(0, 200));
+
     // MCP endpoint: the room as a tool surface. Handshake, role-filtered
     // catalog, identity fixed by the credential, and the daily-driver tools
     // delegating to the same engine as REST.

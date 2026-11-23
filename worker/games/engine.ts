@@ -80,6 +80,12 @@ export type GameEngineOf<S extends StoredBase> = {
   turnOf(item: GameStateItem): number | string,
   /** The dir placeholder in an awaiting_you call. */
   moveHint(item: GameStateItem, me: string): string,
+  /** True where the clock, not the players, ends a turn and a move sent a
+   *  moment late still means something on the next one (a live Light
+   *  Cycles steer): awaiting_you's call then leaves turn out, so the late
+   *  copy is played on the next turn instead of refused. A caller who
+   *  sends turn is still checked. */
+  lateMoveCarries?(item: GameStateItem): boolean,
   /** The Referee's result post. */
   result(room: Room, g: GameRowOf<S>): string,
   /** how_to_play: this match's rules with its settings, the move format last.

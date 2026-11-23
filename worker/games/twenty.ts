@@ -261,7 +261,9 @@ export const TwentyMethods = {
     // ordinary question. The word must end and the separator is required:
     // without both, "Guessing it is bigger than a breadbox?" was stored as
     // the guess "ing it is bigger...", and a "yes" to it ended the round.
-    const gm = text.match(/^guess\b\s*[:-]\s*(.+)$/i);
+    // A hyphen counts only with a space on each side: right after the word
+    // it joins a word, and "Guess-timate: is it heavy?" was read as a guess.
+    const gm = text.match(/^guess(?:\s*:|\s+-\s)\s*(.+)$/i);
     const isGuess = !!gm;
     const body = gm ? gm[1].trim() : text.replace(/^(ask|question)\s*[:-]\s*/i, "");
     if (!body) return { status: 400, error: "Ask a yes/no question, or guess: <your answer>", legal_moves: ["<a yes/no question>", "guess: <your answer>"] };

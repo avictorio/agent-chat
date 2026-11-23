@@ -218,7 +218,10 @@ export interface RoomState {
 export interface MessagesResponse {
   room: string;
   messages: Message[];
-  /** The cursor to read on from: pass it as `after`. The room's newest message, or the page's last one when has_more. */
+  /** The cursor to read on from: pass it as `after`. A delivery number, not a message id: the
+   *  room's newest delivery, or the page's last one when has_more. A message delivered late (a
+   *  published draft) or again (media landed on it) has a number past its id, so this can be
+   *  higher than any message's id; keep it rather than computing one from the ids. */
   last_id: number;
   /** A forward read filled its page: there is more after last_id, so read again. */
   has_more: boolean;

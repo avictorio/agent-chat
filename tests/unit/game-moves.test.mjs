@@ -32,8 +32,20 @@ test("Twenty Questions: a question that starts with 'Guessing' is a question, no
   const a = await h.room.gameMove(id, ans, "yes", R);
   assert.equal(a.status, 200, a.error);
   assert.equal(a.resolved, false, "a yes to a question does not end the round");
-  // the form the docs teach still guesses
-  const g = await h.room.gameMove(id, second, "guess: a red bicycle", R);
+  // a hyphen right after the word is part of a word, not the guess form
+  const q2 = await h.room.gameMove(id, second, "Guess-timate: is it heavy?", R);
+  assert.equal(q2.status, 200, q2.error);
+  const asked2 = q2.game.qa[q2.game.qa.length - 1];
+  assert.equal(asked2.kind, "q", "\"Guess-timate: ...\" is a question");
+  assert.equal(asked2.q, "Guess-timate: is it heavy?");
+  assert.equal((await h.room.gameMove(id, ans, "no", R)).status, 200);
+  // the colon form the docs teach still guesses
+  const g1 = await h.room.gameMove(id, first, "guess: a blue car", R);
+  assert.equal(g1.status, 200, g1.error);
+  assert.equal(g1.game.qa[g1.game.qa.length - 1].kind, "guess");
+  assert.equal((await h.room.gameMove(id, ans, "wrong", R)).status, 200);
+  // and so does the hyphen form, with a space on both sides
+  const g = await h.room.gameMove(id, second, "guess - a red bicycle", R);
   assert.equal(g.resolved, true);
   assert.equal(g.game.rounds[0].how, "guessed");
   assert.equal(g.game.rounds[0].guessed_by, second);
@@ -139,4 +151,34 @@ test("a move naming a turn the match has moved past is refused, not played on th
   const plain = await h.room.gameMove(id, F, "4", R);
   assert.equal(plain.status, 200);
   assert.equal(plain.game.moves.length, 3);
+});
+
+// A live Light Cycles tick is ended by the clock: the call room_state hands
+// out used to name the tick, so an agent's steer sent a moment after the
+// tick resolved was refused, the clock carried the rider and the absence
+// rule could take it out. There the call leaves turn out; async (ticks wait
+// for every rider) and every other game keep it.
+test("Light Cycles live: the awaiting_you call leaves turn out, so a late steer applies to the next tick", async () => {
+  const callFor = (h, who, id) => (h.room.roomState(who, R).awaiting_you || []).find((a) => a.type === "game" && a.id === id);
+  const live = await running("lightcycles", ["Ann", "Bob"], { w: 12, h: 10 });
+  const c = callFor(live.h, "Ann", live.id);
+  assert.equal(c.turn, 0, "the item still names the tick");
+  assert.equal("turn" in c.call.body, false, "the live call does not");
+  // Ann's steer for tick 0 arrives after the tick resolved without her
+  const st0 = (await live.h.room.gameState(live.id, "Ann", R)).game;
+  assert.equal((await live.h.room.gameMove(live.id, "Bob", st0.players.find((p) => p.name === "Bob").dir, R)).status, 200);
+  live.h.db.prepare("UPDATE gm SET state = json_set(state, '$.deadline', ?) WHERE id = ?").run(Date.now() - 10, live.id);
+  const dir = st0.you.safe_moves[0] || st0.you.legal_moves[0];
+  const late = await live.h.room.gameMove(live.id, "Ann", dir, R, null, false, c.call.body.turn);
+  assert.equal(late.status, 200, late.error);
+  assert.equal(late.game.tick, 1, "the clock resolved tick 0 first");
+  assert.equal(late.game.you.queued, dir, "and the steer is queued for tick 1");
+  const stale = await live.h.room.gameMove(live.id, "Ann", dir, R, null, false, 0);
+  assert.equal(stale.status, 409, "a caller who names a past tick is still refused");
+  assert.equal(stale.turn, 1);
+  const as = await running("lightcycles", ["Ann", "Bob"], { mode: "async", w: 12, h: 10 });
+  assert.equal(callFor(as.h, "Ann", as.id).call.body.turn, 0, "an async match's call names the tick");
+  const c4 = await running("fourinarow", ["Ann", "Bob"]);
+  const first = (await c4.h.room.gameState(c4.id, null, R)).game.turn_of;
+  assert.equal(callFor(c4.h, first, c4.id).call.body.turn, 1, "and so does every other game's");
 });
