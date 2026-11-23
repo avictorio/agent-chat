@@ -404,13 +404,48 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     if (!/"turn":7/.test(out.drop)) throw new Error('a Four in a Row move names its turn: ' + out.drop);
     return out;
   });
+  /* room_state behind for more than one move. The first refusal teaches
+     turn 9; before the next tap the match moves on again (turn 11) while
+     room_state still names 7. That tap is refused once more, and its
+     answer's turn must replace the one remembered. It was kept under the
+     turn SENT, not the turn room_state names, so the refusal dropped it
+     and the tap after went back to turn 7: two refusals for every move. */
+  await run('move-stale-twice', { state: { c4: true }, init: noGl, allowConsole: [/409/] }, async (page, S, calls) => {
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-flat .c4-grid', { timeout: 15000 });
+    const shown = (n) => page.waitForFunction((want) => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === want, n, { timeout: 10000 }).catch(() => {});
+    // another tab of yours and the rival both play: the match is two turns on
+    const moveOn = (turn) => {
+      const cells = S.c4.board.map((x) => x.split(''));
+      const moves = S.c4.moves.slice();
+      for (const [by, piece, col] of [['Anthony', 'X', 6], ['Ada', 'O', 7]]) {
+        let k = 5;
+        while (k >= 0 && cells[k][col - 1] !== '.') k -= 1;
+        cells[k][col - 1] = piece;
+        moves.push({ n: moves.length + 1, by, col, row: 6 - k });
+      }
+      Object.assign(S.c4, { turn, board: cells.map((x) => x.join('')), moves, last_move: Object.assign({ at: now - 5e3 }, moves[moves.length - 1]) });
+    };
+    S.c4AwaitTurn = 7;
+    moveOn(9);
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await shown(8);
+    moveOn(11);
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await shown(10);
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await shown(11);
+    const out = { sent: calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c)).map((c) => (c.match(/"turn":(\d+)/) || [])[1]), discs: await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length) };
+    if (JSON.stringify(out.sent) !== '["7","9","11"]' || out.discs !== 11) throw new Error('each refusal teaches the turn for the next tap: ' + JSON.stringify(out));
+    return out;
+  });
   /* A move whose answer never comes (a phone switching networks) held the
      queue, and so every later move in the match, until a reload. It now
      has a deadline (30 s, cut short here): the player is told the move did
      not reach the referee, and the next move goes out and lands. */
   for (const [label, o] of [['move-deadline', {}], ['move-deadline-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { c4: true }, init: noGl }, o), async (page, S, calls) => {
-      await page.addInitScript(() => { const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, ms === 30000 ? 1000 : ms, ...a); });
+      await page.addInitScript(() => { const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, ms === 60000 ? 1000 : ms, ...a); });
       await page.reload();
       await settle(page);
       S.moveHold = 1;
@@ -424,7 +459,8 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
       await page.waitForFunction(() => document.querySelectorAll('#viewer .c4-flat .c4-grid .c4-disc').length === 7, null, { timeout: 10000 }).catch(() => {});
       out.posts = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c));
       out.discs = await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length);
-      if (!/did not reach the referee/.test(out.said)) throw new Error('the player is told the move did not arrive: ' + JSON.stringify(out));
+      if (!/^No answer from the referee yet\. The move may still have landed/.test(out.said)) throw new Error('the player is told there was no answer, and to check the board: ' + JSON.stringify(out));
+      if (!calls.some((c) => /^GET .*\/games\/16(\?|$| )/.test(c))) throw new Error('the board is read again after the deadline: ' + JSON.stringify(calls.filter((c) => /games\/16/.test(c))));
       if (out.posts.length !== 2 || !/"dir":"3"/.test(out.posts[1]) || out.discs !== 7) throw new Error('the next move goes out and lands: ' + JSON.stringify(out));
       return out;
     });

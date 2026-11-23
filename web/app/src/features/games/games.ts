@@ -324,17 +324,26 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // square): it waits and goes next, with the turn it was tapped on, so
   // one that came too late for its turn is refused, not played on the
   // next.
-  type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined };
+  // named: the turn room_state named when the move was tapped (turn is
+  // what is sent, which differs once a refusal has told us better).
+  type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined; named: number | string | undefined };
   const moving = new Map<number, { last: string; queue: Waiting[] }>();
   // how long a move's answer may take (sendOne)
-  const MOVE_DEADLINE_MS = 30000;
+  // Well past the longest the referee itself may hold a move: the guess
+  // that closes a Sketch & Guess round is judged inside its own request,
+  // and that call may take 30 s. At 30 s here, a slow judge made the page
+  // say a move that had landed never arrived.
+  const MOVE_DEADLINE_MS = 60000;
   // A stale-turn refusal's turn, per match, kept while room_state still
   // names the turn that was refused: the board repaints from the answer,
   // but room_state catches up only with the stream (a reconnect, a phone
-  // waking), and until then every tap sent the refused turn again.
+  // waking), and until then every tap sent the refused turn again. It is
+  // kept under the turn room_state NAMED, not the one sent: keyed on the
+  // turn sent, a refusal of the remembered turn itself (the rival moved
+  // again, room_state still behind) dropped the memory, and the next tap
+  // went back to room_state's turn for a second refusal.
   const caughtUp = new Map<number, { refused: string; turn: number | string }>();
-  function turnToSend(id: number): number | string | undefined {
-    const named = opts.turnFor ? opts.turnFor(id) : undefined;
+  function turnToSend(id: number, named: number | string | undefined): number | string | undefined {
     const c = caughtUp.get(id);
     if (c && named !== undefined && String(named) === c.refused) return c.turn;
     caughtUp.delete(id);
@@ -344,22 +353,24 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // the case: the form has already cleared its draft, so a second "no"
   // dropped as a copy was lost for good.
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }) {
-    const turn = turnToSend(id);
+    const named = opts.turnFor ? opts.turnFor(id) : undefined;
+    const turn = turnToSend(id, named);
     const out = moving.get(id);
     if (out) {
       if (out.last !== dir || how?.repeat) {
         out.last = dir;
-        out.queue.push({ dir, note, label, turn });
+        out.queue.push({ dir, note, label, turn, named });
       }
       return;
     }
     const mine = { last: dir, queue: [] as Waiting[] };
     moving.set(id, mine);
     try {
-      for (let w: Waiting | undefined = { dir, note, label, turn }; w; w = mine.queue.shift()) {
-        // one send that throws (a repaint failing) must not strand the
-        // moves queued behind it
-        await sendOne(id, w).catch(() => toast("The move did not reach the referee.", true));
+      for (let w: Waiting | undefined = { dir, note, label, turn, named }; w; w = mine.queue.shift()) {
+        // One send that throws must not strand the moves queued behind
+        // it. What throws here is the repaint, after the answer came, so
+        // the move itself may well have landed.
+        await sendOne(id, w).catch(() => toast("Something went wrong showing that move. Check the board.", true));
       }
     } finally {
       moving.delete(id);
@@ -405,16 +416,25 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     };
     // A move whose answer never comes (a phone switching networks) held
     // the queue, and so every later move in the match, until a reload.
-    // The deadline is long because a Sketch & Guess drawing is a large
-    // body on a slow link.
+    // Giving up says nothing about the move: it may have landed and only
+    // its answer was lost, so the board is read again and the sentence
+    // says to look before trying again.
     const ctl = new AbortController();
     const deadline = setTimeout(() => ctl.abort(), MOVE_DEADLINE_MS);
+    const noAnswer = () => {
+      say("No answer from the referee yet. The move may still have landed: check the board before trying again.");
+      void fetchGame(id);
+    };
     try {
       const d = await client.submitMove(id, dir, w.turn, ctl.signal);
       if (d.game) {
         cache.set(id, d.game);
         notify();
         renderGameView(d.game, true);
+      } else if (ctl.signal.aborted) {
+        // cut off while the answer's body was arriving: the client hands
+        // back an empty answer, which is not a refusal
+        noAnswer();
       } else say("That move was refused.");
     } catch (e) {
       // the match moved past the turn this move was meant for: show it
@@ -423,14 +443,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       // person in most games), so people get a plain one.
       const stale = staleTurn(e);
       if (stale) {
-        if (w.turn !== undefined) caughtUp.set(id, { refused: String(w.turn), turn: stale.turn });
+        if (w.named !== undefined) caughtUp.set(id, { refused: String(w.named), turn: stale.turn });
         cache.set(id, stale.game);
         notify();
         renderGameView(stale.game, true);
         say("Too late: the match has moved on. This is how it stands now.");
         return;
       }
-      if (ctl.signal.aborted) say("The move did not reach the referee: no answer in 30 seconds. Check the board, then try again.");
+      if (ctl.signal.aborted) noAnswer();
       else say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
     } finally {
       clearTimeout(deadline);
