@@ -2287,6 +2287,37 @@ function mp4() {
     check('stream: board change pushes a state frame', await waitFor(() => s.frames.some(f => f.includes('event: state') && f.includes('"open_questions"') && f.includes('State event probe question?')), 4000), JSON.stringify(s.frames).slice(-400));
     if (probeQid) await req('DELETE', R2 + '/questions/' + probeQid, { token: TP });
     s.close();
+
+    // Board writes from what the caller read. A deleted decision's id went
+    // to the next one, so a sign call held for it signed other text; ids
+    // are never handed out again now, and a call that carries the item's
+    // updated (base_updated) is refused with 409 once it changed. An edit
+    // from a stale copy is refused the same way instead of saving over
+    // the newer text; without base_updated a write goes ahead as before.
+    r = await req('POST', R2 + '/decisions', { token: TP, json: { title: 'Adopt two-space indentation' } });
+    const bwA = r.json.decision;
+    await req('DELETE', R2 + '/decisions/' + bwA.id, { token: TP });
+    r = await req('POST', R2 + '/decisions', { token: TP, json: { title: 'Poc speaks for the room' } });
+    const bwB = r.json.decision;
+    check('board: a deleted decision\'s id is not handed out again', bwB.id > bwA.id, bwA.id + ' then ' + bwB.id);
+    r = await req('POST', R2 + '/decisions/' + bwA.id, { token: TRex, json: { action: 'sign', base_updated: bwA.updated } });
+    check('board: a sign call for a deleted decision answers 404', r.status === 404, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TP, json: { action: 'edit', title: 'Poc speaks for the room in all outside dealings', base_updated: bwB.updated } });
+    check('board: an edit with the current base_updated saves', r.status === 200 && r.json.decision.updated > bwB.updated, r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'sign', base_updated: bwB.updated } });
+    check('board: a sign carrying the stamp of the text before an edit answers 409 with the decision now', r.status === 409 && r.json.decision && /outside dealings/.test(r.json.decision.title) && r.json.decision.signers.length === 0, r.status + ' ' + r.text.slice(0, 200));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'edit', title: 'Rex rewrites it', base_updated: bwB.updated } });
+    check('board: an edit from a stale copy answers 409 and saves nothing', r.status === 409 && /outside dealings/.test(((await req('GET', R2 + '/decisions', { token: TP })).json.decisions.find((x) => x.id === bwB.id) || {}).title), r.status + ' ' + r.text.slice(0, 200));
+    r = await req('POST', R2 + '/decisions/' + bwB.id, { token: TRex, json: { action: 'sign', base_updated: 'soon' } });
+    check('board: a base_updated that is not a number answers 400', r.status === 400, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('POST', R2 + '/questions', { token: TP, json: { text: 'Which database?' } });
+    const bwQ = r.json.question;
+    r = await req('POST', R2 + '/questions/' + bwQ.id, { token: TP, json: { action: 'edit', text: 'Which database, really?' } });
+    check('board: an edit without base_updated saves as before', r.status === 200 && r.json.question.text === 'Which database, really?', r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/questions/' + bwQ.id, { token: TRex, json: { action: 'claim', base_updated: bwQ.updated } });
+    check('board: a question action with a stale base_updated answers 409', r.status === 409 && r.json.question && r.json.question.status === 'open', r.status + ' ' + r.text.slice(0, 160));
+    await req('DELETE', R2 + '/questions/' + bwQ.id, { token: TP });
+    await req('DELETE', R2 + '/decisions/' + bwB.id, { token: TP });
     // Envelope: every frame kind carries from + kind + targets, and
     // message objects carry targets on reads and post responses too.
     function frameData(f) { const i = f.indexOf('data: '); if (i < 0) return null; try { return JSON.parse(f.slice(i + 6)); } catch { return null; } }

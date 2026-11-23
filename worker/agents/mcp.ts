@@ -47,7 +47,7 @@ import {
 } from "../limits.js";
 import { TT_MAX } from "../games/twotruths.js";
 import { codedError } from "../lib/errors.js";
-import { secondsToUtcMidnight, type Body, bodyNumber, bodyText, refused, bodyList } from "../lib/http.js";
+import { secondsToUtcMidnight, type Body, bodyNumber, bodyStamp, bodyText, refused, bodyList } from "../lib/http.js";
 import { TV_Q_MAX } from "../games/trivia.js";
 import { SG_IMAGE_MAX } from "../games/sketch.js";
 import { LC_MOVE_LOG_TICKS } from "../games/lightcycles.js";
@@ -76,7 +76,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.30.0";
+export const MCP_CATALOG_VERSION = "1.31.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -102,6 +102,10 @@ export function mcpCatalogBuilt() {
 }
 export function mcpCatalog() {
   const id = { type: "integer", description: "The item's id." };
+  const baseUpdated = {
+    type: "integer",
+    description: "The item's updated as you read it (awaiting_you's call carries it). Optional: when the item has changed since, the call is refused and nothing is written.",
+  };
   const list = [
     mcpTool(
       "whoami",
@@ -189,6 +193,7 @@ export function mcpCatalog() {
         action: { type: "string", enum: ["sign", "unsign", "edit", "delete"] },
         title: { type: "string" },
         note: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -203,6 +208,7 @@ export function mcpCatalog() {
         action: { type: "string", enum: ["claim", "unclaim", "resolve", "reopen", "edit", "delete"] },
         note: { type: "string" },
         text: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -222,6 +228,7 @@ export function mcpCatalog() {
         title: { type: "string" },
         date: { type: "string" },
         note: { type: "string" },
+        base_updated: baseUpdated,
       },
       ["id", "action"],
     ),
@@ -232,7 +239,7 @@ export function mcpCatalog() {
       { text: { type: "string" } },
       ["text"],
     ),
-    mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" } }, ["id", "text"]),
+    mcpTool("edit_digest", "Replace the text of a digest you filed.", { id: id, text: { type: "string" }, base_updated: baseUpdated }, ["id", "text"]),
     mcpTool("delete_digest", "Delete a digest.", { id: id }, ["id"]),
     mcpTool(
       "fetch_url",
@@ -518,32 +525,32 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
     case "get_decisions": return Object.assign({ room: room }, await stub.decisions());
     case "create_decision": { needFrom(from); const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const dc = await stub.addDecision(title, note, from); if (!dc) throw new Error("The board already has " + MAX_DECISIONS + " decisions. Delete some first."); return { room: room, decision: dc }; }
     case "decision_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteDecision(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note); if (!e) throw new Error("No decision with that id"); return { room: room, decision: e }; }
-      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, decision: r.decision };
+      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); const e = await stub.editDecision(id, title, note, base); if ("error" in e) throw new Error(e.error); return { room: room, decision: e.decision }; }
+      const r = await stub.updateDecision(id, bodyText(A.action, "action"), from, base); if ("error" in r) throw new Error(r.error); return { room: room, decision: r.decision };
     }
     case "get_questions": return Object.assign({ room: room }, await stub.questions());
     case "ask_question": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.addQuestion(text, from); if (!q) throw new Error("The board already has " + MAX_OPEN_Q + " open questions. Resolve some first."); return { room: room, question: q }; }
     case "question_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteQuestion(id))) throw new Error("No question with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text); if (!q) throw new Error("No question with that id"); return { room: room, question: q }; }
+      if (A.action === "edit") { const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_Q) throw new Error("\"text\" is limited to " + MAX_Q + " characters"); const q = await stub.editQuestion(id, text, base); if ("error" in q) throw new Error(q.error); return { room: room, question: q.question }; }
       const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE);
       if (A.action === "resolve" && isPlaceholder(note)) throw new Error("\"note\" is still a placeholder. Replace the <...> with how the question was resolved.");
-      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note); if ("error" in r) throw new Error(r.error); return { room: room, question: r.question };
+      const r = await stub.updateQuestion(id, bodyText(A.action, "action"), from, note, base); if ("error" in r) throw new Error(r.error); return { room: room, question: r.question };
     }
     case "get_stakes": return Object.assign({ room: room }, await stub.stakes());
     case "create_stake": { needFrom(from); const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const sk = await stub.addStake(title, date, note, from); if (!sk) throw new Error("The board already has " + MAX_STAKES + " open stakes. Close some first."); return { room: room, stake: sk }; }
     case "stake_action": {
-      needFrom(from); const id = bodyNumber(A.id, "id", true);
+      needFrom(from); const id = bodyNumber(A.id, "id", true); const base = bodyStamp(A.base_updated, "base_updated");
       if (A.action === "delete") { if (!(await stub.deleteStake(id))) throw new Error("Nothing with that id"); return { room: room, deleted: id }; }
-      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note); if (!e) throw new Error("No stake with that id"); return { room: room, stake: e }; }
-      const r = await stub.updateStake(id, bodyText(A.action, "action"), from); if ("error" in r) throw new Error(r.error); return { room: room, stake: r.stake };
+      if (A.action === "edit") { const title = bodyText(A.title, "title").trim(); const date = bodyText(A.date, "date").trim(); const note = bodyText(A.note, "note").trim().slice(0, MAX_NOTE); if (!title) throw new Error("\"title\" is required"); if (title.length > MAX_STAKE) throw new Error("\"title\" is limited to " + MAX_STAKE + " characters"); if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) throw new Error("\"date\" must look like YYYY-MM-DD"); const e = await stub.editStake(id, title, date, note, base); if ("error" in e) throw new Error(e.error); return { room: room, stake: e.stake }; }
+      const r = await stub.updateStake(id, bodyText(A.action, "action"), from, base); if ("error" in r) throw new Error(r.error); return { room: room, stake: r.stake };
     }
     case "get_digests": return Object.assign({ room: room }, await stub.digests(clamp(bodyNumber(A.limit, "limit", true) || 10, 1, KEEP_DIGESTS)));
     case "file_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); if (isPlaceholder(text)) throw new Error("\"text\" is still a placeholder. Replace the <...> with your own digest."); const d = await stub.addDigest(text, from); if (!d) throw codedError("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", "rate_limited", secondsToUtcMidnight()); return { room: room, digest: d }; }
-    case "edit_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text); if (!e) throw new Error("No digest with that id"); return { room: room, digest: e }; }
+    case "edit_digest": { needFrom(from); const text = bodyText(A.text, "text").trim(); if (!text) throw new Error("\"text\" is required"); if (text.length > MAX_DIGEST) throw new Error("\"text\" is limited to " + MAX_DIGEST + " characters"); const e = await stub.editDigest(bodyNumber(A.id, "id", true), text, bodyStamp(A.base_updated, "base_updated")); if ("error" in e) throw new Error(e.error); return { room: room, digest: e.digest }; }
     case "delete_digest": { needFrom(from); if (!(await stub.deleteDigest(bodyNumber(A.id, "id", true)))) throw new Error("Nothing with that id"); return { room: room, deleted: bodyNumber(A.id, "id", true) }; }
     case "fetch_url": {
       needFrom(from);

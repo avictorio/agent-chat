@@ -14,7 +14,7 @@ import {
   MAX_STAKES,
   ROOM_RE,
 } from "../limits.js";
-import { deny, json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
+import { deny, json, rateLimited, readBody, secondsToUtcMidnight, bodyStamp, bodyText } from "../lib/http.js";
 import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
 import { mediaSigner } from "../lib/media.js";
 import { memberReply } from "./members.js";
@@ -75,14 +75,15 @@ export async function questionsRoute(rc: RouteContext, m: RegExpMatchArray) {
     const text = bodyText(body?.text, "text").trim();
     if (!text) return json({ error: "\"text\" is required" }, 400);
     if (text.length > MAX_Q) return json({ error: "\"text\" is limited to " + MAX_Q + " characters" }, 413);
-    const q = await stub.editQuestion(qid, text);
-    if (!q) return json({ error: "No question with that id" }, 404);
-    return json({ room, question: q });
+    const q = await stub.editQuestion(qid, text, bodyStamp(body?.base_updated, "base_updated"));
+    if ("error" in q) return json(q.question ? { error: q.error, question: q.question } : { error: q.error }, q.status);
+    return json({ room, question: q.question });
   }
   const note = bodyText(body?.note, "note").trim().slice(0, MAX_NOTE);
   if (bodyText(body?.action, "action") === "resolve" && isPlaceholder(note)) return json({ error: "\"note\" is still a placeholder. Replace the <...> with how the question was resolved." }, 400);
-  const r = await stub.updateQuestion(qid, bodyText(body?.action, "action"), from, note);
-  if ("error" in r) return json({ error: r.error }, r.status);
+  const r = await stub.updateQuestion(qid, bodyText(body?.action, "action"), from, note, bodyStamp(body?.base_updated, "base_updated"));
+  // a stale base_updated: the question as it is now, to decide again from
+  if ("error" in r) return json(r.question ? { error: r.error, question: r.question } : { error: r.error }, r.status);
   return json({ room, question: r.question });
 }
 
@@ -129,9 +130,9 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (text.length > MAX_DIGEST) return json({ error: "\"text\" is limited to " + MAX_DIGEST + " characters" }, 413);
     if (isPlaceholder(text)) return json({ error: "\"text\" is still a placeholder. Replace the <...> with your own digest." }, 400);
     if (id !== null) {
-      const e = await stub.editDigest(id, text);
-      if (!e) return json({ error: "No digest with that id" }, 404);
-      return json({ room, digest: e });
+      const e = await stub.editDigest(id, text, bodyStamp(body?.base_updated, "base_updated"));
+      if ("error" in e) return json(e.digest ? { error: e.error, digest: e.digest } : { error: e.error }, e.status);
+      return json({ room, digest: e.digest });
     }
     const d = await stub.addDigest(text, from);
     if (!d) return rateLimited("This room already has " + DIGESTS_PER_DAY + " digests today (UTC). Try again tomorrow.", secondsToUtcMidnight());
@@ -145,16 +146,16 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
       if (!title) return json({ error: "\"title\" is required" }, 400);
       if (title.length > MAX_STAKE) return json({ error: "\"title\" is limited to " + MAX_STAKE + " characters" }, 413);
       if (id !== null) {
-        const e = await stub.editDecision(id, title, note);
-        if (!e) return json({ error: "No decision with that id" }, 404);
-        return json({ room, decision: e });
+        const e = await stub.editDecision(id, title, note, bodyStamp(body?.base_updated, "base_updated"));
+        if ("error" in e) return json(e.decision ? { error: e.error, decision: e.decision } : { error: e.error }, e.status);
+        return json({ room, decision: e.decision });
       }
       const dc = await stub.addDecision(title, note, from);
       if (!dc) return json({ error: "The board already has " + MAX_DECISIONS + " decisions. Delete some first." }, 409);
       return json({ room, decision: dc }, 201);
     }
-    const r = await stub.updateDecision(id, dact, from);
-    if ("error" in r) return json({ error: r.error }, r.status);
+    const r = await stub.updateDecision(id, dact, from, bodyStamp(body?.base_updated, "base_updated"));
+    if ("error" in r) return json(r.decision ? { error: r.error, decision: r.decision } : { error: r.error }, r.status);
     return json({ room, decision: r.decision });
   }
   const action = bodyText(body?.action, "action");
@@ -166,15 +167,15 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     if (title.length > MAX_STAKE) return json({ error: "\"title\" is limited to " + MAX_STAKE + " characters" }, 413);
     if (date && (!DATE_RE.test(date) || isNaN(Date.parse(date)))) return json({ error: "\"date\" must look like YYYY-MM-DD" }, 400);
     if (id !== null) {
-      const e = await stub.editStake(id, title, date, note);
-      if (!e) return json({ error: "No stake with that id" }, 404);
-      return json({ room, stake: e });
+      const e = await stub.editStake(id, title, date, note, bodyStamp(body?.base_updated, "base_updated"));
+      if ("error" in e) return json(e.stake ? { error: e.error, stake: e.stake } : { error: e.error }, e.status);
+      return json({ room, stake: e.stake });
     }
     const sk = await stub.addStake(title, date, note, from);
     if (!sk) return json({ error: "The board already has " + MAX_STAKES + " open stakes. Close some first." }, 409);
     return json({ room, stake: sk }, 201);
   }
-  const r = await stub.updateStake(id, action, from);
-  if ("error" in r) return json({ error: r.error }, r.status);
+  const r = await stub.updateStake(id, action, from, bodyStamp(body?.base_updated, "base_updated"));
+  if ("error" in r) return json(r.stake ? { error: r.error, stake: r.stake } : { error: r.error }, r.status);
   return json({ room, stake: r.stake });
 }

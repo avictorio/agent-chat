@@ -30,7 +30,7 @@ import { VoiceMethods } from "./voices.js";
 import { MediaMethods } from "./media.js";
 import { UploadMethods } from "./uploads.js";
 import { PushMethods } from "./push.js";
-import { BoardMethods } from "./board.js";
+import { BOARD_TABLES, BoardMethods } from "./board.js";
 import { StateMethods } from "./state.js";
 import { MessageMethods } from "./messages.js";
 import { GameMachineryMethods } from "./games.js";
@@ -117,7 +117,8 @@ export type ConRow = { v: number, ts: number, editor: string, text: string };
 export type OqRow = { id: number, ts: number, added_by: string, text: string, status: QuestionStatus, claimed_by: string | null,
   resolved_by: string | null, resolution: string | null, updated: number };
 /** dg: a digest. */
-export type DgRow = { id: number, ts: number, day: string, author: string, text: string };
+/** updated: the last write (schema step 5; null on a digest from before it, read as ts). */
+export type DgRow = { id: number, ts: number, day: string, author: string, text: string, updated: number | null };
 /** sk: a stake. */
 export type SkRow = { id: number, ts: number, added_by: string, title: string, date: string | null, note: string | null, done: number | null,
   done_by: string | null, updated: number };
@@ -290,7 +291,7 @@ function schemaPushFailures(sql: SqlStorage) {
   addColumn(sql, "push", "rest_ts", "INTEGER");
 }
 
-// Step 5. mdel and pcid. mdel: a live message that was deleted, under a delivery number
+// Step 5. mdel, pcid and dg.updated. mdel: a live message that was deleted, under a delivery number
 // of its own from the id counter, so the stream can replay the delete to
 // a reader whose cursor is below it (a "delete" frame), in order with the
 // messages. A delete used to reach nobody: every open feed kept the
@@ -305,9 +306,15 @@ function schemaPushFailures(sql: SqlStorage) {
 // sent again after its answer was lost gets the first one back instead
 // of posting twice. It is stored, not held in memory, so a restart of the
 // room between the two sends does not forget it. Starts empty.
+//
+// And dg.updated: when a digest was last written, the stamp an edit
+// names (base_updated) so it cannot save over a newer edit unseen, as the
+// other board tables' updated already allowed. Left null on older
+// digests; reads take ts in its place (DG_COLS in room/board.ts).
 function schemaDeletesAndPostIds(sql: SqlStorage) {
   sql.exec("CREATE TABLE IF NOT EXISTS mdel (dn INTEGER PRIMARY KEY, id INTEGER NOT NULL, ts INTEGER NOT NULL, who TEXT)");
   sql.exec("CREATE TABLE IF NOT EXISTS pcid (sender TEXT NOT NULL, cid TEXT NOT NULL, msg INTEGER NOT NULL, ts INTEGER NOT NULL, draft INTEGER, PRIMARY KEY (sender, cid))");
+  addColumn(sql, "dg", "updated", "INTEGER");
 }
 
 /** The schema steps, in order (see above). */
@@ -476,6 +483,10 @@ export class Room extends DurableObject {
     // and nothing of the room's content.
     let hwm = 0;
     try { hwm = this.msgHwm(); } catch (e) { warn("room.destroy.hwm", e, { room }); }
+    // The board's id marks too (nextBoardId): a sign call held from the old
+    // room must not land on the new room's decision of that id.
+    const boardMarks: CfgRow[] = [];
+    for (const t of BOARD_TABLES) { try { const n = this.boardHwm(t); if (n) boardMarks.push({ k: t + "_hwm", v: String(n) }); } catch (e) { warn("room.destroy.boardhwm", e, { room, table: t }); } }
     // Kept too: the ids of clones members asked to delete that Cartesia
     // has not confirmed (room/voices.ts, voiceDelPend). The room delete
     // tries them (routes/rooms.ts); one Cartesia refused then would be
@@ -483,12 +494,12 @@ export class Room extends DurableObject {
     let voiceDels: CfgRow[] = [];
     try { voiceDels = this.sql.exec<CfgRow>("SELECT k, v FROM cfg WHERE substr(k, 1, 10) = 'voice-del:'").toArray(); } catch (e) { warn("room.destroy.voicedel", e, { room }); }
     await this.ctx.storage.deleteAll();
-    if (hwm || voiceDels.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
+    if (hwm || voiceDels.length || boardMarks.length) this.sql.exec("CREATE TABLE IF NOT EXISTS cfg (k TEXT PRIMARY KEY, v TEXT)");
     if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(hwm));
     // every number up to it belonged to the old room: a stream resuming
     // from one of them is told its history is gone (a "gap" frame)
     if (hwm) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_forgot', ?)", String(hwm));
-    for (const d of voiceDels) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
+    for (const d of voiceDels.concat(boardMarks)) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES (?, ?)", d.k, d.v);
     // A stream or long poll that slipped in during the awaits above
     // (fetch refuses one now, but this is the last word) goes too.
     for (const c of Array.from(this.clients)) c.close();

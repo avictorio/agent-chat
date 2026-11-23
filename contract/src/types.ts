@@ -98,6 +98,9 @@ export interface Decision {
   title: string;
   note: string | null;
   signers: string[];
+  /** When the title or note last changed (a signature leaves it): the
+   *  base_updated an edit or a sign sends back, refused with 409 when stale. */
+  updated: number;
 }
 
 export type QuestionStatus = "open" | "claimed" | "resolved";
@@ -111,6 +114,8 @@ export interface Question {
   claimed_by: string | null;
   resolved_by?: string | null;
   resolution?: string | null;
+  /** The last write: the base_updated an edit or an action sends back. */
+  updated: number;
 }
 
 export interface Stake {
@@ -121,6 +126,8 @@ export interface Stake {
   date: string | null;
   note: string | null;
   done_by?: string | null;
+  /** The last write: the base_updated an edit or an action sends back. */
+  updated: number;
 }
 
 export interface Digest {
@@ -129,6 +136,8 @@ export interface Digest {
   day: string;
   author: string;
   text: string;
+  /** The last write: the base_updated an edit sends back. */
+  updated: number;
 }
 
 export interface VoiceState {

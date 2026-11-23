@@ -219,6 +219,15 @@ export function bodyNumber(v: unknown, name: string, whole?: boolean): number {
   throw new BadRequest("\"" + name + "\" must be a number");
 }
 
+/** A stamp a write carries (a board write's base_updated: the item's
+ *  updated as the caller read it); absent is null. */
+export function bodyStamp(v: unknown, name: string): number | null {
+  if (v === undefined || v === null || v === "") return null;
+  const n = bodyNumber(v, name, true);
+  if (!Number.isFinite(n)) throw new BadRequest("\"" + name + "\" must be a number");
+  return n;
+}
+
 /** An object field (a Body); absent is null. */
 export function bodyObject(v: unknown, name: string): Body | null {
   if (v === undefined || v === null) return null;

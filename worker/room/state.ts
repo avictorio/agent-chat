@@ -28,8 +28,8 @@ export type StateData = {
   members: string[],
   humans: string[],
   constitution: number | null,
-  questions: Array<Pick<OqRow, "id" | "text" | "added_by" | "claimed_by">>,
-  decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[] }>,
+  questions: Array<Pick<OqRow, "id" | "text" | "added_by" | "claimed_by" | "updated">>,
+  decisions: Array<{ id: number, title: string, signed_by: string[], missing: string[], updated: number }>,
   stakes: Array<{ id: number, title: string, date: string, days_away: number }>,
   digest: Pick<DgRow, "day" | "author"> | null,
   digests_today: number,
@@ -96,8 +96,12 @@ export function stateAttempt(d: StateData, who: string | null | undefined, room:
     const mine: AwaitingItem[] = [];
     // The digest comes first: it's the one item with a deadline.
     if (d.awaiting_digest && d.awaiting_digest.toLowerCase() === me) mine.push({ type: "digest", action: "file", call: stateCall(room, "digests", { from: name, text: "<your digest of the day>" }) });
-    for (const id of unsigned.map((x) => x.id).sort((a, b) => a - b)) mine.push({ type: "decision", id: id, action: "sign", call: stateCall(room, "decisions/" + id, { from: name, action: "sign" }) });
-    for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>" }) });
+    // A sign or resolve call names the stamp of the text it was handed for
+    // (base_updated): sent after that text was edited, or the item deleted
+    // and another put in, it is refused rather than signing what the
+    // member never read.
+    for (const x of unsigned.slice().sort((a, b) => a.id - b.id)) mine.push({ type: "decision", id: x.id, action: "sign", call: stateCall(room, "decisions/" + x.id, { from: name, action: "sign", base_updated: x.updated }) });
+    for (const q of d.questions) if (q.claimed_by && q.claimed_by.toLowerCase() === me) mine.push({ type: "question", id: q.id, action: "resolve", call: stateCall(room, "questions/" + q.id, { from: name, action: "resolve", note: "<how it was resolved>", base_updated: q.updated }) });
     for (const gm of gamesLobby(d, me)) mine.push({ type: "game", id: gm.id, turn: "lobby", action: "accept", call: stateCall(room, "games/" + gm.id + "/accept", { from: name }) });
     // the turn signature and the move placeholder come from the game's engine
     // (and the call names the turn, unless a late copy should carry to the next one: lateMoveCarries)
@@ -209,7 +213,7 @@ export const StateMethods = {
         const missing = members.filter((n) => signed.indexOf(n.toLowerCase()) < 0);
         // A decision everyone active has signed drops out. Without a member set there is no "everyone".
         if (members.length && !missing.length) continue;
-        decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing });
+        decisions.push({ id: d.id, title: d.title, signed_by: d.signers, missing: missing, updated: d.updated });
       }
       decisions.sort((a, b) => (b.missing.length - a.missing.length) || (a.signed_by.length - b.signed_by.length) || (a.id - b.id));
       const digest = this.sql.exec<NonNullable<StateData["digest"]>>("SELECT day, author FROM dg ORDER BY id DESC LIMIT 1").toArray()[0] || null;
@@ -222,7 +226,7 @@ export const StateMethods = {
         members: members,
         humans: inv.filter((r) => r.used && !r.revoked && r.kind === "human").map((r) => r.name.toLowerCase()),
         constitution: this.sql.exec<{ v: number | null }>("SELECT MAX(v) AS v FROM con").one().v || null,
-        questions: this.sql.exec<StateData["questions"][number]>("SELECT id, text, added_by, claimed_by FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
+        questions: this.sql.exec<StateData["questions"][number]>("SELECT id, text, added_by, claimed_by, updated FROM oq WHERE status != 'resolved' ORDER BY id").toArray(),
         decisions: decisions,
         stakes: this.sql.exec<{ id: number, title: string, date: string }>("SELECT id, title, date FROM sk WHERE done IS NULL AND date IS NOT NULL AND date <= ? ORDER BY date, id", horizon).toArray().map((r) => ({ id: r.id, title: r.title, date: r.date, days_away: daysBetween(today, r.date) })),
         digest: digest,

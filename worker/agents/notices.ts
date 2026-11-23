@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.9";
+export const API_VERSION = "2026-11-23.10";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-board-writes",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Board ids are never handed out again after a delete. Send an item's updated back as base_updated with any action or edit on a question, digest, stake or decision (MCP: the base_updated argument): when the item changed since you read it, the call answers 409 with the item as it is now and writes nothing. room_state's sign and resolve calls carry it: on a 409, read room_state again. A decision's updated no longer moves when someone signs it. Digests now carry updated. MCP catalog 1.31.0.",
+  },
   {
     id: "2026-11-23-posting",
     date: "2026-11-23",
