@@ -847,3 +847,61 @@ test("the sweep publishes a publish_on_complete draft left with a finished file 
   assert.equal(isDraft(h, id), false);
   assert.ok(h.objects.has(row(h, id, "image").r2key));
 });
+
+// The sweep publishes a publish_on_complete draft only where nothing else
+// would: an upload of it expired, or a day has passed since a file the
+// upload engine finished. It used to publish any such draft holding a
+// file, so a draft posted with an inline thumbnail went live without its
+// video at the sweep inside that video's own start.
+test("a publish_on_complete draft with an inline picture stays a draft through its video's start, and goes live with both", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const id = (await h.room.post("Ada", "thumb and video", R, false, null, { data: bytes(PNG_HEAD, 100).buffer, type: "image/png" }, null, true, true)).id;
+  h.room._sweptAt = 0; // a fresh instance, or no sweep for ten minutes
+  const s = await h.room.uploadStart(id, "video", "Ada", false, R, 400, "video/mp4", "v.mp4", "fp-v", false);
+  assert.equal(s.status, 200, s.error);
+  assert.equal(isDraft(h, id), true, "the start's sweep leaves it a draft");
+  h.room._sweptAt = 0;
+  await h.room.sweepDrafts(R);
+  assert.equal(isDraft(h, id), true, "and so does any later sweep");
+  const up = h.one("SELECT upload_id FROM md WHERE msg = ? AND kind = 'video'", id).upload_id;
+  h.multipart.get(up).data = bytes(MP4_HEAD, 400);
+  for (let n = 1; n <= s.parts; n++) assert.equal(h.room.uploadPartDone(id, "video", up, n, "e" + n).status, 200);
+  const f = await h.room.uploadFinish(id, "video", "Ada", false, R, null);
+  assert.equal(f.status, 200, f.error);
+  assert.equal(f.published, true);
+  const m = h.one("SELECT draft, image_type, video_type FROM m WHERE id = ?", id);
+  assert.ok(!m.draft && m.image_type && m.video_type, "live with the picture and the video: " + JSON.stringify(m));
+});
+
+test("a day-old publish_on_complete draft whose files are only inline or attached is deleted, as before", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const inline = (await h.room.post("Ada", "inline", R, false, null, { data: bytes(PNG_HEAD, 100).buffer, type: "image/png" }, null, true, true)).id;
+  const attached = (await h.room.post("Ada", "attached", R, false, null, null, null, true, true)).id;
+  assert.equal((await h.room.attachImage(attached, "Ada", bytes(PNG_HEAD, 100).buffer, "image/png", false, R)).status, 200);
+  const keys = [row(h, inline, "image").r2key, row(h, attached, "image").r2key];
+  await h.sweepNow();
+  assert.equal(isDraft(h, inline), true, "a fresh draft is not the sweep's");
+  assert.equal(isDraft(h, attached), true);
+  age(h, inline);
+  age(h, attached);
+  await h.sweepNow();
+  assert.equal(h.one("SELECT id FROM m WHERE id IN (?, ?)", inline, attached), undefined, "both swept, not published");
+  for (const k of keys) assert.equal(h.objects.has(k), false);
+});
+
+test("a publish_on_complete draft whose engine upload finished a moment ago is left to its sender, not published by the sweep", async () => {
+  const h = makeRoom();
+  const id = await autoDraft(h);
+  await imageSession(h, id, 100);
+  await fileSession(h, id, 300, "fp-file");
+  assert.equal((await h.room.uploadFinish(id, "image", "Ada", false, R, null)).published, false);
+  // the instance stopped between ending the file's upload and publishing
+  h.db.prepare("DELETE FROM md WHERE msg = ? AND kind = 'file'").run(id);
+  await h.sweepNow();
+  assert.equal(isDraft(h, id), true, "within the day it stays a draft");
+  age(h, id);
+  await h.sweepNow();
+  assert.equal(isDraft(h, id), false, "past it the sweep publishes it rather than delete it");
+});

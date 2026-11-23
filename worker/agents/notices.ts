@@ -44,7 +44,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-uploads-media",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Publish now answers 409 with \"uploading\": [kinds] while an upload of the draft is in flight: finish or abort it first. A publish_on_complete draft goes live once a file has finished and none is in flight; abort answers \"published\" (and \"aborted\": false if nothing was in flight). upload/resume skips drafts holding another kind. Upload status carries fp. Attach and finish urls end in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") for fresh media urls.",
+    text: "Publish now answers 409 with \"uploading\": [kinds] while an upload of the draft is in flight: finish or abort it first. A publish_on_complete draft goes live when its last upload ends (even aborted or expired) with a file in place; abort answers \"published\" (and \"aborted\": false if nothing was in flight). upload/resume skips drafts holding another kind. Upload status carries fp. Attach and finish urls end in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") for fresh media urls.",
   },
   {
     id: "2026-11-23-delete-gap-frames",

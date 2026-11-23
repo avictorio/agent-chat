@@ -478,8 +478,15 @@ credential, and the route reads no other.
   upload runs the check: a finish (engine, stream, ticket), an abort
   (which answers `published` as a finish does), a finish or stream whose
   file did not land, a revoke's cancel of a direct upload, and the draft
-  sweep, which is what notices an upload that expired unfinished and
-  publishes such a draft before its deletes can reach it. Only the
+  sweep. The sweep publishes only in the two states nothing else
+  notices: an upload of the draft expired unfinished, or the draft is as
+  old as its deletes take and holds a file the upload engine finished
+  (`md.began` set: only the engine writes it), so the instance stopped
+  between ending that upload and publishing. It once published any such
+  draft holding a file, so one posted a moment ago with an inline
+  thumbnail went live without its video at the sweep inside that video's
+  own start. A draft whose files were all sent inline or attached is
+  never published by the sweep and is deleted after a day. Only the
   finish used to check once the publish began waiting for the last
   upload, so a draft whose last upload was aborted after another file
   had finished stayed a draft and the sweep deleted it with that file.

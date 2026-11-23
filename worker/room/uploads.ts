@@ -281,12 +281,18 @@ export const UploadMethods = {
     const now = Date.now();
     this._sweptAt = now;
     // A publish_on_complete draft with a file in place and no upload still
-    // live goes live here, before the deletes below can reach it: its last
-    // upload expired unfinished (nothing else notices that), or the
-    // instance stopped between ending an upload and publishing. Left a
-    // draft, it was deleted with its finished file, where the code that
-    // published on the first finish had posted it.
-    const due = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND pubauto IS NOT NULL AND pubauto != 0 AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL) AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - UP_SESSION_MS).toArray();
+    // live goes live here, before the deletes below can reach it, in the
+    // two cases nothing else notices: (i) an upload of it expired
+    // unfinished, or (ii) it is as old as the deletes below take and holds
+    // a file the upload engine finished (only the engine sets md.began):
+    // the instance stopped between ending that upload and publishing.
+    // Left a draft, it was deleted with its finished file, where the code
+    // that published on the first finish had posted it. Any draft with a
+    // file used to be published here, so one posted a moment ago with an
+    // inline thumbnail went live without its video, at the sweep inside
+    // the very start of that video. A draft whose files are only inline
+    // or attached keeps its old fate: deleted after a day.
+    const due = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND pubauto IS NOT NULL AND pubauto != 0 AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL) AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?) AND (EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) <= ?) OR (m.ts < ? AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.at > ?) AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL AND md.began IS NOT NULL)))", now - UP_SESSION_MS, now - UP_SESSION_MS, now - 86400000, now - 86400000).toArray();
     for (const d of due) {
       await this.maybeAutoPublish(d.id, room || this.roomName || "");
       if (!this.alive(gen)) return;
