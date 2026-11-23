@@ -318,7 +318,8 @@ one list of parts however they arrive. Bigger parts wait for the check.
 Turning `R2_DIRECT` off shuts the path for sessions in flight as well
 (`upDirectOff`; the owner key is exempt, as it may force direct):
 a resume answers `direct: false` and `status` says the same, `sign`
-answers 409 telling the client to send the rest through `/part`, and a
+answers 409 telling the client to send the rest through `/part` (the
+composer, `uploads.ts`, does so mid-upload, keeping the parts sent), and a
 session whose parts are over `UP_PART_MAX` gets 409 from `sign`, `/part`
 and a resume alike, telling it to abort and start again (the server
 does not drop the upload itself: the switch may come back on within the

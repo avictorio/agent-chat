@@ -182,7 +182,44 @@ const { heldStream, settle, FIXTURES, TESTS, done, must, run, shot } = require('
     must(calls.some((c) => /\/101\/file\/finish/.test(c)) && calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
     return { r2: r2.length, signs: S.signs };
   });
-  await run('upload-finish-names-file', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+  await run('upload-direct-switched-off', { hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
+    // Direct uploads are switched off mid-flight: the first sign gives part
+    // 1's address only, the next answers 409 naming /part, as the server
+    // does. The upload carries on through the site from part 2 instead of
+    // failing, and part 1 (already in storage) is not sent again.
+    S.direct = true;
+    const r2 = [];
+    const signs = [];
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'PUT', 'access-control-allow-headers': '*', 'access-control-expose-headers': 'ETag' };
+    await page.route('https://acct.r2.cloudflarestorage.com/**', async (route) => {
+      const req = route.request();
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+      const u = new URL(req.url());
+      const n = +u.searchParams.get('partNumber');
+      r2.push(n);
+      const seg = u.pathname.split('/');
+      const up = S.ups[seg[3] + ':' + seg[4]];
+      if (up) up.got.add(n);
+      return route.fulfill({ status: 200, headers: Object.assign({ etag: '"e' + n + '"' }, cors), body: '' });
+    });
+    await page.route('**/messages/101/file/sign', async (route) => {
+      signs.push(JSON.parse(route.request().postData() || '{}').parts);
+      if (signs.length > 1) return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'Direct uploads are turned off: send this upload\'s remaining parts through the site (PUT each one to its /part?n=N); the parts already in storage count' }) });
+      const body = { room: 'demo', id: 101, kind: 'file', method: 'PUT', urls: { 1: 'https://acct.r2.cloudflarestorage.com/victorio-chat-media/demo/101/file?partNumber=1&uploadId=up1&X-Amz-Signature=s1' }, expires_at: new Date(Date.now() + 3600e3).toISOString() };
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.setInputFiles('#anyFile', { name: 'switch.tar', mimeType: 'application/x-tar', buffer: Buffer.alloc(200000, 3) });
+    await page.click('#send');
+    await page.locator('.file-card', { hasText: 'switch.tar' }).waitFor({ timeout: 20000 });
+    const viaSite = calls.filter((c) => /\/101\/file\/part\?n=/.test(c)).map((c) => +c.split('n=')[1].split(' ')[0]).sort();
+    const starts = calls.filter((c) => /\/101\/file\/start /.test(c)).length;
+    must(r2.length === 1 && r2[0] === 1, 'part 1 went to storage once: ' + JSON.stringify(r2));
+    must(JSON.stringify(viaSite) === '[2,3,4]', 'the other parts went through the site, once each: ' + JSON.stringify(viaSite));
+    must(signs.length === 2 && starts === 1, 'no sign after the 409 and no restart: ' + JSON.stringify({ signs, starts }));
+    must(calls.some((c) => /\/101\/publish/.test(c)), 'finished and published');
+    return { r2, viaSite, signs: signs.length };
+  });
+  await run('upload-finish-names-file',{ hash: '#invite=tok_Anthony' }, async (page, S, calls) => {
     // Every finish, the retry after a lost answer included, names the file
     // by the size and fingerprint start gave, so the server can refuse one
     // whose upload another file has replaced.

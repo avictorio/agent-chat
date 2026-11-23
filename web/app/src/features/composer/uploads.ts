@@ -302,7 +302,8 @@ async function uploadItem(
   const partBlob = (n: number) => blob.slice((n - 1) * ps, Math.min(n * ps, blob.size));
   const have = new Set(plan.received || []);
   for (const n of have) meter.add(partBlob(n).size);
-  const direct = !!plan.direct;
+  // Not const: a direct upload can be moved onto the site mid-flight (below).
+  let direct = !!plan.direct;
 
   // A direct upload's parts go to presigned storage addresses, signed a
   // batch at a time and re-signed when one is near its expiry (or storage
@@ -314,18 +315,35 @@ async function uploadItem(
   };
   // one signing call at a time: parallel parts wait for the batch in flight
   let signing: Promise<void> | null = null;
-  const target = async (n: number, ahead: number[]): Promise<{ url: string; headers: Record<string, string> }> => {
-    if (!direct) return client.partRequest(id, kind, n);
+  const target = async (n: number, ahead: number[]): Promise<{ url: string; headers: Record<string, string>; storage: boolean }> => {
     for (let round = 0; !fresh(n) && round < 4; round++) {
+      // the sign in flight (this one's or another part's) may have moved the upload onto the site
+      if (!direct) break;
       if (signing) {
         await signing.catch(() => {});
         continue;
       }
       const batch = [n, ...ahead.filter((x) => x !== n && !fresh(x))].slice(0, 25);
       const p = (async () => {
-        const r = await net(() => client.uploadSign(id, kind, batch), signal, meter);
-        const exp = Date.parse(r.expires_at) || Date.now() + 3600 * 1000;
-        for (const k of Object.keys(r.urls)) signed.set(Number(k), { url: r.urls[k]!, exp });
+        try {
+          const r = await net(() => client.uploadSign(id, kind, batch), signal, meter);
+          const exp = Date.parse(r.expires_at) || Date.now() + 3600 * 1000;
+          for (const k of Object.keys(r.urls)) signed.set(Number(k), { url: r.urls[k]!, exp });
+        } catch (e) {
+          // Direct uploads were switched off while this one was in flight
+          // (or the session predates the switch): sign answers 409 and
+          // names the site's /part route, and the parts already in storage
+          // count. Every remaining part goes through the site from here;
+          // before, this 409 failed the whole upload ("Part n failed"). A
+          // 409 that does not name /part (parts too big for the site) still
+          // fails it.
+          if (e instanceof ApiError && e.status === 409 && /\/part\b/.test(e.message)) {
+            direct = false;
+            signed.clear();
+            return;
+          }
+          throw e;
+        }
       })();
       signing = p;
       try {
@@ -334,9 +352,10 @@ async function uploadItem(
         if (signing === p) signing = null;
       }
     }
+    if (!direct) return { ...client.partRequest(id, kind, n), storage: false };
     const c = signed.get(n);
     if (!c) throw new PartError(0, "No storage address for part " + n);
-    return { url: c.url, headers: {} };
+    return { url: c.url, headers: {}, storage: true };
   };
 
   const sendAll = async (nums: number[]) => {
@@ -360,8 +379,11 @@ async function uploadItem(
             meter.setWaiting(null);
           }
           let sent = 0;
+          // whether this try went to a storage address (it can change mid-upload)
+          let storage = direct;
           try {
             const t = await target(n, nums.slice(idx));
+            storage = t.storage;
             await sendPart(t.url, t.headers, part, (b) => {
               meter.add(b - sent);
               sent = b;
@@ -382,7 +404,7 @@ async function uploadItem(
             const pe = e instanceof PartError ? e : e instanceof ApiError ? new PartError(e.status, e.message) : new PartError(0, errText(e));
             // Storage turning a signed address away means it expired (or
             // the clock drifted): sign it again and retry.
-            if (direct && pe.status === 403) signed.delete(n);
+            if (storage && pe.status === 403) signed.delete(n);
             else if (pe.status === 401 || pe.status === 403) {
               failure = new Error("Upload was denied");
               return;
@@ -392,7 +414,7 @@ async function uploadItem(
               attempt--;
               continue;
             }
-            if ((!pe.retry && !(direct && pe.status === 403)) || attempt >= 9) {
+            if ((!pe.retry && !(storage && pe.status === 403)) || attempt >= 9) {
               failure = new Error("Part " + n + " failed: " + pe.message);
               return;
             }
