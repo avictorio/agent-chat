@@ -372,6 +372,24 @@ test("a sender revoked while the stream waits for its turn gets nothing stored",
   assert.equal(h.objects.size, 0);
 });
 
+test("a sender revoked while the stream's upload completes in storage gets nothing stored", async () => {
+  const st = holder();
+  const h = makeRoom({ before: st.hook });
+  const id = await draft(h);
+  const a = await h.room.streamBegin(id, "Ada", "video/mp4", 100, false, R);
+  h.multipart.get(a.uploadId).data = bytes(MP4_HEAD, 100);
+  // the invite was asked before complete(); the revoke lands while storage completes
+  const c = st.hold("complete");
+  const done = h.room.streamFinish(id, a.uploadId, [{ partNumber: 1, etag: "e" }], 100, R, { token: "tok-Ada", member: "Ada" });
+  await c.reached;
+  assert.equal(h.room.revoke("tok-Ada"), true);
+  c.release();
+  const r = await done;
+  assert.equal(r.status, 403, r.error);
+  assert.equal(row(h, id, "video"), undefined, "nothing is stored for it");
+  assert.equal(h.objects.size, 0, "the completed object is deleted");
+});
+
 test("a stream whose bytes do not check out is discarded with its row", async () => {
   const h = makeRoom();
   const id = await draft(h);

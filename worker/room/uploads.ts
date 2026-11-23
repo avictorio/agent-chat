@@ -735,6 +735,11 @@ export const UploadMethods = {
       if (!head || head.size !== size || !sniffed) return discard(400, "The uploaded bytes do not check out as that video; upload discarded");
       // the message was deleted while storage answered (see upFinishNow)
       if (!this.upStill(id, "video", uploadId)) return discard(409, "This upload was cancelled while it finished");
+      // And the sender asked again, with no await before the write: the
+      // check above complete() leaves complete, head and the ranged get
+      // to wait on, and a revoke landing there still attached the video.
+      const left = sender ? this.inviteStill(sender.token, sender.member) : null;
+      if (left) return discard(left.status, left.error);
       this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
       this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, Date.now(), id, uploadId);
       this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
