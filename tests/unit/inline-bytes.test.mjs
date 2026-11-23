@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { inlineBytes } from "../../worker/lib/sniff.ts";
+import { decodeTextPayload, inlineBytes } from "../../worker/lib/sniff.ts";
 import { VIDEO_MAX } from "../../worker/limits.ts";
 
 test("inlineBytes decodes base64 and data: URLs, whitespace and all", () => {
@@ -44,4 +44,18 @@ test("a video at the inline cap decodes in a 128 MB heap", () => {
     "if (b.byteLength !== " + VIDEO_MAX + ") process.exit(2);";
   const r = spawnSync(process.execPath, ["--no-warnings", "--max-old-space-size=128", "--input-type=module", "-e", script], { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, (r.stderr || "").slice(-400));
+});
+
+// Pages and documents (html, doc) are text, raw or as a base64 data: URL:
+// the same length check comes before any decoding.
+test("decodeTextPayload takes a page at its cap and refuses a longer one before decoding it", () => {
+  const page = "<p>" + "x".repeat(7) + "</p>"; // 14 bytes
+  assert.equal(decodeTextPayload(page, 14), page);
+  assert.equal(decodeTextPayload(page, 13), "too_big");
+  const url = "data:text/html;base64," + Buffer.from(page).toString("base64");
+  assert.equal(decodeTextPayload(url, 14), page);
+  assert.equal(decodeTextPayload("data:text/html;base64," + Buffer.alloc(16, 65).toString("base64"), 14), "too_big");
+  // not base64 at all, and too long: refused on its length, unread
+  assert.equal(decodeTextPayload("data:text/html;base64," + "!".repeat(40), 14), "too_big");
+  assert.equal(decodeTextPayload("data:text/html;base64,!!!!", 14), null);
 });

@@ -8,7 +8,7 @@ import { messagesRoute, publishRoute } from "../../worker/routes/messages.ts";
 import { mcpCallTool } from "../../worker/agents/mcp.ts";
 import { BadRequest } from "../../worker/lib/http.ts";
 import { makeRoom } from "./room-harness.mjs";
-import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MAX, CLIENT_MSG_ID_MS, IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
+import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MAX, CLIENT_MSG_ID_MS, DOC_MAX, HTML_MAX, IMAGE_MAX, INLINE_TOTAL_MAX, VIDEO_MAX } from "../../worker/limits.ts";
 
 const R = "unit";
 
@@ -214,5 +214,20 @@ test("a client_msg_id that is not one is refused before anything is posted", asy
     assert.equal(r.status, 400, JSON.stringify(cid));
     assert.match(r.json.error, /client_msg_id/);
   }
+  assert.equal(h.all("SELECT id FROM m").length, 0);
+});
+
+test("a page or document past its cap is refused with 413 by REST and MCP, as raw text or base64", async () => {
+  const h = makeRoom();
+  h.member("Ada");
+  const big = "<p>" + "x".repeat(HTML_MAX) + "</p>";
+  for (const html of [big, "data:text/html;base64," + Buffer.from(big).toString("base64")]) {
+    const r = await post(h, JSON.stringify({ text: "page", html }), asJson);
+    assert.equal(r.status, 413);
+    assert.match(r.json.error, /HTML pages can be up to/);
+    await assert.rejects(mcpCallTool({}, h.room, R, "http://localhost", false, { kind: "agent" }, "Ada", "post_message", { text: "page", html }), /HTML pages can be up to/);
+  }
+  const doc = "data:text/markdown;base64," + Buffer.alloc(DOC_MAX + 1, 65).toString("base64");
+  assert.equal((await post(h, JSON.stringify({ text: "doc", doc }), asJson)).status, 413);
   assert.equal(h.all("SELECT id FROM m").length, 0);
 });

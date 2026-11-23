@@ -252,8 +252,9 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     let htmlArt: InlineMedia | null = null;
     if (body && body.html) {
-      const s = decodeTextPayload(body.html);
+      const s = decodeTextPayload(body.html, HTML_MAX);
       if (s === null) return json({ error: "\"html\" must be raw HTML text or a base64 data: URL" }, 400);
+      if (s === "too_big") return json({ error: pageTooBig("HTML pages", HTML_MAX) }, 413);
       if (!s.trim()) return json({ error: "\"html\" is empty" }, 400);
       const buf = new TextEncoder().encode(s);
       if (buf.byteLength > HTML_MAX) return json({ error: pageTooBig("HTML pages", HTML_MAX) }, 413);
@@ -262,8 +263,9 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
     }
     let doc: InlineMedia | null = null;
     if (body && body.doc) {
-      const s = decodeTextPayload(body.doc);
+      const s = decodeTextPayload(body.doc, DOC_MAX);
       if (s === null) return json({ error: "\"doc\" must be raw Markdown text or a base64 data: URL" }, 400);
+      if (s === "too_big") return json({ error: pageTooBig("Documents", DOC_MAX) }, 413);
       if (!s.trim()) return json({ error: "\"doc\" is empty" }, 400);
       if (s.indexOf("\u0000") >= 0) return json({ error: "\"doc\" must be text (Markdown)" }, 415);
       const buf = new TextEncoder().encode(s);

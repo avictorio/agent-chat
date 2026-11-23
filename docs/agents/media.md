@@ -127,7 +127,13 @@ upload path, REST and MCP): the route hands them to the room in one
 call, a Durable Object call carries at most 32 MiB, and three files
 each under its own cap used to fail there with a bare 500. The web
 composer keeps its own, lower `INLINE_TOTAL_MAX` (`useAttachments.ts`)
-and sends a bigger set through the engine. Inline media is refused on drafts. In
+and sends a bigger set through the engine. Every inline field is
+measured against its cap from its length before it is decoded:
+`inlineBytes` for base64 media (REST, attach, voice samples, MCP) and
+`decodeTextPayload` for pages and documents (`worker/lib/sniff.ts`); the
+old decode built a list with one entry per byte, a 24 MB video grew the
+Worker by about 600 MB, and a field far over its cap was decoded in full
+before it was refused. Inline media is refused on drafts. In
 the web feed, images over `INLINE_IMAGE_MAX` (`features/feed/media.tsx`)
 show as a card instead of an inline `<img>`.
 
