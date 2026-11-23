@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23";
+export const API_VERSION = "2026-11-23.2";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-delivery-cursor",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "after= is a cursor (GET /messages, MCP list_messages, /stream): keep the last answer's last_id, or the stream frame's id: line, and never build one from message ids. A draft published after newer messages, or a message whose media landed after it went live, is delivered once to every earlier cursor under a higher number, with the same id: replace the copy you hold by id. last_id can be past the newest message's id. MCP catalog 1.28.0.",
+  },
   {
     id: "2026-11-23-move-turn",
     date: "2026-11-23",

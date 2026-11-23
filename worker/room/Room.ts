@@ -45,7 +45,7 @@ import { warn } from "../lib/log.js";
    A query casts its rows to its table's row, or to a Pick of it for a
    column list, once. */
 /** m: one message (draft until published). */
-export type MsgRow = { id: number, ts: number, sender: string, text: string, draft: number | null, pubauto: number | null, pub_ts: number | null, owntrust: number | null,
+export type MsgRow = { id: number, ts: number, sender: string, text: string, draft: number | null, pubauto: number | null, pub_ts: number | null, owntrust: number | null, seq: number | null,
   audio_type: string | null, audio_size: number | null, audio_transcript: string | null, image_type: string | null, image_size: number | null,
   video_type: string | null, video_size: number | null, html_type: string | null, html_size: number | null, html_name: string | null,
   doc_type: string | null, doc_size: number | null, doc_name: string | null, file_type: string | null, file_size: number | null, file_name: string | null,
@@ -247,8 +247,22 @@ function schemaMediaStampAndLiveMatches(sql: SqlStorage) {
   sql.exec("CREATE INDEX IF NOT EXISTS gm_status ON gm (status)");
 }
 
+// Step 3. m.seq: the message's delivery number, when it is not its id.
+// Forward reads (after=N) and the stream's "id:" lines go by it. A message
+// that goes live later than its id was taken (a published draft, a post
+// held while its media was stored) or is sent again because media landed
+// on it takes a fresh number from the id counter (nextMsgId), so a reader
+// whose cursor passed its id still gets it, once. NULL means the id, so
+// existing rows need no backfill. Reads used to compare pub_ts against the
+// cursor message's, which handed a late-published draft back on every
+// read from the newest cursor and lost it when the cursor message was
+// deleted.
+function schemaDeliveryNumber(sql: SqlStorage) {
+  addColumn(sql, "m", "seq", "INTEGER");
+}
+
 /** The schema steps, in order (see above). */
-const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches];
+const SCHEMA_STEPS: Array<(sql: SqlStorage) => void> = [schemaBaseline, schemaMediaStampAndLiveMatches, schemaDeliveryNumber];
 
 export class Room extends DurableObject {
   // The instance's fields: declared only (the constructor and the methods
@@ -543,8 +557,7 @@ export class Room extends DurableObject {
     };
     client.send("retry: 2000\n\n");
     if (after !== null && streamWants(client, "message")) {
-      const backlog = this.read(after, KEEP);
-      for (const m of backlog) client.send(sseFrame(room, m));
+      for (const d of this.delivered(after, KEEP)) client.send(sseFrame(room, d.msg, d.dn));
     }
     this.clients.add(client);
     if (client.stateSub) {

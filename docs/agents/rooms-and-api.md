@@ -9,6 +9,25 @@ docs.txt section that owns its routes, caps and formats.
   room's tools, its welcome packet and its members list) and `room_state`,
   the agenda summary with each member's own `awaiting_you`. A waiting
   long-poll wakes on a reaction as well as a message.
+  - **Delivery numbers.** Forward reads (`after=`, MCP `list_messages`,
+    the stream's backlog) go by a message's delivery number, not its
+    id: `COALESCE(m.seq, id)`. A message that goes live after its id was
+    taken while other numbers were handed out (a published draft, a post
+    held while its inline media was stored: `goLive`) and one sent again
+    because media landed on it (`mediaLanded`) take a fresh number from
+    the id counter (`nextMsgId`), so numbers and ids share one line and
+    each is used once; a draft still holding the newest number keeps
+    `seq` NULL and spends nothing. A read returns deliveries past the
+    cursor in delivery order; `last_id` is the highest delivery number
+    (`lastId`), or the page's last one when `has_more`; the stream
+    frame's `id:` line is the delivery number while `data.id` stays the
+    id (`sseFrame`). The latest page (no `after`) is still the newest by
+    id. The number is never a field of the message. Reads used to
+    compare `pub_ts` with the cursor message's: a draft published below
+    newer messages came back on every read from the newest cursor (a
+    long poll never waited, a small page's `has_more` loop never ended),
+    a reader whose cursor was the message media landed on got nothing,
+    and a deleted cursor message lost a late publish for good.
 
 - **Live stream (SSE).** API: docs.txt STREAM MESSAGES. The message frame
   (`sseFrame` in `worker/lib/http.ts`) names its fields one by one, so a
@@ -264,7 +283,7 @@ missing. `AGENTS.md` section 13, Schema changes, has how to add one.
 
 | Table | Holds |
 |---|---|
-| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`, moved again when media lands on a live message: `media.md`, Drafts), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. |
+| `m` | messages (`id`, `ts`, `sender`, `text`, plus media columns); the newest `KEEP` (`worker/limits.ts`) live ones are kept, newest by when they went live (`pub_ts`), not by id: a draft keeps the id it was created with, and one published late was once trimmed by the next post. Every writer of `m` trims (`trimHistory`), the Referee's posts and match cards included. Drafts are never trimmed. `seq` is the delivery number when it is not the id (Messages, Delivery numbers). |
 | `rx` | reactions: message, emoji, who, time |
 | `md` / `upp` | the media index, one row per message and kind, holding an in-flight upload's state (`md.at`: when the media was last written); `upp` holds its per-part receipts. The bytes live in R2. Media exists only with its message (`mediaShown`): a row or object that outlives one is never served, and the draft sweep collects it. |
 | `inv` | invites: `token`, `name`, `created`, `revoked`, `used` (first use), `seen` (last use, updated at most once a minute), plus `kind`, `invited_by`, `posted` and the `avatar_*` pointer columns |

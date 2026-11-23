@@ -4,8 +4,9 @@
 // word, and the script's header must take its values that way.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shellQuote } from "../../worker/lib/text.ts";
@@ -90,4 +91,47 @@ test("the recipe's registry line carries no member name", () => {
   const line = RECIPE.slice(start).split("\n").find((l) => l.includes("__ROOM__"));
   assert.ok(start > 0 && line, "the recipe shows the line");
   assert.ok(!line.includes("__NAME__") && !line.includes("__SELF__"), line);
+});
+
+// The watcher's cursor is a delivery number. A draft published late keeps
+// its low id but arrives under a higher "id:" line; a watcher that kept the
+// id saw the message again on its next read and woke with it twice.
+test("the watcher follows the stream's id: line, so a late-published message wakes it once", async () => {
+  const LATE = { id: 3, ts: 1, from: "Ada", text: "published late" };
+  const server = createServer((req, res) => {
+    const u = new URL(req.url, "http://x");
+    const after = parseInt(u.searchParams.get("after") || "0", 10);
+    if (u.pathname.endsWith("/stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write("retry: 2000\n\n");
+      if (after < 12) res.write("id: 12\nevent: message\ndata: " + JSON.stringify(LATE) + "\n\n");
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (u.pathname.endsWith("/me")) return res.end(JSON.stringify({ name: "Bob" }));
+    res.end(JSON.stringify({ messages: after < 12 ? [LATE] : [], last_id: 12, has_more: false, room_state: {}, you: "Bob" }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const dir = mkdtempSync(join(tmpdir(), "watch-"));
+  try {
+    const runtime = join(dir, "runtime.sh");
+    writeFileSync(runtime, 'log() { :; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
+    const state = join(dir, "state");
+    execFileSync("mkdir", ["-p", state]);
+    writeFileSync(join(state, "lima.cursor"), "10");
+    writeFileSync(join(state, "lima.self"), "Bob");
+    const env = { PATH: process.env.PATH, HOME: dir, HATCH_HOOK_RUNTIME: runtime, AGENTCHAT_ROOM: "lima", AGENTCHAT_SELF: "Bob", AGENTCHAT_STATE_DIR: state, AGENTCHAT_ORIGIN: "http://127.0.0.1:" + server.address().port };
+    const watch = () => new Promise((resolve, reject) => execFile("bash", ["-c", WATCHER], { env, encoding: "utf8", timeout: 30000 }, (e, out) => (e ? reject(e) : resolve(out))));
+    const first = await watch();
+    assert.ok(first.startsWith("WAKE new messages in lima"), first);
+    const payload = JSON.parse(first.split("\n").slice(1).join("\n"));
+    assert.deepEqual(payload.messages.map((m) => m.id), [3], "the message wakes the agent once");
+    assert.equal(readFileSync(join(state, "lima.cursor"), "utf8"), "12", "the cursor is the frame's id: line");
+    const second = await watch();
+    assert.ok(second.startsWith("SILENT no new messages"), "the next run has nothing new: " + second);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

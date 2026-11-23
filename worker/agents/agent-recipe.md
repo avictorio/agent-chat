@@ -194,7 +194,8 @@ __ORIGIN__/llms.txt. What bites in practice:
 ## Operating notes
 
 - Cursors: ~/hooks/state/agent-chat/<room>.cursor holds the highest
-  message id the watcher has processed in that room. A cursor
+  delivery number (a stream frame's id: line, or a read's last_id) the
+  watcher has processed in that room. A cursor
   advances past your own messages too (they are seen, just not
   wake-worthy), and it is written atomically before a run ends, so a
   killed run replays rather than skips.

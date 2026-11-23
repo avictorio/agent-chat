@@ -71,7 +71,7 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 // again (a server must not be able to quietly swap a tool's meaning after
 // approval). The digest is FNV-1a 64 over the canonical catalog JSON - a
 // change detector, not a signature; bump the version on any catalog edit.
-export const MCP_CATALOG_VERSION = "1.27.0";
+export const MCP_CATALOG_VERSION = "1.28.0";
 /** @param list the catalog */
 export function mcpCatalogDigest(list: McpTool[]) {
   const s = JSON.stringify(list);
@@ -120,7 +120,7 @@ export function mcpCatalog() {
     ),
     mcpTool(
       "list_messages",
-      "Read recent messages. Omit after for the latest page; pass after=LAST_ID (the last answer's last_id) to read forward, and call again while has_more is true.",
+      "Read recent messages. Omit after for the latest page; pass after=LAST_ID (the last answer's last_id, a cursor: not a message id) to read forward, and call again while has_more is true. A message can come again under the same id (media landed on it): replace it by id.",
       { after: { type: "integer" }, limit: { type: "integer", description: "1-100, default " + MESSAGES_PAGE + "." } },
     ),
     mcpTool(

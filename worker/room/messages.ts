@@ -16,7 +16,11 @@ export type ApiMessage = Message & { targets: string[] };
 /** A message as a listing reads it (its sender as from), before withKinds
  *  turns its media columns into media references. */
 export type MsgListRow = { id: number, ts: number, from: string, text: string }
-  & Partial<Omit<MsgRow, "id" | "ts" | "sender" | "text" | "draft" | "pubauto" | "pub_ts" | "owntrust">>;
+  & Partial<Omit<MsgRow, "id" | "ts" | "sender" | "text" | "draft" | "pubauto" | "pub_ts" | "owntrust" | "seq">>;
+/** A live message and its delivery number: the number forward reads and
+ *  the stream's "id:" lines go by (the message's id unless it went live
+ *  late or was sent again; Room.ts, schema step 3). */
+export type Delivered = { msg: ApiMessage, dn: number };
 /** A listing row while withKinds rewrites it in place into an ApiMessage:
  *  its columns as read (typed), plus the fields it gains on the way. */
 export type MsgBag = MsgListRow & Record<string, unknown>;
@@ -126,7 +130,7 @@ export const MessageMethods = {
     }
     // held back until here: now it is live, and it went live now (a
     // reader whose cursor passed its id meanwhile is still owed it)
-    if (held) this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
+    const dn = held ? this.goLive(id) : id;
     this.trimHistory();
     this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
     const row: MsgListRow = { id, ts, from: sender, text };
@@ -139,7 +143,7 @@ export const MessageMethods = {
     // A draft is stored but not announced: no stream frame, no push. It goes
     // live only when publishMessage runs - that is what lets a long media upload
     // finish before the message officially posts.
-    if (!draft) this.announce(msg, room);
+    if (!draft) this.announce(msg, room, dn);
     return msg;
   },
 
@@ -165,14 +169,15 @@ export const MessageMethods = {
     }
   },
 
-  announce(msg: ApiMessage, room: string | null) {
+  /** @param dn the message's delivery number, its frame's "id:" line */
+  announce(msg: ApiMessage, room: string | null, dn: number = msg.id) {
     const ws = this.waiters;
     this.waiters = new Set();
     for (const w of ws) w();
     if (this.clients.size) {
       // Message frames are lean and identical for every client; the
       // current room state travels as its own event (see emitState).
-      const frame = sseFrame(room, msg);
+      const frame = sseFrame(room, msg, dn);
       for (const c of this.clients) {
         if (!streamWants(c, "message")) continue;
         c.send(frame);
@@ -187,23 +192,25 @@ export const MessageMethods = {
   // published message. Only the rows used to change, so open tabs kept the
   // text-only message until a reload, long polls slept through it, and a
   // reader whose cursor had passed the id never saw the file. The message
-  // goes out again, whole: the web app swaps in a copy that carries media
-  // its own lacks, a long poll wakes, and pub_ts moves past every other
-  // live message so a forward read from any later cursor returns it (it
-  // also counts as new for the trim, as a late publish does). No second
-  // push: members were told when it went live. A draft is left alone; its
-  // publish announces it with everything it has.
+  // goes out again, whole, under a fresh delivery number: the web app swaps
+  // in a copy that carries media its own lacks, a long poll wakes, and a
+  // forward read from any earlier cursor, the message's own included,
+  // returns it once. pub_ts stays when it went live, so the trim order does
+  // not change (moving pub_ts used to do both jobs, and a reader whose
+  // cursor was this very message got nothing). No second push: members
+  // were told when it went live. A draft is left alone; its publish
+  // announces it with everything it has.
   mediaLanded(id: number, room: string | null | undefined) {
     const r = this.sql.exec<Pick<MsgRow, "draft">>("SELECT draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || r.draft) return;
-    const newest = this.sql.exec<{ t: number | null }>("SELECT MAX(pub_ts) AS t FROM m WHERE draft IS NULL OR draft = 0").one().t || 0;
-    this.sql.exec("UPDATE m SET pub_ts = ? WHERE id = ?", Math.max(Date.now(), newest + 1), id);
+    const dn = this.nextMsgId();
+    this.sql.exec("UPDATE m SET seq = ? WHERE id = ?", dn, id);
     const msg = this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE id = ?', id).toArray())[0];
     const ws = this.waiters;
     this.waiters = new Set();
     for (const w of ws) w();
     if (!this.clients.size || !msg) return;
-    const frame = sseFrame(room || null, msg);
+    const frame = sseFrame(room || null, msg, dn);
     for (const c of this.clients) { if (streamWants(c, "message")) c.send(frame); }
     this.emitState(room);
   },
@@ -212,13 +219,30 @@ export const MessageMethods = {
   // the newest message would free its id for the next post: cursor
   // readers past it would miss the repost, and a signed media URL for the
   // deleted message would serve the new one's media. A high-water mark in
-  // cfg keeps every id fresh.
+  // cfg keeps every id fresh. Delivery numbers (m.seq) come from the same
+  // counter, so ids and delivery numbers share one number line.
   nextMsgId() {
-    const max = this.sql.exec<{ id: number | null }>("SELECT MAX(id) AS id FROM m").one().id || 0;
-    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray()[0];
-    const id = Math.max(max, r ? parseInt(r.v, 10) || 0 : 0) + 1;
+    const id = this.msgHwm() + 1;
     this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('msg_hwm', ?)", String(id));
     return id;
+  },
+
+  /** The newest number the id counter has handed out. */
+  msgHwm(): number {
+    const max = this.sql.exec<{ n: number | null }>("SELECT MAX(MAX(id), COALESCE(MAX(seq), 0)) AS n FROM m").one().n || 0;
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'msg_hwm'").toArray()[0];
+    return Math.max(max, r ? parseInt(r.v, 10) || 0 : 0);
+  },
+
+  // A draft or a held post goes live now. While its id is still the newest
+  // number handed out nothing can be past it, so it is delivered under its
+  // id and no number is spent; otherwise it takes a fresh delivery number,
+  // so a reader whose cursor passed its id meanwhile gets it, once.
+  /** @returns its delivery number */
+  goLive(id: number): number {
+    const seq = id < this.msgHwm() ? this.nextMsgId() : null;
+    this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ?, seq = ? WHERE id = ?", Date.now(), seq, id);
+    return seq === null ? id : seq;
   },
 
   // A room message from the referee itself (match results). Not a member: it
@@ -244,12 +268,12 @@ export const MessageMethods = {
     const finalText = (text !== undefined && text !== null) ? String(text) : (r.text || "");
     if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text).slice(0, MAX_TEXT), id);
-    this.sql.exec("UPDATE m SET draft = NULL, pub_ts = ? WHERE id = ?", Date.now(), id);
+    const dn = this.goLive(id);
     const f = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name, file_type: f.file_type, file_size: f.file_size, file_name: f.file_name };
     const msg = this.withKinds([row])[0];
     this.roomName = room;
-    this.announce(msg, room);
+    this.announce(msg, room, dn);
     return { status: 200, msg: msg };
   },
 
@@ -407,21 +431,32 @@ export const MessageMethods = {
   },
 
   /** @param after the cursor, or null for the latest */
-  read(after: number | null, limit: number) {
-    if (after === null) {
-      return this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id', limit).toArray());
-    }
-    // Forward reads are id-ordered, plus one exception: a draft that published
-    // after the cursor was taken keeps its original (lower) id, so id alone
-    // would skip it forever. pub_ts is the publish time; anything published
-    // after the cursor message was is owed to the reader too.
-    return this.withKinds(this.sql.exec<MsgListRow>('SELECT id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id FROM m WHERE (draft IS NULL OR draft = 0) AND (id > ? OR (pub_ts IS NOT NULL AND pub_ts > (SELECT pub_ts FROM m WHERE id = ?))) ORDER BY id LIMIT ?', after, after, limit).toArray());
+  read(after: number | null, limit: number): ApiMessage[] {
+    return this.delivered(after, limit).map((d) => d.msg);
+  },
+
+  // The latest page is the newest messages by id. A forward read is every
+  // live message whose delivery number is past the cursor, in delivery
+  // order: a message that went live late, or came again with new media,
+  // carries a number past every cursor taken before, so it is delivered
+  // once to each of them and a cursor at its number never sees it again.
+  /** @param after the cursor, or null for the latest */
+  delivered(after: number | null, limit: number): Delivered[] {
+    const cols = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id, COALESCE(seq, id) AS dn';
+    const rows = after === null
+      ? this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id", limit).toArray()
+      : this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM m WHERE (draft IS NULL OR draft = 0) AND COALESCE(seq, id) > ? ORDER BY dn LIMIT ?", after, limit).toArray();
+    const dns = rows.map((r) => r.dn);
+    // the delivery number is a cursor, not a field of the message
+    for (const r of rows as MsgBag[]) delete r.dn;
+    return this.withKinds(rows).map((msg, i) => ({ msg, dn: dns[i]! }));
   },
 
   lastId(): number {
-    // The highest id a reader can actually see: drafts do not count. A cursor
-    // taken from last_id must never skip a message that publishes later.
-    return this.sql.exec<{ id: number | null }>("SELECT MAX(id) AS id FROM m WHERE draft IS NULL OR draft = 0").one().id || 0;
+    // The highest delivery number a reader can actually see: drafts do not
+    // count. It can be past the newest message's id (a late publish, media
+    // landed on an older message).
+    return this.sql.exec<{ n: number | null }>("SELECT MAX(COALESCE(seq, id)) AS n FROM m WHERE draft IS NULL OR draft = 0").one().n || 0;
   },
 
   // The room's attachments, newest first: one entry per media row on a
@@ -498,11 +533,12 @@ export const MessageMethods = {
     // it used to be the room's newest id even then, and a reader who
     // followed the documented loop (read after=LAST_ID, keep last_id)
     // silently skipped every message past the page.
-    const answer = (page: ReturnType<typeof this.read>) => {
+    // last_id is a delivery number, like the cursor it replaces.
+    const answer = (page: Delivered[]) => {
       const more = after !== null && page.length >= limit;
-      return { messages: page, last_id: more ? Math.max(after as number, page[page.length - 1]!.id) : this.lastId(), has_more: more, room_state: this.roomState(who, room) };
+      return { messages: page.map((d) => d.msg), last_id: more ? Math.max(after as number, page[page.length - 1]!.dn) : this.lastId(), has_more: more, room_state: this.roomState(who, room) };
     };
-    let rows = this.read(after, limit);
+    let rows = this.delivered(after, limit);
     if (rows.length || !wait || after === null) return answer(rows);
     await (new Promise((resolve) => {
       let t: number | undefined;
@@ -513,7 +549,7 @@ export const MessageMethods = {
     if (!this.ready) return { messages: [], last_id: 0, has_more: false, room_state: { v: 1 } };
     // the wait can outlast the invite: someone removed meanwhile does not get what was posted since
     if (token) { const l = this.lookupInvite(token); if (!l.ok) return l; }
-    rows = this.read(after, limit);
+    rows = this.delivered(after, limit);
     return answer(rows);
   },
 } satisfies ThisType<Room>;
