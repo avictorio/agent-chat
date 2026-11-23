@@ -2,18 +2,34 @@
 export const dataLines = (txt: string) => String(txt).split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
 
 export const TV_NUMS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
-// An answer folded for matching: case, accents, punctuation and articles
-// dropped, number words as digits.
-export function tvNorm(s: unknown) {
-  return String(s == null ? "" : s)
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+// The words of an answer, folded: case and (unless keepAccents) Latin
+// accents dropped, every script's letters and digits kept, punctuation a
+// word break. The fold once kept only a-z and 0-9, so "東京", "Москва"
+// or "π" folded to nothing and could match no answer (every answer went
+// to the quizmaster), and a Twenty Questions guess "avô" won against
+// "avó". Only the combining accents U+0300-036F go: other scripts' marks
+// (a Japanese voicing mark, a Devanagari vowel sign) change the word, so
+// they are put back with NFC and kept.
+export function foldWords(s: unknown, keepAccents = false) {
+  const t = String(s == null ? "" : s).normalize("NFKD");
+  return (keepAccents ? t : t.replace(/[\u0300-\u036f]/g, ""))
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, " ")
-    .split(/\s+/)
-    .filter((w) => w && w !== "the" && w !== "a" && w !== "an")
-    .map((w) => { const i = TV_NUMS.indexOf(w); return i >= 0 ? String(i) : w; })
-    .join(" ");
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
+    .split(" ")
+    .filter(Boolean);
+}
+// The answer as typed, for one with no letters or digits at all (an
+// emoji): compared exactly, case and spacing aside.
+export const foldRaw = (s: unknown) => String(s == null ? "" : s).normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+const TV_ARTICLES = ["the", "a", "an"];
+// An answer folded for matching: foldWords, articles dropped, number
+// words as digits. An answer that is only an article ("A" on a multiple
+// choice) keeps it.
+export function tvNorm(s: unknown) {
+  const words = foldWords(s);
+  const kept = words.filter((w) => !TV_ARTICLES.includes(w));
+  return (kept.length ? kept : words).map((w) => { const i = TV_NUMS.indexOf(w); return i >= 0 ? String(i) : w; }).join(" ");
 }
 // At most one letter added, dropped or changed.
 export function tvNear(a: string, b: string) {
@@ -25,15 +41,17 @@ export function tvNear(a: string, b: string) {
   return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
 
-// The lenient match: equal once folded, or one letter off in an answer of
-// five letters or more.
+// The lenient match: equal once folded, or one letter off in an answer
+// of five letters or more. A key with nothing to fold (an emoji) is
+// compared as typed.
 /** @param keys the answer and its accepted variants */
 export function tvMatch(given: unknown, keys: unknown[]) {
   const g = tvNorm(given);
-  if (!g) return false;
+  const raw = foldRaw(given);
   return keys.some((k) => {
     const n = tvNorm(k);
-    return !!n && (g === n || (n.length >= 5 && tvNear(g, n)));
+    if (!n) return !!raw && raw === foldRaw(k);
+    return !!g && (g === n || (n.length >= 5 && tvNear(g, n)));
   });
 }
 

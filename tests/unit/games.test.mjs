@@ -39,6 +39,37 @@ test("tvMatch: equal once folded, or one letter off in answers of five letters o
   assert.equal(tvMatch("dog", ["", "cat"]), false);
 });
 
+test("answers in any script match: letters and digits of every alphabet are kept", () => {
+  // the fold kept only a-z and 0-9: these all folded to nothing and matched no answer
+  assert.equal(tvMatch("東京", ["東京"]), true);
+  assert.equal(tvMatch("Москва", ["москва"]), true);
+  assert.equal(tvMatch("Ёлка", ["елка"]), true); // a Cyrillic accent folds like a Latin one
+  assert.equal(tvMatch("π", ["π"]), true);
+  assert.equal(tvMatch("大阪", ["東京"]), false);
+  assert.equal(tvMatch("Ленинград", ["Москва"]), false);
+  // a Japanese voicing mark is part of the letter, not an accent to drop
+  assert.equal(tvMatch("か", ["が"]), false);
+  assert.equal(tvNorm("が"), "が");
+  // an answer that is only an article keeps it (a multiple choice)
+  assert.equal(tvNorm("A"), "a");
+  assert.equal(tvMatch("a", ["A"]), true);
+  assert.equal(tvMatch("b", ["A"]), false);
+  // a key with nothing to fold is compared as typed
+  assert.equal(tvMatch("🍎", ["🍎"]), true);
+  assert.equal(tvMatch("🍐", ["🍎"]), false);
+  assert.equal(tvMatch("apple", ["🍎"]), false);
+});
+
+test("tqNorm keeps every script, and accents: an exact guess wins with no say for the answerer", () => {
+  // the ASCII fold made both "av", so the wrong guess won the round
+  assert.notEqual(tqNorm("avô"), tqNorm("avó"));
+  assert.equal(tqNorm("Avô!"), tqNorm("avô"));
+  assert.equal(tqNorm("東京タワー"), "東京タワー");
+  assert.notEqual(tqNorm("東京"), tqNorm("大阪"));
+  assert.notEqual(tqNorm("東京"), "");
+  assert.equal(tqNorm("🍎"), "🍎");
+});
+
 test("clockWords, dataLines and seatAccepted", () => {
   assert.equal(clockWords(45), "45 s");
   assert.equal(clockWords(180), "3 min");

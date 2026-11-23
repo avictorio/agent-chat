@@ -1,6 +1,6 @@
 // Twenty Questions: a rotating answerer keeps a secret, everyone asks yes/no questions.
 
-import { clockWords, dataLines, seatAccepted } from "./shared.js";
+import { clockWords, dataLines, foldRaw, foldWords, seatAccepted } from "./shared.js";
 import TQ_SECRETS_TXT from "../data/twenty-secrets.txt";
 import type { GameLogLine, TwentyQuestion, TwentyRound, TwentyState, TwentyYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
@@ -35,9 +35,18 @@ export function tqSecrets() {
   if (!tqSecretsCache) tqSecretsCache = dataLines(TQ_SECRETS_TXT);
   return tqSecretsCache;
 }
-// "A Lighthouse!" and "lighthouse" name the same secret.
+// "A Lighthouse!" and "lighthouse" name the same secret. An exact guess
+// wins on its own, with no say for the answerer, so accents count here:
+// "avô" (grandfather) is not "avó" (grandmother). An ASCII-only fold made
+// both "av", so the wrong guess won the round. A close guess is the
+// answerer's call. A secret with no letters or digits (an emoji) is
+// compared as typed.
+const TQ_FILLER = ["a", "an", "the", "it", "is", "its"];
 export function tqNorm(s: unknown) {
-  return String(s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(a|an|the|it|is|its)\b/g, " ").replace(/\s+/g, " ").trim();
+  const words = foldWords(s, true);
+  if (!words.length) return foldRaw(s);
+  const kept = words.filter((w) => !TQ_FILLER.includes(w));
+  return (kept.length ? kept : words).join(" ");
 }
 
 export const TwentyMethods = {

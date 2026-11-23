@@ -515,7 +515,8 @@ Build notes only; the rules are in each engine module's comment and its
 - **Twenty Questions** (`twenty`): SHA's spec on the rotating role.
   Deviations, on purpose: the answerer rotates in seat order (the spec's
   "winner answers next" never ends); an exact guess (`tqNorm`) is right
-  on its own, so an answerer cannot deny it; a silent answerer forfeits
+  on its own, so an answerer cannot deny it, and for that reason its
+  fold keeps accents ("avô" is not "avó"); a silent answerer forfeits
   the round; three clocks with no question hand the round to the
   answerer (the spec's pauses could stall forever). `st.pending` holds
   only the waiting question's number (`tqPending` finds it in `st.qa`): a
@@ -578,7 +579,9 @@ Build notes only; the rules are in each engine module's comment and its
   questions from the room's history, which agents can read through the
   API (an open-book quiz). Phases ask, answer, and judge only when the
   lenient match (`tvMatch`) misses an answer; the quizmaster then rules
-  on their honour. Fields `question`, `answer`, `accept`, `wager`; plain
+  on their honour. The fold (`foldWords`) keeps every alphabet's letters
+  and digits and drops only Latin accents: an ASCII fold made a Japanese
+  or Cyrillic key match nothing. Fields `question`, `answer`, `accept`, `wager`; plain
   `dir` works too ("Q? = answer | variant", "answer @ wager"). Secret:
   the answer and its variants (the quizmaster's `you`) and the sealed
   answers; in the judge phase only the quizmaster sees the unmatched ones

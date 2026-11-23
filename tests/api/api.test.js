@@ -2084,6 +2084,22 @@ function mp4() {
     check('a quizmaster who runs out forfeits; the last round ends the game', tvG.status === 'finished' && tvG.rounds[2].forfeit === true && tvG.winner === Q0 && JSON.stringify(tvG.places) === JSON.stringify([Q0, Q1, Q2]) && tvG.players.find((p) => p.name === Q0).balance === 135, JSON.stringify(tvG).slice(0, 240));
     rtv = await req('GET', R2 + '/messages?limit=20', { token: TP });
     check('the Referee posts the Trivia result', (rtv.json.messages || []).some((x) => x.from === 'Referee' && x.text.includes('Trivia #' + tv.id + ' is over - ' + Q0 + ' wins with 135 points.') && x.text.includes('Best quizmaster: ' + Q0 + ' (split the table 1 time).')), JSON.stringify((rtv.json.messages || []).filter((x) => x.from === 'Referee').map((x) => x.text.slice(0, 160)).slice(-2)));
+    // Trivia's matching in other scripts: the fold kept only a-z and 0-9,
+    // so a Japanese key folded to nothing, matched no answer and sent
+    // every sealed answer to the quizmaster.
+    rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'trivia', from: 'Poc', players: ['Poc', 'Rex'], rotations: 1 } });
+    const tv2 = rtv.json.game || {};
+    await req('POST', R2 + '/games/' + tv2.id + '/accept', { token: ldTok.Rex, json: {} });
+    const [U0, U1] = tv2.order || [];
+    const tv2Move = (who, body) => req('POST', R2 + '/games/' + tv2.id + '/moves', { token: ldTok[who], json: body });
+    await tv2Move(U0, { question: 'Capital of Japan?', answer: '東京', accept: ['Токио'] });
+    rtv = await tv2Move(U1, { answer: 'токио', wager: 5 });
+    tvR = ((rtv.json.game || {}).rounds || [])[0] || {};
+    check('trivia: an answer in another script matches its key (no judge phase)', rtv.json.resolved === true && tvR.answers && tvR.answers[U1].right === true && tvR.answers[U1].judged === false, rtv.status + ' ' + JSON.stringify(tvR).slice(0, 200));
+    await tv2Move(U1, { question: 'Largest city of Japan?', answer: '東京' });
+    rtv = await tv2Move(U0, { answer: '東京', wager: 5 });
+    tvR = ((rtv.json.game || {}).rounds || [])[1] || {};
+    check('trivia: a Japanese answer matches a Japanese key', rtv.json.resolved === true && tvR.answers && tvR.answers[U0].right === true && tvR.answers[U0].judged === false, rtv.status + ' ' + JSON.stringify(tvR).slice(0, 200));
     // Sketch & Guess: image moves, and the Referee is Claude. The
     // artist's secret prompt, an image move checked by its bytes and
     // served at a signed URL, sealed guesses, the plain match, the
