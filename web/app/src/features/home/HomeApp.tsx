@@ -154,7 +154,20 @@ export default function HomeApp() {
     setForgetErr("");
     const dlg = forgetDlgRef.current;
     if (dlg && dlg.showModal) dlg.showModal();
-    else if (window.confirm("Forget " + r.room + "? It will be removed from this device.")) void doForget(r, true);
+    else if (window.confirm("Forget " + r.room + "? It will be removed from this device.")) {
+      // no dialog to show the failure in: ask the same question it would.
+      // This path used to skip the unsubscribe, so the room went on
+      // notifying the device.
+      void doForget(r, false).then((err) => {
+        if (
+          err &&
+          window.confirm(
+            "Couldn't turn off this room's notifications on this device. Forget it anyway? They then keep coming until you block notifications for this site."
+          )
+        )
+          void doForget(r, true);
+      });
+    }
   };
   const closeForget = () => {
     setForgetRoom(null);
@@ -164,7 +177,8 @@ export default function HomeApp() {
   // Notifications go off first, while the invite the server asks for is
   // still here; once it is deleted nothing on this device can stop them.
   // If that fails the room stays, unless the person chose Forget anyway.
-  const doForget = async (r: SavedRoom, anyway: boolean) => {
+  // Resolves to the failure's text, or "" once the room is forgotten.
+  const doForget = async (r: SavedRoom, anyway: boolean): Promise<string> => {
     if (!anyway) {
       // The bell's saved mode goes before the server call, as bell Off
       // does: a tab with this room open re-registers it quietly when its
@@ -189,12 +203,13 @@ export default function HomeApp() {
         } catch {
           // storage unavailable
         }
-        setForgetErr(
-          "Couldn't turn off this room's notifications on this device (" +
-            (e instanceof Error ? e.message : String(e)) +
-            "). Try again, or forget it anyway: they then keep coming until you block notifications for this site."
-        );
-        return;
+        const err =
+          (forgetErr ? "Still couldn't" : "Couldn't") +
+          " turn off this room's notifications on this device (" +
+          (e instanceof Error ? e.message : String(e)) +
+          "). Try again, or forget it anyway: they then keep coming until you block notifications for this site.";
+        setForgetErr(err);
+        return err;
       } finally {
         setForgetBusy(false);
       }
@@ -225,6 +240,7 @@ export default function HomeApp() {
     }
     closeForget();
     setRooms(savedRooms());
+    return "";
   };
 
   const onJoin = (e: React.FormEvent) => {
@@ -418,15 +434,21 @@ export default function HomeApp() {
                 </p>
               ) : null}
               <div className="dlg-actions">
-                <Button
-                  type="button"
-                 
-                  id="forgetNo"
-                  disabled={forgetBusy}
-                  onClick={closeForget}
-                >
+                <Button type="button" id="forgetNo" disabled={forgetBusy} onClick={closeForget}>
                   Cancel
                 </Button>
+                {forgetErr ? (
+                  <Button
+                    type="button"
+                    id="forgetRetry"
+                    disabled={forgetBusy}
+                    onClick={() => {
+                      if (forgetRoom) void doForget(forgetRoom, false);
+                    }}
+                  >
+                    {forgetBusy ? "Trying…" : "Try again"}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   className="danger-solid"
@@ -436,7 +458,7 @@ export default function HomeApp() {
                     if (forgetRoom) void doForget(forgetRoom, !!forgetErr);
                   }}
                 >
-                  {forgetBusy ? "Forgetting…" : forgetErr ? "Forget anyway" : "Forget"}
+                  {forgetErr ? "Forget anyway" : forgetBusy ? "Forgetting…" : "Forget"}
                 </Button>
               </div>
             </dialog>

@@ -276,7 +276,8 @@ The home page and the room page share one on-device identity model.
   left, clear of the row's link; Forget asks first (a dialog). It first
   drops this device's push registration in the room (`/push/unsubscribe`
   needs the invite it is about to delete; if that fails the dialog says so
-  and offers Forget anyway), then deletes every key the device kept for
+  and offers Try again and Forget anyway, a browser without dialogs asks
+  with confirm), then deletes every key the device kept for
   the room: `chat-invite:`, `chat-you:`, `chat-push-mode:/api/rooms/`,
   `ac-members:`, `ac:agent-app:`, `chat-upl:` and `chat-draft:<room>:*`.
   A key added per room belongs in that list too.

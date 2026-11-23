@@ -369,6 +369,73 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     must(!out.keys.some((k) => /[:/]demo($|:)/.test(k)), 'Forget must remove the room\'s keys: ' + JSON.stringify(out));
     return out;
   });
+  // A failed unsubscribe offers Try again, which runs it again (busy
+  // meanwhile); the error line used to say "Try again" with no button for it.
+  for (const vp of [{ tag: 'desktop', w: 1280, h: 860 }, { tag: 'phone', w: 390, h: 844, touch: true }]) {
+    await run('push-forget-retry-' + vp.tag, { init: pushInitSrc, w: vp.w, h: vp.h, touch: vp.touch }, async (page, S) => {
+      S.push = { [EP]: 'all' };
+      await page.goto('https://chat.victorio.cloud/');
+      await settle(page);
+      S.pushFail = 503;
+      await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+      await page.waitForSelector('#forgetDlg[open]', { timeout: 4000 });
+      await page.click('#forgetYes');
+      await page.waitForSelector('#forgetRetry', { timeout: 4000 });
+      const btns = () => page.$$eval('#forgetDlg .dlg-actions button', (bs) => bs.map((x) => ({ id: x.id, text: x.textContent, disabled: x.disabled, r: x.getBoundingClientRect().toJSON() })));
+      const first = { btns: await btns(), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')) };
+      must(JSON.stringify(first.btns.map((x) => x.text)) === '["Cancel","Try again","Forget anyway"]' && first.mode === 'all', 'a refused unsubscribe must offer Try again and keep the bell\'s mode: ' + JSON.stringify(first));
+      const dlg = await page.$eval('#forgetDlg', (d) => d.getBoundingClientRect().toJSON());
+      must(first.btns.every((x) => x.r.left >= dlg.left && x.r.right <= dlg.right), 'the buttons must fit in the dialog: ' + JSON.stringify({ dlg, btns: first.btns }));
+      await page.screenshot({ path: OUT + 'push-forget-retry-' + vp.tag + '.png' });
+      // Try again, refused again: the line says so
+      const sent = S.pushLog.length;
+      await page.click('#forgetRetry');
+      await settle(page);
+      const again = { err: await page.$eval('#forgetErr', (e) => e.textContent), log: S.pushLog.slice(sent) };
+      must(/^Still couldn't turn off/.test(again.err) && again.log.some((l) => l.startsWith('unsubscribe')), 'Try again must unsubscribe again and say it failed again: ' + JSON.stringify(again));
+      // Try again while the server is slow: every button waits
+      S.pushFail = 0;
+      let openUnsub;
+      S.unsubGate = new Promise((r) => (openUnsub = r));
+      await page.click('#forgetRetry');
+      await page.waitForFunction(() => document.getElementById('forgetRetry') && document.getElementById('forgetRetry').disabled, null, { timeout: 4000 });
+      const busy = await btns();
+      must(busy.every((x) => x.disabled) && busy[1].text === 'Trying…', 'every button must wait while Try again runs: ' + JSON.stringify(busy));
+      S.unsubGate = null;
+      openUnsub();
+      await settle(page);
+      const out = { push: S.push, open: await page.$eval('#forgetDlg', (d) => d.open), rows: await page.$$eval('.roomrow .rn', (rs) => rs.map((r) => r.textContent)) };
+      must(!Object.keys(S.push).length && !out.open && JSON.stringify(out.rows) === '["demo-two"]', 'Try again must forget the room once the server answers: ' + JSON.stringify(out));
+      return out;
+    });
+  }
+  // A browser with no dialog.showModal asks with confirm. That path used to
+  // skip the unsubscribe, so the room went on notifying the device; now it
+  // unsubscribes, and when that fails asks whether to forget anyway.
+  await run('push-forget-nodialog', { init: pushInitSrc + ' delete HTMLDialogElement.prototype.showModal;' }, async (page, S) => {
+    S.push = { [EP]: 'all' };
+    await page.goto('https://chat.victorio.cloud/');
+    await settle(page);
+    const asked = [];
+    let answers = [];
+    page.on('dialog', (d) => { asked.push(d.message()); void (answers.shift() ? d.accept() : d.dismiss()); });
+    // refused, and no to Forget anyway: the room stays, with its bell
+    S.pushFail = 503;
+    answers = [true, false];
+    await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+    await settle(page);
+    const kept = { asked: asked.slice(), log: S.pushLog.filter((l) => l.startsWith('unsubscribe')), rows: await page.$$eval('.roomrow .rn', (rs) => rs.map((r) => r.textContent)), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')) };
+    must(kept.asked.length === 2 && /Forget it anyway\?/.test(kept.asked[1]) && kept.log.length === 1 && kept.rows.includes('demo') && kept.mode === 'all', 'a refused unsubscribe must ask, and No must keep the room: ' + JSON.stringify(kept));
+    // the server answers: one confirm, the device leaves the room's registry
+    S.pushFail = 0;
+    asked.length = 0;
+    answers = [true];
+    await page.click('.roomrow:has(.rn:text-is("demo")) .forget');
+    await settle(page);
+    const out = { asked: asked.slice(), push: S.push, log: S.pushLog.filter((l) => l.startsWith('unsubscribe')), rows: await page.$$eval('.roomrow .rn', (rs) => rs.map((r) => r.textContent)) };
+    must(out.asked.length === 1 && !Object.keys(S.push).length && out.log[out.log.length - 1] === 'unsubscribe tok_Anthony' && JSON.stringify(out.rows) === '["demo-two"]', 'Forget without a dialog must unsubscribe the room: ' + JSON.stringify(out));
+    return out;
+  });
   // Bell Off that the server refuses says it failed and keeps the bell
   // on; it used to toast "Notifications off" while the room went on
   // notifying this device.
