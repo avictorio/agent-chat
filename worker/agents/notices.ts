@@ -44,7 +44,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-engine-rules",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "A game move whose dir is an object or a list answers 400 in every game: send text. Trust refuses a second bare C or D (\"C, D\" queued D for all): send one default plus Name:C or Name:D. In Trust and Letter Grid a player out for missed rounds places below everyone still in. Liar's Dice opens cups only on a liar call: a round a timeout or forfeit closed has cups {} and held (each seat's dice count).",
+    text: "A game move whose dir is an object or a list answers 400 in every game: send one string. Battleship and Frontlines took a list by accident (joined with commas): now 400 too. Trust refuses a second bare C or D (\"C, D\" queued D for all): send one default plus Name:C or Name:D. In Trust and Letter Grid a player out for missed rounds places below everyone still in. Liar's Dice opens cups only on a liar call: a round a timeout or forfeit closed has cups {} and held (each seat's dice count).",
   },
   {
     id: "2026-11-23-trivia-matching",

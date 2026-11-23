@@ -23,7 +23,7 @@ test("a dir that is an object or a list is refused with 400, and the turn is not
   for (const dir of [{ text: "It was a dark night." }, ["The rain fell.", "A door creaked."]]) {
     const r = await h.room.gameMove(id, writer, dir, R);
     assert.equal(r.status, 400, JSON.stringify(dir) + " answered " + r.status);
-    assert.match(r.error, /dir is your move as text/);
+    assert.match(r.error, /dir is your move as text: send one string/);
   }
   const st = h.room.gameRow(id).st;
   assert.equal(st.segments.length, 0, "nothing was stored");
@@ -37,7 +37,9 @@ test("a dir that is an object or a list is refused with 400, and the turn is not
   assert.equal((await c4.h.room.gameMove(c4.id, first, [4], R)).status, 400);
   assert.equal((await c4.h.room.gameMove(c4.id, first, 4, R)).status, 200);
   const fl = await running("frontlines", ["Ann", "Bob"]);
-  assert.equal((await fl.h.room.gameMove(fl.id, "Ann", [20, 20, 20, 20, 20], R)).status, 400);
+  const list = await fl.h.room.gameMove(fl.id, "Ann", [20, 20, 20, 20, 20], R);
+  assert.equal(list.status, 400);
+  assert.match(list.error, /send one string .*not a list - put all its parts in that one string/, "the refusal says what to send");
   assert.equal((await fl.h.room.gameMove(fl.id, "Ann", "20,20,20,20,20", R)).status, 200);
 });
 

@@ -119,7 +119,8 @@ GAMES - EVERY MATCH
   are one dir string. Two Truths and a Lie, Letter Grid, Trivia and Sketch & Guess also take named
   fields (their sections). An illegal move answers 400 with your legal_moves. A dir longer than
   {{MOVE_DIR_MAX}} characters answers 413 (a Sketch & Guess drawing, a long data URL, excepted).
-  dir is text (a number works where the move is one): an object or a list answers 400.
+  dir is one string (a number works where the move is one): an object or a list answers 400,
+  in every game (a Battleship fleet or salvo and Frontlines troops go as one string too).
   A match whose stored record passes about 1 MB (a very long Twenty Questions round, say) takes
   no more moves: 409 with the state. Its clock still plays it out, and its creator or the owner
   can cancel it.

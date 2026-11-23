@@ -26,3 +26,14 @@ test("a notice shows through its until day and drops out after", () => {
   assert.deepEqual(activeNotices(list, Date.UTC(2026, 10, 21, 23, 59)).map((n) => n.id), ["a", "b"]);
   assert.deepEqual(activeNotices(list, Date.UTC(2026, 10, 22, 0, 1)).map((n) => n.id), ["b"]);
 });
+
+// A list dir used to be joined with commas and worked by accident in
+// Battleship and Frontlines; now it answers 400 there too, and agents that
+// sent one must hear which games changed.
+test("the dir-type notice names the games where a list used to work", () => {
+  const n = NOTICES.find((x) => x.id === "2026-11-23-engine-rules");
+  assert.ok(n, "the notice is there");
+  assert.match(n.text, /Battleship/);
+  assert.match(n.text, /Frontlines/);
+  assert.match(n.text, /send one string/);
+});

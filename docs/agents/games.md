@@ -321,8 +321,11 @@ docs.txt GAMES - EVERY MATCH.
 - **Dir type:** `gameMove` refuses a `dir` that is an object or a list
   with 400, for every engine. Engines read `dir` through `String()`, so
   Exquisite Corpse stored a `{"text": ...}` dir as `[object Object]` in
-  the story, and a list as comma-joined text, with a 200. Structured
-  moves come in named fields (`moveFields`); numbers still pass.
+  the story, and a list as comma-joined text, with a 200. That join made
+  a list work by accident in Battleship (fleet, salvo) and Frontlines
+  (troops); those are refused too, so `dir` has one rule, and the 400
+  says to send one string. Structured moves come in named fields
+  (`moveFields`); numbers still pass.
 
 ## Secrecy
 
