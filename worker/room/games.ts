@@ -426,6 +426,11 @@ export const GameMachineryMethods = {
   /** @param opts the create's options: game names the engine, and no
    *  game is Light Cycles (the API's default) */
   async createGame(creator: string, playersIn: unknown[], opts: Body | null | undefined, room: string) {
+    // A match's state names its game in "type", so "type" is the natural
+    // guess for the create field too. It was never read: {"type": "duel"}
+    // made a Light Cycles match with a 201 (the schema upgrade test, meant
+    // to carry a duel across, checked a Light Cycles lobby because of it).
+    if (opts && opts.type != null && opts.game == null) return { status: 400, error: "the field is \"game\", not \"type\": game must be one of " + Object.keys(GAME_ENGINES).join(", ") };
     const key = String((opts && opts.game) || "lightcycles").toLowerCase().replace(/[\s_-]+/g, "");
     // an unknown spelling is no entry: the check below answers it
     const eng = (GAME_ENGINES as Record<string, GameEngine | undefined>)[(GAME_ALIASES as Record<string, string>)[key] || key];

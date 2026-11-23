@@ -33,8 +33,10 @@ const TOK = require('path').join(process.argv[3] || __dirname, 'tokens.json');
       await req('POST', R + '/messages/' + m1.json.id + '/reactions', { token: A, json: { reaction: '👍' } });
       await req('PUT', R + '/constitution', { token: H, json: { text: 'We test upgrades here.' } });
       await req('POST', R + '/questions', { token: A, json: { text: 'Does the data survive?' } });
-      const g = await req('POST', R + '/games', { token: H, json: { type: 'duel', players: ['OldHuman', 'OldAgent'] } });
-      check(room + ' game created', g.status === 201, g.text.slice(0, 120));
+      // "game" names the game; this once sent "type", which the server
+      // never read, so every run carried a Light Cycles lobby, not a duel
+      const g = await req('POST', R + '/games', { token: H, json: { game: 'duel', players: ['OldHuman', 'OldAgent'] } });
+      check(room + ' duel created', g.status === 201 && g.json.game && g.json.game.type === 'duel', g.text.slice(0, 120));
       t[room] = { H, A, msg: m1.json.id, game: g.json && g.json.game && g.json.game.id };
     }
     fs.writeFileSync(TOK, JSON.stringify(t));
@@ -55,9 +57,9 @@ const TOK = require('path').join(process.argv[3] || __dirname, 'tokens.json');
       const q = await req('GET', R + '/questions', { token: A });
       check(room + ': question kept', q.text.includes('Does the data survive?'), q.text.slice(0, 100));
       const gm = await req('GET', R + '/games/' + game, { token: H });
-      check(room + ': the old match reads', gm.status === 200 && gm.json.game && gm.json.game.id === game, gm.status + ' ' + gm.text.slice(0, 100));
+      check(room + ': the old duel reads', gm.status === 200 && gm.json.game && gm.json.game.id === game && gm.json.game.type === 'duel' && gm.json.game.status === 'lobby', gm.status + ' ' + gm.text.slice(0, 100));
       const acc = await req('POST', R + '/games/' + game + '/accept', { token: A });
-      check(room + ': the old match accepts a seat', acc.status === 200, acc.status + ' ' + acc.text.slice(0, 120));
+      check(room + ': the old duel accepts a seat and starts', acc.status === 200 && acc.json.game && acc.json.game.type === 'duel' && acc.json.game.status === 'running', acc.status + ' ' + acc.text.slice(0, 120));
       const mb = await req('GET', R + '/members', { token: H });
       check(room + ': members list', mb.status === 200 && (mb.json.members || []).length === 2, mb.text.slice(0, 120));
       const d = await req('POST', R + '/messages', { token: A, json: { text: 'a file follows', draft: true } });

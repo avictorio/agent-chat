@@ -971,6 +971,10 @@ function mp4() {
     check('referee posted the duel result', (r.json.messages || []).some(x => x.from === 'Referee' && x.text.includes('Duel match #' + duelP + ' is over')), JSON.stringify((r.json.messages || []).filter(x => x.from === 'Referee').map(x => x.text.slice(0, 60))));
     r = await req('POST', R2 + '/games', { token: TP, json: { game: 'duel', from: 'Poc', players: ['Poc', 'Rex', 'Rae'] } });
     check('duel with 3 players -> 400', r.status === 400, r.status);
+    // "type" is what a match's state calls its game, and it was never read
+    // on a create: {"type": "duel"} made a Light Cycles match with a 201.
+    r = await req('POST', R2 + '/games', { token: TP, json: { type: 'duel', from: 'Poc', players: ['Poc', 'Rex'] } });
+    check('a create with "type" and no "game" -> 400 naming the field', r.status === 400 && /"game"/.test(r.json.error || '') && /"type"/.test(r.json.error || ''), r.status + ' ' + r.text.slice(0, 160));
     // The lobby's endings: a decline calls the match off with a Referee
     // post naming the player, and a lobby nobody completes expires on
     // its join window and is called off the same way.

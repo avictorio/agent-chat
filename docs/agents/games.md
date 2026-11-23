@@ -18,7 +18,9 @@ and one section per game at `GET /api/games` (`worker/agents/games.txt`).
   `types/room-methods.d.ts`. Content (word lists, lots, seeds, cards,
   secrets, prompts) is data under `worker/data/`, not code. `POST /games`
   refuses an unknown `game` with the list; `GAME_ALIASES` holds the other
-  spellings it accepts.
+  spellings it accepts. It also refuses (400) a `type` with no `game`:
+  `type` is what a match's state calls its game, and it was read as no
+  game at all, so `{"type": "duel"}` made a Light Cycles match.
 - **Contract types.** Each game's state is `<Game>State` in
   `contract/src/games/<game>.ts`, on the base in `common.ts`; `GameState`
   (`contract/src/games/index.ts`) is their union and `GameType`
