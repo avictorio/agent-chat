@@ -51,10 +51,11 @@ export function renderWerewolfView(ctx: GameViewCtx, g: WerewolfState, force?: b
     if (gv.r3dCommit && !/^(say|den):/.test(dir)) gv.r3dCommit();
     void ctx.sendMove(g.id, dir, note);
   };
-  // a line of talk sent twice is two lines, not a double tap
-  const say = (dir: string) => {
-    if (ctx.gameView !== gv) return;
-    void ctx.sendMove(g.id, dir, note, undefined, { repeat: true });
+  // a line of talk sent twice is two lines, not a double tap; the answer
+  // says whether it landed, so the talk form can give a refused line back
+  const say = (dir: string): Promise<boolean> => {
+    if (ctx.gameView !== gv) return Promise.resolve(false);
+    return ctx.sendMove(g.id, dir, note, undefined, { repeat: true });
   };
   if (you.playing) wrap.appendChild(ctx.panel("role", <WerewolfRole g={g} />));
   if (wwActionVerb(g)) {

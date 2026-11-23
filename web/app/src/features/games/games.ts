@@ -326,7 +326,8 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // next.
   // named: the turn room_state named when the move was tapped (turn is
   // what is sent, which differs once a refusal has told us better).
-  type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined; named: number | string | undefined };
+  // landed: told whether the move is known to have landed (sendMove's answer)
+  type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined; named: number | string | undefined; landed?: (ok: boolean) => void };
   const moving = new Map<number, { last: string; queue: Waiting[] }>();
   // how long a move's answer may take (sendOne)
   // Well past the longest the referee itself may hold a move: the guess
@@ -352,31 +353,45 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // how.repeat: a repeat is meant, not a double tap. A line of talk is
   // the case: the form has already cleared its draft, so a second "no"
   // dropped as a copy was lost for good.
-  async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }) {
+  // Answers true once the referee took the move, false when it was
+  // refused, too late or unanswered: a form that cleared what was typed
+  // (a Werewolf line) puts it back on false, where before the text was
+  // gone for good. A double tap that is dropped answers true: the first
+  // tap is the move.
+  async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }): Promise<boolean> {
     const named = opts.turnFor ? opts.turnFor(id) : undefined;
     const turn = turnToSend(id, named);
     const out = moving.get(id);
     if (out) {
       if (out.last !== dir || how?.repeat) {
         out.last = dir;
-        out.queue.push({ dir, note, label, turn, named });
+        return new Promise<boolean>((landed) => out.queue.push({ dir, note, label, turn, named, landed }));
       }
-      return;
+      return true;
     }
     const mine = { last: dir, queue: [] as Waiting[] };
     moving.set(id, mine);
+    let first = false;
     try {
       for (let w: Waiting | undefined = { dir, note, label, turn, named }; w; w = mine.queue.shift()) {
         // One send that throws must not strand the moves queued behind
         // it. What throws here is the repaint, after the answer came, so
-        // the move itself may well have landed.
-        await sendOne(id, w).catch(() => toast("Something went wrong showing that move. Check the board.", true));
+        // the move itself landed.
+        const ok = await sendOne(id, w).catch(() => {
+          toast("Something went wrong showing that move. Check the board.", true);
+          return true;
+        });
+        if (w.landed) w.landed(ok);
+        else first = ok;
       }
     } finally {
       moving.delete(id);
+      // a throw above must not leave a queued sender waiting forever
+      for (const w of mine.queue.splice(0)) if (w.landed) w.landed(false);
     }
+    return first;
   }
-  async function sendOne(id: number, w: Waiting) {
+  async function sendOne(id: number, w: Waiting): Promise<boolean> {
     const { dir, note, label } = w;
     if (note) {
       note.textContent = label || "Queuing " + dir + "…";
@@ -431,11 +446,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         cache.set(id, d.game);
         notify();
         renderGameView(d.game, true);
-      } else if (ctl.signal.aborted) {
+        return true;
+      }
+      if (ctl.signal.aborted) {
         // cut off while the answer's body was arriving: the client hands
         // back an empty answer, which is not a refusal
         noAnswer();
       } else say("That move was refused.");
+      return false;
     } catch (e) {
       // the match moved past the turn this move was meant for: show it
       // as it is now, to decide again. The referee's sentence is written
@@ -448,10 +466,11 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         notify();
         renderGameView(stale.game, true);
         say("Too late: the match has moved on. This is how it stands now.");
-        return;
+        return false;
       }
       if (ctl.signal.aborted) noAnswer();
       else say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
+      return false;
     } finally {
       clearTimeout(deadline);
     }

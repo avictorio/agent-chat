@@ -550,7 +550,28 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
     if (out.posts.length !== 2 || !out.posts.every((c) => /"dir":"say: no"/.test(c))) throw new Error('both lines go out, in order: ' + JSON.stringify(out));
     return out;
   });
-  for (const [label, o] of [['werewolf-night-wolf', {}], ['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+  // A line the referee refuses (the day closed just before Say) comes
+  // back into the field and the panel's draft: the form cleared it before
+  // the answer, and the accusation was gone for good.
+  await run('werewolf-say-refused', { state: { ww: true }, init: noGl }, async (page, S) => {
+    const out = {};
+    await page.click('.game-card.kind-werewolf');
+    await page.waitForSelector('#viewer .ww-talk-input', { timeout: 20000 });
+    S.moveRefuse = 'The village sleeps - talk resumes at dawn.';
+    await page.fill('#viewer .ww-talk-input', 'Henry voted with the wolves twice.');
+    await page.press('#viewer .ww-talk-input', 'Enter');
+    await page.waitForFunction(() => /village sleeps/.test(document.querySelector('#viewer').textContent), null, { timeout: 10000 });
+    out.back = await page.$eval('#viewer .ww-talk-input', (i) => i.value);
+    // and it is the panel's draft too: a repaint keeps it
+    await page.click('#viewer .arena-tabs button:nth-child(2)');
+    await page.click('#viewer .arena-tabs button:nth-child(1)');
+    await page.waitForSelector('#viewer .ww-talk-input', { timeout: 10000 });
+    out.kept = await page.$eval('#viewer .ww-talk-input', (i) => i.value);
+    if (out.back !== 'Henry voted with the wolves twice.') throw new Error('a refused line comes back into the field: ' + JSON.stringify(out.back));
+    if (out.kept !== out.back) throw new Error('the given-back line is the draft, kept across a repaint: ' + JSON.stringify(out.kept));
+    return out;
+  });
+  for (const [label, o] of [['werewolf-night-wolf', {}],['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true, wwWolf: true } }, o), async (page, S, calls) => {
       const out = {};
       await page.waitForSelector('.game-card .ww-card', { timeout: 10000 });

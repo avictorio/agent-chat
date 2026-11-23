@@ -65,10 +65,18 @@ export function WerewolfAction({ g, me, onSend }: { g: WerewolfState; me: string
 
 type Channel = "town" | "den";
 
+// A line given back, ahead of whatever was typed since.
+const joinBack = (line: string, since: string) => (since.trim() ? line + " " + since : line).slice(0, WW_TALK_MAX);
+
 /* A line to the village or the pack. The field starts from the draft
    when it mounts and reports each keystroke back. Uncontrolled field:
-   see docs/agents/games.md, Panels. */
-function TalkForm({ ch, draft, onDraft, onSay }: { ch: Channel; draft: string; onDraft: (v: string) => void; onSay: (dir: string) => void }) {
+   see docs/agents/games.md, Panels.
+   The field clears at once, and a line the referee does not take (the
+   day closed first, the answer never came) comes back: into the field
+   if it is still on the page, and always into the panel's draft, so a
+   form that unmounted at nightfall shows it again at dawn. Before, a
+   refused line was simply gone. Anything typed since stays after it. */
+function TalkForm({ ch, draft, onDraft, onGiveBack, onSay }: { ch: Channel; draft: string; onDraft: (v: string) => void; onGiveBack: (t: string) => void; onSay: (dir: string) => Promise<boolean> }) {
   const ref = useRef<HTMLInputElement>(null);
   const [seed] = useState(draft);
   useLayoutEffect(() => {
@@ -81,7 +89,12 @@ function TalkForm({ ch, draft, onDraft, onSay }: { ch: Channel; draft: string; o
     if (!t) return;
     inp.value = "";
     onDraft("");
-    onSay((ch === "den" ? "den: " : "say: ") + t);
+    void onSay((ch === "den" ? "den: " : "say: ") + t).then((ok) => {
+      if (ok) return;
+      const now = ref.current;
+      if (now && now.isConnected) now.value = joinBack(t, now.value);
+      onGiveBack(t);
+    });
   };
   return (
     <div className="ww-talk-form">
@@ -106,7 +119,7 @@ function TalkForm({ ch, draft, onDraft, onSay }: { ch: Channel; draft: string; o
 /* The discussion panel: the town square (everyone by day; the dead and
    spectators read), and for wolves the den. The drafts are this panel's
    state, kept for as long as the match is open. */
-export function WerewolfTalk({ g, onSay }: { g: WerewolfState; onSay: (dir: string) => void }) {
+export function WerewolfTalk({ g, onSay }: { g: WerewolfState; onSay: (dir: string) => Promise<boolean> }) {
   const [draft, setDraft] = useState<Record<Channel, string>>({ town: "", den: "" });
   // Each list follows the newest line while its reader is at (or near)
   // the bottom, and stays put once they have scrolled up to read back.
@@ -165,7 +178,13 @@ export function WerewolfTalk({ g, onSay }: { g: WerewolfState; onSay: (dir: stri
           ))}
         </div>
         {canTown || canDen ? (
-          <TalkForm ch={ch} draft={draft[ch]} onDraft={(v) => setDraft((d) => Object.assign({}, d, { [ch]: v }))} onSay={onSay} />
+          <TalkForm
+            ch={ch}
+            draft={draft[ch]}
+            onDraft={(v) => setDraft((d) => Object.assign({}, d, { [ch]: v }))}
+            onGiveBack={(t) => setDraft((d) => Object.assign({}, d, { [ch]: joinBack(t, d[ch]) }))}
+            onSay={onSay}
+          />
         ) : ch === "town" && alive && g.phase === "night" ? (
           <div className="ww-talk-empty">The village sleeps - talk resumes at dawn.</div>
         ) : null}

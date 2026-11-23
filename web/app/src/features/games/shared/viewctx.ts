@@ -107,7 +107,7 @@ export interface GameViewCtx {
   paint3d(kind: string, g: GL, h: Host3d, extra?: Partial<Omit<Arena3dProps, "g">>): void;
   paintDuel3d(g: DuelState, h: Host3d): void;
   resultRow(g: GL): HTMLElement | null;
-  sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }): Promise<void>;
+  sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }): Promise<boolean>;
   turnBanner(g: GL): HTMLElement | null;
   webglOk(): boolean;
   /** True when the open arena plays on flat panels: no WebGL, or its

@@ -227,7 +227,10 @@ docs.txt GAMES - EVERY MATCH.
   rider steering again, a second line in the Werewolf square). A caller
   says when a repeat is meant (`sendMove(..., { repeat: true })`): the
   Werewolf talk form does, since it has already cleared its draft and a
-  second "no" dropped as a double tap was lost. On the
+  second "no" dropped as a double tap was lost. `sendMove` answers
+  whether the move landed (false on a refusal, a 409, no answer), so a
+  form that clears at once can give the text back: the talk form puts a
+  refused line into the field and its panel's draft. On the
   409 it repaints from the answer's `game` and shows a plain sentence
   with no turn number (the referee's is written for agents), and sends
   the answer's `turn` with the next move for as long as `room_state`
