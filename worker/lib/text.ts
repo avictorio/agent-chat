@@ -53,7 +53,10 @@ export function memberNameProblem(name: string) {
  * beside a single-spaced twin that every such move landed on.
  */
 export function cleanName(raw: string | null | undefined): string {
-  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  // NFC first, so the name checked (memberNameProblem) is the name stored:
+  // invite() composes it, and U+1FEF composes to a backtick - a character
+  // the check refuses, stored after passing it.
+  const text = String(raw || "").normalize("NFC").replace(/\s+/g, " ").trim();
   let out = "";
   for (const ch of text) {
     if (out.length + ch.length > MAX_NAME) break;
@@ -68,6 +71,24 @@ export function cleanName(raw: string | null | undefined): string {
 // NFKC so look-alike forms (full-width letters, composed vs decomposed) match.
 export function nameFold(name: string | null | undefined) {
   return String(name || "").normalize("NFKC").toLowerCase();
+}
+
+// Whether two strings name the same member: the one test the room uses
+// (scripts/check-worker.js refuses a new toLowerCase() or SQL lower() in
+// worker/room). Names used to be compared three ways - this fold, JS
+// toLowerCase and SQL lower(), which folds ASCII only - so a member named
+// "Émile" or "Иван" matched no invite in SQL and read as a system actor
+// (kind non_interactive, the Referee's) on every message.
+export function sameName(a: string | null | undefined, b: string | null | undefined) {
+  return nameFold(a) === nameFold(b);
+}
+
+// The key a member's stored rows are filed under: their voice (mv.name),
+// their push registrations (push.member) and their avatar's path in R2.
+// The rows already stored were written under a plain toLowerCase, so the
+// key stays that; it files rows, and never decides who is who (sameName).
+export function nameKey(name: string | null | undefined) {
+  return String(name || "").toLowerCase();
 }
 
 /**

@@ -4,7 +4,7 @@ import { streamWants } from "./state.js";
 import { isStoreError, storeError } from "../lib/errors.js";
 import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT } from "../limits.js";
 import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
-import { mentionsName } from "../lib/text.js";
+import { mentionsName, nameFold, sameName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
 import type { AttachmentKind, AttachmentsResponse, Message, MessagesResponse } from "@chat/contract";
 import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, PcidRow, Refusal, Room, RxRow, StreamClient } from "./Room.js";
@@ -49,7 +49,7 @@ export const MessageMethods = {
     if (!r) return null;
     // Drafts are invisible to everyone but their sender and the owner, here
     // as everywhere else: a draft answers exactly like a missing message.
-    if (r.draft && !owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
+    if (r.draft && !owner && !sameName(r.sender, who)) return null;
     return this.reactionsFor(id);
   },
 
@@ -57,15 +57,15 @@ export const MessageMethods = {
   react(id: number, who: string, emoji: string | null, room: string, owner: boolean) {
     const msg = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!msg) return null;
-    if (msg.draft && !owner && String(msg.sender).toLowerCase() !== String(who || "").toLowerCase()) return null;
+    if (msg.draft && !owner && !sameName(msg.sender, who)) return null;
     const ts = Date.now();
-    this.sql.exec("DELETE FROM rx WHERE msg = ? AND lower(who) = lower(?)", id, who);
+    for (const x of this.sql.exec<Pick<RxRow, "who">>("SELECT DISTINCT who FROM rx WHERE msg = ?", id).toArray()) if (sameName(x.who, who)) this.sql.exec("DELETE FROM rx WHERE msg = ? AND who = ?", id, x.who);
     if (emoji) this.sql.exec("INSERT INTO rx (msg, emoji, who, ts) VALUES (?, ?, ?, ?)", id, emoji, who, ts);
     const reactions = this.reactionsFor(id);
     const frame = "event: reaction\ndata: " + JSON.stringify({ type: "reaction", room: room, id: id, message_from: msg.sender, from: who, kind: this.memberKind(who), targets: [msg.sender], reaction: emoji, reactions: reactions, ts: ts }) + "\n\n";
     // A draft is private to its sender (and the owner): its reactions are
     // not announced to the rest of the room.
-    const sees = (c: StreamClient) => !msg.draft || c.owner || String(c.name || "").toLowerCase() === String(msg.sender).toLowerCase();
+    const sees = (c: StreamClient) => !msg.draft || c.owner || sameName(c.name, msg.sender);
     for (const c of this.clients) { if (streamWants(c, "reaction") && sees(c)) c.send(frame); }
     if (msg.draft) return { reactions: reactions, message_from: msg.sender };
     this.emitState(room);
@@ -106,7 +106,7 @@ export const MessageMethods = {
     // below: a repeat sent while the first is still storing its media
     // finds it.
     if (cid) {
-      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = lower(?) AND cid = ?", sender, cid).toArray()[0];
+      const seen = this.sql.exec<Pick<PcidRow, "msg" | "draft">>("SELECT msg, draft FROM pcid WHERE sender = ? AND cid = ?", nameFold(sender), cid).toArray()[0];
       if (seen) return this.repeatPost(seen.msg, !!seen.draft);
     }
     const ts = Date.now();
@@ -173,7 +173,7 @@ export const MessageMethods = {
     // invisible, and stamping it put the drafter into the digest rotation
     // that room_state shows every member (awaiting_digest_from), even
     // after the draft was deleted. publishMessage stamps a draft's sender.
-    if (!draft) this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", ts, sender);
+    if (!draft) { const [who, ...names] = this.invMatch(sender); this.sql.exec("UPDATE inv SET posted = ? WHERE " + who + " AND posted IS NULL", ts, ...names); }
     const row: MsgListRow = { id, ts, from: sender, text };
     if (audio) { row.audio_type = audio.type; row.audio_size = audio.data.byteLength; row.audio_transcript = audio.transcript || null; }
     if (image) { row.image_type = image.type; row.image_size = image.data.byteLength; }
@@ -191,8 +191,11 @@ export const MessageMethods = {
   /** Records a post's client_msg_id, and lets go of the sender's ids
    *  past the newest CLIENT_MSG_ID_KEEP or older than CLIENT_MSG_ID_MS. */
   rememberPostId(sender: string, cid: string, id: number, draft: boolean, ts: number) {
-    this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (lower(?), ?, ?, ?, ?)", sender, cid, id, ts, draft ? 1 : null);
-    this.sql.exec("DELETE FROM pcid WHERE sender = lower(?) AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = lower(?) ORDER BY ts DESC, rowid DESC LIMIT ?))", sender, ts - CLIENT_MSG_ID_MS, sender, CLIENT_MSG_ID_KEEP);
+    // filed under the sender's fold (nameFold); rows from before were filed
+    // under SQL lower(), the same string for an ASCII name, and age out
+    const key = nameFold(sender);
+    this.sql.exec("INSERT INTO pcid (sender, cid, msg, ts, draft) VALUES (?, ?, ?, ?, ?)", key, cid, id, ts, draft ? 1 : null);
+    this.sql.exec("DELETE FROM pcid WHERE sender = ? AND (ts < ? OR rowid NOT IN (SELECT rowid FROM pcid WHERE sender = ? ORDER BY ts DESC, rowid DESC LIMIT ?))", key, ts - CLIENT_MSG_ID_MS, key, CLIENT_MSG_ID_KEEP);
   },
 
   /**
@@ -326,7 +329,7 @@ export const MessageMethods = {
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
     const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only publish your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only publish your own messages" };
     if (!r.draft) return { status: 409, error: "That message is already live" };
     // Not while one of its files is still on its way: published then, the
     // message went live with that file missing and its upload dangling,
@@ -346,7 +349,8 @@ export const MessageMethods = {
     if (!finalText.trim() && !r.audio_type && !r.image_type && !r.video_type && !r.html_type && !r.doc_type && !r.file_type) return { status: 400, error: "Nothing to publish yet: add text or attach the media first" };
     if (text !== undefined && text !== null) this.sql.exec("UPDATE m SET text = ? WHERE id = ?", String(text), id);
     const dn = this.goLive(id);
-    this.sql.exec("UPDATE inv SET posted = ? WHERE lower(name) = lower(?) AND posted IS NULL", Date.now(), r.sender);
+    const [poster, ...names] = this.invMatch(r.sender);
+    this.sql.exec("UPDATE inv SET posted = ? WHERE " + poster + " AND posted IS NULL", Date.now(), ...names);
     const f = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
     const row = { id: f.id, ts: f.ts, from: f.sender, text: f.text, audio_type: f.audio_type, audio_size: f.audio_size, audio_transcript: f.audio_transcript, image_type: f.image_type, image_size: f.image_size, video_type: f.video_type, video_size: f.video_size, html_type: f.html_type, html_size: f.html_size, html_name: f.html_name, doc_type: f.doc_type, doc_size: f.doc_size, doc_name: f.doc_name, file_type: f.file_type, file_size: f.file_size, file_name: f.file_name };
     const msg = this.withKinds([row])[0];
@@ -385,7 +389,7 @@ export const MessageMethods = {
   async deleteMessage(id: number, who: string | null | undefined, owner: boolean, draftOnly = false) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only delete your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only delete your own messages" };
     // A client throwing away an upload it thinks never finished asks for
     // this: the draft may have been published meanwhile (another tab or
     // device picked it up, or this one's publish answer was lost), and a
@@ -479,14 +483,13 @@ export const MessageMethods = {
   mentionTargets(text: string | null | undefined, selfName: string | null | undefined, names?: string[]): string[] {
     const t = String(text || "");
     if (!t || t.indexOf("@") < 0) return [];
-    const self = String(selfName || "").toLowerCase();
     const list = names || this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
-    const low = t.toLowerCase();
+    const low = t.toLowerCase(); // lowercase-ok: where the mention sits in the text, as mentionsName finds it
     const hits = [];
     for (const name of list) {
-      if (name.toLowerCase() === self) continue;
+      if (sameName(name, selfName)) continue;
       if (!mentionsName(t, name)) continue;
-      const needle = "@" + name.toLowerCase();
+      const needle = "@" + name.toLowerCase(); // lowercase-ok: as above
       let at = -1;
       let i = low.indexOf(needle);
       while (i >= 0) {
@@ -511,12 +514,15 @@ export const MessageMethods = {
    */
   withKinds(rows: MsgListRow[]): ApiMessage[] {
     if (!rows.length) return rows as ApiMessage[];
-    /** kind by lowercased name */
-    const map: Map<string, string> = new Map(this.sql.exec<{ n: string, kind: string | null }>("SELECT lower(name) AS n, kind FROM inv").toArray().map((r) => [r.n, r.kind === "human" ? "human" : "agent"]));
+    // kind by folded name (nameFold), the newest invite's (as memberKind).
+    // Both sides were lowercased apart - JS on the sender, SQL lower() on
+    // the invite, which folds ASCII only - so every sender with a capital
+    // outside ASCII ("Émile", "Иван") matched no invite and read as a
+    // system actor, the Referee's kind.
+    const map: Map<string, string> = new Map(this.sql.exec<Pick<InvRow, "name" | "kind">>("SELECT name, kind FROM inv ORDER BY revoked IS NOT NULL DESC, created").toArray().map((r) => [nameFold(r.name), r.kind === "human" ? "human" : "agent"]));
     const names = this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE used IS NOT NULL AND revoked IS NULL").toArray().map((r) => r.name);
     for (const r of rows as MsgBag[]) {
-      const n = String(r.from || "").toLowerCase();
-      r.kind = !r.from ? null : (map.get(n) || "non_interactive");
+      r.kind = !r.from ? null : (map.get(nameFold(r.from)) || "non_interactive");
       r.targets = this.mentionTargets(r.text, r.from, names);
     }
     // Reactions: { "👍": ["Henry", ...], ... } in the order they were first used.
@@ -639,7 +645,7 @@ export const MessageMethods = {
     const KINDS = ["image", "video", "audio", "speak", "html", "doc", "file"];
     let kinds = KINDS;
     if (opts.kind) {
-      kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0);
+      kinds = String(opts.kind).split(",").map((k) => k.trim().toLowerCase()).filter((k) => KINDS.indexOf(k) >= 0); // lowercase-ok: media kinds
       if (!kinds.length) return { error: "kind must name one or more of: " + KINDS.join(", "), status: 400 };
     }
     const limit = Math.max(1, Math.min(200, parseInt(opts.limit, 10) || 60));
@@ -653,14 +659,16 @@ export const MessageMethods = {
     }
     const inList = kinds.map(() => "?").join(",");
     const base = "FROM md JOIN m ON m.id = md.msg WHERE (m.draft IS NULL OR m.draft = 0) AND md.upload_id IS NULL";
-    const fromSql = from ? " AND lower(m.sender) = lower(?)" : "";
+    // the senders whose name is this one (sameName), as each is stored
+    const senders = from ? this.sql.exec<{ s: string }>("SELECT DISTINCT m.sender AS s " + base).toArray().map((r) => r.s).filter((n) => sameName(n, from)) : [];
+    const fromSql = from ? " AND m.sender IN (" + senders.map(() => "?").join(", ") + ")" : "";
     const counts = { all: 0, image: 0, video: 0, audio: 0, speak: 0, html: 0, doc: 0, file: 0 };
-    const cArgs = from ? [from] : [];
+    const cArgs = senders;
     for (const r of this.sql.exec<{ kind: string, n: number }>("SELECT md.kind AS kind, COUNT(*) AS n " + base + fromSql + " GROUP BY md.kind", ...cArgs).toArray()) {
       if (r.kind in counts) { (counts as Record<string, number>)[r.kind] = r.n; counts.all += r.n; }
     }
     let sql = "SELECT md.msg AS id, m.ts AS ts, m.sender AS \"from\", m.text AS text, m.audio_transcript AS transcript, m.html_name AS html_name, m.doc_name AS doc_name, m.file_name AS file_name, md.kind AS kind, md.type AS type, md.size AS bytes, md.at AS at " + base + fromSql + " AND md.kind IN (" + inList + ")";
-    const args: Array<string | number> = from ? [from, ...kinds] : [...kinds];
+    const args: Array<string | number> = [...senders, ...kinds];
     // curKind is set together with curMsg
     if (curMsg !== null) { sql += " AND (md.msg < ? OR (md.msg = ? AND md.kind > ?))"; args.push(curMsg, curMsg, curKind as string); }
     sql += " ORDER BY md.msg DESC, md.kind ASC LIMIT ?";

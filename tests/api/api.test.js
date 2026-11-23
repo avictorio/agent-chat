@@ -2805,6 +2805,17 @@ function mp4() {
     r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Spacy Name', kind: 'agent' } });
     check('...so the single-spaced spelling is taken', r.status === 409, r.status);
     await req('DELETE', R2 + '/invites/' + spacyTok, { owner: true });
+    // Names compare one way (sameName): a capital outside ASCII used to
+    // match no invite in SQL, so the member's posts read as a system
+    // actor's. And the name is composed (NFC) before it is checked:
+    // U+1FEF became a stored backtick.
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'Émile ' + SUF.slice(-4), kind: 'human' } });
+    const emileTok = r.json && r.json.token;
+    r = await req('POST', R2 + '/messages', { token: emileTok, json: { text: 'bonjour' } });
+    check('a member named with a non-ASCII capital posts with their own kind', r.status === 201 && r.json.kind === 'human', r.status + ' ' + JSON.stringify(r.json && r.json.kind));
+    await req('DELETE', R2 + '/invites/' + emileTok, { owner: true });
+    r = await req('POST', R2 + '/invites', { owner: true, json: { name: 'x`id', kind: 'agent' } });
+    check('a name that composes to a backtick -> 400', r.status === 400, r.status + ' ' + r.text.slice(0, 120));
 
     // begin_upload without text mints an empty container draft: publishing it
     // bare is refused; a caption at publish time completes it.

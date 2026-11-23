@@ -37,9 +37,9 @@ import {
 } from "../uploads/plan.js";
 import { directUploadsProven } from "../platform/r2-direct-check.js";
 import { r2DirectConfigured, r2ListParts } from "../platform/r2-s3.js";
-import type { CountRow, MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
+import type { MdRow, MsgRow, Room, UppRow, UtRow } from "./Room.js";
 import { warn } from "../lib/log.js";
-import { nameFold, stripControlChars } from "../lib/text.js";
+import { nameFold, sameName, stripControlChars } from "../lib/text.js";
 import { hiddenDraft } from "./media.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
@@ -138,17 +138,17 @@ export const UploadMethods = {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", msgId).toArray()[0];
     if (!r || hiddenDraft(r, member, byOwner)) return { status: 404, error: "No message with that id" };
     if (!r.draft) return { status: 409, error: "Upload tickets are minted for drafts; that message is already published" };
-    if (String(r.sender).toLowerCase() !== String(member || "").toLowerCase()) return { status: 403, error: "You can only open an upload for your own draft" };
+    if (!sameName(r.sender, member)) return { status: 403, error: "You can only open an upload for your own draft" };
     const now = Date.now();
     this.sql.exec("DELETE FROM ut WHERE expires < ?", now);
     // A resumable link counts while its upload is in flight.
-    const open = this.sql.exec<CountRow>("SELECT COUNT(*) AS n FROM ut WHERE lower(member) = lower(?) AND used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", member, now).toArray()[0];
+    const open = this.sql.exec<Pick<UtRow, "member">>("SELECT member FROM ut WHERE used IS NULL AND expires > ? AND (sess IS NULL OR EXISTS (SELECT 1 FROM md WHERE md.msg = ut.msg AND md.kind = ut.kind AND md.upload_id IS NOT NULL))", now).toArray().filter((u) => sameName(u.member, member)).length;
     // Links being minted right now count too: the row is written only
     // after the awaits below, so without this a burst of calls arriving
     // together would each see the same count and all pass the cap.
     const who = nameFold(String(member || ""));
     const minting = this.utMinting.get(who) || 0;
-    if (((open && open.n) || 0) + minting >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
+    if (open + minting >= TICKET_MAX_PER_MEMBER) return { status: 429, code: "limit_reached", error: "Too many outstanding upload tickets (" + TICKET_MAX_PER_MEMBER + "). Finish one or let one expire first." };
     this.utMinting.set(who, minting + 1);
     let plan: UpStart | null = null;
     const raw = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
@@ -194,10 +194,10 @@ export const UploadMethods = {
     const t = this.sql.exec<Pick<UtRow, "msg" | "kind" | "member" | "expires" | "owner" | "sess">>("SELECT msg, kind, member, expires, owner, sess FROM ut WHERE h = ?", await sha256hex(String(rawTicket || ""))).toArray()[0];
     if (!t || !t.sess) return { status: 404, error: "Unknown upload link" };
     if (Date.now() > t.expires) return { status: 410, error: "This upload link has expired" };
-    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    if (!t.owner && !this.invNames(t.member, true).length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
     const m = this.sql.exec<Pick<MsgRow, "sender">>("SELECT sender FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The message this upload was opened for is gone" };
-    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The message changed hands; open a fresh upload" };
+    if (!sameName(m.sender, t.member)) return { status: 409, error: "The message changed hands; open a fresh upload" };
     return { status: 200, msg: t.msg, kind: t.kind, member: t.member, expires: t.expires };
   },
 
@@ -236,11 +236,11 @@ export const UploadMethods = {
     // Any active invite under the name counts: a member whose invite was
     // rotated has a revoked row and a live one. Owner-minted tickets carry
     // no member check (the owner posts under any name).
-    if (!t.owner && !this.sql.exec("SELECT token FROM inv WHERE lower(name) = lower(?) AND revoked IS NULL", t.member).toArray().length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
+    if (!t.owner && !this.invNames(t.member, true).length) return { status: 403, error: "The member who opened this upload is no longer in the room" };
     const m = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", t.msg).toArray()[0];
     if (!m) return { status: 404, error: "The draft this upload was opened for is gone" };
     if (!m.draft) return { status: 409, error: "The draft this upload was opened for is already published" };
-    if (String(m.sender).toLowerCase() !== String(t.member).toLowerCase()) return { status: 409, error: "The draft changed hands; open a fresh upload" };
+    if (!sameName(m.sender, t.member)) return { status: 409, error: "The draft changed hands; open a fresh upload" };
     const kind = t.kind;
     if (!data.byteLength) return { status: 400, error: "The upload body is empty" };
     if (data.byteLength > t.max_bytes) return { status: 413, error: mediaTooBig(kind as "image" | "audio" | "video", "single-shot") };
@@ -316,7 +316,7 @@ export const UploadMethods = {
   upAuth(id: number, who: string | null | undefined, owner: boolean | undefined, kind: string): { status: 404 | 403, error: string } | { status: 200, msg: Pick<MsgRow, "sender" | "ts" | "draft"> } {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "ts" | "draft">>("SELECT sender, ts, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach " + upNoun(kind) + " to your own messages" };
     return { status: 200, msg: r };
   },
 
@@ -757,7 +757,7 @@ export const UploadMethods = {
     const rows = this.sql.exec<{ msg: number, kind: string, sender: string }>("SELECT md.msg AS msg, md.kind AS kind, m.sender AS sender FROM md JOIN m ON m.id = md.msg WHERE md.upload_id IS NOT NULL AND md.size = ? AND md.fp = ? AND m.draft IS NOT NULL AND m.draft != 0 ORDER BY md.msg DESC", size, String(fp)).toArray();
     for (const r of rows) {
       if (kind && r.kind !== kind) continue;
-      if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) continue;
+      if (!owner && !sameName(r.sender, who)) continue;
       if (this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND kind != ? LIMIT 1", r.msg, r.kind).toArray().length) continue;
       const st = await this.uploadStatus(r.msg, r.kind);
       if (st.status !== 200 || !st.uploading) continue;
@@ -774,7 +774,7 @@ export const UploadMethods = {
   async streamBegin(id: number, who: string | null | undefined, type: string, size: number, owner: boolean, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft">>("SELECT sender, draft FROM m WHERE id = ?", id).toArray()[0];
     if (!r || hiddenDraft(r, who, owner)) return { status: 404, error: "No message with that id" };
-    if (!owner && String(r.sender).toLowerCase() !== String(who || "").toLowerCase()) return { status: 403, error: "You can only attach a video to your own messages" };
+    if (!owner && !sameName(r.sender, who)) return { status: 403, error: "You can only attach a video to your own messages" };
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     if (VIDEO_TYPES.indexOf(type) < 0) return { status: 415, error: "Video must be MP4, WebM or MOV" };
     if (!size || size > VIDEO_MAX_HARD) return { status: 413, error: VIDEO_STREAM_TOO_BIG };

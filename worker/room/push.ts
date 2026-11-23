@@ -3,7 +3,7 @@
 import { b64urlDecode, b64urlEncode, concatBytes } from "../lib/crypto.js";
 import { sendWebPush, vapidSubject } from "../platform/webpush.js";
 import { PUSH_AUTH_MAX, PUSH_ENDPOINT_MAX, PUSH_FAIL_MAX, PUSH_FAIL_MS, PUSH_MAX_PER_MEMBER, PUSH_P256DH_MAX, PUSH_PARALLEL, PUSH_REST_MS } from "../limits.js";
-import { mentionsName } from "../lib/text.js";
+import { mentionsName, nameKey } from "../lib/text.js";
 import { streamWants } from "./state.js";
 import type { ApiMessage } from "./messages.js";
 import type { InvRow, PushRow, Room } from "./Room.js";
@@ -58,7 +58,7 @@ export const PushMethods = {
     if (!owner) {
       const l = this.lookupInvite(token);
       if (!l.ok) return l;
-      who = String(l.row.name || "").toLowerCase();
+      who = nameKey(l.row.name);
     }
     this.sql.exec("INSERT OR REPLACE INTO push (member, endpoint, p256dh, auth, ts, mode) VALUES (?, ?, ?, ?, ?, ?)",
       who, sub.endpoint, sub.p256dh, sub.auth, Date.now(), mode === "mentions" ? "mentions" : "all");
@@ -69,23 +69,23 @@ export const PushMethods = {
   },
   pushUnsubscribe(member: string, endpoint: string, owner: boolean) {
     if (owner) this.sql.exec("DELETE FROM push WHERE endpoint = ?", endpoint);
-    else this.sql.exec("DELETE FROM push WHERE endpoint = ? AND member = ?", endpoint, String(member || "").toLowerCase());
+    else this.sql.exec("DELETE FROM push WHERE endpoint = ? AND member = ?", endpoint, nameKey(member));
     return { status: 200 };
   },
   pushStatus(member: string, endpoint: string) {
-    const rows = this.sql.exec<Pick<PushRow, "endpoint" | "mode">>("SELECT endpoint, mode FROM push WHERE member = ? AND " + PUSH_SANE, String(member || "").toLowerCase(), ...PUSH_BOUNDS).toArray();
+    const rows = this.sql.exec<Pick<PushRow, "endpoint" | "mode">>("SELECT endpoint, mode FROM push WHERE member = ? AND " + PUSH_SANE, nameKey(member), ...PUSH_BOUNDS).toArray();
     const mine = endpoint ? rows.find((r) => r.endpoint === endpoint) : null;
     return { count: rows.length, registered: !!mine, mode: mine ? (mine.mode || "all") : null };
   },
   async notifyPush(msg: ApiMessage, room: string | null) {
-    const sender = String(msg.from || "").toLowerCase();
+    const sender = nameKey(msg.from);
     const text = String(msg.text || "").trim();
     const excerpt = text ? (text.length > 120 ? text.slice(0, 117) + "..." : text) : "(attachment)";
     const payload = JSON.stringify({ title: msg.from + " - Agent Chat", body: excerpt, url: "/r/" + room, tag: "room-" + room });
     // Only the owner ("") and members with an active invite hear about a
     // message: revoke() drops a leaving member's registrations, and this
     // keeps any that slipped through (older rows) from leaking text.
-    const active = new Set(this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => String(r.name).toLowerCase()));
+    const active = new Set(this.sql.exec<Pick<InvRow, "name">>("SELECT name FROM inv WHERE revoked IS NULL").toArray().map((r) => nameKey(r.name)));
     const allowed = (m: string) => m === "" || active.has(m);
     // Web push (browser subscriptions), but none resting.
     const rows = this.sql.exec<Pick<PushRow, "member" | "endpoint" | "p256dh" | "auth" | "mode">>("SELECT member, endpoint, p256dh, auth, mode FROM push WHERE member != ? AND " + PUSH_SANE + " AND (rest_ts IS NULL OR rest_ts <= ?)", sender, ...PUSH_BOUNDS, Date.now()).toArray();
@@ -146,7 +146,6 @@ export const PushMethods = {
   },
 
   dropPush(name: string) {
-    const member = String(name || "").toLowerCase();
-    this.sql.exec("DELETE FROM push WHERE member = ?", member);
+    this.sql.exec("DELETE FROM push WHERE member = ?", nameKey(name));
   },
 } satisfies ThisType<Room>;

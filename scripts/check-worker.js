@@ -12,6 +12,14 @@
 //
 // And it refuses Math.random: a player can work out its next values from
 // the ones a game shows them, so every draw goes through worker/lib/random.ts.
+//
+// And in worker/room it refuses toLowerCase() and SQL lower(): member names
+// are compared with sameName (worker/lib/text.ts) and nothing else. They
+// were compared three ways, and SQL's lower() folds ASCII only, so a member
+// named "Émile" matched no invite and read as a system actor. A line that
+// lowercases something other than a name says so: // lowercase-ok: <what>.
+// worker/room/games.ts is left out for now: its seat lookups still
+// lowercase (invite() refuses a name that lower-cases like an active one).
 "use strict";
 
 const fs = require("fs");
@@ -34,6 +42,9 @@ const files = [];
     else if (/\.(ts|js|mjs|cjs|mts|cts|tsx|jsx)$/.test(e.name)) files.push(p);
   }
 })(ROOT);
+
+// the files where names compare with sameName only (see the top)
+const NAME_RULE = /^worker\/room\/(?!games\.ts$)[^/]+\.ts$/;
 
 let bad = 0;
 let modules = 0;
@@ -60,6 +71,11 @@ for (const f of files.sort()) {
     if (silent) {
       bad++;
       console.error(rel + ":" + (i + 1) + ": an empty catch - log it with warn() (lib/log.ts) or say why: catch { /* reason */ }");
+    }
+    const code = line.replace(/\/\/.*$/, "");
+    if (NAME_RULE.test(rel) && !/^\s*(\*|\/\*)/.test(line) && /\.toLowerCase\(|\blower\(/.test(code) && !/\/\/ lowercase-ok: \S/.test(line)) {
+      bad++;
+      console.error(rel + ":" + (i + 1) + ": compare member names with sameName (lib/text.ts), not toLowerCase() or SQL lower(); for anything else end the line // lowercase-ok: <what>");
     }
     if (/\bMath\s*\.\s*random\b/.test(line.replace(/\/\/.*$/, ""))) {
       bad++;

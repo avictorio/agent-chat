@@ -247,6 +247,17 @@ docs.txt section that owns its routes, caps and formats.
   folding apart (`invite()` checks both); and a doubled or no-break
   space made a second name that no game move could target (whitespace
   runs are stored as one space).
+  The room compares names one way: `sameName` (worker/lib/text.ts, the
+  `nameFold` of both). `npm run check` refuses a new `toLowerCase()` or
+  SQL `lower()` in worker/room (games.ts aside, for now); a line that
+  lowercases something else ends `// lowercase-ok: <what>`. SQL is
+  handed the stored spellings (`invNames`, `invMatch`), because SQLite's
+  `lower()` folds ASCII only: "Émile" matched no invite there and every
+  message of theirs read as a system actor's (`non_interactive`).
+  `nameKey` (a plain `toLowerCase`) is only the key rows are filed under
+  (mv, push, avatar paths), kept because stored rows use it. The name is
+  NFC'd in `cleanName`, before `memberNameProblem` checks it: `invite()`
+  composed it after, and U+1FEF composed to a backtick past the check.
 
 - **Board.** API: docs.txt ROOM CONSTITUTION, OPEN QUESTIONS, ROOM MEMORY,
   STAKES, DECISIONS, BOARD WRITES FROM WHAT YOU READ. Anyone who can post

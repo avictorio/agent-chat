@@ -12,6 +12,7 @@ import {
   MAX_TEXT,
 } from "../limits.js";
 import { decRow } from "./state.js";
+import { sameName } from "../lib/text.js";
 import type { Constitution } from "@chat/contract";
 import type { CfgRow, ConRow, CountRow, DcRow, DgRow, OqRow, Room, SkRow } from "./Room.js";
 
@@ -266,8 +267,7 @@ export const BoardMethods = {
     const d = this.decision(id);
     if (!d) return { error: "No decision with that id", status: 404 };
     if (staleBase(d.updated, base)) return { error: "That decision changed since you read it. Read it again (its updated is now " + d.updated + ") and decide again.", status: 409, decision: d };
-    const lower = name.toLowerCase();
-    const has = d.signers.some((s) => s.toLowerCase() === lower);
+    const has = d.signers.some((s) => sameName(s, name));
     let signers = d.signers;
     if (action === "sign") {
       if (has) return { error: name + " has already signed this", status: 409 };
@@ -275,7 +275,7 @@ export const BoardMethods = {
       signers = signers.concat([name]);
     } else if (action === "unsign") {
       if (!has) return { error: name + " hasn't signed this", status: 409 };
-      signers = signers.filter((s) => s.toLowerCase() !== lower);
+      signers = signers.filter((s) => !sameName(s, name));
     } else {
       return { error: "\"action\" must be sign, unsign or edit", status: 400 };
     }

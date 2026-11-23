@@ -250,7 +250,7 @@ function schemaBaseline(sql: SqlStorage): void {
   addColumn(sql, "inv", "used", "INTEGER");
   // When each member first posted as a member: the column, then a
   // backfill from the kept history, once (when the column is new).
-  if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)");
+  if (addColumn(sql, "inv", "posted", "INTEGER")) sql.exec("UPDATE inv SET posted = (SELECT MIN(ts) FROM m WHERE lower(m.sender) = lower(inv.name) AND m.ts >= inv.created)"); // lowercase-ok: a step that has run, kept as it ran
 }
 
 // Step 2. md.at: when a media row was last written (an attach, a
@@ -639,7 +639,7 @@ export class Room extends DurableObject {
     // fast instead of silently starving.
     const STREAM_KINDS = ["message", "reaction", "game", "members", "state", "delete", "gap"];
     let kinds: Set<string> | null = null;
-    const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase();
+    const evRaw = (url.searchParams.get("events") || "").trim().toLowerCase(); // lowercase-ok: event names
     // state is opt-in only: naming it anywhere in events= subscribes, and
     // "all" (or no events= at all) does not - see the note at streamWants.
     const wantsState = evRaw.split(",").map((x) => x.trim()).indexOf("state") >= 0;
