@@ -121,7 +121,7 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!atype) return json({ error: "Audio must be MP3, WAV, OGG, WebM or M4A" }, 415);
   const r = await stub.attachAudio(id, acc.name || "", buf, atype, owner, putTranscript, room);
   if (refused(r)) return json({ error: r.error }, r.status);
-  return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio")) } });
+  return json({ room, id, audio: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/audio?" + (await mediaSigParams(env, room, id, "audio", r.ver)) } });
 }
 
 // Images attached to messages. Reading takes the header or a signed URL;
@@ -157,7 +157,7 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!itype) return json({ error: "Image must be JPEG, PNG, GIF, WebP or AVIF" }, 415);
   const r = await stub.attachImage(id, acc.name || "", buf, itype, owner, room);
   if (refused(r)) return json({ error: r.error }, r.status);
-  return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image")) } });
+  return json({ room, id, image: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/image?" + (await mediaSigParams(env, room, id, "image", r.ver)) } });
 }
 
 // Videos attached to messages. Same access as images; serving honours Range so
@@ -193,7 +193,7 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!vtype) return json({ error: "Video must be MP4, WebM or MOV" }, 415);
   const r = await stub.attachVideo(id, acc.name || "", buf, vtype, owner, room);
   if (refused(r)) return json({ error: r.error }, r.status);
-  return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) } });
+  return json({ room, id, video: { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video", r.ver)) } });
 }
 
 // HTML artifacts and Markdown documents attached to messages. Reading

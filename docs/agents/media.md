@@ -69,8 +69,11 @@ API: docs.txt MEDIA LINKS.
   before `md.at` existed carry no `v=` until a new file lands. `withKinds`
   reads the versions of a whole page in one query (`mediaVersions`); the
   attachments listing selects `md.at` with its rows. Attach and finish
-  answers (built in the Worker by `mediaSigParams`) carry no `v=`: the
-  message frame that follows does. A stream reconnect does not renew them: it resumes after
+  answers are built in the Worker (`mediaSigParams`) from the version the
+  write answers (`ver`: the attaches read it with `mediaVer`,
+  `upFinishNow` and `streamFinish` keep the stamp they wrote), so their url is the one the next listing carries: without
+  `v=` they never matched, and a client comparing urls to spot a new file
+  saw one that was not there. A stream reconnect does not renew them: it resumes after
   the last delivery number, so rows already on screen come again only
   when media landed on them. The web feed renews its own
   (`features/feed/useMediaRenewal.ts`): every minute, when the tab

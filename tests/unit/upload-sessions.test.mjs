@@ -711,3 +711,21 @@ test("a finish that joins one already running is told apart by its fingerprint, 
   assert.equal(done.complete, true);
   assert.equal(done.fp, "fp-100", "the finished file still names its fingerprint");
 });
+
+// The routes put ver on the url as v=, as listings do (mediaQuery): the
+// answers used to name no version, so their url never matched a listing's.
+test("an attach and a finish answer with the stored file's version, the listing's v=", async () => {
+  const h = makeRoom();
+  const id = await draft(h);
+  const att = await h.room.attachImage(id, "Ada", bytes(PNG_HEAD, 50).buffer, "image/png", false, R);
+  assert.equal(att.status, 200);
+  assert.equal(att.ver, h.one("SELECT at FROM md WHERE msg = ? AND kind = 'image'", id).at);
+  const up = (await h.room.post("Ada", "uploaded", R, false, null, null, null, true, false)).id;
+  await imageSession(h, up, 100);
+  const fin = await h.room.uploadFinish(up, "image", "Ada", false, R, null);
+  const at = h.one("SELECT at FROM md WHERE msg = ? AND kind = 'image'", up).at;
+  assert.ok(at);
+  assert.equal(fin.ver, at);
+  assert.equal((await h.room.uploadFinish(up, "image", "Ada", false, R, null)).ver, at, "and a repeat after it ended answers the same one");
+  assert.ok(h.room.withKinds([{ id: up, ts: 0, from: "Ada", text: "", image_type: "image/png", image_size: 100 }])[0].image.url.endsWith("&v=" + at), "the version a listing puts on the url");
+});

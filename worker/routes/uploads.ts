@@ -163,7 +163,7 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     const r = await stub.uploadFinish(id, kind, who, owner, room, { transcript: body ? body.transcript : undefined, size: size, fp: fp, expires: linkExpires ?? null });
     if (refused(r)) return json(r.missing ? { error: r.error, missing: r.missing } : { error: r.error }, r.status);
     /** the answer, with the media under its kind */
-    const media: { type: string, bytes: number, url: string, name?: string | null } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind)) };
+    const media: { type: string, bytes: number, url: string, name?: string | null } = { type: r.type, bytes: r.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/" + kind + "?" + (await mediaSigParams(env, room, id, kind, r.ver)) };
     if (kind === "file") media.name = r.name;
     return json({ room: room, id: id, kind: kind, published: !!r.published, [kind]: media });
   }
@@ -403,7 +403,7 @@ async function videoStreamIngest(rc: RouteContext, stub: DurableObjectStub, room
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
     return json({ error: doneRes.error }, doneRes.status);
   }
-  return json({ room: room, id: id, video: { type: doneRes.type, bytes: doneRes.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video")) }, published: !!doneRes.published });
+  return json({ room: room, id: id, video: { type: doneRes.type, bytes: doneRes.bytes, url: url.origin + "/api/rooms/" + room + "/messages/" + id + "/video?" + (await mediaSigParams(env, room, id, "video", doneRes.ver)) }, published: !!doneRes.published });
 }
 
 // The upload engine (UP_KINDS): start / part / sign / status / finish / abort

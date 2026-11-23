@@ -44,7 +44,7 @@ import { hiddenDraft } from "./media.js";
 
 /** An upload session as the engine reads it (upSession): the md row's
  *  object, upload and plan columns. */
-export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode">;
+export type UpSession = Pick<MdRow, "type" | "r2key" | "size" | "upload_id" | "fp" | "part_size" | "name" | "began" | "mode" | "at">;
 /** A direct upload in flight, as a removal found it (directUploadsOf). */
 export type DirectSession = { msg: number, kind: string, upload_id: string };
 /** A resumable upload asked for with a ticket (mintUploadTicket's
@@ -58,7 +58,7 @@ export type UpPlan = { status: 200, part_size: number, parts: number, resumed: b
 /** uploadFinish's answer: the stored file, or { status, error } (with
  *  the missing part numbers on a 409 for parts). Shared by a finish sent
  *  again while the first runs. */
-export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean } | { status: number, error: string, missing?: number[] };
+export type UpFinish = { status: 200, type: string, bytes: number, name: string | null, published: boolean, ver: number | null } | { status: number, error: string, missing?: number[] };
 /** What a finish may say about the file it means (all optional): the
  *  size and fingerprint (fp) the client gave at start, and for an upload
  *  link its expiry, which is its session's start plus UP_SESSION_MS. */
@@ -321,7 +321,7 @@ export const UploadMethods = {
   },
 
   upSession(id: number, kind: string): UpSession | null {
-    return this.sql.exec<UpSession>("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
+    return this.sql.exec<UpSession>("SELECT type, r2key, size, upload_id, fp, part_size, name, began, mode, at FROM md WHERE msg = ? AND kind = ?", id, kind).toArray()[0] || null;
   },
 
   // The plan a session runs on, pinned at its start (streamed ones
@@ -640,7 +640,7 @@ export const UploadMethods = {
       // this one.
       if (this.upOtherFile(row, a.msg, opts)) return { status: 409, error: "No upload in progress for that message" };
       const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
-      return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
+      return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft), ver: row.at || null };
     }
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
     const media = this.env.MEDIA;
@@ -712,7 +712,8 @@ export const UploadMethods = {
       return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
     }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
-    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ? AND upload_id = ?", type, Date.now(), id, kind, uploadId);
+    const at = Date.now();
+    this.sql.exec("UPDATE md SET type = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = ? AND upload_id = ?", type, at, id, kind, uploadId);
     const transcript = opts && opts.transcript !== undefined && opts.transcript !== null ? String(opts.transcript).slice(0, MAX_TEXT) : undefined;
     if (kind === "image") this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, row.size, id);
     if (kind === "audio") {
@@ -724,7 +725,7 @@ export const UploadMethods = {
     // a live message is sent again with its file; a draft waits for its publish
     this.mediaLanded(id, room);
     const published = room ? !!(await this.maybeAutoPublish(id, room)) : false;
-    return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published };
+    return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published, ver: at };
   },
 
   async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean) {
@@ -868,11 +869,12 @@ export const UploadMethods = {
       const left = sender ? this.inviteStill(sender.token, sender.member) : null;
       if (left) return discard(left.status, left.error);
       this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = 'video'", id);
-      this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, Date.now(), id, uploadId);
+      const at = Date.now();
+      this.sql.exec("UPDATE md SET type = ?, size = ?, upload_id = NULL, at = ? WHERE msg = ? AND kind = 'video' AND upload_id = ?", sniffed, size, at, id, uploadId);
       this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", sniffed, size, id);
       this.mediaLanded(id, room);
       const published = room ? await this.maybeAutoPublish(id, room) : null;
-      return { status: 200, type: sniffed, bytes: size, published: !!published };
+      return { status: 200, type: sniffed, bytes: size, published: !!published, ver: at };
     });
   },
 

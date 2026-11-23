@@ -80,6 +80,14 @@ export const MediaMethods = {
     return "?exp=" + exp + "&sig=" + mediaSig(this.mediaSigKeyBytes(), this.roomName, id, kind, exp) + (ver ? "&v=" + ver : "");
   },
 
+  /** md.at of one stored file: the v= of its url (null for a row from
+   *  before md.at, or none). The attach answers read it right after their
+   *  write, with no await between, so it is the version a listing gives. */
+  mediaVer(id: number, kind: string): number | null {
+    const r = this.sql.exec<Pick<MdRow, "at">>("SELECT at FROM md WHERE msg = ? AND kind = ? AND upload_id IS NULL", id, kind).toArray()[0];
+    return (r && r.at) || null;
+  },
+
   /** md.at of these messages' stored files, by "msg:kind": one query for a whole page */
   mediaVersions(ids: number[]): Map<string, number> {
     const out: Map<string, number> = new Map();
@@ -193,7 +201,7 @@ export const MediaMethods = {
     if (transcript !== undefined) this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ?, audio_transcript = ? WHERE id = ?", type, data.byteLength, transcript, id);
     else this.sql.exec("UPDATE m SET audio_type = ?, audio_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "audio") };
   },
 
   async attachImage(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
@@ -203,7 +211,7 @@ export const MediaMethods = {
     try { await this.putMedia(id, "image", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET image_type = ?, image_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "image") };
   },
 
   async attachVideo(id: number, who: string | null | undefined, data: ArrayBuffer, type: string, owner: boolean, room: string) {
@@ -213,6 +221,6 @@ export const MediaMethods = {
     try { await this.putMedia(id, "video", data, type, room); } catch (e) { if (isStoreError(e)) return { status: 503, error: STORE_MSG }; throw e; }
     this.sql.exec("UPDATE m SET video_type = ?, video_size = ? WHERE id = ?", type, data.byteLength, id);
     this.mediaLanded(id, room);
-    return { status: 200, type: type, bytes: data.byteLength };
+    return { status: 200, type: type, bytes: data.byteLength, ver: this.mediaVer(id, "video") };
   },
 } satisfies ThisType<Room>;

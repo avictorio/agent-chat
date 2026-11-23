@@ -541,8 +541,12 @@ function mp4() {
     const b1 = Buffer.from(await (await fetch(BASE + u1)).arrayBuffer());
     r = await req('PUT', R + '/messages/' + vId + '/image', { token: TA, headers: { 'Content-Type': 'image/gif' }, body: GIF });
     check('media version: PUT a different image -> 200', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
+    const putUrl = r.json && r.json.image && r.json.image.url;
     const v2 = await vRead();
     const u2 = v2.image && v2.image.url;
+    // The attach answer's url used to carry no v=, so it never matched the
+    // listing's while the file was the same one.
+    check('media version: the attach answer carries the url the listing has, v= included', !!putUrl && /&v=\d+$/.test(putUrl) && new URL(putUrl).pathname + new URL(putUrl).search === u2, putUrl + ' / ' + u2);
     const qs = (u) => new URL(u, BASE).searchParams;
     check('media version: the replaced image has a new url, the same signature', !!u2 && u2 !== u1 && (qs(u2).get('exp') !== qs(u1).get('exp') || qs(u2).get('sig') === qs(u1).get('sig')) && qs(u2).get('v') !== qs(u1).get('v'), u1 + ' -> ' + u2);
     check('media version: the untouched page keeps its url', v2.html && v2.html.url === v1.html.url, v1.html && v1.html.url);
@@ -2798,6 +2802,7 @@ function mp4() {
     r = await req('POST', R2 + '/messages/' + fid + '/file/finish', { token: TU });
     check('finish with a part missing -> 409 naming it', r.status === 409 && JSON.stringify(r.json && r.json.missing) === '[2]', r.status + ' ' + r.text.slice(0, 160));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TU });
+    check('status names the fingerprint the start gave', !!(r.json && r.json.fp === FP), JSON.stringify(r.json));
     check('status lists the parts received', !!(r.json && r.json.uploading === true && JSON.stringify(r.json.received) === '[1,3]' && r.json.parts === 3 && r.json.name === 'résumé data.bin'), JSON.stringify(r.json));
     r = await req('GET', R2 + '/messages/' + fid + '/file/status', { token: TP });
     check('status shows nothing to another member', !!(r.json && r.json.uploading === false && r.json.received.length === 0), JSON.stringify(r.json));
@@ -2840,6 +2845,8 @@ function mp4() {
     const fmsg = ((r.json && r.json.messages) || []).find(x => x.id === fid);
     check('listings carry the file', !!(fmsg && fmsg.file && fmsg.file.bytes === BIG.length && fmsg.file.type === 'application/x-probe' && /sig=/.test(fmsg.file.url)), JSON.stringify(fmsg && fmsg.file));
     const fURL = BASE + new URL(fmsg.file.url, BASE).pathname + new URL(fmsg.file.url, BASE).search;
+    const pathOf = (u) => new URL(u, BASE).pathname + new URL(u, BASE).search;
+    check('the finish answers carry the url the listing has, v= included', /&v=\d+$/.test(fmsg.file.url) && pathOf(r2nd.json.file.url) === pathOf(fmsg.file.url) && pathOf(r3rd.json.file.url) === pathOf(fmsg.file.url), r2nd.json.file.url + ' / ' + fmsg.file.url);
     let ff = await fetch(fURL);
     const fbuf = Buffer.from(await ff.arrayBuffer());
     check('the file downloads with a signed url, byte for byte', ff.status === 200 && fbuf.length === BIG.length && sha(fbuf) === sha(BIG), ff.status + ' ' + fbuf.length);
