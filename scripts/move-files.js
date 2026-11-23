@@ -4,12 +4,15 @@
 //
 //   node scripts/move-files.js <root> <map-file> [--dry]
 //
-// <root> is the tree whose imports are rewritten (e.g. web/app/src). The map
+// <root> is the tree whose imports are rewritten (web/app/src, worker). The map
 // file has one move per line, "old -> new", both relative to <root>; blank
 // lines and lines starting with # are ignored. A directory may be moved by
 // naming it ("feed -> features/feed"). Specifiers keep their style: no
 // extension stays no extension, and a ./ prefix is kept for same-folder
-// imports. Imports reaching outside <root> (e.g. into contract/) are rewritten too.
+// imports; a "./x.js" import of x.ts (the Worker's spelling) stays ".js".
+// Imports reaching outside <root> (e.g. into contract/) are rewritten too.
+// A relative import it cannot resolve stops the run before anything is
+// written or moved (--dry lists them).
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -62,6 +65,15 @@ const newOf = (abs) => moves.get(abs) || abs;
 function resolveSpec(fromFile, spec) {
   const base = path.resolve(path.dirname(fromFile), spec);
   if (fs.existsSync(base) && fs.statSync(base).isFile()) return { file: base, ext: true };
+  // The Worker's TypeScript imports "./x.js" for x.ts (as tsc, wrangler and
+  // tests/unit/register.mjs resolve it). Without this every Worker import
+  // was unresolved, none was rewritten, and the files were moved anyway.
+  const js = base.match(/^(.*)\.(js|jsx|mjs)$/);
+  if (js) {
+    for (const e of { js: [".ts", ".tsx"], jsx: [".tsx"], mjs: [".mts"] }[js[2]]) {
+      if (fs.existsSync(js[1] + e)) return { file: js[1] + e, ext: true, spelled: "." + js[2] };
+    }
+  }
   for (const e of EXTS) if (fs.existsSync(base + e)) return { file: base + e, ext: false };
   for (const e of EXTS) {
     const idx = path.join(base, "index" + e);
@@ -70,9 +82,10 @@ function resolveSpec(fromFile, spec) {
   return null;
 }
 
-function specFor(fromNew, targetNew, keepExt, index) {
+function specFor(fromNew, targetNew, keepExt, index, spelled) {
   let target = targetNew;
   if (index) target = path.dirname(target);
+  else if (spelled) target = target.replace(/\.(ts|tsx|mts)$/, "") + spelled;
   else if (!keepExt) target = target.replace(/\.(ts|tsx|js|jsx|mjs|css|json)$/, "");
   let rel = path.relative(path.dirname(fromNew), target).split(path.sep).join("/");
   if (!rel.startsWith(".")) rel = "./" + rel;
@@ -95,7 +108,7 @@ for (const file of files) {
     const r = resolveSpec(file, spec);
     if (!r) { unresolved.push(path.relative(root, file) + ": " + spec); return all; }
     if (!moves.has(file) && !moves.has(r.file)) return all;
-    const next = specFor(fileNew, newOf(r.file), r.ext, r.index);
+    const next = specFor(fileNew, newOf(r.file), r.ext, r.index, r.spelled);
     if (next === spec) return all;
     n++;
     return pre + q + next + q;
@@ -103,9 +116,15 @@ for (const file of files) {
   if (n) { rewrites.set(file, out); changedFiles++; changedSpecs += n; }
 }
 if (unresolved.length) {
-  console.error("unresolved relative imports (left as they are):\n  " + unresolved.join("\n  "));
+  console.error("unresolved relative imports:\n  " + unresolved.join("\n  "));
 }
 console.log((dry ? "dry run: " : "") + moves.size + " file(s) move; " + changedSpecs + " specifier(s) in " + changedFiles + " file(s) rewritten");
+// An import the tool cannot follow may name a moved file, and moving it
+// anyway leaves that importer broken: stop before anything is written.
+if (unresolved.length && !dry) {
+  console.error("nothing was written or moved: fix or remove the imports above first");
+  process.exit(1);
+}
 if (dry) {
   for (const [from, to] of moves) console.log("  " + path.relative(root, from) + " -> " + path.relative(root, to));
   process.exit(0);
