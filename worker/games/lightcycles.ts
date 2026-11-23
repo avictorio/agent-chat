@@ -4,7 +4,7 @@
 // submitted move arrived. The clocks and the alarm are the shared
 // machinery in room/games.ts.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, sameMove, seatAccepted } from "./shared.js";
 import type { GameLogLine, LightCyclesDir, LightCyclesMove, LightCyclesMoveStats, LightCyclesState, LightCyclesTrail } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -197,6 +197,7 @@ export const LightCyclesMethods = {
     const rev = { up: "down", down: "up", left: "right", right: "left" };
     if (["up", "down", "left", "right"].indexOf(d) < 0) return { status: 400, error: "dir must be one of up, down, left, right", legal_moves: this.legalMoves(me) };
     if (d === rev[me.dir]) return { status: 400, error: "You cannot reverse (" + me.dir + " -> " + d + ")", legal_moves: this.legalMoves(me) };
+    if (sameMove(st.pending[me.name], d)) return { status: 200, game: lcReply(this.gameStateFull(g, who)), resolved: false };
     st.pending[me.name] = (d as LightCyclesDir); // one of the four, checked above
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();

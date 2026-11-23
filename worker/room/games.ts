@@ -11,6 +11,7 @@ import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
 import { nameFold } from "../lib/text.js";
+import { sameMove } from "../games/shared.js";
 
 // Object.prototype's member names, folded: seats key plain objects in every
 // engine's state (roles, scores, votes, moves). A legacy member named
@@ -176,6 +177,8 @@ export const GameMachineryMethods = {
     const me = st.players.find((p) => p.name.toLowerCase() === String(who || "").toLowerCase());
     // the engines commit only for a seated player
     if (!me) return false;
+    // an unchanged re-send keeps its time and sends no frame (sameMove)
+    if (sameMove(st.pending[me.name], move)) return false;
     st.pending[me.name] = move;
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();

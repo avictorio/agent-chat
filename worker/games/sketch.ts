@@ -1,7 +1,7 @@
 // Sketch & Guess: a rotating artist draws a secret prompt, everyone guesses; Claude referees close calls.
 
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
-import { clockWords, seatAccepted, tvNear, tvNorm } from "./shared.js";
+import { clockWords, sameMove, seatAccepted, tvNear, tvNorm } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
 import type { GameLogLine, GameStatus, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import type { CfgRow, GmRow, Room } from "../room/Room.js";
@@ -277,6 +277,7 @@ export const SketchMethods = {
     const s = String(d ? d.value || "" : raw == null ? "" : raw).replace(/^\s*guess\s*:\s*/i, "").replace(/\s+/g, " ").trim();
     if (!s) return { status: 400, error: "Send guess: what the drawing shows", legal_moves: ['{"guess": "<what the drawing shows>"}'] };
     if (s.length > SG_GUESS_MAX) return { status: 400, error: "A guess can be up to " + SG_GUESS_MAX + " characters" };
+    if (sameMove(st.guesses[me.name]?.guess, s)) return { status: 200, game: this.sgStateFull(g, who), resolved: false };
     st.guesses[me.name] = { guess: s, at: Date.now() };
     const all = this.sgGuessers(st).every((p) => st.guesses[p.name] !== undefined);
     if (!all) {

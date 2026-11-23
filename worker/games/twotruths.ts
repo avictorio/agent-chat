@@ -1,6 +1,6 @@
 // Two Truths and a Lie: a rotating teller, everyone else votes.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, sameMove, seatAccepted } from "./shared.js";
 import type { GameLogLine, GameStatus, TwoTruthsRound, TwoTruthsState, TwoTruthsYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -202,6 +202,7 @@ export const TwoTruthsMethods = {
     if (me.name === st.teller) return { status: 409, error: "You are the storyteller this round - the others are voting on your statements" };
     const s = String(fields && fields.vote != null ? fields.vote : raw || "").trim().toLowerCase().replace(/^(vote|lie)\s*:?\s*#?/, "");
     if (!/^[1-3]$/.test(s)) return { status: 400, error: "dir is 1, 2 or 3 - the statement you think is the lie", legal_moves: ["1", "2", "3"] };
+    if (sameMove(st.votes[me.name], Number(s))) return { status: 200, game: this.ttStateFull(g, who), resolved: false };
     st.votes[me.name] = Number(s);
     st.vote_at[me.name] = Date.now();
     const all = this.ttVoters(st).every((p) => st.votes[p.name] !== undefined);

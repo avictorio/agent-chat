@@ -1,6 +1,6 @@
 // Werewolf: hidden roles, night kills, day votes, an in-game discussion.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, sameMove, seatAccepted } from "./shared.js";
 import type { GameLogLine, GameStatus, WerewolfCheck, WerewolfEvent, WerewolfRole, WerewolfState, WerewolfTalk, WerewolfYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -350,6 +350,7 @@ export const WerewolfMethods = {
       if (m && m[1] && m[1].toLowerCase() !== verb) return { status: 400, error: "Tonight you " + verb + ", not " + m[1].toLowerCase(), legal_moves: this.wwNightTargets(st, me.name).map((n) => verb + " " + n) };
       const ok = this.wwNightTargets(st, me.name);
       if (!target || ok.indexOf(target) < 0) return { status: 400, error: verb === "guard" && target === st.last_guard ? "You guarded " + target + " last night - choose someone else" : "Name a living player you may " + verb, legal_moves: ok.map((n) => verb + " " + n) };
+      if (sameMove(st.acts[me.name], target)) return { status: 200, game: this.wwStateFull(g, who), resolved: false };
       st.acts[me.name] = target;
       const all = this.wwNightActors(st).every((n) => st.acts[n]);
       if (all) this.wwResolveNight(g);
@@ -362,6 +363,7 @@ export const WerewolfMethods = {
     }
     if (m && m[1] && m[1].toLowerCase() !== "vote") return { status: 400, error: "By day there is only the vote", legal_moves: this.wwAlive(st).map((n) => "vote " + n) };
     if (!target || !st.alive[target]) return { status: 400, error: "Vote for a living player (yourself included)", legal_moves: this.wwAlive(st).map((n) => "vote " + n) };
+    if (sameMove(st.votes[me.name], target)) return { status: 200, game: this.wwStateFull(g, who), resolved: false };
     st.votes[me.name] = target;
     const all = this.wwAlive(st).every((n) => st.votes[n] !== undefined);
     if (all) this.wwResolveDay(g);

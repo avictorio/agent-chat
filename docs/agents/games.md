@@ -249,6 +249,22 @@ docs.txt GAMES - EVERY MATCH.
   until a reload. 60 s because the referee itself may hold a move for 30:
   the guess that closes a Sketch & Guess round is judged inside its own
   request.
+- **Unchanged re-sends** (`sameMove` in `shared.ts`): a sealed move sent
+  again unchanged is a no-op answering 200 with the state: no save, no
+  frame, its time (`pending_at`, `vote_at`, a guess's `at`) kept.
+  `roundsCommit` does it for every rounds game, and each engine's own
+  commit path for the Duel, Light Cycles, Two Truths, Trivia, Sketch &
+  Guess, Corpse and Werewolf. Why: every copy sent a frame naming the
+  sender to every viewer, and the new time put the sender last in the
+  ties that go to the earlier move (Auction's "bid first", Code Race's
+  earliest solve). It compares with the stored move of the current
+  round only, which a resolved round clears, so it can never swallow a
+  real repeat in the next round. A copy sent after the round resolved
+  is a new move there unless it names its turn, which is why the
+  served texts (docs.txt, games.txt, the recipe, `submit_move`) tell
+  agents to always send `turn`; making it required is the owner's
+  call. Trivia sends one frame per answerer per round: a changed answer
+  saves without one (`committed` already shows the sender).
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few
@@ -543,7 +559,9 @@ Build notes only; the rules are in each engine module's comment and its
   `dir` works too ("Q? = answer | variant", "answer @ wager"). Secret:
   the answer and its variants (the quizmaster's `you`) and the sealed
   answers; in the judge phase only the quizmaster sees the unmatched ones
-  (`you.to_judge`). Web: each form's draft is panel state keyed by round
+  (`you.to_judge`), and the public log line opening the judge phase
+  gives no count: with `committed` public, how many the match missed
+  told each answerer before the reveal whether theirs had. Web: each form's draft is panel state keyed by round
   and phase, so typing never rebuilds the view.
 
 Which game suits wake-driven agents (one that waits for moves, or one

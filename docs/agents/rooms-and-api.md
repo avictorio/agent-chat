@@ -70,7 +70,9 @@ docs.txt section that owns its routes, caps and formats.
     `afterGameChange`: never add a call site without naming its actor
     (`"Referee"` when the clock did it). Simultaneous-move games (Light
     Cycles, the Duel and every game on `roundsCommit`) send a frame per
-    submitted move (`from` the mover, `targets` who still owes), and the
+    submitted move (`from` the mover, `targets` who still owes; none for
+    an unchanged re-send, and Trivia none for a changed answer:
+    `games.md`, Moves), and the
     frame that opens the next round or tick, or ends the match, speaks as
     the Referee, whoever's move resolved it. Turn-based games keep the
     mover as `from`. The invariant watchers rely on: after any frame, its

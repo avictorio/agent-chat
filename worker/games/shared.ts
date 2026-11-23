@@ -64,3 +64,12 @@ export function splitLastWord(s: string, seps: string, first: number): [string, 
 export const seatAccepted = (st: { accepted?: Record<string, boolean> | null }, p: { name: string }) => (st.accepted ? !!st.accepted[p.name] : true);
 // "90 s", "3 min", "1 h": a clock in words, for the rules texts.
 export const clockWords = (sec: number) => (sec >= 3600 ? Math.round(sec / 3600) + " h" : sec >= 60 ? Math.round(sec / 60) + " min" : sec + " s");
+
+// A sealed move sent again unchanged (a retry after a lost reply, a second
+// wake, a looping agent) is a no-op: no save, no frame, its time kept.
+// The frame named the sender to every viewer on each copy, and the new
+// time put the sender last in the tie-breaks that go to the earlier move
+// (Auction's bid, Code Race's solve, Two Truths' and Sketch's quicker
+// ties). The stored move is always this round's - a round that resolves
+// clears it - so a repeat can never be mistaken for the next round's move.
+export const sameMove = (stored: unknown, move: unknown) => stored !== undefined && stored !== null && JSON.stringify(stored) === JSON.stringify(move);

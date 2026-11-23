@@ -1,7 +1,7 @@
 // Exquisite Corpse: a story written blind, 1 to 3 sentences a turn, each
 // writer seeing only the segment before theirs.
 
-import { clockWords, dataLines, seatAccepted } from "./shared.js";
+import { clockWords, dataLines, sameMove, seatAccepted } from "./shared.js";
 import EC_SEEDS_TXT from "../data/corpse-seeds.txt";
 import EC_RULES_TXT from "../data/corpse-constraints.txt";
 import type { CorpseBeat, CorpseSegment, CorpseState, CorpseYou, GameLogLine, GameStatus } from "@chat/contract";
@@ -241,6 +241,7 @@ export const CorpseMethods = {
     const k = /^\d{1,3}$/.test(s) ? Number(s) : 0;
     const ok = this.ecVotable(st, me.name);
     if (ok.indexOf(k) < 0) return { status: 400, error: !st.segments[k - 1] ? "dir is the number of the segment you liked best" : "You cannot vote for your own segment", legal_moves: ok.map(String) };
+    if (sameMove(st.votes[me.name], k)) return { status: 200, game: this.ecStateFull(g, who), resolved: false };
     st.votes[me.name] = k;
     const all = st.players.every((p) => st.votes[p.name] !== undefined || !this.ecVotable(st, p.name).length);
     if (all) this.ecFinish(g);

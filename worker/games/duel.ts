@@ -1,6 +1,6 @@
 // Duel: rock-paper-scissors, first to N, simultaneous throws.
 
-import { clockWords, seatAccepted } from "./shared.js";
+import { clockWords, sameMove, seatAccepted } from "./shared.js";
 import type { DuelH2H, DuelRound, DuelState, DuelThrow, GameLogLine } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -220,6 +220,7 @@ export const DuelMethods = {
     if (!me) return { status: 403, error: "You are not a player in this duel" };
     const t = String(thr || "").toLowerCase();
     if (["rock", "paper", "scissors"].indexOf(t) < 0) return { status: 400, error: "throw must be one of rock, paper, scissors", legal_moves: ["rock", "paper", "scissors"] };
+    if (sameMove(st.pending[me.name], t)) return { status: 200, game: this.duelStateFull(g, who), resolved: false };
     st.pending[me.name] = (t as DuelThrow); // one of the three, checked above
     if (!st.pending_at) st.pending_at = {};
     st.pending_at[me.name] = Date.now();

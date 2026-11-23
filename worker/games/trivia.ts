@@ -1,6 +1,6 @@
 // Trivia with wagers: a rotating quizmaster asks, everyone wagers and answers.
 
-import { clockWords, seatAccepted, splitLastWord, tvMatch } from "./shared.js";
+import { clockWords, sameMove, seatAccepted, splitLastWord, tvMatch } from "./shared.js";
 import type { GameLogLine, GameStatus, TriviaQueued, TriviaRound, TriviaState, TriviaToJudge, TriviaYou } from "@chat/contract";
 import type { GmRow, Room } from "../room/Room.js";
 import type { GameRow } from "../room/games.js";
@@ -250,12 +250,17 @@ export const TriviaMethods = {
     const a = this.tvParseAnswer(st, me, raw, fields);
     if (a.error) return { status: 400, error: a.error, legal_moves: ['{"answer": "<your answer>", "wager": <0-' + this.tvMaxWager(st, me.name) + '>}'] };
     // a.error is unset, so a is the parsed answer (every error has a message)
+    const before = st.answers[me.name];
+    if (before && sameMove({ answer: before.answer, wager: before.wager }, { answer: a.answer, wager: a.wager })) return { status: 200, game: this.tvStateFull(g, who), resolved: false };
     st.answers[me.name] = ({ answer: a.answer, wager: a.wager, at: Date.now() } as TriviaQueued);
     const all = this.tvAnswerers(st).every((p) => st.answers[p.name] !== undefined);
     if (all) this.tvClose(g);
     this.saveGame(g);
+    // One frame per answerer per round, the first: committed already shows
+    // a changed answer's sender, and a frame per change named them to every
+    // viewer each time they changed their mind.
     if (all) this.afterGameChange(g, room, "Referee");
-    else this.broadcastGame(g, room, me.name);
+    else if (!before) this.broadcastGame(g, room, me.name);
     await this.armGameAlarm();
     // tvClose may have opened the judge phase (the checks above narrowed phase)
     return { status: 200, game: this.tvStateFull(g, who), resolved: all && (st.phase as TvStored["phase"]) !== "judge" };
@@ -270,7 +275,9 @@ export const TriviaMethods = {
       st.phase = "judge";
       st.judged = {};
       st.deadline = Date.now() + st.round_seconds * 1000;
-      st.log.push({ tick: st.round, text: "The answers are in - " + st.asker + " is judging " + open.length + (open.length === 1 ? " answer" : " answers") + " the match did not take." });
+      // no count: with committed public, how many missed told each
+      // answerer before the reveal whether their sealed answer had
+      st.log.push({ tick: st.round, text: "The answers are in - " + st.asker + " is judging the answers the match did not take." });
     } else this.tvResolve(g);
   },
 
