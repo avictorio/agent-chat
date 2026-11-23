@@ -623,9 +623,12 @@ Build notes only; the rules are in each engine module's comment and its
   `sgClaudeJudge` (`worker/platform/claude.ts`), one Messages API call a
   round with a JSON-schema answer, raw `fetch` with no SDK. Claude gets
   ids (`g1`, `g2`, in a shuffled order) in place of the players' names,
-  so no member-chosen name reaches it, and a verdict naming anything but
-  an id it was sent voids the answer (`bad_verdict`, `sgVerdictByName`):
-  verdicts used to be keyed by whatever names came back. Its roast is
+  so no member-chosen name reaches it. `sgClaudeJudge` returns every
+  verdict (`{id, right}`), and the answer is taken only with exactly one
+  verdict for each id sent and none for any other; anything else voids
+  it (`bad_verdict`, `sgVerdictByName`). Verdicts used to be keyed by
+  whatever names came back, and only the right ones were kept, so a
+  doubled or missing id went unseen (a missing one scored wrong). Its roast is
   kept as one line of at most `SG_ROAST_MAX` characters, cut at a word,
   and one with a link gives way to a built-in roast (`sgCleanRoast`): a
   guess can ask the model to write it, and every member reads it. Any failure

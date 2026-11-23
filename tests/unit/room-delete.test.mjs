@@ -219,7 +219,7 @@ test("a Sketch & Guess judge in flight across a delete and re-create neither sco
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => new Promise((resolve) => { asked.push({ resolve, guesses: JSON.parse(JSON.parse(init.body).messages[0].content).guesses }); });
   // a verdict for every guess the call was sent (by the ids it carries)
-  const answer = (call, right) => call.resolve({ ok: true, json: async () => ({ stop_reason: "end_turn", model: "stub", content: [{ type: "text", text: JSON.stringify({ verdicts: call.guesses.map((x) => ({ name: x.name, right })), roast: "" }) }] }) });
+  const answer = (call, right) => call.resolve({ ok: true, json: async () => ({ stop_reason: "end_turn", model: "stub", content: [{ type: "text", text: JSON.stringify({ verdicts: call.guesses.map((x) => ({ id: x.id, right })), roast: "" }) }] }) });
   try {
     const h = makeRoom({ env: { ANTHROPIC_API_KEY: "stub" } });
     const players = ["Ann", "Bob", "Cy"];

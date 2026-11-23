@@ -21,9 +21,10 @@ export type SgSealed = { guess: string, at: number };
 export type SgImageMeta = { key: string, type: string, bytes: number };
 /** A round as stored; sgRoundOut adds its image. */
 export type SgRound = Omit<SketchRound, "image">;
-/** The Referee's answer (sgClaudeJudge, or the test hook's stand-in): the
- *  guesses it judged right and a roast, or why it did not judge. */
-export type SgVerdict = Awaited<ReturnType<typeof sgClaudeJudge>>;
+/** The Referee's answer by seat (sgVerdictByName from sgClaudeJudge, or
+ *  the test hook's stand-in): the seats it judged right and a roast, or
+ *  why it did not judge. */
+export type SgVerdict = { error: string } | { error?: undefined, right: Record<string, boolean>, roast: string, model: string };
 /** Sketch & Guess's stored match state (g.st): what createSketch builds
  *  and the moves, the clock and the Referee change. sgSummary and
  *  sgStateFull turn it into the contract's SketchState. artist, phase and
@@ -112,17 +113,23 @@ export function sgDecodeImage(raw: unknown): { bytes: Uint8Array, type: string, 
 // (g1, g2, ... in a shuffled order) in place of the players' names, so no
 // name a member chose reaches it, and a guess cannot tell it which seat to
 // favour by name. Its verdicts used to be keyed by whatever names came
-// back and were taken unchecked; a verdict naming anything but an id this
-// round sent now voids the whole answer, and the text match decides.
+// back and were taken unchecked. The answer is taken only when it holds
+// exactly one verdict for each id this round sent and none for any other
+// id; anything else voids the whole answer, and the text match decides.
+// Only the right verdicts used to come back, so an id answered twice went
+// unseen and one left out was simply scored wrong.
 /** @param ids the ids sent, to the seats' names */
-export function sgVerdictByName(verdict: SgVerdict, ids: Record<string, string>): SgVerdict {
-  if (verdict.error !== undefined) return verdict;
+export function sgVerdictByName(answer: Awaited<ReturnType<typeof sgClaudeJudge>>, ids: Record<string, string>): SgVerdict {
+  if (answer.error !== undefined) return answer;
   const right: Record<string, boolean> = {};
-  for (const id of Object.keys(verdict.right)) {
-    if (!Object.prototype.hasOwnProperty.call(ids, id)) return { error: "bad_verdict" };
-    right[ids[id]] = true;
+  const seen = new Set<string>();
+  for (const v of answer.verdicts) {
+    if (!Object.prototype.hasOwnProperty.call(ids, v.id) || seen.has(v.id)) return { error: "bad_verdict" };
+    seen.add(v.id);
+    if (v.right) right[ids[v.id]] = true;
   }
-  return { right: right, roast: verdict.roast, model: verdict.model };
+  if (seen.size !== Object.keys(ids).length) return { error: "bad_verdict" };
+  return { right: right, roast: answer.roast, model: answer.model };
 }
 // The longest roast from Claude the round shows: about the 20 words it is
 // asked for, which fits the panel's line and the arena's title.
@@ -416,7 +423,7 @@ export const SketchMethods = {
         // the test hook's verdict names seats; Claude's names the ids
         const hook = this.sgTestJudge();
         if (hook) verdict = hook;
-        else if (this.sgJudgeBudget()) verdict = sgVerdictByName(await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, Object.keys(ids).map((id) => ({ name: id, guess: st0.guesses[ids[id]].guess })), !anyRight), ids); // judging: the drawing is up
+        else if (this.sgJudgeBudget()) verdict = sgVerdictByName(await sgClaudeJudge(this.env, (st0.cur as SgCur).prompt, Object.keys(ids).map((id) => ({ id: id, guess: st0.guesses[ids[id]].guess })), !anyRight), ids); // judging: the drawing is up
         else verdict = { error: "daily_cap" };
       }
       // the round may have moved on while the Referee thought, or the room
@@ -474,7 +481,9 @@ export const SketchMethods = {
   sgResolve(g: SgGame, auto: Record<string, "exact" | "near" | null>, verdict: SgVerdict | null) {
     // it runs once the guessing has begun: the round has its artist and prompt
     const st = g.st as SgStored & { artist: string, cur: SgCur };
-    const ok = verdict && !verdict.error;
+    /** the verdict, when it came back without an error */
+    const good = verdict && verdict.error === undefined ? verdict : null;
+    const ok = !!good;
     /** The round as stored; sgRoundOut adds its image. */
     const rec: Omit<SketchRound, "image"> = { n: st.round, artist: st.artist, prompt: st.cur.prompt, guesses: {}, right: [], missed: [], points: {}, judge: ok ? "referee" : "match", judge_note: verdict && verdict.error ? verdict.error : null, roast: null, forfeit: false, at: Date.now() };
     for (const p of this.sgGuessers(st)) {
@@ -484,10 +493,7 @@ export const SketchMethods = {
         continue;
       }
       const a = auto[p.name];
-      // ok: the verdict came back without an error, so it carries right; ok
-      // is null only with no verdict, which comes only when every guess
-      // matched on its own (a is set), so byRef is a boolean
-      const byRef = (!a && ok && !!(verdict.right as Record<string, boolean>)[p.name]) as boolean;
+      const byRef = !a && !!good && !!good.right[p.name];
       const right = !!a || byRef;
       rec.guesses[p.name] = { guess: x.guess, right: right, exact: a === "exact", how: a ? "match" : ok ? "referee" : "match", at: x.at, ms: Math.max(0, x.at - (st.cur.posted || x.at)) };
       if (right) {
@@ -496,7 +502,7 @@ export const SketchMethods = {
       }
     }
     rec.points[st.artist] = Math.min(2, rec.right.length);
-    if (!rec.right.length) rec.roast = (ok && sgCleanRoast(verdict.roast)) || SG_ROASTS[st.round % SG_ROASTS.length].replace(/\{p\}/g, st.cur.prompt).replace(/\{a\}/g, st.artist);
+    if (!rec.right.length) rec.roast = (good && sgCleanRoast(good.roast)) || SG_ROASTS[st.round % SG_ROASTS.length].replace(/\{p\}/g, st.cur.prompt).replace(/\{a\}/g, st.artist);
     st.rounds.push(rec);
     st.log.push({ tick: st.round, text: "Round " + st.round + ": it was " + st.cur.prompt + ". " + (rec.right.length ? rec.right.join(", ") + " got it" : "Nobody got it") + "; " + st.artist + " +" + rec.points[st.artist] + "." });
     st.forfeits = 0;
