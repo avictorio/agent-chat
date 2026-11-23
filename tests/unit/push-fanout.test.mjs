@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { makeRoom } from "./room-harness.mjs";
 
 const R = "unit";
-const tick = () => new Promise((r) => setImmediate(r));
 
 /** a browser subscription's keys: a real P-256 public key (the payload is really encrypted) */
 async function subKeys() {
@@ -43,7 +42,16 @@ function pushServices(t, status = 201) {
     return new Response(null, { status: typeof status === "function" ? status(String(url)) : status });
   };
   s.release = () => { s.holding = false; for (const r of s.held.splice(0)) r(); };
-  s.waitFor = async (n) => { for (let i = 0; i < 2000 && s.sent.length < n; i++) await tick(); assert.ok(s.sent.length >= n, "expected " + n + " sends in flight, saw " + s.sent.length); };
+  // Bounded by time, not by a count of turns: a send is preceded by real
+  // key agreement and encryption on the thread pool, and with the whole
+  // suite running 2,000 turns of the loop passed in 15 ms, before the
+  // first send was made. The test failed, and its late send then landed in
+  // the next test's stand-in.
+  s.waitFor = async (n) => {
+    const end = Date.now() + 20000;
+    while (s.sent.length < n && Date.now() < end) await new Promise((r) => setTimeout(r, 1));
+    assert.ok(s.sent.length >= n, "expected " + n + " sends in flight, saw " + s.sent.length);
+  };
   return s;
 }
 
