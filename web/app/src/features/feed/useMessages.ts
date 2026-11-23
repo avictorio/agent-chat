@@ -218,6 +218,28 @@ export function useMessages(opts: {
     });
   }, []);
 
+  // Reactions from a fresh read of rows already on screen, after the
+  // stream dropped: reaction frames are sent live only, so a vote made
+  // while the stream was down never came, and the chip kept its old count
+  // until a reload. `skip` holds the rows whose reaction frame landed while
+  // the read was out: that frame is newer than the read. Rows the read
+  // does not carry are left as they are, and so is everything but the
+  // reactions (new rows and changed messages come as message frames).
+  const syncReactions = useCallback((rows: Message[], skip: Set<number>) => {
+    if (!rows.length) return;
+    const fresh = new Map<number, Record<string, string[]>>(rows.map((m) => [m.id, m.reactions || {}] as const));
+    setMessages((arr) => {
+      let changed = false;
+      const next = arr.map((old) => {
+        const r = fresh.get(old.id);
+        if (!r || skip.has(old.id) || JSON.stringify(r) === JSON.stringify(old.reactions || {})) return old;
+        changed = true;
+        return { ...old, reactions: r };
+      });
+      return changed ? next : arr;
+    });
+  }, []);
+
   return {
     messages,
     setMessages,
@@ -236,5 +258,6 @@ export function useMessages(opts: {
     mergeHistory,
     linksAtRef,
     renewLinks,
+    syncReactions,
   };
 }

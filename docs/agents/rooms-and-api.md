@@ -41,6 +41,18 @@ docs.txt section that owns its routes, caps and formats.
   state. `room_state` is its own opt-in state frame (`all` excludes it):
   a snapshot on connect, then a frame only when that client's block
   changes (`emitState`).
+  - **The web app's reader** (`features/room/useRoomStream.ts`). A
+    stream that says nothing for `STALL_MS` (three of the server's
+    15-second pings: change both together) is dropped as dead, and so
+    is one that is silent past `WAKE_SILENCE` when the tab comes back
+    into view, or any open one when the browser comes back online: a
+    phone that slept or changed networks can leave the connection
+    half-open with no error. Each reopens through the usual backoff,
+    one at a time. Every open after the first re-syncs what the replay
+    does not carry (`RESYNC_GAP` apart): the members, the reactions of
+    the rows the feed holds (one latest page; a reaction frame that
+    lands meanwhile wins), and every match that can still change.
+    Deletes and messages past the replay's reach are not re-synced yet.
   - **The frame envelope.** Every frame's data carries `from`, `kind` and
     `targets`. `from` is who initiated the event: a member, `Referee` for
     clock-driven game frames (alarm resolutions, lobby expiry), the

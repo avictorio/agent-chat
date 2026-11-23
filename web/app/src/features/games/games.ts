@@ -31,6 +31,8 @@ export interface GameStore {
   subscribe(fn: () => void): () => void;
   getVersion(): number;
   fetch(id: number): Promise<void>;
+  /** fetch every match that can still change, and the open arena's */
+  refreshLive(): void;
   onFrame(game: GL): void;
   openGame(id: number, type?: string): void;
   viewerClosed(): void;
@@ -1043,11 +1045,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
   // Cards stay fresh on a slow poll. A finished or called-off match
   // never changes again, so only live ones (and entries known only from
   // a frame) are polled.
-  window.setInterval(() => {
-    if (document.hidden) return;
+  function refreshLive() {
     cache.forEach((g, id) => {
       if (g.__frameOnly || g.status === "lobby" || g.status === "running") void fetchGame(id);
     });
+    if (gameView && !cache.has(gameView.id)) void fetchGame(gameView.id);
+  }
+  window.setInterval(() => {
+    if (!document.hidden) refreshLive();
   }, 20000);
 
   return {
@@ -1060,6 +1065,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     },
     getVersion: () => version,
     fetch: fetchGame,
+    refreshLive,
     onFrame(game: GL) {
       if (!game || !game.id) return;
       // A frame of any registered game; Light Cycles once it carries trails.

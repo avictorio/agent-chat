@@ -1,7 +1,7 @@
 // UI scenarios: the chat: markdown, voice and dictation, message actions, artifacts and reactions.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/chat.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
+const { heldStream, settle, done, must, run, shot, ymd, TESTS } = require('./harness');
 
 (async () => {
   for (const [label, o] of [['markdown-light', {}], ['markdown-dark', { scheme: 'dark' }], ['markdown-mobile', { w: 390, h: 844 }]]) {
@@ -641,6 +641,100 @@ const { settle, done, must, run, shot, ymd, TESTS } = require('./harness');
     out.posts = calls.slice(before).filter((c) => /^POST \/api\/rooms\/demo\/messages(\?|\s|$)/.test(c));
     if (out.posts.length !== 1 || !/"text":"@He"/.test(out.posts[0])) throw new Error('Ctrl+Enter sends the message, menu or not: ' + JSON.stringify(out));
     return out;
+  });
+
+  // The room's stream stays open (heldStream) and goes silent, as a
+  // half-open connection does after a phone sleeps or changes networks.
+  // Moves the page's clock on by ms from the real time (not stacked).
+  const skew = (page, ms) => page.evaluate((d) => { if (!window.__realNow) window.__realNow = Date.now; Date.now = () => window.__realNow.call(Date) + d; }, ms);
+  const streams = (page) => page.evaluate(() => window.__streams.map((x) => (x.open ? 'open' : x.aborted ? 'aborted' : 'ended')));
+  const waitStreams = async (page, n, ms) => { for (let t = 0; t < ms / 50 && (await streams(page)).length < n; t++) await page.waitForTimeout(50); return streams(page); };
+
+  // A stream that has said nothing for three of the server's pings is
+  // dropped and reopened from its cursor, and a message posted meanwhile
+  // shows. Back in view after a long silence (the device slept, so the
+  // check had not run) or back online, it reopens at once; a tab that was
+  // only hidden for a moment keeps its stream, and several wake-ups at
+  // once reopen it once. Before, nothing watched the stream: the room said
+  // "live" while nothing arrived until a reload.
+  await run('stream-stall-reopens', { init: heldStream }, async (page, S, calls) => {
+    S.streamRetry = 300;
+    await page.reload(); await settle(page);
+    must(JSON.stringify(await streams(page)) === '["open"]', 'one stream, open: ' + JSON.stringify(await streams(page)));
+    S.msgs.push({ id: 120, ts: S.msgs[S.msgs.length - 1].ts + 1000, from: 'Ada', kind: 'agent', text: 'Posted while the line was dead.' });
+    // 50 s of silence: the stall check (every 5 s) drops it
+    await skew(page, 50e3);
+    await page.waitForSelector('.msg[data-id="120"]', { state: 'attached', timeout: 9000 }).catch(() => { throw new Error('the silent stream was never reopened: ' + JSON.stringify(calls.filter((c) => /stream/.test(c)))); });
+    const afterStall = await streams(page);
+    must(JSON.stringify(afterStall) === '["aborted","open"]', 'the dead stream is dropped and one reopens: ' + JSON.stringify(afterStall));
+    must((await page.$$('.msg[data-id="120"]')).length === 1, 'the message shows once');
+    await page.waitForFunction(() => document.querySelector('#status').classList.contains('live'), null, { timeout: 3000 });
+    // a moment hidden: the stream is fresh and stays
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(700);
+    must((await streams(page)).length === 2, 'a short hide keeps the stream: ' + JSON.stringify(await streams(page)));
+    // back in view after 30 s of silence (under the stall check's 45)
+    await skew(page, 80e3);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    const woke = await waitStreams(page, 3, 2500);
+    must(JSON.stringify(woke) === '["aborted","aborted","open"]', 'waking after a long silence reopens it: ' + JSON.stringify(woke));
+    // back online, three times at once: one reopen
+    await page.waitForTimeout(300);
+    await page.evaluate(() => { for (let i = 0; i < 3; i++) window.dispatchEvent(new Event('online')); });
+    await waitStreams(page, 4, 2500);
+    await page.waitForTimeout(800);
+    const online = await streams(page);
+    must(JSON.stringify(online) === '["aborted","aborted","aborted","open"]', 'online reopens it once: ' + JSON.stringify(online));
+    await page.waitForFunction(() => document.querySelector('#status').classList.contains('live'), null, { timeout: 3000 });
+    S.streamRetry = 0;
+    return { streams: online.length };
+  });
+
+  // Reactions, members and matches that changed while the stream was down
+  // show once it reopens: reaction, members and game frames are live only,
+  // and the reconnect replays only messages. A reaction frame that lands
+  // while the re-read is out wins over the read. Before, the chips kept
+  // their old counts and the avatar its old picture until a reload.
+  await run('stream-resync-after-drop', { init: heldStream, state: { game: true } }, async (page, S, calls) => {
+    S.streamRetry = 300;
+    await page.reload(); await settle(page);
+    const chips = (id) => page.$$eval('.msg[data-id="' + id + '"] .rx-chip', (bs) => bs.map((b) => b.dataset.rx + b.textContent.replace(/\D/g, '')).join(' '));
+    const before = { m3: await chips(3), m5: await chips(5) };
+    // while the stream is down: two votes, a new avatar, and the match moves
+    S.msgs.find((m) => m.id === 5).reactions = { '🎉': ['Ada', 'Henry'] };
+    S.msgs.find((m) => m.id === 3).reactions = { '👍': ['Henry'] };
+    S.mb.members.find((m) => m.name === 'Henry').avatar = 'https://chat.victorio.cloud/api/rooms/demo/avatars/Henry?v=2';
+    // the re-read is held until a reaction frame has landed on row 3
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const held = [];
+    await page.route(/\/api\/rooms\/demo\/messages\?/, async (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname !== '/api/rooms/demo/messages' || u.searchParams.has('after') || /^(1|200)$/.test(u.searchParams.get('limit') || '')) return route.fallback();
+      held.push(u.search);
+      await gate;
+      return route.fallback();
+    });
+    const from = calls.length;
+    await page.evaluate(() => window.__streams[0].end());
+    for (let i = 0; i < 100 && !held.length; i++) await page.waitForTimeout(50);
+    must(held.length === 1, 'the reopen re-reads the rows on screen: ' + JSON.stringify(calls.slice(from)));
+    const frame = { type: 'reaction', room: 'demo', id: 3, reactions: { '👍': ['Henry', 'Ada'], '🔥': ['Ada'] } };
+    await page.evaluate((f) => window.__streams[window.__streams.length - 1].send('event: reaction\ndata: ' + JSON.stringify(f) + '\n\n'), frame);
+    await page.waitForFunction(() => !!document.querySelector('.msg[data-id="3"] .rx-chip[data-rx="🔥"]'), null, { timeout: 3000 });
+    release();
+    await page.waitForFunction(() => !!document.querySelector('.msg[data-id="5"] .rx-chip[data-rx="🎉"]'), null, { timeout: 5000 }).catch(() => { throw new Error('the vote from the gap never showed: ' + JSON.stringify(calls.slice(from))); });
+    await settle(page);
+    const after = { m3: await chips(3), m5: await chips(5) };
+    must(after.m5 === '🎉2', 'row 5 shows the read reactions: ' + after.m5);
+    must(after.m3 === '👍2 🔥1', 'row 3 keeps the newer frame, not the read: ' + after.m3);
+    const avatar = await page.$eval('.msg .avatar[data-name="Henry"] img', (i) => i.getAttribute('src')).catch(() => null);
+    must(/v=2/.test(avatar || ''), 'the new avatar shows: ' + avatar);
+    const later = calls.slice(from);
+    must(later.some((c) => /^GET \/api\/rooms\/demo\/members/.test(c)), 'the members are read again: ' + JSON.stringify(later));
+    must(later.some((c) => /^GET \/api\/rooms\/demo\/games\/1\b/.test(c)), 'the live match is read again: ' + JSON.stringify(later));
+    S.streamRetry = 0;
+    return { before, after, read: held[0] };
   });
 
   done('chat');

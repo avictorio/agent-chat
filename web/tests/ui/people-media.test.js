@@ -824,6 +824,9 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
       tried.push(u.search);
       return down ? route.abort('internetdisconnected') : route.fallback();
     });
+    // the room's stream goes down with the network, as in a real outage
+    // (a stream that opens re-reads the feed)
+    await page.route(/\/stream\?/, (route) => (down ? route.abort('internetdisconnected') : route.fallback()));
     await page.route(/\/messages\/95\/image\?/, (route) => {
       const u = new URL(route.request().url());
       if (u.searchParams.get('sig') !== 'dead') return route.fallback();
@@ -836,7 +839,9 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
     await settle(page);
     const online = (on) => page.evaluate((v) => Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => v }), on);
     const src = () => page.$eval('.msg[data-id="8"] img.msg-img', (i) => i.getAttribute('src'));
-    // the browser says it is offline: three checks send nothing
+    // the browser says it is offline: three checks send nothing (counted
+    // from here: the stream's reopens before it re-sync the feed)
+    const startOff = tried.length;
     await online(false);
     down = true;
     for (const t of [51, 52, 53]) {
@@ -845,7 +850,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
       await settle(page);
     }
     const offline = tried.length;
-    must(offline === 0, 'nothing is sent while the browser is offline: ' + JSON.stringify(tried));
+    must(offline === startOff, 'nothing is sent while the browser is offline: ' + JSON.stringify(tried.slice(startOff)));
     // back online: the check runs at once, with no wait for the next minute
     for (const m of S.msgs) for (const k of ['image', 'html', 'doc']) if (m[k]) m[k] = Object.assign({}, m[k], { url: m[k].url.split('?')[0] + '?exp=2&sig=fresh' });
     down = false;
@@ -876,7 +881,7 @@ const { settle, FIXTURES, TESTS, done, must, run, shot } = require('./harness');
       .catch(() => { throw new Error('the failed photo was not retried during the wait: ' + JSON.stringify(tried.slice(retryFrom))); });
     S.streamRetry = 0;
     must(/sig=fresh/.test(await src()), 'row 8 kept its renewed link');
-    return { offline, back: back - offline, failing: failing.length, retry: tried.length - retryFrom };
+    return { offline: offline - startOff, back: back - offline, failing: failing.length, retry: tried.length - retryFrom };
   });
 
   // A row a walk could not reach is held for 50 minutes; once a page has

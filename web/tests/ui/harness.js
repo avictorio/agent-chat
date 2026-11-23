@@ -850,6 +850,32 @@ const fakePush = () => {
   Object.defineProperty(Notification, 'permission', { get: () => 'granted', configurable: true });
   Notification.requestPermission = async () => 'granted';
 };
+// A room stream that stays open, as a real one does (pass as a run's
+// init). The stub's stream ends at once, like a dropped connection; this
+// hands the page the stub's answer (the replay and the state frame) and
+// then keeps the stream open and silent until a scenario sends more
+// (window.__streams[i].send(text)) or ends it (.end()). An abort errors
+// it, as a real fetch's does. window.__streams lists every stream opened.
+const heldStream = () => {
+  const real = window.fetch.bind(window);
+  window.__streams = [];
+  window.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!/\/stream\?/.test(url)) return real(input, init);
+    const res = await real(input, Object.assign({}, init, { signal: undefined }));
+    if (!res.ok) return res;
+    const text = await res.text();
+    const enc = new TextEncoder();
+    const s = { open: true, aborted: false };
+    const body = new ReadableStream({ start(c) { s.c = c; c.enqueue(enc.encode(text)); } });
+    s.send = (t) => { if (s.open) s.c.enqueue(enc.encode(t)); };
+    s.end = () => { if (s.open) { s.open = false; s.c.close(); } };
+    const signal = init && init.signal;
+    if (signal) signal.addEventListener('abort', () => { if (s.open) { s.open = false; s.aborted = true; s.c.error(new DOMException('The operation was aborted.', 'AbortError')); } });
+    window.__streams.push(s);
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  };
+};
 const must = (c, msg) => { if (!c) throw new Error(msg); };
 // A scenario with its own harness (the home page) counts its failure here.
 function failed() {
@@ -862,4 +888,4 @@ function done(file) {
   process.exit(FAILURES ? 1 : 0);
 }
 
-module.exports = { ARENA_KIDS, fakePush, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };
+module.exports = { ARENA_KIDS, fakePush, heldStream, settle, trackNetwork, CLOCK, NOW, clockNow, installClock, D, DIST, FIXTURES, H, HTML, ICON_PNG, OUT, RESOURCE_STATUS, TESTS, badConsole, chromium, done, failed, fresh, fs, must, ngOpen, noGl, now, path, roomState, run, setup, shot, ymd };

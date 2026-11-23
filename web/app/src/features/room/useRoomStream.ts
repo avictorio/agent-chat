@@ -16,12 +16,33 @@ import type { Status } from "./Sidebar";
 
 // The room's live connection: the initial load with its retry
 // loop, the SSE stream (message / reaction / game / members
-// frames), and the recheck-on-close that re-opens it. Identity
-// discoveries (your name, the agent gate) report back through
-// callbacks; everything else lands in the feed and board hooks.
+// frames), the recheck-on-close that re-opens it, and the re-sync
+// after a drop. Identity discoveries (your name, the agent gate)
+// report back through callbacks; everything else lands in the feed
+// and board hooks.
 
 type Feed = ReturnType<typeof useMessages>;
 type Board = ReturnType<typeof useBoardData>;
+
+// The server writes a ping comment on every open stream every 15 s (the
+// pinger in worker/room/Room.ts). A stream that has said nothing for three
+// of those is dead: a phone that slept or changed networks can leave the
+// connection half-open, with no error ever reaching the reader, and the
+// room said "live" while nothing more arrived until a reload.
+const STALL_MS = 45_000;
+const STALL_CHECK = 5_000;
+// Back in view after more than a ping's silence: the device slept (timers
+// stop with it, so the stall check had not run). A tab that was only
+// hidden kept reading, so its stream is fresh and is left open.
+const WAKE_SILENCE = 25_000;
+// Re-syncs after a drop run one at a time and at least this far apart: a
+// stream that keeps closing as soon as it opens must not turn every
+// reopen into a members read and a page of messages.
+const RESYNC_GAP = 15_000;
+// The server's largest page, and the rows past those the feed holds that
+// a re-read takes along (sent while the stream was down).
+const PAGE = 500;
+const SLACK = 50;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -76,6 +97,72 @@ export function useRoomStream(opts: {
     const fallbackBlock = (name: string) => setupBlock(room, token, name);
     let cancelled = false;
     const streamRefLocal: { fn: () => void } = { fn: () => {} };
+    // The stream being read: when it last said anything, whether it is
+    // still being read, and whether it is being dropped as dead (which,
+    // unlike an abort on purpose, reconnects).
+    type Open = { ctrl: AbortController; at: number; open: boolean; stalled: boolean };
+    let cur: Open | null = null;
+    // Drop a dead stream: dropped() then reconnects with the stream's own
+    // backoff. A stream already ended is waiting for that reconnect, so
+    // asking again starts nothing: there is one reopen at a time.
+    const reopen = (s: Open) => {
+      if (!s.open || cur !== s || cancelled) return;
+      s.stalled = true;
+      s.ctrl.abort();
+    };
+    // Reaction, members and game frames are sent live only, and a reconnect
+    // replays only the messages after the cursor. After a drop, what changed
+    // meanwhile is read again: the members, the reactions of the rows the
+    // feed holds, and every match that can still change. Without it a
+    // reaction vote or a new avatar from the gap showed only after a reload.
+    const rs = { running: false, again: false, at: 0, timer: 0 };
+    // ids whose reaction frame arrived while the re-read was out
+    let touched: Set<number> | null = null;
+    const resync = () => {
+      if (cancelled || deniedRef.current) return;
+      if (rs.running) {
+        rs.again = true;
+        return;
+      }
+      if (rs.timer) return;
+      const wait = rs.at + RESYNC_GAP - Date.now();
+      if (wait > 0) {
+        rs.timer = window.setTimeout(() => {
+          rs.timer = 0;
+          resync();
+        }, wait);
+        return;
+      }
+      // the stream dropped again while this waited: the next open asks
+      if (!cur || !cur.open) return;
+      rs.running = true;
+      rs.at = Date.now();
+      void (async () => {
+        try {
+          void board.loadMembers();
+          gamesRef.current?.refreshLive();
+          const held = feed.messagesRef.current.length;
+          if (held) {
+            const seen = new Set<number>();
+            touched = seen;
+            const d = await client.messages(undefined, Math.min(PAGE, held + SLACK));
+            if (!cancelled) feed.syncReactions(d.messages || [], seen);
+          }
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
+          // any other failure: the next drop's re-sync reads again
+        } finally {
+          touched = null;
+          rs.running = false;
+          if (rs.again) {
+            rs.again = false;
+            resync();
+          }
+        }
+      })();
+    };
+    // Whether a stream has gone live yet: every later open follows a drop.
+    let opened = false;
     const recheck = async () => {
       try {
         await client.messages(feed.lastRef.current ?? undefined, 1);
@@ -98,6 +185,8 @@ export function useRoomStream(opts: {
       if (deniedRef.current || cancelled) return;
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
+      const s: Open = { ctrl, at: Date.now(), open: true, stalled: false };
+      cur = s;
       let retryMs = 3000;
       const onFrame = (kind: string, data: string, eventId: number | null) => {
         try {
@@ -109,6 +198,7 @@ export function useRoomStream(opts: {
               id: number;
               reactions?: Record<string, string[]>;
             };
+            touched?.add(d.id);
             feed.setMessages((arr) =>
               arr.map((m) => (m.id === d.id ? { ...m, reactions: d.reactions || {} } : m))
             );
@@ -134,12 +224,17 @@ export function useRoomStream(opts: {
         }
       };
       const dropped = () => {
-        if (ctrl.signal.aborted || cancelled) return;
+        s.open = false;
+        if ((ctrl.signal.aborted && !s.stalled) || cancelled) return;
         if (!deniedRef.current) setStatus("reconnecting");
         window.setTimeout(() => {
           if (!cancelled && ctrlRef.current === ctrl) void recheck();
         }, retryMs);
       };
+      // also covers a connection that never answers
+      const watch = window.setInterval(() => {
+        if (Date.now() - s.at > STALL_MS) reopen(s);
+      }, STALL_CHECK);
       void (async () => {
         try {
           const res = await fetch(
@@ -159,14 +254,18 @@ export function useRoomStream(opts: {
             }
           );
           if (!res.ok || !res.body) throw new Error("stream " + res.status);
+          s.at = Date.now();
           setStatus("live");
           window.dispatchEvent(new Event("ac-stream-open"));
+          if (opened) resync();
+          opened = true;
           const reader = res.body.getReader();
           const decoder = new TextDecoder();
           let buf = "";
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            s.at = Date.now();
             buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
             let cut = buf.indexOf("\n\n");
             while (cut >= 0) {
@@ -193,13 +292,25 @@ export function useRoomStream(opts: {
             }
           }
         } catch {
-          // Aborted on purpose (deny, unmount, a newer stream) or a
-          // network drop; dropped() tells the two apart.
+          // Aborted on purpose (deny, unmount, a newer stream), dropped as
+          // dead, or a network drop; dropped() tells them apart.
         }
+        window.clearInterval(watch);
         dropped();
       })();
     };
     streamRefLocal.fn = stream;
+    const onVisible = () => {
+      if (!document.hidden && cur && Date.now() - cur.at > WAKE_SILENCE) reopen(cur);
+    };
+    // Back online after a network change: the open connection may be on
+    // the old network, half-open, and would only be found dead by the
+    // stall check up to STALL_MS later.
+    const onOnline = () => {
+      if (cur) reopen(cur);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
 
     (async () => {
       setStatus("connecting");
@@ -254,6 +365,9 @@ export function useRoomStream(opts: {
 
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+      window.clearTimeout(rs.timer);
       ctrlRef.current?.abort();
       feed.endSettle();
       speaker.stopAll();
