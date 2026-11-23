@@ -318,11 +318,34 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
 
   // One move per match at a time: a double tap, or a tap while the
   // answer is slow, sent a second copy that landed on the next turn once
-  // the rival had answered (a second disc in the same column).
-  const moving = new Set<number>();
+  // the rival had answered (a second disc in the same column). A second
+  // tap of the same move is dropped. A different move tapped meanwhile
+  // is not a copy (a rider steering again, a second line in the Werewolf
+  // square): it waits and goes next, with the turn it was tapped on, so
+  // one that came too late for its turn is refused, not played on the
+  // next.
+  type Waiting = { dir: string; note: HTMLElement | null; label: string | undefined; turn: number | string | undefined };
+  const moving = new Map<number, { last: string; queue: Waiting[] }>();
   async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
-    if (moving.has(id)) return;
-    moving.add(id);
+    const turn = opts.turnFor ? opts.turnFor(id) : undefined;
+    const out = moving.get(id);
+    if (out) {
+      if (out.last !== dir) {
+        out.last = dir;
+        out.queue.push({ dir, note, label, turn });
+      }
+      return;
+    }
+    const mine = { last: dir, queue: [] as Waiting[] };
+    moving.set(id, mine);
+    try {
+      for (let w: Waiting | undefined = { dir, note, label, turn }; w; w = mine.queue.shift()) await sendOne(id, w);
+    } finally {
+      moving.delete(id);
+    }
+  }
+  async function sendOne(id: number, w: Waiting) {
+    const { dir, note, label } = w;
     if (note) note.textContent = label || "Queuing " + dir + "…";
     // Several views add their note to the page only when it has text,
     // and on the mover's own turn it has none: a refusal written there
@@ -354,7 +377,7 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
       n.scrollIntoView({ block: "nearest" });
     };
     try {
-      const d = await client.submitMove(id, dir, opts.turnFor ? opts.turnFor(id) : undefined);
+      const d = await client.submitMove(id, dir, w.turn);
       if (d.game) {
         cache.set(id, d.game);
         notify();
@@ -370,8 +393,6 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
         renderGameView(stale.game, true);
       }
       say(e instanceof Error && e.message ? e.message : "The move did not reach the referee.");
-    } finally {
-      moving.delete(id);
     }
   }
 

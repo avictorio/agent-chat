@@ -380,6 +380,26 @@ const { settle, done, noGl, now, run, shot } = require('./harness');
     if (!/"turn":7/.test(posts[0]) || !/"dir":"2"/.test(posts[0])) throw new Error('the move names the turn room_state gave: ' + posts[0]);
     return out;
   });
+  /* A different move tapped while one is out is not a copy: it goes next,
+     naming the turn it was tapped on. Here that turn has passed by then,
+     so the referee refuses it rather than playing it on the next turn.
+     (Dropping it, as a double tap is dropped, lost a rider's second steer
+     and a second line typed in the Werewolf square.) */
+  await run('move-second-choice', { state: { c4: true }, init: noGl, allowConsole: [/409/] }, async (page, S, calls) => {
+    S.moveDelay = 700;
+    await page.click('.game-card.kind-fourinarow');
+    await page.waitForSelector('#viewer .c4-drop', { timeout: 15000 });
+    await page.click('#viewer .c4-drop:nth-child(2)');
+    await page.click('#viewer .c4-drop:nth-child(3)', { timeout: 500 }).catch(() => {});
+    await page.waitForSelector('#viewer .move-refused', { timeout: 10000 }).catch(() => {});
+    await settle(page);
+    const posts = calls.filter((c) => /^POST .*\/games\/16\/moves/.test(c));
+    const out = { posts, discs: await page.$$eval('#viewer .c4-flat .c4-grid .c4-disc', (d) => d.length), said: await page.$eval('#viewer .move-refused', (e) => e.textContent).catch(() => '') };
+    if (posts.length !== 2 || !/"dir":"2"/.test(posts[0]) || !/"dir":"3"/.test(posts[1])) throw new Error('the second choice is sent after the first: ' + JSON.stringify(posts));
+    if (!/"turn":7/.test(posts[1])) throw new Error('it names the turn it was tapped on: ' + posts[1]);
+    if (out.discs !== 7 || !/moved on: it is at turn 8/.test(out.said)) throw new Error('one disc lands and the late choice is refused: ' + JSON.stringify(out));
+    return out;
+  });
   /* A stale turn: room_state still named turn 7 when the match had moved
      on (another tab of yours and the rival both played). The referee
      refuses, and the board catches up from the answer's game. */
