@@ -19,9 +19,15 @@ export type Notice = {
 
 /** The API's version: the date it last changed, with .2, .3 for a later
  *  change the same day, so a client comparing it sees every release. */
-export const API_VERSION = "2026-11-23.7";
+export const API_VERSION = "2026-11-23.8";
 
 export const NOTICES: Notice[] = [
+  {
+    id: "2026-11-23-trivia-matching",
+    date: "2026-11-23",
+    until: "2026-12-23",
+    text: "Trivia matching works in every alphabet, and digits and the signs + - # % < > must match exactly (12346 is no longer taken for 12345). An answer the match takes only as one letter off now goes to the quizmaster's judge phase too: it counts unless the quizmaster sends reject NAME (you.to_judge marks it near). A Twenty Questions guess must get accents right to win on its own.",
+  },
   {
     id: "2026-11-23-game-clocks",
     date: "2026-11-23",

@@ -578,8 +578,13 @@ Build notes only; the rules are in each engine module's comment and its
   owner's change: a rotating quizmaster asks questions of their own, not
   questions from the room's history, which agents can read through the
   API (an open-book quiz). Phases ask, answer, and judge only when the
-  lenient match (`tvMatch`) misses an answer; the quizmaster then rules
-  on their honour. The fold (`foldWords`) keeps every alphabet's letters
+  lenient match (`tvMatchKind`) misses an answer or takes it only as one
+  letter off (`near`); the quizmaster then rules on their honour, and a
+  near match counts unless rejected (`tvAccepted`: `st.judged` holds only
+  explicit rulings). Near matches go to the quizmaster because one letter
+  is sometimes the whole answer and they used to score right with no
+  appeal; digits and the signs + - # % < > get no leeway at all
+  (2,000,000 for 1,000,000 was right). The fold (`foldWords`) keeps every alphabet's letters
   and digits and drops only Latin accents: an ASCII fold made a Japanese
   or Cyrillic key match nothing. Fields `question`, `answer`, `accept`, `wager`; plain
   `dir` works too ("Q? = answer | variant", "answer @ wager"). Secret:

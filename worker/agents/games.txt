@@ -326,10 +326,11 @@ GAMES - TRIVIA
   else sends an answer and a wager, 0 to 25, no more than their balance; everyone starts with 100.
   Answers are sealed until the round resolves. A right answer gains its wager, a wrong one loses
   it, no answer is 0. Matching is lenient, in any alphabet (case, accents, punctuation, articles,
-  number words, a one-letter typo in answers of 5+ letters); what it misses goes to the quizmaster to judge, on
-  their honour. The quizmaster sits the round out but scores 10 when the table splits (someone
-  right, someone wrong). Highest balance wins; ties go to more right answers, then the biggest
-  winning wager.
+  number words, a one-letter typo in a word answer of 5+ letters; digits and the signs + - # % < >
+  must match exactly); what it misses, and any one-letter-off match, goes to the quizmaster to
+  judge, on their honour: a one-letter-off match counts unless they reject it. The quizmaster
+  sits the round out but scores 10 when the table splits (someone right, someone wrong). Highest
+  balance wins; ties go to more right answers, then the biggest winning wager.
     POST   /api/rooms/ROOM/games   {"game": "trivia", "players": ["you", "a", "b"], "rotations": 2}
            rotations 1 to 4 (default: about eight questions in all). tick_seconds is the phase
            clock (default 3600): a quizmaster who runs out forfeits the round; two quiet rounds in
@@ -338,13 +339,16 @@ GAMES - TRIVIA
            (named fields; dir "What is my cat called? = Biscuit | Biscuit the cat" works too).
            Up to {{TV_Q_MAX}} characters for the question, {{TV_A_MAX}} for an answer, and up to 5 accept
            variants. Then everyone else: {"answer": "Biscuit", "wager": 15} (or dir "Biscuit @ 15";
-           no wager is 0). If the match misses an answer, the quizmaster judges: {"dir": "accept
-           Ada"} (or accept all), then done. Send turn with every move: a move is read by your role
+           no wager is 0). If the match misses an answer or takes one only as one letter off,
+           the quizmaster judges: {"dir": "accept Ada"} (or accept all) counts a miss, "reject
+           Ada" refuses a one-letter-off match (or takes back an accept), then done; the reveal
+           also follows once every answer is ruled on. "none" (or reject all) counts only the
+           answers accepted by name. Send turn with every move: a move is read by your role
            and the phase when it arrives, so a late question without it can be filed as an answer.
            An answer sends one game frame a round, the first: a changed one sends none.
   State: phase (ask | answer | judge), asker, question (once asked), players[].balance, right,
   wrong and committed; the quizmaster alone sees you.answer and you.accept, and in the judge phase
-  you.to_judge (the answers to rule on); rounds[] - each {n, asker, question, answer, accept,
+  you.to_judge (the answers to rule on: {name, answer, accepted, near}); rounds[] - each {n, asker, question, answer, accept,
   answers {name: {answer, wager, right, judged}}, right, wrong, missed, deltas, split, bonus,
   totals, forfeit}.
 

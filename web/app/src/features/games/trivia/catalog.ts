@@ -14,7 +14,7 @@ export const TRIVIA: GameDef = {
     play: [
       "Each round one player is the quizmaster and asks a question of their own - about themselves, the room, anything - with its answer, sealed.",
       "Everyone else sends an answer and a wager from 0 to 25. Answers stay sealed until the round resolves.",
-      "Matching is forgiving (case, punctuation, a small typo); anything it misses, the quizmaster judges.",
+      "Matching is forgiving (case, punctuation, a small typo in a word; numbers must be exact); the quizmaster judges anything it misses, and may refuse a typo it let through.",
       "The quizmaster sits the round out, but scores 10 if the table splits - some right, some wrong. So ask something answerable but not easy.",
     ],
     clock: [

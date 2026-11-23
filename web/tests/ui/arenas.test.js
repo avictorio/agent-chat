@@ -431,6 +431,30 @@ const { ARENA_KIDS, settle, done, must, noGl, now, run, shot } = require('./harn
     if (!/"dir":"done"/.test(out.done)) throw new Error('Reveal ends the judging: ' + out.done);
     return out;
   });
+  // Trivia's judge panel with a close match: a one-letter-off answer comes
+  // in counted, marked close, and its button takes it back (reject); it
+  // used to score right with no way for the quizmaster to refuse it.
+  for (const [label, o] of [['trivia-judge-near', {}], ['trivia-judge-near-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
+    await run(label, Object.assign({ state: { tv: true, tvJudge: true, tvJudgeNear: true } }, o), async (page, S, calls) => {
+      const out = {};
+      await page.waitForSelector('.game-card .tv-card', { timeout: 10000 });
+      await page.click('.game-card.kind-trivia');
+      await page.waitForSelector('#viewer .tv-judge', { timeout: 20000 });
+      await page.$eval('#viewer .tv-judge', (e) => e.scrollIntoView({ block: 'center' }));
+      out.rows = await page.$$eval('#viewer .tv-judge-row', (r) => r.map((x) => x.className + ' | ' + x.textContent));
+      out.hint = await page.$eval('#viewer .tv-judge .tv-hint', (e) => e.textContent);
+      await shot(page, label + '.png');
+      await page.click('#viewer .tv-accept[aria-label="Stop counting Henry\'s answer as right"]');
+      await settle(page);
+      out.reject = calls.filter((c) => c.includes('/games/36/moves')).pop() || '';
+      out.after = await page.$$eval('#viewer .tv-judge-row', (r) => r.map((x) => x.className + ' | ' + x.textContent));
+      if (out.rows.length !== 2 || !/ok \| Henry.*Rexfrd.*close.*Counted/.test(out.rows[1]) || /ok/.test(out.rows[0])) throw new Error('the close match comes in counted and marked: ' + JSON.stringify(out.rows));
+      if (!/close match counts unless you tap it off/.test(out.hint)) throw new Error('the hint explains close matches: ' + out.hint);
+      if (!/"dir":"reject Henry"/.test(out.reject)) throw new Error('tapping a counted answer rejects it: ' + out.reject);
+      if (/ok/.test(out.after[1]) || !/Count it/.test(out.after[1])) throw new Error('the rejected close match reads not counted: ' + JSON.stringify(out.after));
+      return out;
+    });
+  }
   // Letter Grid: the card shows a small grid with the claims; the arena puts
   // the scene first, then the word panel, the scores, your words and the last
   // round's words. Typing traces the path live (cells as chips, the score it

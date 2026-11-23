@@ -163,17 +163,27 @@ export function TriviaAnswerForm({ g, onSend }: { g: TriviaState; onSend: (dir: 
   );
 }
 
-/* The quizmaster's ruling on answers the match missed. */
+/* The quizmaster's ruling on answers the match missed, and on close
+   matches (one letter off), which count unless the quizmaster rejects
+   them. Each row's button toggles the ruling. */
 export function TriviaJudgeForm({ g, onSend }: { g: TriviaState; onSend: (dir: string) => void }) {
   const you: Partial<TriviaYou> = g.you || {};
+  const list = (you.to_judge || []) as TriviaToJudge[];
   return (
     <div className="tv-form tv-judge">
       <div className="tv-form-title">{"Judge these answers - the answer is " + (you.answer || "?")}</div>
-      {((you.to_judge || []) as TriviaToJudge[]).map((x: TriviaToJudge) => (
+      {list.map((x: TriviaToJudge) => (
         <div key={x.name} className={"tv-judge-row" + (x.accepted ? " ok" : "")}>
           <span className="tv-judge-name">{x.name}</span>
           <span className="tv-judge-ans">{"“" + x.answer + "”"}</span>
-          <button type="button" className="btn sm tv-accept" disabled={!!x.accepted} aria-label={"Count " + x.name + "'s answer as right"} onClick={() => onSend("accept " + x.name)}>
+          {x.near ? <span className="tv-judge-near">close</span> : null}
+          <button
+            type="button"
+            className="btn sm tv-accept"
+            aria-pressed={!!x.accepted}
+            aria-label={x.accepted ? "Stop counting " + x.name + "'s answer as right" : "Count " + x.name + "'s answer as right"}
+            onClick={() => onSend((x.accepted ? "reject " : "accept ") + x.name)}
+          >
             {x.accepted ? "Counted ✓" : "Count it"}
           </button>
         </div>
@@ -183,7 +193,7 @@ export function TriviaJudgeForm({ g, onSend }: { g: TriviaState; onSend: (dir: s
           Reveal
         </button>
       </div>
-      <div className="tv-hint">Anything you don't count is wrong. On your honour.</div>
+      <div className="tv-hint">{list.some((x) => x.near) ? "A close match counts unless you tap it off. Anything you don't count is wrong. On your honour." : "Anything you don't count is wrong. On your honour."}</div>
     </div>
   );
 }

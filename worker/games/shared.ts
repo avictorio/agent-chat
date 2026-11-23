@@ -9,15 +9,15 @@ export const TV_NUMS = ["zero", "one", "two", "three", "four", "five", "six", "s
 // to the quizmaster), and a Twenty Questions guess "avô" won against
 // "avó". Only the combining accents U+0300-036F go: other scripts' marks
 // (a Japanese voicing mark, a Devanagari vowel sign) change the word, so
-// they are put back with NFC and kept.
+// they are put back with NFC and kept. Signs that change an answer stay
+// as words of their own: + # % < > and a minus in front of a number.
+// They used to be word breaks, so "C++" matched "C#" and "-40" matched
+// "40".
+const FOLD_WORD = /(?:(?<![\p{L}\p{M}\p{N}])[-\u2212](?=\p{N}))?[\p{L}\p{M}\p{N}]+|[+#%<>]+/gu;
 export function foldWords(s: unknown, keepAccents = false) {
   const t = String(s == null ? "" : s).normalize("NFKD");
-  return (keepAccents ? t : t.replace(/[\u0300-\u036f]/g, ""))
-    .normalize("NFC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
-    .split(" ")
-    .filter(Boolean);
+  const folded = (keepAccents ? t : t.replace(/[\u0300-\u036f]/g, "")).normalize("NFC").toLowerCase();
+  return (folded.match(FOLD_WORD) || []).map((w) => w.replace("\u2212", "-"));
 }
 // The answer as typed, for one with no letters or digits at all (an
 // emoji): compared exactly, case and spacing aside.
@@ -41,19 +41,30 @@ export function tvNear(a: string, b: string) {
   return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
 
-// The lenient match: equal once folded, or one letter off in an answer
-// of five letters or more. A key with nothing to fold (an emoji) is
-// compared as typed.
+// The lenient match: "exact" when equal once folded, "near" when one
+// letter off in an answer of five letters or more, else null. A key with
+// nothing to fold (an emoji) is compared as typed. No leeway once a
+// number or a sign is in play: one character off there is another answer
+// (2,000,000 for 1,000,000, July 5 for July 4), and it was scored right.
+const TV_EXACT_ONLY = /[\p{N}+#%<>]/u;
 /** @param keys the answer and its accepted variants */
-export function tvMatch(given: unknown, keys: unknown[]) {
+export function tvMatchKind(given: unknown, keys: unknown[]): "exact" | "near" | null {
   const g = tvNorm(given);
   const raw = foldRaw(given);
-  return keys.some((k) => {
+  let near = false;
+  for (const k of keys) {
     const n = tvNorm(k);
-    if (!n) return !!raw && raw === foldRaw(k);
-    return !!g && (g === n || (n.length >= 5 && tvNear(g, n)));
-  });
+    if (!n) {
+      if (raw && raw === foldRaw(k)) return "exact";
+      continue;
+    }
+    if (!g) continue;
+    if (g === n) return "exact";
+    if (n.length >= 5 && !TV_EXACT_ONLY.test(n) && !TV_EXACT_ONLY.test(g) && tvNear(g, n)) near = true;
+  }
+  return near ? "near" : null;
 }
+export const tvMatch = (given: unknown, keys: unknown[]) => tvMatchKind(given, keys) !== null;
 
 /**
  * "Ada:D", "paris @ 10": the text before a separator and the one word

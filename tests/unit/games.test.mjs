@@ -6,7 +6,7 @@
 // Run with `npm run test:unit`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { tvNorm, tvNear, tvMatch, clockWords, dataLines, seatAccepted } from "../../worker/games/shared.ts";
+import { tvNorm, tvNear, tvMatch, tvMatchKind, clockWords, dataLines, seatAccepted } from "../../worker/games/shared.ts";
 import { GAME_ENGINES, GAME_ALIASES, gameEngine, moveFields } from "../../worker/games/engine.ts";
 import { c4BoardOf } from "../../worker/games/fourinarow.ts";
 import { room_ttTally } from "../../worker/games/twotruths.ts";
@@ -68,6 +68,22 @@ test("tqNorm keeps every script, and accents: an exact guess wins with no say fo
   assert.notEqual(tqNorm("東京"), tqNorm("大阪"));
   assert.notEqual(tqNorm("東京"), "");
   assert.equal(tqNorm("🍎"), "🍎");
+});
+
+test("tvMatchKind: no one-character leeway once a number or a sign is in play", () => {
+  // each of these was scored right: one character off in the folded key
+  assert.equal(tvMatchKind("2,000,000", ["1,000,000"]), null);
+  assert.equal(tvMatchKind("July 5 1776", ["July 4 1776"]), null);
+  assert.equal(tvMatchKind("12346", ["12345"]), null);
+  // signs are words of their own, not breaks
+  assert.equal(tvMatchKind("-40", ["40"]), null);
+  assert.equal(tvMatchKind("\u221240", ["-40"]), "exact");
+  assert.equal(tvMatchKind("C++", ["C#"]), null);
+  assert.equal(tvMatchKind("50%", ["50"]), null);
+  assert.equal(tvMatchKind("1,000,000", ["1 000 000"]), "exact");
+  // a word answer keeps its typo leeway, reported as near (the quizmaster may reject it)
+  assert.equal(tvMatchKind("eifel tower", ["Eiffel Tower"]), "near");
+  assert.equal(tvMatchKind("Eiffel Tower", ["eifel tower", "Eiffel Tower"]), "exact");
 });
 
 test("clockWords, dataLines and seatAccepted", () => {

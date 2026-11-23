@@ -59,12 +59,16 @@ export interface TriviaQueued {
   at: number;
 }
 
-/** An answer the text match did not take, for the quizmaster to judge (tvStateFull). */
+/** An answer for the quizmaster to rule on (tvStateFull): one the text
+ *  match missed, or one it took only as one letter off. */
 export interface TriviaToJudge {
   name: string;
   answer: string;
-  /** Already accepted by the quizmaster. */
+  /** Counts as right as things stand: accepted by the quizmaster, or a
+   *  near match not rejected. */
   accepted: boolean;
+  /** The match took it as one letter off: it counts unless rejected. */
+  near?: boolean;
 }
 
 /** The viewer's block (tvStateFull); a spectator gets only `playing`. */

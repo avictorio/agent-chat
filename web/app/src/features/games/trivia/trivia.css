@@ -24,6 +24,7 @@ textarea.tv-in { resize: vertical; min-height: 54px; }
 .tv-judge-row.ok { opacity: .7; }
 .tv-judge-name { font-weight: 700; flex: none; }
 .tv-judge-ans { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e9d5ff; }
+.tv-judge-near { flex: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #fde68a; border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; }
 .tv-scores { display: grid; gap: 4px; margin-top: 10px; background: var(--gbg); border: 1px solid rgba(var(--ga), .3); border-radius: 12px; padding: 10px 12px; color: #f5f3ff; }
 .tv-scores.compact { margin: 0; border: 0; border-radius: 0; padding: 6px 10px 6px; background: transparent; }
 .tv-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; min-width: 0; }

@@ -2063,7 +2063,7 @@ function mp4() {
     }
     wm.close();
     rtv = await req('GET', R2 + '/games/' + tv.id, { token: ldTok[Q0] });
-    check('the quizmaster sees only the answers to judge', JSON.stringify(rtv.json.game.you.to_judge) === JSON.stringify([{ name: Q2, answer: 'my cat Bisc', accepted: false }]) && rtv.json.game.you.legal_moves.includes('accept ' + Q2), JSON.stringify(rtv.json.game.you));
+    check('the quizmaster sees only the answers to judge', JSON.stringify(rtv.json.game.you.to_judge) === JSON.stringify([{ name: Q2, answer: 'my cat Bisc', accepted: false, near: false }]) && rtv.json.game.you.legal_moves.includes('accept ' + Q2), JSON.stringify(rtv.json.game.you));
     rtv = await tvMove(Q2, { dir: 'Biscuit @ 10' });
     check('answers are closed while the quizmaster judges -> 409', rtv.status === 409, rtv.status);
     rtv = await tvMove(Q0, { dir: 'accept Nobody' });
@@ -2087,7 +2087,7 @@ function mp4() {
     // Trivia's matching in other scripts: the fold kept only a-z and 0-9,
     // so a Japanese key folded to nothing, matched no answer and sent
     // every sealed answer to the quizmaster.
-    rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'trivia', from: 'Poc', players: ['Poc', 'Rex'], rotations: 1 } });
+    rtv = await req('POST', R2 + '/games', { token: TP, json: { game: 'trivia', from: 'Poc', players: ['Poc', 'Rex'], rotations: 2 } });
     const tv2 = rtv.json.game || {};
     await req('POST', R2 + '/games/' + tv2.id + '/accept', { token: ldTok.Rex, json: {} });
     const [U0, U1] = tv2.order || [];
@@ -2100,6 +2100,22 @@ function mp4() {
     rtv = await tv2Move(U0, { answer: '東京', wager: 5 });
     tvR = ((rtv.json.game || {}).rounds || [])[1] || {};
     check('trivia: a Japanese answer matches a Japanese key', rtv.json.resolved === true && tvR.answers && tvR.answers[U0].right === true && tvR.answers[U0].judged === false, rtv.status + ' ' + JSON.stringify(tvR).slice(0, 200));
+    // One character off is another number: 12346 for 12345 was scored
+    // right, and a matched answer never reached the quizmaster.
+    await tv2Move(U0, { question: 'My house number?', answer: '12345' });
+    rtv = await tv2Move(U1, { answer: '12346', wager: 5 });
+    check('trivia: a number one digit off is not matched - it goes to the quizmaster', rtv.json.resolved === false && rtv.json.game.phase === 'judge', rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await tv2Move(U0, { dir: 'done' });
+    tvR = ((rtv.json.game || {}).rounds || [])[2] || {};
+    check('trivia: ... and unaccepted it is wrong', rtv.json.resolved === true && tvR.answers && tvR.answers[U1].right === false, JSON.stringify(tvR).slice(0, 200));
+    await tv2Move(U1, { question: 'What is my cat called?', answer: 'Biscuit' });
+    rtv = await tv2Move(U0, { answer: 'Biscut', wager: 5 });
+    check('trivia: a one-letter-off answer waits on the quizmaster', rtv.json.resolved === false && rtv.json.game.phase === 'judge', rtv.status + ' ' + rtv.text.slice(0, 160));
+    rtv = await req('GET', R2 + '/games/' + tv2.id, { token: ldTok[U1] });
+    check('trivia: the quizmaster sees it as a close match that counts unless rejected', JSON.stringify(rtv.json.game.you.to_judge) === JSON.stringify([{ name: U0, answer: 'Biscut', accepted: true, near: true }]) && rtv.json.game.you.legal_moves.includes('reject ' + U0), JSON.stringify(rtv.json.game.you));
+    rtv = await tv2Move(U1, { dir: 'reject ' + U0 });
+    tvR = ((rtv.json.game || {}).rounds || [])[3] || {};
+    check('trivia: the quizmaster can overrule a close match; every answer ruled on, the round resolves', rtv.json.resolved === true && tvR.answers && tvR.answers[U0].right === false && tvR.deltas[U0] === -5, rtv.status + ' ' + JSON.stringify(tvR).slice(0, 200));
     // Sketch & Guess: image moves, and the Referee is Claude. The
     // artist's secret prompt, an image move checked by its bytes and
     // served at a signed URL, sealed guesses, the plain match, the

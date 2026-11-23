@@ -1,7 +1,7 @@
 // Sketch & Guess: a rotating artist draws a secret prompt, everyone guesses; Claude referees close calls.
 
 import SG_PROMPTS_TXT from "../data/sketch-prompts.txt";
-import { clockWords, sameMove, seatAccepted, tvNear, tvNorm } from "./shared.js";
+import { clockWords, sameMove, seatAccepted, tvMatchKind } from "./shared.js";
 import { sgClaudeJudge } from "../platform/claude.js";
 import type { GameLogLine, GameStatus, SketchRound, SketchState, SketchYou } from "@chat/contract";
 import type { CfgRow, GmRow, Room } from "../room/Room.js";
@@ -318,14 +318,12 @@ export const SketchMethods = {
   },
 
   // Folded equal (or one letter off) to the prompt: right on its own.
+  // Trivia's match, so a number in a prompt gets no leeway there either.
   // Runs once the drawing is up, so cur is set.
   sgAuto(st: SgStored) {
     const out: Record<string, "exact" | "near" | null> = {};
-    const p = tvNorm((st.cur as SgCur).prompt);
-    for (const n of Object.keys(st.guesses)) {
-      const g = tvNorm(st.guesses[n].guess);
-      out[n] = g && g === p ? "exact" : g && p.length >= 5 && tvNear(g, p) ? "near" : null;
-    }
+    const p = (st.cur as SgCur).prompt;
+    for (const n of Object.keys(st.guesses)) out[n] = tvMatchKind(st.guesses[n].guess, [p]);
     return out;
   },
 
