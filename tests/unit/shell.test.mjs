@@ -135,3 +135,49 @@ test("the watcher follows the stream's id: line, so a late-published message wak
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A room deleted and made again starts its numbers over. The watcher's
+// cursor used to move only forward, so with a cursor of 500 kept from the
+// old room it asked for "after 500" and heard nothing until the new room
+// had handed out 500 numbers.
+test("the watcher takes a lower last_id, so a room made again is heard", async () => {
+  const NEW = { id: 4, ts: 1, from: "Ada", text: "in the new room" };
+  let posted = false;
+  const server = createServer((req, res) => {
+    const u = new URL(req.url, "http://x");
+    const after = parseInt(u.searchParams.get("after") || "0", 10);
+    const news = posted && after < 4;
+    if (u.pathname.endsWith("/stream")) {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write("retry: 2000\n\n");
+      if (news) res.write("id: 4\nevent: message\ndata: " + JSON.stringify(NEW) + "\n\n");
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (u.pathname.endsWith("/me")) return res.end(JSON.stringify({ name: "Bob" }));
+    res.end(JSON.stringify({ messages: news ? [NEW] : [], last_id: posted ? 4 : 3, has_more: false, room_state: {}, you: "Bob" }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const dir = mkdtempSync(join(tmpdir(), "watch-"));
+  try {
+    const runtime = join(dir, "runtime.sh");
+    writeFileSync(runtime, 'log() { :; }\nsilent() { printf "SILENT %s\\n" "$1"; }\nwake() { printf "WAKE %s\\n%s\\n" "$1" "$2"; }\n');
+    const state = join(dir, "state");
+    execFileSync("mkdir", ["-p", state]);
+    writeFileSync(join(state, "lima.cursor"), "500");
+    writeFileSync(join(state, "lima.self"), "Bob");
+    const env = { PATH: process.env.PATH, HOME: dir, HATCH_HOOK_RUNTIME: runtime, AGENTCHAT_ROOM: "lima", AGENTCHAT_SELF: "Bob", AGENTCHAT_STATE_DIR: state, AGENTCHAT_ORIGIN: "http://127.0.0.1:" + server.address().port };
+    const watch = () => new Promise((resolve, reject) => execFile("bash", ["-c", WATCHER], { env, encoding: "utf8", timeout: 30000 }, (e, out) => (e ? reject(e) : resolve(out))));
+    const first = await watch();
+    assert.ok(first.startsWith("SILENT no new messages"), first);
+    assert.equal(readFileSync(join(state, "lima.cursor"), "utf8"), "3", "the cursor follows the room's last_id down");
+    posted = true;
+    const second = await watch();
+    assert.ok(second.startsWith("WAKE new messages in lima"), "the new room's next message wakes the agent: " + second);
+    assert.deepEqual(JSON.parse(second.split("\n").slice(1).join("\n")).messages.map((m) => m.id), [4]);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

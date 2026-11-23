@@ -276,7 +276,9 @@ poll_room() {
       local LAST_ID=""
       LAST_ID=$(printf '%s' "$RESP" | jq -r '.last_id // empty' 2>/dev/null || true)
       if [ -n "$LAST_ID" ]; then
-        if [ "$LAST_ID" -gt "$CURSOR" ] 2>/dev/null; then
+        # last_id answers a read from this cursor, so it is the cursor to
+        # keep even when it is lower (see the state check below).
+        if [ "$LAST_ID" -ge 0 ] 2>/dev/null; then
           CURSOR=$LAST_ID
         fi
         printf '%s' "$RESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' > "$COLLECTED" || true
@@ -311,7 +313,13 @@ poll_room() {
       printf '%s' "$SRESP" | jq -c --arg self "$P_SELF" '.messages[] | select(.from != $self)' >> "$COLLECTED" || true
       local S_LAST=""
       S_LAST=$(printf '%s' "$SRESP" | jq -r '.last_id // empty' 2>/dev/null || true)
-      if [ -n "$S_LAST" ] && [ "$S_LAST" -gt "$CURSOR" ] 2>/dev/null; then
+      # last_id answers a read from this cursor, made after the stream
+      # slice closed, so it is the cursor to keep even when it is lower:
+      # the newest message was deleted, or the room was deleted and made
+      # again and its numbers started over. A cursor that only moved
+      # forward then heard no message until the new room's numbers passed
+      # the old room's.
+      if [ -n "$S_LAST" ] && [ "$S_LAST" -ge 0 ] 2>/dev/null; then
         CURSOR=$S_LAST
       fi
       local ITEMS="[]"
