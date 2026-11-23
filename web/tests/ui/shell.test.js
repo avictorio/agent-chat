@@ -1,7 +1,7 @@
 // UI scenarios: the room shell: error boundaries, the agent gate, layout, update banner, pull to refresh, the bell, access, unread, and the home page.
 // Run alone: node -r ./tests/system-chromium.js tests/ui/shell.test.js
 // (ONLY=name1,name2 runs just those). All files: npm test.
-const { settle, installClock, fakePush, must, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
+const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, badConsole, chromium, done, failed, run, shot } = require('./harness');
 
 (async () => {
   // Error boundaries: a message the feed can't render (here malformed
@@ -307,6 +307,55 @@ const { settle, installClock, fakePush, must, DIST, HTML, ICON_PNG, OUT, badCons
     await bellOff(page);
     out.after = { toast: await page.$eval('#toast', (t) => t.textContent), bell: await bellLabel(page), mode: await page.evaluate(() => localStorage.getItem('chat-push-mode:/api/rooms/demo')), push: S.push };
     must(/Notifications off for this room/.test(out.after.toast) && out.after.bell === 'Notifications off' && out.after.mode === null && !S.push[EP], 'Off must turn the room off: ' + JSON.stringify(out.after));
+    return out;
+  });
+  // The browser dropped its subscription (or replaced it without telling
+  // the page): a room turned on here, with permission still granted,
+  // subscribes again quietly and re-registers. It used to show Off and
+  // stay silent.
+  await run('push-resubscribe', { init: pushInitSrc }, async (page, S) => {
+    S.push = {};
+    await page.evaluate(() => localStorage.removeItem('__fake_push_sub'));
+    await page.reload();
+    await settle(page);
+    const out = { bell: await bellLabel(page), sub: await page.evaluate(() => localStorage.getItem('__fake_push_sub')), push: S.push };
+    must(out.sub && S.push[out.sub] === 'all' && out.bell === 'Notifications on', 'a dropped subscription must come back for a room turned on here: ' + JSON.stringify(out));
+    return out;
+  });
+  // Off in one tab while another tab's status check is in flight: the
+  // other tab read the saved mode before Off cleared it, then heard
+  // "not registered" and quietly registered the room again. It now reads
+  // the mode after the status answer.
+  await run('push-two-tabs', { init: pushInitSrc }, async (page, S, calls) => {
+    S.push = { [EP]: 'all' };
+    await page.reload();
+    await settle(page);
+    const b = await page.context().newPage();
+    await installClock(b);
+    await setup(b, S, calls);
+    await b.addInitScript(pushInitSrc);
+    await b.goto('https://chat.victorio.cloud/r/demo');
+    await b.waitForSelector('.pushBtn', { timeout: 10000 });
+    await b.waitForFunction(() => [...document.querySelectorAll('.pushBtn')].some((x) => x.getAttribute('title') === 'Notifications on'), null, { timeout: 10000 });
+    // tab B starts a status check that the server holds
+    let open;
+    S.statusGate = new Promise((r) => (open = r));
+    const held = S.pushLog.length;
+    await b.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    for (let i = 0; i < 100 && S.pushLog.length === held; i++) await new Promise((r) => setTimeout(r, 20));
+    // tab A turns the bell off
+    await page.$$eval('.pushBtn', (bs) => bs.filter((x) => x.offsetParent)[0].click());
+    await page.waitForSelector('.pushMenu button[data-mode="off"]', { timeout: 4000 });
+    await page.click('.pushMenu button[data-mode="off"]');
+    for (let i = 0; i < 100 && S.push[EP]; i++) await new Promise((r) => setTimeout(r, 20));
+    S.statusGate = null;
+    open();
+    await settle(page);
+    await new Promise((r) => setTimeout(r, 300));
+    await settle(page);
+    const out = { push: S.push, a: await bellLabel(page), b: await bellLabel(b), log: S.pushLog.slice(held) };
+    must(!Object.keys(S.push).length, 'the other tab registered the room again after Off: ' + JSON.stringify(out));
+    must(out.a === 'Notifications off' && out.b === 'Notifications off', 'both bells must show off: ' + JSON.stringify(out));
     return out;
   });
   await run('denied', { state: { deny: 401 } }, async (page) => { await shot(page, 'denied.png'); return { disabled: await page.$$eval('.tab', e => e.every(x => x.disabled)) }; });

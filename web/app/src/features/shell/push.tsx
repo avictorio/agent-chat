@@ -40,6 +40,15 @@ function savedMode(key: string): PushMode | null {
   }
 }
 
+async function subscribeBrowser(reg: ServiceWorkerRegistration): Promise<PushSubscription> {
+  const kr = await fetch("/api/push/key");
+  const kd = (await kr.json()) as { key: string };
+  return reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: b64ToBytes(kd.key) as BufferSource,
+  });
+}
+
 /** Forget on Home: drop this device's registration in the room while the
  *  invite that the server asks for is still on the device. Forget used to
  *  delete only the invite, so the room kept notifying whoever held the
@@ -95,7 +104,16 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     }
     try {
       const reg = await navigator.serviceWorker.ready;
-      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      let sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (!sub && reg && savedMode(modeKey) && Notification.permission === "granted") {
+        // The browser dropped or replaced its subscription (Chrome rarely
+        // fires pushsubscriptionchange, and the service worker could not
+        // re-register rooms anyway: it holds no invites). This room was
+        // turned on here and permission still stands, so subscribe again
+        // quietly; the status check below re-registers the room. Before,
+        // the bell showed Off and the room stayed silent.
+        sub = await subscribeBrowser(reg).catch(() => null);
+      }
       let m = modeRef.current;
       let on = false;
       if (sub) {
@@ -104,15 +122,13 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         // when the room holds the subscription; a room that lost it is
         // quietly re-registered only if this room was turned on here
         // (its saved mode) - never just because another room was.
-        let saved: string | null = null;
-        try {
-          saved = localStorage.getItem(modeKey);
-        } catch {
-          // storage unavailable
-        }
-        const wanted = saved === "all" || saved === "mentions" ? (saved as PushMode) : null;
         try {
           const sd = await client.pushStatus(sub.endpoint);
+          // The saved mode is read after the status answer, not before:
+          // Off in another tab clears it before it unsubscribes, and a
+          // mode read before the await re-registered the room just
+          // turned off there.
+          const wanted = savedMode(modeKey);
           if (sd.registered) {
             m = (sd.mode as PushMode) || "all";
             on = true;
@@ -123,6 +139,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
           }
         } catch {
           // status check is best-effort: trust the saved choice
+          const wanted = savedMode(modeKey);
           if (wanted) {
             m = wanted;
             on = true;
@@ -144,15 +161,7 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
         return;
       }
       const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        const kr = await fetch("/api/push/key");
-        const kd = (await kr.json()) as { key: string };
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: b64ToBytes(kd.key) as BufferSource,
-        });
-      }
+      const sub = (await reg.pushManager.getSubscription()) || (await subscribeBrowser(reg));
       await client.pushSubscribe(sub.toJSON(), m);
       try {
         localStorage.setItem(modeKey, m);
@@ -166,8 +175,9 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
   );
 
   const pushOff = useCallback(async () => {
-    // The saved mode is cleared before the server call and comes back
-    // if the server refuses.
+    // The saved mode goes before the server call, so another tab's
+    // quiet re-register (which reads it after its status check) cannot
+    // undo this Off; it comes back if the server refuses.
     const saved = savedMode(modeKey);
     try {
       localStorage.removeItem(modeKey);
@@ -207,9 +217,17 @@ export function usePush(client: RoomClient, toast: (msg: string, err?: boolean) 
     const onVis = () => {
       if (!document.hidden) void paintPushState();
     };
+    // another tab of this room turned the bell on or off
+    const onStore = (e: StorageEvent) => {
+      if (e.key === null || e.key === modeKey) void paintPushState();
+    };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [paintPushState]);
+    window.addEventListener("storage", onStore);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("storage", onStore);
+    };
+  }, [paintPushState, modeKey]);
 
   const choose = useCallback(
     async (m: PushMode | "off") => {

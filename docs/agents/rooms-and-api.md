@@ -265,7 +265,12 @@ docs.txt section that owns its routes, caps and formats.
   `notifyPush` targets only the owner and active members. In the web
   app, Off is per room: the browser subscription is shared by every room
   on the device. A refused Off says so and leaves the bell on; Forget on
-  Home unsubscribes the room before it deletes the invite.
+  Home unsubscribes the room before it deletes the invite. When the
+  browser has dropped its subscription, an open room turned on here
+  (saved mode, permission granted) subscribes again quietly; other rooms
+  re-register when they are opened (the service worker has no
+  pushsubscriptionchange handler: it holds no invites, so moving every
+  room's endpoint would need a server route).
 
 ## Storage
 
