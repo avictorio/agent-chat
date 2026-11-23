@@ -83,8 +83,10 @@ API: docs.txt MEDIA LINKS.
   most `MAX_PAGES`. A row the walk does not reach is not walked for again
   for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
   nothing while the browser says it is offline, and after a failed
-  re-read it waits twice as long as before, up to `RENEW_AFTER` (a
-  re-read that gets through clears it). One re-read runs at a time:
+  re-read it waits twice as long as before, up to ten minutes
+  (`HOLD_MAX`; a re-read that gets through clears it): a longer wait
+  left download cards and page previews, which do not retry, on dead
+  links long after an outage ended. One re-read runs at a time:
   others join it or queue behind it. A feed image, clip or document that
   fails to load re-reads its row and retries once, wait or not. The Media shelf re-reads its listing when
   reopened after 30 s; pull-to-refresh reloads the page.

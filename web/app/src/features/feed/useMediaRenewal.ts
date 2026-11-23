@@ -29,6 +29,12 @@ const RENEW_AFTER = 50 * 60e3;
 // up to sixty large reads an hour per open tab. Taking the younger ones
 // along spaces renewals about twenty minutes apart.
 const BATCH_AFTER = 30 * 60e3;
+// The longest wait after failed reads. It was RENEW_AFTER: after an hour's
+// outage in which the browser still said "online" (the server down, a
+// captive wifi), links the server could renew stayed dead for up to fifty
+// minutes once it was back. Images and clips ask again by themselves, but
+// a download card or a page preview does not.
+const HOLD_MAX = 10 * 60e3;
 const CHECK_EVERY = 60e3;
 // The server's largest page.
 const PAGE = 500;
@@ -69,7 +75,7 @@ export function useMediaRenewal(opts: {
   // still skipped, unread, when its link came due again within the hour.
   const farRef = useRef<Map<number, number>>(new Map());
   // After a failed re-read the minute's check waits, twice as long after
-  // each failure in a row, up to RENEW_AFTER; a re-read that gets through
+  // each failure in a row, up to HOLD_MAX; a re-read that gets through
   // clears it. With the network down every check failed at its first read
   // and the next went out a minute later, for as long as the tab was open.
   // A failed image's own retry (renewMedia) is not held.
@@ -151,7 +157,7 @@ export function useMediaRenewal(opts: {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) deny(e);
         // a network error: what was read still lands; the rest is asked
         // for again once the hold is over
-        const wait = Math.min(RENEW_AFTER, holdRef.current.wait * 2 || CHECK_EVERY * 2);
+        const wait = Math.min(HOLD_MAX, holdRef.current.wait * 2 || CHECK_EVERY * 2);
         holdRef.current = { until: Date.now() + wait, wait };
       }
       feed.renewLinks(rows, covered);
