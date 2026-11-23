@@ -62,6 +62,9 @@ declare module "../worker/room/Room.js" {
     // In-memory locks the method objects set on the instance (not storage).
     /** Sketch & Guess matches whose Referee is judging right now (sgJudgeNow). */
     sgJudging?: Set<number>;
+    /** The matches whose clock work threw, as read from cfg for this
+     *  room (gen) by gameClockFails. */
+    clockFails?: { gen: number, map: Record<string, { n: number, retry: number }> };
   }
 }
 

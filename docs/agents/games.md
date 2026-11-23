@@ -135,7 +135,15 @@ docs.txt GAMES - EVERY MATCH.
   when it already matches), so ticks resolve and the result posts with
   nobody reading. `alarm()` in `Room.ts` advances each match in its own
   try/catch and re-arms in a `finally`, so one match's bad state cannot
-  stop every clock in the room. An alarm can fire in a fresh instance,
+  stop every clock in the room. A match whose clock work throws (an engine
+  bug, a state that no longer fits its row) is counted
+  (`gameClockFailed`, from `advanceGame`, `advanceLobby` and Sketch's
+  judge) and the alarm waits 30 s for it, doubling on each failure in a
+  row up to an hour; a clean advance clears the count. The counts are in
+  `cfg` (`gm_clock_fail`), so the doubling survives a fresh instance. No
+  alarm is armed less than a second ahead. Why: the alarm re-armed at the
+  same past deadline and fired again at once, forever, with a log line,
+  an invocation and an alarm write each time. An alarm can fire in a fresh instance,
   so the room's name is kept in `cfg` (`room_name`) for the Referee's
   posts. An engine's async clock work (`advanceAsync`, only Sketch &
   Guess) is awaited by the alarm; reads run only the sync part.

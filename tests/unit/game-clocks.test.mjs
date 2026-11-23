@@ -108,3 +108,39 @@ test("a Battleship clock running late settles one turn: no misses for turns neve
   assert.deepEqual(st.misses, { [first]: 1 });
   assert.notEqual(st.turn_of, first);
 });
+
+test("a match whose clock work keeps throwing backs the alarm off instead of re-firing it at once", async (t) => {
+  const { h, edit, status } = await running("duel", ["Ann", "Bob"]);
+  const armed = [];
+  h.room.ctx.storage.setAlarm = async (at) => { armed.push(at - Date.now()); };
+  const errors = console.error;
+  console.error = () => {};
+  t.after(() => { console.error = errors; });
+  edit((st) => { st.deadline = Date.now() - 5; });
+  h.room.advanceDuel = () => { throw new Error("broken clock"); };
+  await h.room.alarm();
+  assert.ok(armed.at(-1) >= 29000 && armed.at(-1) <= 30000, "first failure: retried in 30 s, not at the past deadline: " + armed.at(-1));
+  await h.room.alarm();
+  assert.ok(armed.at(-1) >= 59000 && armed.at(-1) <= 60000, "second in a row: 60 s: " + armed.at(-1));
+  // a fresh instance keeps counting (the count is stored with the room)
+  h.room.clockFails = undefined;
+  await h.room.alarm();
+  assert.ok(armed.at(-1) >= 119000 && armed.at(-1) <= 120000, "third: 120 s: " + armed.at(-1));
+  for (let i = 0; i < 10; i++) await h.room.alarm();
+  assert.ok(armed.at(-1) >= 3599000 && armed.at(-1) <= 3600000, "capped at an hour: " + armed.at(-1));
+  // once the clock works again the count goes and the match is settled
+  delete h.room.advanceDuel;
+  await h.room.alarm();
+  assert.equal(status(), "cancelled", "round 1 went unthrown");
+  assert.equal(h.one("SELECT v FROM cfg WHERE k = 'gm_clock_fail'"), undefined);
+});
+
+test("no alarm is armed in the past", async () => {
+  const { h, edit } = await running("duel", ["Ann", "Bob"]);
+  const armed = [];
+  h.room.ctx.storage.setAlarm = async (at) => { armed.push(at - Date.now()); };
+  // a deadline that has passed with no catch-up yet (the alarm will settle it)
+  edit((st) => { st.deadline = Date.now() - 60000; });
+  await h.room.armGameAlarm();
+  assert.ok(armed.at(-1) >= 900, "armed a moment ahead: " + armed.at(-1));
+});

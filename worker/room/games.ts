@@ -6,7 +6,7 @@ import { GAME_ALIASES, GAME_ENGINES, gameEngine } from "../games/engine.js";
 import { streamWants } from "./state.js";
 import { LOBBY_DEFAULT_SECONDS, MOVE_DIR_MAX } from "../limits.js";
 import type { GameLogLine, GameStatus } from "@chat/contract";
-import type { GmRow, InvRow, MsgRow, Room } from "./Room.js";
+import type { CfgRow, GmRow, InvRow, MsgRow, Room } from "./Room.js";
 import type { GameEngine, GamePub, GameRowOf } from "../games/engine.js";
 import { warn } from "../lib/log.js";
 import type { Body } from "../lib/http.js";
@@ -58,6 +58,16 @@ export type TurnsStored = StoredBase & { order: string[], turn_of: string | null
  *  get_game full_log), and an engine that windows its record (Light
  *  Cycles' move_log) reads it when it builds the full state. */
 export type GameRow = { id: number, status: GameStatus, created: number, created_by: string, card_msg: number | null, st: StoredBase, fullLog?: boolean };
+
+// A match whose clock work throws (an engine bug, a state that no longer
+// fits its row) is retried after CLOCK_RETRY_MIN, doubling on each failure
+// in a row up to CLOCK_RETRY_MAX. The alarm used to re-arm at the same past
+// deadline, so it fired again at once, forever: a log line, a billed
+// invocation and a billed alarm write each time, until the room was
+// deleted. No alarm is ever armed less than ALARM_LEAD_MIN ahead.
+const CLOCK_RETRY_MIN = 30000;
+const CLOCK_RETRY_MAX = 3600000;
+const ALARM_LEAD_MIN = 1000;
 
 export const GameMachineryMethods = {
   /* ---------- shared rows and clocks ----------
@@ -284,10 +294,60 @@ export const GameMachineryMethods = {
   },
 
   // Settle whatever the clock owes a running match (resolutions,
-  // forfeits): the engine's own advance.
+  // forfeits): the engine's own advance. A throw is counted for the
+  // alarm's backoff (gameClockFailed) and passed on.
   advanceGame(g: GameRow | null, room: string) {
     if (!g || g.status !== "running") return;
-    gameEngine(g.st).advance(this, g, room);
+    try {
+      gameEngine(g.st).advance(this, g, room);
+    } catch (e) {
+      this.gameClockFailed(g.id);
+      throw e;
+    }
+    this.gameClockOk(g.id);
+  },
+
+  /* The clock failures, by match id: how many in a row and the earliest
+     the alarm tries that match again. Kept in cfg ('gm_clock_fail') so
+     the doubling survives a fresh instance (an idle room's instance is
+     evicted between alarms minutes apart), and read once per instance;
+     gen ties the copy to the room it was read in, since a room deleted
+     and created again starts its match ids at 1. */
+  gameClockFails(): Record<string, { n: number, retry: number }> {
+    if (this.clockFails && this.clockFails.gen === this.gen) return this.clockFails.map;
+    let map: Record<string, { n: number, retry: number }> = {};
+    try {
+      const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'gm_clock_fail'").toArray()[0];
+      if (r) map = JSON.parse(String(r.v)) || {};
+    } catch (e) {
+      warn("game.clock.read", e, { room: this.roomName });
+    }
+    this.clockFails = { gen: this.gen, map };
+    return map;
+  },
+
+  gameClockSave(map: Record<string, { n: number, retry: number }>) {
+    try {
+      if (Object.keys(map).length) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('gm_clock_fail', ?)", JSON.stringify(map));
+      else this.sql.exec("DELETE FROM cfg WHERE k = 'gm_clock_fail'");
+    } catch (e) {
+      // the in-memory copy still backs the alarm off in this instance
+      warn("game.clock.save", e, { room: this.roomName });
+    }
+  },
+
+  gameClockFailed(id: number) {
+    const map = this.gameClockFails();
+    const n = (map[id] ? map[id].n : 0) + 1;
+    map[id] = { n, retry: Date.now() + Math.min(CLOCK_RETRY_MAX, CLOCK_RETRY_MIN * 2 ** (n - 1)) };
+    this.gameClockSave(map);
+  },
+
+  gameClockOk(id: number) {
+    const map = this.gameClockFails();
+    if (!map[id]) return;
+    delete map[id];
+    this.gameClockSave(map);
   },
 
   // Keep a Durable Object alarm armed at the nearest running match's
@@ -297,13 +357,28 @@ export const GameMachineryMethods = {
   async armGameAlarm() {
     try {
       const rows = this.sql.exec<Pick<GmRow, "id" | "status" | "state">>("SELECT id, status, state FROM gm WHERE status IN ('running', 'lobby')").toArray();
+      const fails = this.gameClockFails();
       /** the nearest deadline */
       let next: number | null = null;
       for (const r of rows) {
-        try { const st = JSON.parse(r.state || "{}"); const dl = r.status === "lobby" ? st.lobby_deadline : st.deadline; if (dl && (next === null || dl < next)) next = dl; } catch { warn("game.state.parse", null, { room: this.roomName, id: r.id }); }
+        try {
+          const st = JSON.parse(r.state || "{}");
+          let dl = r.status === "lobby" ? st.lobby_deadline : st.deadline;
+          // a match whose clock work failed waits out its backoff
+          const f = fails[r.id];
+          if (dl && f && f.retry > dl) dl = f.retry;
+          if (dl && (next === null || dl < next)) next = dl;
+        } catch { warn("game.state.parse", null, { room: this.roomName, id: r.id }); }
       }
+      // a match that ended (a cancel, a finish by a move) drops its count
+      const live = new Set(rows.map((r) => String(r.id)));
+      const ended = Object.keys(fails).filter((k) => !live.has(k));
+      if (ended.length) { for (const k of ended) delete fails[k]; this.gameClockSave(fails); }
       const cur = await this.ctx.storage.getAlarm();
       if (next === null) { if (cur !== null) await this.ctx.storage.deleteAlarm(); return; }
+      // A deadline already past (one no catch-up has settled yet) is armed
+      // a moment ahead, never in the past: a past alarm fires at once.
+      next = Math.max(next, Date.now() + ALARM_LEAD_MIN);
       // The alarm may fire in a fresh instance, where roomName (memory
       // only) is unset: keep the name with the clock so the Referee's
       // posts and their pushes still link to the room.
@@ -482,6 +557,16 @@ export const GameMachineryMethods = {
   // so once: a card that silently dies is dead furniture in the room.
   advanceLobby(g: GameRow | null, room: string) {
     if (!g || g.status !== "lobby" || !g.st.lobby_deadline || Date.now() < g.st.lobby_deadline) return;
+    try {
+      this.lobbyExpire(g, room);
+    } catch (e) {
+      this.gameClockFailed(g.id);
+      throw e;
+    }
+    this.gameClockOk(g.id);
+  },
+
+  lobbyExpire(g: GameRow, room: string) {
     const missing = g.st.players.filter((pl: { name: string }) => !(g.st.accepted || {})[pl.name]).map((pl: { name: string }) => pl.name);
     g.status = "cancelled";
     g.st.log.push({ tick: this.gameLogTick(g.st), text: "The lobby expired - " + (missing.join(", ") || "a player") + " never accepted. The match is called off." });
