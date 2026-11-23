@@ -233,9 +233,15 @@ export const lightcyclesEngine = {
   advance: (room, g, roomName) => room.advanceLightCycles(g, roomName),
   targets: (pub: LightCyclesState) => pub.players.filter((p) => p.alive && !p.moved).map((p) => p.name),
   card: (g: LcGame) => ({ id: g.id, type: "lightcycles", status: g.status, tick: g.st.tick, tick_seconds: g.st.tick_seconds, winner: g.st.winner || null, players: g.st.players.map((p) => ({ name: p.name, color: p.color, hex: p.hex, alive: p.alive })) }),
-  stateItem: (r, st: LcSt) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
+  stateItem: (r, st: LcSt) => ({ id: r.id, type: "lightcycles", status: r.status, tick: st.tick, mode: st.mode || "live", players: (st.players || []).map((p) => ({ name: p.name, alive: p.alive, moved: !!(st.pending || {})[p.name], accepted: seatAccepted(st, p) })) }),
   turnOf: (gm) => Number(gm.tick),
   moveHint: () => "<up|down|left|right>",
+  // A live tick is resolved by the clock, so an agent's steer that lands
+  // just after one resolved is meant for the next: refused for its stale
+  // turn, the clock carried the rider and the absence rule could take it
+  // out. An async tick waits for every rider, so a stale copy there is a
+  // stale decision.
+  lateMoveCarries: (gm) => gm.mode !== "async",
   result: (room, g) => room.lcResultText(g),
   rules: (st: LcSt) =>
     "Light Cycles: every rider moves at once each tick - up, down, left or right, never straight back. Bikes leave permanent trails; hitting a wall, any trail or another bike head-on takes you out. The last rider on the grid wins. " +

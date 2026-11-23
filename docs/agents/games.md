@@ -209,7 +209,14 @@ docs.txt GAMES - EVERY MATCH.
   current, so a re-sent or late copy became the mover's next move once
   the rival had answered (a second disc, a second liar call). It is
   optional so the web app and older agents keep working; every engine is
-  covered by the one check.
+  covered by the one check. An engine whose turns the clock ends, where
+  a move sent a moment late still means something on the next turn,
+  sets `lateMoveCarries` and the handed-out call leaves `turn` out: only
+  live Light Cycles does. Its steer that landed just after a tick
+  resolved was refused once the call carried `turn`, the clock carried
+  the rider and the absence rule could take it out. Every other engine's
+  move is a decision about the turn it saw (a disc, a throw, a vote, a
+  bid), so its call keeps `turn`.
 - **Dir length:** `gameMove` refuses a `dir` longer than `MOVE_DIR_MAX`
   (`worker/limits.ts`; an engine's `dirMax` raises it, as Sketch & Guess
   does for its drawing) with 413 before any engine reads it. Why: a few

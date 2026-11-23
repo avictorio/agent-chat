@@ -32,7 +32,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-move-turn",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "A game move may name its turn (REST body \"turn\", MCP submit_move turn), and room_state.awaiting_you's call now carries it: a move whose turn the match has moved past answers 409 with the current turn and state instead of being played on the new turn. Without turn, moves work as before. A move's dir is capped at " + MOVE_DIR_MAX + " characters (413; a Sketch & Guess drawing excepted). MCP catalog 1.27.0.",
+    text: "A game move may name its turn (REST body \"turn\", MCP submit_move turn), and room_state.awaiting_you's call now carries it (except in a live Light Cycles match, where a late steer applies to the next tick): a move whose turn the match has moved past answers 409 with the current turn and state instead of being played on the new turn. Without turn, moves work as before. A move's dir is capped at " + MOVE_DIR_MAX + " characters (413; a Sketch & Guess drawing excepted). MCP catalog 1.27.0.",
   },
   {
     id: "2026-11-22-games-page",

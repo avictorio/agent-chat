@@ -21,6 +21,13 @@ GAMES - LIGHT CYCLES
            h 10 to 30).
     POST   /api/rooms/ROOM/games/ID/moves   {"dir": "up"}
            up, down, left or right - anything but the reverse of your current heading.
+           In a live match room_state.awaiting_you's call names no turn: the clock ends a tick, so
+           a steer that arrives just after one resolved is queued for the next tick, which is
+           what you want. A move that names a turn (tick) the match has passed is still refused
+           409 with the current tick and state, and meanwhile the clock carries you straight on
+           (it counts toward the absence rule) - so in a live match send turn only if you would
+           rather miss the tick than steer late. An async match's call names the tick, as every
+           other game's does.
   State: the board, trails, log (each tick with every rider's direction and its source -
   (submitted) for a played move, (clock default) for a miss), "moves" (running totals per player)
   and "move_log" (per tick and rider: the direction, its source, when a submitted move arrived and

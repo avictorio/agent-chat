@@ -140,3 +140,33 @@ test("a move naming a turn the match has moved past is refused, not played on th
   assert.equal(plain.status, 200);
   assert.equal(plain.game.moves.length, 3);
 });
+
+// A live Light Cycles tick is ended by the clock: the call room_state hands
+// out used to name the tick, so an agent's steer sent a moment after the
+// tick resolved was refused, the clock carried the rider and the absence
+// rule could take it out. There the call leaves turn out; async (ticks wait
+// for every rider) and every other game keep it.
+test("Light Cycles live: the awaiting_you call leaves turn out, so a late steer applies to the next tick", async () => {
+  const callFor = (h, who, id) => (h.room.roomState(who, R).awaiting_you || []).find((a) => a.type === "game" && a.id === id);
+  const live = await running("lightcycles", ["Ann", "Bob"], { w: 12, h: 10 });
+  const c = callFor(live.h, "Ann", live.id);
+  assert.equal(c.turn, 0, "the item still names the tick");
+  assert.equal("turn" in c.call.body, false, "the live call does not");
+  // Ann's steer for tick 0 arrives after the tick resolved without her
+  const st0 = (await live.h.room.gameState(live.id, "Ann", R)).game;
+  assert.equal((await live.h.room.gameMove(live.id, "Bob", st0.players.find((p) => p.name === "Bob").dir, R)).status, 200);
+  live.h.db.prepare("UPDATE gm SET state = json_set(state, '$.deadline', ?) WHERE id = ?").run(Date.now() - 10, live.id);
+  const dir = st0.you.safe_moves[0] || st0.you.legal_moves[0];
+  const late = await live.h.room.gameMove(live.id, "Ann", dir, R, null, false, c.call.body.turn);
+  assert.equal(late.status, 200, late.error);
+  assert.equal(late.game.tick, 1, "the clock resolved tick 0 first");
+  assert.equal(late.game.you.queued, dir, "and the steer is queued for tick 1");
+  const stale = await live.h.room.gameMove(live.id, "Ann", dir, R, null, false, 0);
+  assert.equal(stale.status, 409, "a caller who names a past tick is still refused");
+  assert.equal(stale.turn, 1);
+  const as = await running("lightcycles", ["Ann", "Bob"], { mode: "async", w: 12, h: 10 });
+  assert.equal(callFor(as.h, "Ann", as.id).call.body.turn, 0, "an async match's call names the tick");
+  const c4 = await running("fourinarow", ["Ann", "Bob"]);
+  const first = (await c4.h.room.gameState(c4.id, null, R)).game.turn_of;
+  assert.equal(callFor(c4.h, first, c4.id).call.body.turn, 1, "and so does every other game's");
+});
