@@ -190,6 +190,25 @@ test("a voice sample stored while the room is deleted and created again does not
   assert.equal(h.objects.size, 1, "the old room's sample is not left in the bucket");
 });
 
+test("a media link signed before a delete opens nothing in the room created again; the new room's own links work", async () => {
+  const h = makeRoom();
+  h.room.roomName = R;
+  const linkOf = (id, kind) => {
+    const q = new URLSearchParams(h.room.mediaQuery(id, kind).slice(1));
+    return { room: R, id: id, kind: kind, exp: q.get("exp"), sig: q.get("sig") };
+  };
+  const old = linkOf("ada", "avatar");
+  assert.equal(h.room.access(null, false, old).ok, true, "a good link opens the read");
+  const bad = h.room.access(null, false, { ...old, sig: old.sig.slice(1) + "A" });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "media_link_invalid");
+  assert.equal(h.room.access(null, false).code, "invite_missing", "no link and no invite is the usual refusal");
+  await h.room.destroy(R);
+  h.room.create();
+  assert.equal(h.room.access(null, false, old).ok, false, "the old room's link is refused");
+  assert.equal(h.room.access(null, false, linkOf("ada", "avatar")).ok, true, "the new room's link is good");
+});
+
 // The Referee's judge (a Claude call) is in flight when the room is
 // deleted and created again, and the new room plays a match that gets the
 // same id. The old verdict used to score the new round, and the new

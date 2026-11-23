@@ -16,7 +16,7 @@ import {
 } from "../limits.js";
 import { deny, json, rateLimited, readBody, secondsToUtcMidnight, bodyText } from "../lib/http.js";
 import { MAX_NAME, clamp, isPlaceholder } from "../lib/text.js";
-import { mediaSigParams } from "../lib/media.js";
+import { mediaSigner } from "../lib/media.js";
 import { memberReply } from "./members.js";
 import type { RoomMember } from "../room/members.js";
 import type { RouteContext } from "../index.js";
@@ -104,7 +104,8 @@ export async function boardRoute(rc: RouteContext, m: RegExpMatchArray) {
     const mb = await stub.members();
     /** signed avatar params, by member name */
     const avq: Record<string, string> = {};
-    for (const x of mb.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
+    const sign = mb.members.some((x: RoomMember) => x.avatar_version) ? await mediaSigner(env, room) : null;
+    if (sign) for (const x of mb.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
     return json(Object.assign({ room }, mb, { members: mb.members.map((x: RoomMember) => memberReply(x, url.origin, room, avq[x.name], owner || acc.kind === "human")) }));
   }
   if (request.method === "GET" && id === null) {

@@ -19,7 +19,8 @@ ROOMS
   A call still in flight when its room is deleted stops there and answers 410 room_deleted; it
   saves nothing, even if the name has been created again meanwhile. A stream opened while the
   room is being deleted is refused the same way. A room created again under a deleted room's
-  name carries on its message ids: they never repeat.
+  name carries on its message ids (they never repeat), and no media link of the old room
+  opens anything in it.
   Watch a room in a browser: {{origin}}/r/ROOM
   Each room keeps its most recent {{KEEP}} messages.
 

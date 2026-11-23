@@ -21,43 +21,54 @@ export function mediaSig(keyBytes: Uint8Array, room: string | null | undefined, 
   return b64urlEncode(hmacSha256(keyBytes, new TextEncoder().encode(room + "|" + id + "|" + kind + "|" + exp)));
 }
 
-// The Worker verifies signatures with the room's key, fetched from the
-// room object once and cached in the isolate for a minute.
-export const _mediaKeyCache: Map<string, { bytes: Uint8Array, at: number }> = new Map();
+// A signed link is checked by the room itself, against its key as it is
+// now (access(), with the link): the Worker used to keep each room's key
+// for a minute, and that copy outlived a room's delete - an old room's
+// links went on opening the files of a room created again under the name
+// (the same ids, kinds and so signatures), while the new room's own links
+// answered 403. The check rides the access() call each read already makes.
+/** A media read's signature, as access() takes it. */
+export type MediaLink = { room: string, id: number | string, kind: string, exp: string, sig: string };
+/** The code access() refuses a bad or expired link with; each route words
+ *  that 403 itself. */
+export const LINK_REFUSED = "media_link_invalid";
 
-export async function roomMediaKeyBytes(env: Env, room: string): Promise<Uint8Array | null> {
-  const hit = _mediaKeyCache.get(room);
-  if (hit && Date.now() - hit.at < 60000) return hit.bytes;
+/** The URL's exp and sig for access() to check, or undefined when it has none. */
+export function mediaLink(url: URL, room: string, id: number | string, kind: string): MediaLink | undefined {
+  const exp = url.searchParams.get("exp");
+  const sig = url.searchParams.get("sig");
+  if (!exp || !sig) return undefined;
+  return { room: room, id: id, kind: kind, exp: exp, sig: sig };
+}
+
+/** Whether a link is good under these key bytes: unexpired, and signed
+ *  for this room, id and kind. */
+export function mediaLinkOk(keyBytes: Uint8Array, link: MediaLink) {
+  const e = parseInt(link.exp, 10);
+  if (!e || e < Math.floor(Date.now() / 1000)) return false;
+  return mediaSig(keyBytes, link.room, link.id, link.kind, e) === link.sig;
+}
+
+// Links the Worker mints itself (attach answers, avatars in a members
+// list) take the key from the room each time, for the same reason: a
+// copy kept from before a delete signed links the room created since
+// refuses. One read serves a whole list.
+/** A signer for this room's media, or null when the room has no key (it does not exist). */
+export async function mediaSigner(env: Env, room: string): Promise<((id: number | string, kind: string) => string) | null> {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   const b64 = await stub.mediaSigKey();
   if (!b64) return null;
-  const bytes = b64urlDecode(b64);
-  _mediaKeyCache.set(room, { bytes: bytes, at: Date.now() });
-  return bytes;
-}
-
-export async function mediaSigParams(env: Env, room: string, id: number | string, kind: string) {
-  const key = await roomMediaKeyBytes(env, room);
-  if (!key) return "";
+  const key = b64urlDecode(b64);
   // Same hour grid as the Room's mediaQuery, so a URL minted here is
   // byte-identical to the one listings carry (and hits the same
   // browser cache entry).
   const exp = (Math.floor(Date.now() / 3600000) + 2) * 3600;
-  return "exp=" + exp + "&sig=" + mediaSig(key, room, id, kind, exp);
+  return (id, kind) => "exp=" + exp + "&sig=" + mediaSig(key, room, id, kind, exp);
 }
 
-// Tri-state for read routes: "none" (no signature params - fall through
-// to credential auth), "ok" (serve), "bad" (params present but invalid
-// or expired - the route answers 403).
-export async function mediaSigState(env: Env, room: string, id: number | string, kind: string, url: URL) {
-  const exp = url.searchParams.get("exp");
-  const sig = url.searchParams.get("sig");
-  if (!exp || !sig) return "none";
-  const e = parseInt(exp, 10);
-  if (!e || e < Math.floor(Date.now() / 1000)) return "bad";
-  const key = await roomMediaKeyBytes(env, room);
-  if (!key) return "bad";
-  return mediaSig(key, room, id, kind, e) === sig ? "ok" : "bad";
+export async function mediaSigParams(env: Env, room: string, id: number | string, kind: string) {
+  const sign = await mediaSigner(env, room);
+  return sign ? sign(id, kind) : "";
 }
 
 // The CSP served with a media object. Ordinary media is fully locked down.

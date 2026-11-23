@@ -38,6 +38,7 @@ import { TestHookMethods, withR2Delay } from "./test-hooks.js";
 import type { GameStatus, QuestionStatus } from "@chat/contract";
 import type { GameRow } from "./games.js";
 import type { UpFinish } from "./uploads.js";
+import { LINK_REFUSED, mediaLinkOk, type MediaLink } from "../lib/media.js";
 import { warn } from "../lib/log.js";
 
 /* ---------- storage rows ----------
@@ -514,9 +515,16 @@ export class Room extends DurableObject {
 
   // Access: every room is invite-only:
   // reading, streaming and posting always need a valid invite or the owner key.
-  access(token: string | null | undefined, owner: boolean): Access | Refusal {
+  // A media read may instead carry a signed link (link): it is checked
+  // here, against the key the room has now, so a link from before a delete
+  // opens nothing in a room created again (lib/media.ts says more).
+  access(token: string | null | undefined, owner: boolean, link?: MediaLink): Access | Refusal {
     if (owner) return { ok: true };
     const l = this.lookupInvite(token);
+    if (!l.ok && link) {
+      if (this.ready && mediaLinkOk(this.mediaSigKeyBytes(), link)) return { ok: true };
+      return { ok: false, status: 403, code: LINK_REFUSED, error: "This media link is invalid or has expired" };
+    }
     if (!l.ok) return l;
     const row = l.row;
     const now = Date.now();

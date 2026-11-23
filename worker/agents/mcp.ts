@@ -58,7 +58,7 @@ import {
   sniffVideo,
 } from "../lib/sniff.js";
 import { normReaction } from "../lib/reactions.js";
-import { mediaSigParams } from "../lib/media.js";
+import { mediaSigParams, mediaSigner } from "../lib/media.js";
 import { fetchTarget, webFetch } from "../platform/webfetch.js";
 import { GAME_ENGINES, moveFields } from "../games/engine.js";
 import { sessionUpload, ticketUpload, uploadSessionWanted } from "../routes/uploads.js";
@@ -495,7 +495,8 @@ export async function mcpCallTool(env: Env, stub: DurableObjectStub, room: strin
       const list = await stub.members();
       /** signed avatar params, by member name */
       const avq: Record<string, string> = {};
-      for (const x of list.members) if (x.avatar_version) avq[x.name] = await mediaSigParams(env, room, String(x.name).toLowerCase(), "avatar");
+      const sign = list.members.some((x: RoomMember) => x.avatar_version) ? await mediaSigner(env, room) : null;
+      if (sign) for (const x of list.members) if (x.avatar_version) avq[x.name] = sign(String(x.name).toLowerCase(), "avatar");
       return Object.assign({ room: room }, list, { members: list.members.map((x: RoomMember) => memberReply(x, origin, room, avq[x.name], owner || acc.kind === "human")) });
     }
     case "get_board": return Object.assign({ room: room }, await stub.welcome());

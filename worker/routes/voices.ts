@@ -5,7 +5,7 @@ import { deny, json, rateLimited, readBody, secondsToUtcMidnight } from "../lib/
 import { cartesiaClone, cartesiaDelete, cartesiaSpeak } from "../platform/cartesia.js";
 import { SPEAK_INFLIGHT, cloneAllowed } from "../room/voices.js";
 import { inlineBytes, sniffAudio } from "../lib/sniff.js";
-import { mediaSigState, serveMedia } from "../lib/media.js";
+import { LINK_REFUSED, mediaLink, serveMedia } from "../lib/media.js";
 import { speakableText } from "../lib/text.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
@@ -88,13 +88,9 @@ export async function speakRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(invite, owner);
-  if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
-    const ss = await mediaSigState(env, room, id, "speak", url);
-    if (ss === "ok") acc = { ok: true };
-    else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-  }
-  if (!acc.ok) return deny(acc);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const acc = await stub.access(invite, owner, read ? mediaLink(url, room, id, "speak") : undefined);
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   const meta = await stub.mediaMeta(id, "speak", { name: acc.name, owner: owner });
   if (meta) return serveMedia(request, env, stub, id, "speak", room, { name: acc.name, owner: owner });

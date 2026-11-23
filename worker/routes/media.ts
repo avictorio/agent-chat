@@ -13,7 +13,7 @@ import {
   VIDEO_MAX,
 } from "../limits.js";
 import { CORS, deny, json, readBody, bodyText, refused } from "../lib/http.js";
-import { mediaSigParams, mediaSigState, serveMedia } from "../lib/media.js";
+import { LINK_REFUSED, mediaLink, mediaSigParams, serveMedia } from "../lib/media.js";
 import { inlineBytes, sniffAudio, sniffImage, sniffVideo } from "../lib/sniff.js";
 import type { RouteContext } from "../index.js";
 import { warn } from "../lib/log.js";
@@ -27,13 +27,8 @@ export async function avatarRoute(rc: RouteContext, m: RegExpMatchArray) {
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
   if (m[3] !== undefined) {
     if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
-    let acc = await stub.access(invite, owner);
-    if (!acc.ok) {
-      const ss = await mediaSigState(env, room, decodeURIComponent(m[3]).toLowerCase(), "avatar", url);
-      if (ss === "ok") acc = { ok: true };
-      else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-    }
-    if (!acc.ok) return deny(acc);
+    const acc = await stub.access(invite, owner, mediaLink(url, room, decodeURIComponent(m[3]).toLowerCase(), "avatar"));
+    if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
     const a = await stub.getAvatar(decodeURIComponent(m[3]));
     if (!a) return json({ error: "No avatar" }, 404);
     const fresh = url.searchParams.get("v") === String(a.ver);
@@ -100,13 +95,9 @@ export async function audioRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(invite, owner);
-  if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
-    const ss = await mediaSigState(env, room, id, "audio", url);
-    if (ss === "ok") acc = { ok: true };
-    else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-  }
-  if (!acc.ok) return deny(acc);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const acc = await stub.access(invite, owner, read ? mediaLink(url, room, id, "audio") : undefined);
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "audio", room, { name: acc.name, owner: owner });
   }
@@ -141,13 +132,9 @@ export async function imageRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(invite, owner);
-  if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
-    const ss = await mediaSigState(env, room, id, "image", url);
-    if (ss === "ok") acc = { ok: true };
-    else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-  }
-  if (!acc.ok) return deny(acc);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const acc = await stub.access(invite, owner, read ? mediaLink(url, room, id, "image") : undefined);
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "image", room, { name: acc.name, owner: owner });
   }
@@ -181,13 +168,9 @@ export async function videoRoute(rc: RouteContext, m: RegExpMatchArray) {
   if (!ROOM_RE.test(room)) return json({ error: "Room names are 1-64 lowercase letters, digits, - or _" }, 400);
   const id = parseInt(m[2], 10);
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(invite, owner);
-  if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
-    const ss = await mediaSigState(env, room, id, "video", url);
-    if (ss === "ok") acc = { ok: true };
-    else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-  }
-  if (!acc.ok) return deny(acc);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const acc = await stub.access(invite, owner, read ? mediaLink(url, room, id, "video") : undefined);
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
   if (request.method === "GET" || request.method === "HEAD") {
     return serveMedia(request, env, stub, id, "video", room, { name: acc.name, owner: owner });
   }
@@ -227,13 +210,9 @@ export async function artifactRoute(rc: RouteContext, m: RegExpMatchArray) {
   const id = parseInt(m[2], 10);
   const kind = m[3];
   const stub = env.ROOM.get(env.ROOM.idFromName(room));
-  let acc = await stub.access(invite, owner);
-  if (!acc.ok && (request.method === "GET" || request.method === "HEAD")) {
-    const ss = await mediaSigState(env, room, id, kind, url);
-    if (ss === "ok") acc = { ok: true };
-    else if (ss === "bad") return json({ error: "This media link is invalid or has expired" }, 403);
-  }
-  if (!acc.ok) return deny(acc);
+  const read = request.method === "GET" || request.method === "HEAD";
+  const acc = await stub.access(invite, owner, read ? mediaLink(url, room, id, kind) : undefined);
+  if (!acc.ok) return acc.code === LINK_REFUSED ? json({ error: acc.error }, 403) : deny(acc);
   if (kind === "file" && request.method !== "GET" && request.method !== "HEAD") return json({ error: "Files upload in parts: POST /messages/ID/file/start {\"size\", \"name\"} - see UPLOADING FILES in GET /api" }, 405);
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   return serveMedia(request, env, stub, id, kind, room, { name: acc.name, owner: owner });

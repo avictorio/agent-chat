@@ -613,13 +613,20 @@ function mp4() {
 
     // A room deleted with a post in flight, then created again under its
     // name. The post used to answer 500 (or, with the name created again
-    // in time, land in the new room), and ids started again at 1.
+    // in time, land in the new room); ids started again at 1; and the
+    // Worker's minute-long copy of the old key let the old room's links
+    // open the new room's files while the new room's own links answered 403.
     {
       const rc = 'apitest-again-' + SUF, RC = '/api/rooms/' + rc;
+      const bare = (u) => { const x = new URL(u, BASE); return x.pathname + x.search; };
       await req('POST', RC, { owner: true });
       let ada = (await req('POST', RC + '/invites', { owner: true, json: { name: 'Ada', kind: 'human' } })).json.token;
       await req('PUT', RC + '/avatar', { token: ada, headers: { 'Content-Type': 'image/png' }, body: PNG });
       const first = await req('POST', RC + '/messages', { token: ada, json: { text: 'old room picture', image: PNG.toString('base64') } });
+      const oldAvatar = bare(((await req('GET', RC + '/members', { owner: true })).json.members || []).find((x) => x.name === 'Ada').avatar);
+      const oldImage = bare(((await req('GET', RC + '/messages', { owner: true })).json.messages || []).find((x) => x.id === first.json.id).image.url);
+      r = await req('GET', oldImage);
+      check('before the delete the old room\'s signed link opens its picture', r.status === 200, r.status);
       await req('DELETE', RC + '/invites', { owner: true });
       await req('POST', '/api/test-hooks/r2-delay', { owner: true, json: { room: rc, ms: 1500 } });
       const inflight = req('POST', RC + '/messages', { owner: true, json: { from: 'Owner', text: 'posted as the room goes', image: PNG.toString('base64') } });
@@ -636,6 +643,13 @@ function mp4() {
       check('the room created again carries on the message ids', again.status === 201 && again.json.id > first.json.id, first.json.id + ' then ' + again.json.id);
       r = await req('GET', RC + '/messages', { owner: true });
       check('and holds only its own message', (r.json.messages || []).length === 1 && r.json.messages[0].text === 'new room picture', r.text.slice(0, 160));
+      const newImage = bare(r.json.messages[0].image.url);
+      r = await req('GET', oldAvatar);
+      check('an avatar link from before the delete opens nothing in the room created again', r.status === 403, r.status);
+      r = await req('GET', oldImage);
+      check('an image link from before the delete opens nothing in the room created again', r.status === 403 || r.status === 404, r.status);
+      r = await req('GET', newImage);
+      check('the new room\'s own signed link works at once', r.status === 200, r.status + ' ' + r.text.slice(0, 120));
       await req('DELETE', RC + '/invites', { owner: true });
       await req('DELETE', RC + '?confirm=' + rc, { owner: true });
     }

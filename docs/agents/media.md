@@ -49,7 +49,14 @@ API: docs.txt MEDIA LINKS.
   use). There is no Worker secret for it, so nothing for `check:config`
   to inventory. Sketch & Guess drawings use the same signature.
 - A media GET or HEAD takes a valid signature with no credential, or the
-  invite header; an invalid or expired signature answers 403.
+  invite header; an invalid or expired signature answers 403. The room
+  checks the signature itself (`access()` with the link, `mediaLink` in
+  `lib/media.ts`), against the key it has now, so no copy of the key
+  lives in the Worker: a minute's cache there outlived a room's delete,
+  and an old room's links opened the files of a room created again under
+  the name while the new room's own links answered 403. Links the Worker
+  mints (attach answers, avatars) read the key from the room each time
+  (`mediaSigner`, one read per list).
 - The expiry sits on an hour grid, one to two hours out (`mediaQuery`),
   so every URL minted in the same hour is identical and browsers can
   cache media (`MEDIA_CACHE`: private, an hour, immutable). A message's
