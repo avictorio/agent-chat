@@ -6,7 +6,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { gameEngine } from "../games/engine.js";
 import { renderRoomState, stateFrame } from "./state.js";
-import { STREAM_PING_MS } from "../limits.js";
+import { GENESIS_PENDING_MS, STREAM_PING_MS } from "../limits.js";
 import { SSE_HEADERS, json } from "../lib/http.js";
 import { GONE_MSG, goneError } from "../lib/errors.js";
 import { FourInARowMethods } from "../games/fourinarow.js";
@@ -407,20 +407,119 @@ export class Room extends DurableObject {
     return true;
   }
 
+  // ---- Public creation (routes/rooms.ts createRoomRoute) ----
+  // A room public creation makes is pending until its genesis mail is
+  // accepted (confirmGenesis) or its invite is first opened (access):
+  // cfg "genesis" holds when it was made and the invite's token. The
+  // Worker used to make the room, wait on the mail and roll back with
+  // calls of its own, with nothing in the room saying it was not done: a
+  // caller who went away mid-mail left a room whose only invite nobody
+  // received, and a second creator was told "already exists" for a room
+  // then rolled back. Rooms from before this mark never carry it.
+
+  /** The pending genesis: when it was made and its invite's token; null once confirmed (or for any other room). */
+  genesisPending(): { at: number, token: string } | null {
+    if (!this.ready) return null;
+    const r = this.sql.exec<Pick<CfgRow, "v">>("SELECT v FROM cfg WHERE k = 'genesis'").toArray()[0];
+    if (!r) return null;
+    try { const g = JSON.parse(r.v); return { at: Number(g.at) || 0, token: String(g.token || "") }; } catch { return { at: 0, token: "" }; /* unreadable: as old as can be */ }
+  }
+
+  // What a public creator of this name meets: free, taken, or pending -
+  // made less than GENESIS_PENDING_MS ago with its mail not yet accepted
+  // (try again in retry_after seconds). A pending room older than that
+  // whose invite was never opened counts as free: createGenesis starts
+  // it over.
+  genesisCheck(): { state: "free" } | { state: "taken" } | { state: "pending", retry_after: number } {
+    // a room that is being deleted is not free yet: see destroy()
+    if (this.destroying) return { state: "taken" };
+    if (!this.ready) return { state: "free" };
+    const g = this.genesisPending();
+    if (!g) return { state: "taken" };
+    const age = Date.now() - g.at;
+    if (age < GENESIS_PENDING_MS) return { state: "pending", retry_after: Math.max(1, Math.ceil((GENESIS_PENDING_MS - age) / 1000)) };
+    const opened = this.sql.exec<Pick<InvRow, "used">>("SELECT used FROM inv WHERE token = ?", g.token).toArray()[0];
+    return opened && opened.used ? { state: "taken" } : { state: "free" };
+  }
+
   // Public creation's critical section: create the room and mint the
   // creator's genesis invite as ONE call. Durable Object calls are
   // serialized, so two racing creates for the same name cannot interleave -
-  // the loser is told the room existed and must not roll anything back
-  // (with a separate check and create, a loser could destroy the winner's
-  // room).
-  createGenesis(name: string) {
-    // a room that is being deleted is not free yet: see destroy()
-    if (this.ready || this.destroying) return { existed: true };
-    this.ensureSchema();
-    this.ready = true;
+  // the loser is told the room existed (or is pending) and must not roll
+  // anything back (with a separate check and create, a loser could
+  // destroy the winner's room). A stale pending room starts over: its
+  // unopened invite is revoked and a new one made for this creator, the
+  // replacement the Worker's rollback made when a mail failed, with the
+  // row kept.
+  createGenesis(name: string): { existed: true } | { pending: true, retry_after: number } | { created: true, invite: { token: string } | null } {
+    const c = this.genesisCheck();
+    if (c.state === "taken") return { existed: true };
+    if (c.state === "pending") return { pending: true, retry_after: c.retry_after };
+    const stale = this.ready ? this.genesisPending() : null;
+    if (stale) {
+      this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+      if (stale.token) this.revoke(stale.token);
+    } else {
+      this.ensureSchema();
+      this.ready = true;
+    }
     const inv = this.invite(name, "human", null);
     // no inviter and no limits here: anything but the new invite means the name was refused
-    return { created: true, invite: inv && "token" in inv && inv.token ? inv : null };
+    const token = inv && "token" in inv && inv.token ? inv.token : null;
+    // A stale room whose name this creator cannot take (an invite the
+    // owner made there holds it) stays as it is, a room like any other.
+    if (!token && stale) return { existed: true };
+    if (token) this.sql.exec("INSERT OR REPLACE INTO cfg (k, v) VALUES ('genesis', ?)", JSON.stringify({ at: Date.now(), token: token }));
+    return { created: true, invite: token ? { token: token } : null };
+  }
+
+  /** The genesis mail went out: the room is the creator's for good. Only
+   *  for the genesis this creator made (a start-over has its own token). */
+  confirmGenesis(token: string): boolean {
+    const g = this.genesisPending();
+    if (!g || g.token !== token) return false;
+    this.sql.exec("DELETE FROM cfg WHERE k = 'genesis'");
+    return true;
+  }
+
+  // The genesis mail failed: the room goes, as it was never there - its
+  // invite revoked and its storage deleted, as the Worker's rollback did.
+  // Only while it is still this creator's unopened genesis: a creator
+  // who started the room over meanwhile, or opened the invite, keeps it.
+  async abandonGenesis(token: string, room: string): Promise<boolean> {
+    const g = this.genesisPending();
+    if (!g || g.token !== token) return false;
+    const opened = this.sql.exec<Pick<InvRow, "used">>("SELECT used FROM inv WHERE token = ?", token).toArray()[0];
+    if (opened && opened.used) return false;
+    await this.revokeAll();
+    const gone = await this.destroy(room);
+    return !!gone.deleted;
+  }
+
+  // ---- Public creation's caps, on the CREATE_QUOTA_ROOM object only ----
+  // Every cap of one creation is checked and its place taken in this one
+  // call, so a burst arriving together cannot all pass (KV's separate read
+  // and write let 60 parallel creations through caps of 3, 5 and 30). A
+  // place is taken before the room is made and given back
+  // (createRelease) when the creation then makes nothing: a taken name, a
+  // pending one, a refused mail. Rows of past days are dropped as the
+  // next day's first creation comes in: they are counters, nothing else.
+  /** @param caps each counter's key (a day in it) and its cap
+   *  @returns whether a place was taken in every one */
+  createReserve(caps: Array<[string, number]>, day: string): boolean {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS cq (k TEXT PRIMARY KEY, day TEXT NOT NULL, n INTEGER NOT NULL)");
+    this.sql.exec("DELETE FROM cq WHERE day < ?", day);
+    for (const [k, max] of caps) {
+      const r = this.sql.exec<{ n: number }>("SELECT n FROM cq WHERE k = ?", k).toArray()[0];
+      if ((r ? r.n : 0) >= max) return false;
+    }
+    for (const [k] of caps) this.sql.exec("INSERT INTO cq (k, day, n) VALUES (?, ?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1", k, day);
+    return true;
+  }
+
+  createRelease(keys: string[]): void {
+    this.sql.exec("CREATE TABLE IF NOT EXISTS cq (k TEXT PRIMARY KEY, day TEXT NOT NULL, n INTEGER NOT NULL)");
+    for (const k of keys) this.sql.exec("UPDATE cq SET n = MAX(0, n - 1) WHERE k = ?", k);
   }
 
   // Removes the room and all its storage for good. A room with active invites has members, so those must go first.
@@ -579,6 +678,9 @@ export class Room extends DurableObject {
     const row = l.row;
     const now = Date.now();
     if (!row.used) this.sql.exec("UPDATE inv SET used = ? WHERE token = ?", now, token);
+    // A pending genesis whose invite is opened has reached its creator,
+    // whatever became of the mail's answer (confirmGenesis).
+    if (!row.used && token) this.confirmGenesis(token);
     if (!row.seen || now - row.seen > 60000) this.sql.exec("UPDATE inv SET seen = ? WHERE token = ?", now, token);
     // first open: the member's status goes from unused to active for everyone
     if (!row.used) this.notifyMembers(row.name);

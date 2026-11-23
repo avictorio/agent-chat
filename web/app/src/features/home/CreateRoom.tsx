@@ -7,6 +7,15 @@ import { Card } from "../../ui/Card";
 // status-mapped result messages. The genesis invite is emailed to
 // the address given and never shown here.
 
+// The address as the server takes it (plainAddress in
+// worker/lib/address.ts): a dot-atom local part and a host name with a
+// dot, nothing around them. Checked here first so a person sees the
+// plain sentence without a round trip.
+const ATOM = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
+const LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+const PLAIN_ADDRESS = new RegExp("^" + ATOM + "(?:\\." + ATOM + ")*@" + LABEL + "(?:\\." + LABEL + ")+$");
+const ADDRESS_HELP = "Write the email address on its own, like name@example.com - no name in front of it, no angle brackets, commas or spaces.";
+
 export function CreateView({ hidden }: { hidden: boolean }) {
   const [roomUrl, setRoomUrl] = useState("chat.victorio.cloud/r/...");
   const [msg, setMsg] = useState<{ text: string; bad: boolean }>({ text: "", bad: false });
@@ -34,8 +43,8 @@ export function CreateView({ hidden }: { hidden: boolean }) {
       nameEl.focus();
       return;
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setMsg({ text: "That email address does not look complete.", bad: true });
+    if (email.length > 254 || !PLAIN_ADDRESS.test(email)) {
+      setMsg({ text: /@.+\./.test(email) ? ADDRESS_HELP : "That email address does not look complete.", bad: true });
       emailEl.focus();
       return;
     }
@@ -47,7 +56,7 @@ export function CreateView({ hidden }: { hidden: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ room, name, email }),
       });
-      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      const d = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
       setBusy(false);
       if (res.status === 200 || res.status === 201) {
         setMsg({
@@ -60,8 +69,13 @@ export function CreateView({ hidden }: { hidden: boolean }) {
         setMsg({ text: "That room name is taken - try another.", bad: true });
       } else if (res.status === 429) {
         setMsg({ text: "Too many rooms created just now - try again in a little while.", bad: true });
+      } else if (res.status === 503 && d.code === "room_pending") {
+        setMsg({ text: "Someone is creating a room with that name right now. Try again in a few minutes, or pick another name.", bad: true });
       } else if (res.status === 503) {
         setMsg({ text: "Room creation is unavailable right now - try again later.", bad: true });
+      } else if (res.status === 400 && d.code === "email_invalid") {
+        setMsg({ text: ADDRESS_HELP, bad: true });
+        emailEl.focus();
       } else {
         setMsg({ text: d.error || "Something went wrong - try again.", bad: true });
       }

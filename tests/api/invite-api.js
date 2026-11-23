@@ -84,7 +84,7 @@ async function codes(ctx) {
   check('MCP begin_upload refused at the cap leaves no draft behind', after.status === 201 && r.status === 404, after.status + ' ' + r.status + ' ' + r.text.slice(0, 80));
 
   // room creation: rate_limited until UTC midnight
-  const email = 'codes-' + SUF + '@example.test';
+  const email = 'sent-codes-' + SUF + '@example.test';
   const cip = (ctx.IPO || '10.9.0.') + '78';
   for (let i = 0; i < 3; i++) await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': cip }, json: { room: 'apitest-cc' + i + '-' + SUF, name: 'Code', email } });
   r = await req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': cip }, json: { room: 'apitest-cc9-' + SUF, name: 'Code', email } });

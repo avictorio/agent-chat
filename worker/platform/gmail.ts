@@ -2,6 +2,7 @@
 
 import { b64urlEncode, pemToDer } from "../lib/crypto.js";
 import { warn } from "../lib/log.js";
+import { MAIL_FETCH_MS } from "../limits.js";
 
 // The service-account JSON arrives via a dashboard paste, and a
 // viewer along the way may turn the key's escaped line breaks into
@@ -61,7 +62,7 @@ export async function gmailAccessTokenInner(env: Env) {
   const claims = b64urlEncode(enc.encode(JSON.stringify({ iss: sa.client_email, sub: sender, aud: "https://oauth2.googleapis.com/token", scope: "https://www.googleapis.com/auth/gmail.send", iat: now, exp: now + 3600 })));
   const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", gmailCache.key, enc.encode(head + "." + claims));
   const jwt = head + "." + claims + "." + b64urlEncode(new Uint8Array(sig));
-  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt) });
+  const res = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" + encodeURIComponent(jwt), signal: AbortSignal.timeout(MAIL_FETCH_MS) });
   if (!res.ok) { warn("gmail.token", "HTTP " + res.status); return null; }
   /** the token endpoint's answer */
   const j: { access_token: string, expires_in?: number } = await res.json();
@@ -108,6 +109,7 @@ export async function sendViaGmail(env: Env, to: string, subject: string, text: 
       method: "POST",
       headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
       body: JSON.stringify({ raw: b64urlEncode(new TextEncoder().encode(mime)) }),
+      signal: AbortSignal.timeout(MAIL_FETCH_MS),
     });
     if (!res.ok) warn("gmail.send", "HTTP " + res.status);
     return res.ok;

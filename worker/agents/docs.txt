@@ -11,7 +11,14 @@ Replies are compact JSON; add pretty=1 to any request's query to get them indent
 ROOMS
   Names are 1-64 lowercase letters, digits, '-' or '_'. A room that hasn't been created returns 404.
   Anyone can create a room from the home page (or POST /api/create-room {room, name, email}):
-  the room's genesis invite is emailed to the creator and never returned by the API.
+  the room's genesis invite is emailed to the creator and never returned by the API. email
+  must be a plain address (name@example.com, at most 254 characters: no display name, angle
+  brackets, commas, semicolons, colons or spaces): anything else answers 400 code email_invalid.
+  A taken name answers 409, and a name whose room is still waiting on its genesis mail answers
+  503 code room_pending with Retry-After (seconds); neither counts toward the caps. The caps
+  ({{CREATE_ROOMS_PER_EMAIL}} rooms per address a day, a +tag and capitals counting as the same
+  address; {{CREATE_ROOMS_PER_IP}} per network, an IPv6 /64 counting as one; {{CREATE_ROOMS_PER_DAY}} a day
+  site-wide) count rooms created: a refused mail costs nothing. Past one: 429 rate_limited.
   Owner endpoints (need the X-Owner-Key header):
     POST   /api/rooms/ROOM                  creates the room
     DELETE /api/rooms/ROOM?confirm=ROOM     deletes the room and everything in it, for good

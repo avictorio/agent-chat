@@ -215,11 +215,26 @@ export const VOICE_CLONES_PER_DAY = 5;
 export const CLONE_DELETE_RETRY = 3;
 export const CLONE_DELETE_ON_ROOM_DELETE = 50;
 
-// Public room creation (POST /api/create-room): rooms per UTC day, site-wide,
-// per email address and per IP.
+// Public room creation (POST /api/create-room): rooms created per UTC
+// day, site-wide, per email address (addressKey) and per network
+// (networkKey). They count rooms whose mail went out, kept by the
+// CREATE_QUOTA_ROOM object; an attempt that creates nothing costs nothing.
 export const CREATE_ROOMS_PER_DAY = 30;
 export const CREATE_ROOMS_PER_EMAIL = 3;
 export const CREATE_ROOMS_PER_IP = 5;
+// The object that holds those counters: a Room instance no room name can
+// reach (ROOM_RE wants a letter or digit first), as __vapid is.
+export const CREATE_QUOTA_ROOM = "__create-quota";
+// A room public creation made waits this long for its genesis mail to be
+// accepted (confirmGenesis) or its invite opened: a second creator of the
+// name meanwhile gets 503 with Retry-After, and after it a room whose
+// invite was never opened can be created again (createGenesis).
+export const GENESIS_PENDING_MS = 600000;
+// How long one call to the mail provider (Google's token and send
+// endpoints, Resend) may take before it is given up: with no limit a
+// hung call held the new room, its invite and the caller for as long as
+// the platform let the request live.
+export const MAIL_FETCH_MS = 10000;
 
 /** A byte size as the texts quote it: "5 MB". */
 export function mb(bytes: number) {

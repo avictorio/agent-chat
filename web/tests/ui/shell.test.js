@@ -688,6 +688,80 @@ const { settle, installClock, fakePush, must, setup, DIST, HTML, ICON_PNG, OUT, 
     }
 
   }
+  // The create form's refusals in plain words: an address with a name or
+  // angle brackets around it is stopped before any request, the server's
+  // email_invalid 400 says the same, and a 503 room_pending (another
+  // creator's room still waiting on its mail) says to wait or pick another
+  // name, not that creation is down.
+  async function runCreateRefusals(name, w, h) {
+    if (process.env.ONLY && !process.env.ONLY.split(',').includes(name)) return;
+    const b = await chromium.launch({});
+    const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: w, height: h }, timezoneId: 'UTC', locale: 'en-US', hasTouch: w < 500, isMobile: w < 500 });
+    const page = await ctx.newPage();
+    await installClock(page);
+    const errs = [];
+    page.on('pageerror', (e) => errs.push(e.message));
+    const answers = [
+      { status: 503, body: { error: 'Someone is creating a room with that name right now.', code: 'room_pending' }, headers: { 'Retry-After': '540' } },
+      { status: 400, body: { error: '"email" must be a plain address like name@example.com', code: 'email_invalid' } },
+    ];
+    const sent = [];
+    await page.route('https://chat.victorio.cloud/**', async (route) => {
+      const pth = new URL(route.request().url()).pathname;
+      if (pth === '/' || pth === '/index.html') return route.fulfill({ status: 200, contentType: 'text/html', body: HTML });
+      if (pth === '/api/build') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ build: 'next-dev' }) });
+      if (pth === '/api/create-room') {
+        sent.push(route.request().postDataJSON());
+        const a = answers.shift();
+        return route.fulfill({ status: a.status, contentType: 'application/json', headers: a.headers || {}, body: JSON.stringify(a.body) });
+      }
+      if (pth.startsWith('/assets/')) { try { const b2 = require('fs').readFileSync(DIST + pth); return route.fulfill({ status: 200, contentType: pth.endsWith('.css') ? 'text/css' : 'text/javascript', body: b2 }); } catch { return route.fulfill({ status: 404, body: 'nf' }); } }
+      if (pth.startsWith('/icons/')) return route.fulfill({ status: 200, contentType: 'image/png', body: ICON_PNG });
+      return route.fulfill({ status: 404, body: 'nf' });
+    });
+    const out = {};
+    try {
+      await page.goto('https://chat.victorio.cloud/');
+      await settle(page);
+      await page.evaluate(() => document.querySelector('.tab[data-view="create"]').click());
+      await settle(page);
+      await page.fill('#cRoom', 'busy-room');
+      await page.fill('#cName', 'Ada');
+      await page.fill('#cEmail', 'Ada <ada@example.com>');
+      await page.click('#cGo');
+      out.local = await page.$eval('#cMsg', (e) => e.textContent);
+      out.sentAfterLocal = sent.length;
+      await page.fill('#cEmail', 'ada@example.com');
+      await page.click('#cGo');
+      await page.waitForFunction(() => /creating a room with that name/.test(document.getElementById('cMsg').textContent), null, { timeout: 5000 });
+      out.pending = await page.$eval('#cMsg', (e) => e.textContent);
+      await page.$eval('#cMsg', (e) => e.scrollIntoView({ block: 'center' }));
+      await page.screenshot({ path: OUT + name + '-pending.png' });
+      await page.click('#cGo');
+      await page.waitForFunction(() => /on its own/.test(document.getElementById('cMsg').textContent), null, { timeout: 5000 });
+      out.server400 = await page.$eval('#cMsg', (e) => e.textContent);
+      out.focused = await page.evaluate(() => document.activeElement && document.activeElement.id);
+      await page.$eval('#cMsg', (e) => e.scrollIntoView({ block: 'center' }));
+      await page.screenshot({ path: OUT + name + '-address.png' });
+      out.msgBox = await page.$eval('#cMsg', (e) => { const r = e.getBoundingClientRect(); return { right: Math.round(r.right), bad: e.classList.contains('bad') }; });
+    } catch (e) {
+      failed();
+      console.log('FAIL ' + name + ': harness error: ' + e.message);
+    }
+    await b.close();
+    const ok = /on its own, like name@example.com/.test(out.local || '') && out.sentAfterLocal === 0
+      && /Try again in a few minutes, or pick another name/.test(out.pending || '') && !/unavailable/.test(out.pending || '')
+      && /on its own, like name@example.com/.test(out.server400 || '') && out.focused === 'cEmail'
+      && out.msgBox && out.msgBox.bad && out.msgBox.right <= w;
+    if (errs.length || !ok) {
+      failed();
+      console.log('FAIL ' + name + ': ' + JSON.stringify({ out, errs }));
+    } else {
+      console.log('PASS ' + name + ' ' + JSON.stringify(out));
+    }
+  }
+  await runCreateRefusals('home-create-refusals', 1280, 860);
+  await runCreateRefusals('home-create-refusals-phone', 390, 844);
   await runHome();
   done('shell');
 })();

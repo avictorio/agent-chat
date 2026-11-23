@@ -14,7 +14,7 @@
 // unless API_PORT names it; start() fails rather than use a port another
 // process answers on), its own local state directory, removed
 // afterwards, and reaches nothing outside this machine. The create-room caps
-// count in KV and one of them is room-wide (30 a day), so shared state would
+// count in the quota object and one of them is site-wide (30 a day), so shared state would
 // fail a later same-day run's create checks as 429s. Room names, emails and
 // client IPs stay unique per run as well.
 const http = require('http');
@@ -22,8 +22,8 @@ const { start, OWNER, localBuildId } = require('./server.js');
 
 let BASE = '';
 const SUF = Date.now().toString(36);
-// Client IPs for the create-room checks: the creation caps count attempts
-// per IP, so each check sends its own address, under a per-run prefix.
+// Client IPs for the create-room checks: the creation caps count rooms
+// created per IP, so each check sends its own address, under a per-run prefix.
 const IPO = '10.' + (20 + (parseInt(SUF, 36) % 180)) + '.0.';
 const { golden } = require('./golden.js');
 const { inviteApi } = require('./invite-api.js');
@@ -633,6 +633,52 @@ async function takenPortRefused() {
       check('and can be created again, empty', r.status === 201 && fresh.status === 200 && (fresh.json.messages || []).length === 0, r.status + ' ' + fresh.status + ' ' + fresh.text.slice(0, 120));
       await req('DELETE', RR + '/invites', { owner: true });
       await req('DELETE', RR + '?confirm=' + race, { owner: true });
+    }
+
+    // Public creation's caps count rooms created (their mail went out),
+    // checked and taken in one call; a taken name, a pending one or a
+    // refused mail costs nothing. They counted attempts in KV: three taken
+    // names locked a person out for the day, and a burst passed every cap.
+    {
+      const C = (room, email, ip) => req('POST', '/api/create-room', { headers: { 'CF-Connecting-IP': ip }, json: { room, name: 'Maker', email } });
+      const P = 'apitest-cq-' + SUF + '-';
+      let codes = [];
+      const ipT = IPO + '20', emT = 'sent-taken-' + SUF + '@example.com';
+      for (let i = 0; i < 3; i++) codes.push((await C('apitest-main-' + SUF, emT, ipT)).status);
+      r = await C(P + 'free', emT, ipT);
+      check('three taken names cost nothing: a free name after them is created', codes.join() === '409,409,409' && r.status === 201, codes.join() + ' then ' + r.status + ' ' + r.text.slice(0, 120));
+      const ipF = IPO + '21';
+      codes = [];
+      for (let i = 0; i < 6; i++) codes.push((await C(P + 'fail' + i, 'refused-' + i + '-' + SUF + '@example.com', ipF)).status);
+      r = await C(P + 'afterfail', 'sent-afterfail-' + SUF + '@example.com', ipF);
+      check('six refused mails from one IP cost nothing: a creation there afterwards succeeds', codes.every((c) => c === 502) && r.status === 201, codes.join() + ' then ' + r.status + ' ' + r.text.slice(0, 120));
+      r = await req('GET', '/api/rooms/' + P + 'fail0/members', { owner: true });
+      check('a refused mail leaves no room behind', r.status === 404, r.status);
+      codes = [];
+      for (let i = 1; i <= 4; i++) codes.push((await C(P + 'tag' + i, 'sent-tag-' + SUF + '+' + i + '@Example.com', IPO + '22')).status);
+      check('+tags and capitals are one address: three rooms, then 429', codes.join() === '201,201,201,429', codes.join());
+      for (const bad of ['Maker <sent-dn-' + SUF + '@example.com>', '<sent-dn-' + SUF + '@example.com>', 'sent-dn-' + SUF + '@example.com, x@example.com', 'sent-dn-' + SUF + '@localhost']) {
+        r = await C(P + 'dn', bad, IPO + '23');
+        check('a non-plain address -> 400 naming email: ' + bad, r.status === 400 && /"email"/.test(r.json.error) && r.json.code === 'email_invalid', r.status + ' ' + r.text.slice(0, 120));
+      }
+      const v6 = '2001:db8:' + (parseInt(SUF.slice(-3), 36) % 65535).toString(16) + ':7:';
+      codes = [];
+      for (let i = 1; i <= 5; i++) codes.push((await C(P + 'v6-' + i, 'sent-v6-' + i + '-' + SUF + '@example.com', v6 + ':' + i)).status);
+      codes.push((await C(P + 'v6-6', 'sent-v6-6-' + SUF + '@example.com', v6 + 'ffff:1:2:3')).status);
+      r = await C(P + 'v6-7', 'sent-v6-7-' + SUF + '@example.com', v6.replace(/:7:$/, ':8::1'));
+      check('one IPv6 /64 is one caller: five rooms, then 429; the next /64 is another', codes.join() === '201,201,201,201,201,429' && r.status === 201, codes.join() + ' then ' + r.status);
+      const slowRoom = P + 'slow';
+      const slow = C(slowRoom, 'slow-sent-' + SUF + '@example.com', IPO + '24');
+      await sleep(700);
+      const racer = await C(slowRoom, 'sent-racer-' + SUF + '@example.com', IPO + '25');
+      const sr = await slow;
+      check('a creator meeting a room whose mail is still on its way -> 503 room_pending with Retry-After', racer.status === 503 && racer.json.code === 'room_pending' && +(racer.headers.get('retry-after') || 0) > 0, racer.status + ' ' + racer.text.slice(0, 160));
+      check('and the slow mail\'s creation goes through', sr.status === 201, sr.status + ' ' + sr.text.slice(0, 120));
+      r = await C(slowRoom, 'sent-racer-' + SUF + '@example.com', IPO + '25');
+      check('once its mail is accepted, the name is taken (409)', r.status === 409, r.status);
+      const burst = await Promise.all(Array.from({ length: 8 }, (_, i) => C(P + 'burst' + i, 'sent-burst-' + SUF + '@example.com', IPO + (30 + i))));
+      const bs = burst.map((x) => x.status);
+      check('8 creations sent together for one address: exactly 3 made, the rest 429', bs.filter((x) => x === 201).length === 3 && bs.filter((x) => x === 429).length === 5, bs.join());
     }
 
     // A room deleted with a post in flight, then created again under its
