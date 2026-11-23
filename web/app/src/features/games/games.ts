@@ -340,11 +340,14 @@ export function createGameStore(opts: GameStoreOptions): GameStore {
     caughtUp.delete(id);
     return named;
   }
-  async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string) {
+  // how.repeat: a repeat is meant, not a double tap. A line of talk is
+  // the case: the form has already cleared its draft, so a second "no"
+  // dropped as a copy was lost for good.
+  async function sendMove(id: number, dir: string, note: HTMLElement | null, label?: string, how?: { repeat?: boolean }) {
     const turn = turnToSend(id);
     const out = moving.get(id);
     if (out) {
-      if (out.last !== dir) {
+      if (out.last !== dir || how?.repeat) {
         out.last = dir;
         out.queue.push({ dir, note, label, turn });
       }

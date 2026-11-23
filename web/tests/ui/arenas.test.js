@@ -534,6 +534,22 @@ const { ARENA_KIDS, settle, done, noGl, now, run, shot } = require('./harness');
       return out;
     });
   }
+  // The same line said twice while the first is still out is two lines:
+  // the form had already cleared its draft, and the second "no" was
+  // dropped as a double tap, lost for good.
+  await run('werewolf-say-twice', { state: { ww: true }, init: noGl }, async (page, S, calls) => {
+    await page.click('.game-card.kind-werewolf');
+    await page.waitForSelector('#viewer .ww-talk-input', { timeout: 20000 });
+    S.moveDelay = 1000;
+    for (let i = 0; i < 2; i++) {
+      await page.fill('#viewer .ww-talk-input', 'no');
+      await page.click('#viewer .ww-say');
+    }
+    await page.waitForTimeout(2500);
+    const out = { posts: calls.filter((c) => /^POST .*\/games\/30\/moves/.test(c)) };
+    if (out.posts.length !== 2 || !out.posts.every((c) => /"dir":"say: no"/.test(c))) throw new Error('both lines go out, in order: ' + JSON.stringify(out));
+    return out;
+  });
   for (const [label, o] of [['werewolf-night-wolf', {}], ['werewolf-night-wolf-mobile', { w: 390, h: 844, touch: true, scheme: 'dark' }]]) {
     await run(label, Object.assign({ state: { ww: true, wwWolf: true } }, o), async (page, S, calls) => {
       const out = {};

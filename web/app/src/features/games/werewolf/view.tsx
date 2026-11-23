@@ -51,13 +51,18 @@ export function renderWerewolfView(ctx: GameViewCtx, g: WerewolfState, force?: b
     if (gv.r3dCommit && !/^(say|den):/.test(dir)) gv.r3dCommit();
     void ctx.sendMove(g.id, dir, note);
   };
+  // a line of talk sent twice is two lines, not a double tap
+  const say = (dir: string) => {
+    if (ctx.gameView !== gv) return;
+    void ctx.sendMove(g.id, dir, note, undefined, { repeat: true });
+  };
   if (you.playing) wrap.appendChild(ctx.panel("role", <WerewolfRole g={g} />));
   if (wwActionVerb(g)) {
     const hint = ctx.arenaHint("werewolf", "Lying is legal for everyone. Watch who pushes a vote, and who goes quiet.");
     if (hint) wrap.appendChild(hint);
     wrap.appendChild(ctx.panel("action", <WerewolfAction g={g} me={me} onSend={send} />));
   }
-  wrap.appendChild(ctx.panel("talk", <WerewolfTalk g={g} onSay={send} />));
+  wrap.appendChild(ctx.panel("talk", <WerewolfTalk g={g} onSay={say} />));
   wrap.appendChild(ctx.panel("events", <WerewolfEvents g={g} />));
   wrap.appendChild(ctx.panel("players", <WerewolfPlayers g={g} me={me} />));
   if (g.status === "running" && !you.playing) note.textContent = "Spectating - you see what the village sees: no roles until the dead are counted.";

@@ -224,7 +224,10 @@ docs.txt GAMES - EVERY MATCH.
   none when the call has none, and keeps one move per match in flight: a second tap of
   the same move is dropped (a double tap sends one), a different move
   tapped meanwhile waits and goes next with the turn it was tapped on (a
-  rider steering again, a second line in the Werewolf square). On the
+  rider steering again, a second line in the Werewolf square). A caller
+  says when a repeat is meant (`sendMove(..., { repeat: true })`): the
+  Werewolf talk form does, since it has already cleared its draft and a
+  second "no" dropped as a double tap was lost. On the
   409 it repaints from the answer's `game` and shows a plain sentence
   with no turn number (the referee's is written for agents), and sends
   the answer's `turn` with the next move for as long as `room_state`
