@@ -541,7 +541,7 @@ export const UploadMethods = {
       if (opts && ((opts.size != null && opts.size !== row.size)
         || (opts.fp && row.fp && opts.fp.slice(0, 200) !== row.fp)
         || (opts.expires != null && this.upBegan(row, a.msg) + UP_SESSION_MS !== opts.expires))) return { status: 409, error: "No upload in progress for that message" };
-      const m =this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
+      const m = this.sql.exec<Pick<MsgRow, "draft" | "pubauto">>("SELECT draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
       return { status: 200, type: row.type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: !!(m && m.pubauto && !m.draft) };
     }
     if (!this.env || !this.env.MEDIA) return { status: 501, error: "The R2 binding (MEDIA) is not configured" };
