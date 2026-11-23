@@ -11,6 +11,9 @@ import type { CfgRow, InvRow, MdRow, MdelRow, MsgRow, Refusal, Room, RxRow, Stre
 import { warn } from "../lib/log.js";
 import { hiddenDraft } from "./media.js";
 
+/** The columns a message is served from (withKinds turns them into the API's fields). */
+const MSG_COLS = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id';
+
 /** A message as the API serves it (withKinds): the contract's Message,
  *  plus the members its text @-mentions. */
 export type ApiMessage = Message & { targets: string[] };
@@ -537,7 +540,7 @@ export const MessageMethods = {
   // once to each of them and a cursor at its number never sees it again.
   /** @param after the cursor, or null for the latest */
   delivered(after: number | null, limit: number): Delivered[] {
-    const cols = 'id, ts, sender AS "from", text, audio_type, audio_size, audio_transcript, image_type, image_size, video_type, video_size, html_type, html_size, html_name, doc_type, doc_size, doc_name, file_type, file_size, file_name, game_id, COALESCE(seq, id) AS dn';
+    const cols = MSG_COLS + ", COALESCE(seq, id) AS dn";
     const rows = after === null
       ? this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM (SELECT * FROM m WHERE (draft IS NULL OR draft = 0) ORDER BY id DESC LIMIT ?) ORDER BY id", limit).toArray()
       : this.sql.exec<MsgListRow & { dn: number }>("SELECT " + cols + " FROM m WHERE (draft IS NULL OR draft = 0) AND COALESCE(seq, id) > ? ORDER BY dn LIMIT ?", after, limit).toArray();
@@ -545,6 +548,20 @@ export const MessageMethods = {
     // the delivery number is a cursor, not a field of the message
     for (const r of rows as MsgBag[]) delete r.dn;
     return this.withKinds(rows).map((msg, i) => ({ msg, dn: dns[i]! }));
+  },
+
+  // These live messages, by id, in id order (GET /messages?ids=): how a
+  // client renews the media links of rows it already holds in one read.
+  // A row deep in a big room used to need a walk of pages from its id to
+  // the newest. A draft is never in it, as in every listing, its sender's
+  // own included, and an id that holds nothing is left out, so what is
+  // missing is gone.
+  /** @param ids at most MESSAGES_IDS_MAX (the route checks) */
+  byIds(ids: number[], room: string): ApiMessage[] {
+    this.roomName = room;
+    if (!ids.length) return [];
+    const rows = this.sql.exec<MsgListRow>("SELECT " + MSG_COLS + " FROM m WHERE (draft IS NULL OR draft = 0) AND id IN (" + ids.map(() => "?").join(",") + ") ORDER BY id", ...ids).toArray();
+    return this.withKinds(rows);
   },
 
   lastId(): number {

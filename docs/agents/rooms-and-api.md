@@ -28,6 +28,14 @@ docs.txt section that owns its routes, caps and formats.
     long poll never waited, a small page's `has_more` loop never ended),
     a reader whose cursor was the message media landed on got nothing,
     and a deleted cursor message lost a late publish for good.
+  - **Read by id.** `GET /messages?ids=` (up to `MESSAGES_IDS_MAX`,
+    `byIds`) returns those ids that are live messages, in id order, with
+    no cursor and no `room_state`: a draft is never in it (anyone's, as
+    in every listing) and an id that holds nothing is left out, so a
+    client knows what was deleted. It is how a feed renews the media
+    links of rows it holds in one read; reaching a row deep in a big
+    room used to take a walk of full pages from its id upward
+    (media.md, Signed media URLs). REST only: MCP has no such tool.
 
 - **Live stream (SSE).** API: docs.txt STREAM MESSAGES. The message frame
   (`sseFrame` in `worker/lib/http.ts`) names its fields one by one, so a

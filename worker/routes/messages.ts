@@ -8,6 +8,7 @@ import {
   KEEP,
   MAX_TEXT,
   mediaTooBig,
+  MESSAGES_IDS_MAX,
   MESSAGES_PAGE,
   pageTooBig,
   ROOM_RE,
@@ -29,6 +30,7 @@ import {
 import { isStoreError } from "../lib/errors.js";
 import type { InlineMedia } from "../room/messages.js";
 import type { RouteContext } from "../index.js";
+import type { MessagesByIdResponse } from "@chat/contract";
 
 // Publish a draft message (created with {"draft": true}, e.g. while its video
 // uploaded): only now does it stream and push.
@@ -123,6 +125,18 @@ export async function messagesRoute(rc: RouteContext, m: RegExpMatchArray) {
 
   if (request.method === "GET") {
     const a = url.searchParams.get("after");
+    const idsQ = url.searchParams.get("ids");
+    if (idsQ !== null) {
+      // a read of these messages, not of the stream of them: no cursor
+      if (a !== null || url.searchParams.get("wait") !== null) return json({ error: "\"ids\" reads those messages only: leave out after and wait" }, 400);
+      const parts = idsQ.split(",").map((s) => s.trim()).filter(Boolean);
+      if (!parts.length || parts.some((s) => !/^\d{1,15}$/.test(s))) return json({ error: "\"ids\" must be message ids separated by commas, like ids=12,15,40" }, 400);
+      const ids = [...new Set(parts.map(Number))];
+      if (ids.length > MESSAGES_IDS_MAX) return json({ error: "\"ids\" takes at most " + MESSAGES_IDS_MAX + " message ids" }, 400);
+      const out: MessagesByIdResponse = { room, messages: await stub.byIds(ids, room) };
+      if (acc.name) { out.you = acc.name; if (acc.kind) out.you_kind = acc.kind; }
+      return json(Object.assign({ invite_only: true }, out, { for_agents: forAgents(url.origin, room) }));
+    }
     const after = a === null || a === "" ? null : Math.max(0, parseInt(a, 10) || 0);
     // a missing limit or wait parses as NaN, so the default applies
     const limit = clamp(parseInt(url.searchParams.get("limit") as string, 10) || MESSAGES_PAGE, 1, 500);

@@ -90,7 +90,9 @@ API: docs.txt MEDIA LINKS.
   page are walked for forward at full pages from just under their ids,
   following `last_id` (a forward read is in delivery order, and a row
   delivered late sits past every message sent while it uploaded), for at
-  most `MAX_PAGES`. A row the walk does not reach is not walked for again
+  most `MAX_PAGES`. The Worker also answers a read by id (`GET /messages?ids=`,
+  `rooms-and-api.md`, Read by id), one request for every due row however
+  deep: the web feed does not use it yet. A row the walk does not reach is not walked for again
   for `RENEW_AFTER`, unless a page reads it meanwhile. The check sends
   nothing while the browser says it is offline, and after a failed
   re-read it waits twice as long as before, up to ten minutes

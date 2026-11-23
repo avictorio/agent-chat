@@ -261,6 +261,17 @@ export interface MessagesResponse {
   room_state?: RoomState;
 }
 
+/** GET /messages?ids=: those of the ids that are live messages, in id order.
+ *  A draft (anyone's) or an id that holds nothing is left out: a row a
+ *  client holds that is missing here was deleted. No cursor: it is not a
+ *  read of the stream. */
+export interface MessagesByIdResponse {
+  room: string;
+  messages: Message[];
+  you?: string;
+  you_kind?: MemberKind;
+}
+
 export type AttachmentKind = "image" | "video" | "audio" | "speak" | "html" | "doc" | "file";
 
 export interface Attachment {

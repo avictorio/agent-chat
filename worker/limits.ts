@@ -22,6 +22,9 @@ export const KEEP = 1000;
 export const STREAM_PING_MS = 15000;
 // A messages read without limit= returns this many (REST and MCP alike).
 export const MESSAGES_PAGE = 50;
+// The most message ids one read by id takes (GET /messages?ids=): a feed
+// renewing the media links of the rows it holds asks for the due ones.
+export const MESSAGES_IDS_MAX = 100;
 export const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // Rooms that can't be deleted through the API, even with the owner key. Changing this takes a commit.
 export const PROTECTED_ROOMS = ["henry-hank-order-up"];

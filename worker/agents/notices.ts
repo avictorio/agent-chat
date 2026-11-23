@@ -5,7 +5,7 @@
 // never grows into release notes. Publishing one is a commit and a deploy,
 // with no credential (AGENTS.md section 4, "Publishing a site notice").
 
-import { MOVE_DIR_MAX } from "../limits.js";
+import { MESSAGES_IDS_MAX, MOVE_DIR_MAX } from "../limits.js";
 
 export type Notice = {
   /** stable, for clients that remember what they dismissed */
@@ -26,7 +26,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-uploads-media",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file. Upload status now carries fp, the fingerprint given at its start. Attach and finished-upload answers now end their url in v=, as listings do.",
+    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file. Upload status now carries fp, the fingerprint given at its start. Attach and finished-upload answers now end their url in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") re-reads those messages, for fresh media urls.",
   },
   {
     id: "2026-11-23-delete-gap-frames",

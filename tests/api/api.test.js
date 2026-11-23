@@ -2871,6 +2871,18 @@ function mp4() {
     r = await req('PUT', R2 + '/messages/' + idr.json.id + '/image/part?n=1', { token: TU, body: PNG });
     r = await req('POST', R2 + '/messages/' + idr.json.id + '/image/finish', { token: TU });
     check('a one-part image finishes as an image', r.status === 200 && !!(r.json && r.json.image && r.json.image.type === 'image/png'), r.status + ' ' + r.text.slice(0, 160));
+    // A read by id: the rows a client holds, for fresh media urls, in one
+    // request. Another member's draft is no more there than an empty id.
+    r = await req('GET', R2 + '/messages?ids=' + [idr.json.id, fid, 99999999].join(','), { token: TP });
+    check('a read by id returns the live ones, not another member\'s draft or an empty id', r.status === 200 && JSON.stringify((r.json.messages || []).map((x) => x.id)) === JSON.stringify([fid]) && /&v=\d+$/.test(r.json.messages[0].file.url) && r.json.you === 'Poc' && !('last_id' in r.json), r.status + ' ' + r.text.slice(0, 200));
+    r = await req('GET', R2 + '/messages?ids=' + idr.json.id, { token: TU });
+    check('a read by id leaves out its reader\'s own draft too', r.status === 200 && Array.isArray(r.json.messages) && r.json.messages.length === 0, r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages?ids=' + Array.from({ length: 101 }, (_, i) => i + 1).join(','), { token: TP });
+    check('a read by id of more than 100 ids -> 400', r.status === 400 && /at most 100/.test(r.json && r.json.error), r.status + ' ' + r.text.slice(0, 120));
+    r = await req('GET', R2 + '/messages?ids=1,x', { token: TP });
+    check('a read by id with something not an id -> 400', r.status === 400, r.status);
+    r = await req('GET', R2 + '/messages?ids=1&after=0', { token: TP });
+    check('a read by id takes no cursor -> 400', r.status === 400, r.status);
     // The first chunked flow's addresses are the engine's (kind video), and
     // publish_on_complete fires on finish.
     const vdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'engine video', draft: true, publish_on_complete: true } });
