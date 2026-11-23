@@ -427,7 +427,8 @@ credential, and the route reads no other.
   (its kinds): it went live with that file missing and its upload
   dangling, or with a file from a send the author had since changed.
   `publish_on_complete` waits for the last upload the same way, since
-  its publish is the same call. A caption sent with the
+  its publish is the same call. An upload begun more than `UP_SESSION_MS`
+  ago no longer counts (`upsLive`): storage has dropped it. A caption sent with the
   publish replaces the draft's and is held to `MAX_TEXT` like a post
   (413): it used to be cut to the limit, silently.
 - To anyone else a draft does not exist (`hiddenDraft` in
@@ -471,9 +472,18 @@ credential, and the route reads no other.
   and missed the reader whose cursor was that message. A draft is left
   to its publish.
 - `publish_on_complete: true` (the `m.pubauto` column) has the server
-  publish the draft the moment its upload verifies (the stream endpoint,
-  or the engine's finish), for uploads that finish with no client alive
-  to call `/publish`. The server publishes as the member, never with
+  publish the draft once at least one of its files is in place and no
+  upload of it is still in flight (`maybeAutoPublish`), for uploads that
+  finish with no client alive to call `/publish`. Every path that ends an
+  upload runs the check: a finish (engine, stream, ticket), an abort
+  (which answers `published` as a finish does), a finish or stream whose
+  file did not land, a revoke's cancel of a direct upload, and the draft
+  sweep, which is what notices an upload that expired unfinished and
+  publishes such a draft before its deletes can reach it. Only the
+  finish used to check once the publish began waiting for the last
+  upload, so a draft whose last upload was aborted after another file
+  had finished stayed a draft and the sweep deleted it with that file.
+  A draft with nothing finished stays a draft. The server publishes as the member, never with
   owner trust (`AGENTS.md` section 13, Trust).
   It and the one-PUT stream endpoint were built for the removed Android
   app's background uploads (`AGENTS.md` section 8) and stay as API

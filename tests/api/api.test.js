@@ -2966,9 +2966,22 @@ function mp4() {
     const adr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'aborted audio', draft: true } });
     await req('POST', R2 + '/messages/' + adr.json.id + '/audio/start', { token: TU, json: { size: 20 * MiB } });
     r = await req('POST', R2 + '/messages/' + adr.json.id + '/audio/abort', { token: TU });
-    check('abort cancels an upload', r.status === 200 && !!(r.json && r.json.aborted === true), r.status);
+    check('abort cancels an upload', r.status === 200 && !!(r.json && r.json.aborted === true && r.json.published === false), r.status + ' ' + r.text.slice(0, 120));
     r = await req('GET', R2 + '/messages/' + adr.json.id + '/audio/status', { token: TU });
     check('nothing is left after abort', !!(r.json && r.json.uploading === false), JSON.stringify(r.json));
+    // A publish_on_complete draft whose image finished while its audio was
+    // on its way goes live when the audio is aborted (it waited only on it).
+    const pdr = await req('POST', R2 + '/messages', { token: TU, json: { text: 'image kept, audio dropped', draft: true, publish_on_complete: true } });
+    await req('POST', R2 + '/messages/' + pdr.json.id + '/audio/start', { token: TU, json: { size: 20 * MiB } });
+    await req('POST', R2 + '/messages/' + pdr.json.id + '/image/start', { token: TU, json: { size: PNG.length } });
+    await req('PUT', R2 + '/messages/' + pdr.json.id + '/image/part?n=1', { token: TU, body: PNG });
+    r = await req('POST', R2 + '/messages/' + pdr.json.id + '/image/finish', { token: TU });
+    check('a publish_on_complete finish with another upload in flight stays a draft', r.status === 200 && !!(r.json && r.json.published === false), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('POST', R2 + '/messages/' + pdr.json.id + '/audio/abort', { token: TU });
+    check('aborting the last upload in flight publishes it: published true', r.status === 200 && !!(r.json && r.json.aborted === true && r.json.published === true), r.status + ' ' + r.text.slice(0, 160));
+    r = await req('GET', R2 + '/messages?limit=5', { token: TP });
+    const pmsg = ((r.json && r.json.messages) || []).find(x => x.id === pdr.json.id);
+    check('and it is live with the image only', !!(pmsg && pmsg.image && !pmsg.audio), JSON.stringify(pmsg).slice(0, 200));
     // Agents: begin_upload with a size opens a resumable link set that needs
     // no credential; a file needs a size.
     r = await mcp(R2, 'tools/call', { name: 'begin_upload', arguments: { kind: 'file', name: 'notes.txt' } }, { token: TU });

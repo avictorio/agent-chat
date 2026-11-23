@@ -2,7 +2,7 @@
 
 import { streamWants } from "./state.js";
 import { isStoreError, storeError } from "../lib/errors.js";
-import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT } from "../limits.js";
+import { CLIENT_MSG_ID_KEEP, CLIENT_MSG_ID_MS, KEEP, MAX_TEXT, UP_SESSION_MS } from "../limits.js";
 import { deleteFrame, gapFrame, sseFrame } from "../lib/http.js";
 import { mentionsName, nameFold, sameName } from "../lib/text.js";
 import { gameEngine } from "../games/engine.js";
@@ -99,7 +99,7 @@ export const MessageMethods = {
     // the room the post was sent to: deleted during the sweep, it takes no message (Room.fence)
     const gen = this.gen;
     this.fence(gen);
-    await this.sweepDrafts();
+    await this.sweepDrafts(room);
     this.fence(gen);
     this.roomName = room;
     // Looked up and recorded with no await between, with the insert
@@ -325,6 +325,12 @@ export const MessageMethods = {
     return msg;
   },
 
+  /** The kinds of the message's uploads still in flight: begun less than
+   *  UP_SESSION_MS ago (sweepDrafts counts them the same way). */
+  upsLive(id: number): string[] {
+    return this.sql.exec<Pick<MdRow, "kind">>("SELECT md.kind AS kind FROM md JOIN m ON m.id = md.msg WHERE md.msg = ? AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ? ORDER BY md.kind", id, Date.now() - UP_SESSION_MS).toArray().map((x) => x.kind);
+  },
+
   /** @param text a caption to publish with (undefined or null keeps the draft's) */
   async publishMessage(id: number, who: string | null | undefined, owner: boolean, room: string, text: unknown) {
     const r = this.sql.exec<MsgRow>("SELECT * FROM m WHERE id = ?", id).toArray()[0];
@@ -334,9 +340,11 @@ export const MessageMethods = {
     // Not while one of its files is still on its way: published then, the
     // message went live with that file missing and its upload dangling,
     // or with a file from another send the author had dropped since (a
-    // resend that adopted the draft, another device). The upload's own
-    // finish publishes a publish_on_complete draft once nothing is left.
-    const flying = this.sql.exec<Pick<MdRow, "kind">>("SELECT kind FROM md WHERE msg = ? AND upload_id IS NOT NULL ORDER BY kind", id).toArray().map((x) => x.kind);
+    // resend that adopted the draft, another device). Whatever ends the
+    // last upload publishes a publish_on_complete draft (maybeAutoPublish).
+    // An upload past UP_SESSION_MS from its start is no longer on its way
+    // (storage has dropped it) and holds nothing back.
+    const flying = this.upsLive(id);
     if (flying.length) return { status: 409, error: "An upload for this message is still in flight (" + flying.join(", ") + "): finish it, or abort it (POST /messages/" + id + "/KIND/abort), then publish", uploading: flying };
     // An over-long caption is refused, as a post with it is: cutting it to
     // MAX_TEXT here published a shortened message and told no one, when
@@ -366,9 +374,19 @@ export const MessageMethods = {
   // push) is identical to a manual publish. The owner flag stays false:
   // this server-side path acts with the member's own standing, never the
   // owner's.
+  // It runs wherever an upload of the draft ends - a finish, an abort, a
+  // finish or stream whose file did not land, a revoke's cancel - and in
+  // the draft sweep, which is where an upload that expired unfinished is
+  // noticed. It ran on a finish only, so a draft whose last upload was
+  // aborted after another file had finished stayed a draft, and the sweep
+  // deleted it with that file a day later. It goes live once one file is
+  // in place and no upload is still live; a draft with nothing finished
+  // stays a draft.
   async maybeAutoPublish(id: number, room: string) {
     const r = this.sql.exec<Pick<MsgRow, "sender" | "draft" | "pubauto">>("SELECT sender, draft, pubauto FROM m WHERE id = ?", id).toArray()[0];
     if (!r || !r.draft || !r.pubauto) return null;
+    if (!this.sql.exec("SELECT 1 FROM md WHERE msg = ? AND upload_id IS NULL LIMIT 1", id).toArray().length) return null;
+    if (this.upsLive(id).length) return null;
     const res = await this.publishMessage(id, r.sender, false, room, undefined);
     return res && res.status === 200 ? res.msg : null;
   },

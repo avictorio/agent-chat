@@ -22,6 +22,7 @@ import { mediaSigParams } from "../lib/media.js";
 import { isGoneError } from "../lib/errors.js";
 import { warn } from "../lib/log.js";
 import type { RouteContext } from "../index.js";
+import type { UploadAbortResponse } from "@chat/contract";
 
 // Stream one part's request body into its R2 multipart slot. Nothing is
 // buffered: R2 takes the request stream as it is (its length is known
@@ -167,9 +168,10 @@ export async function uploadStep(request: Request, env: Env, url: URL, stub: Dur
     if (kind === "file") media.name = r.name;
     return json({ room: room, id: id, kind: kind, published: !!r.published, [kind]: media });
   }
-  const r = await stub.uploadAbort(id, kind, who, owner);
+  const r = await stub.uploadAbort(id, kind, who, owner, room);
   if (refused(r)) return json({ error: r.error }, r.status);
-  return json({ room: room, id: id, kind: kind, aborted: true });
+  // aborted false: nothing was in flight (a finish ran first), as /api says
+  return json({ room: room, id: id, kind: kind, aborted: !!r.aborted, published: !!r.published } satisfies UploadAbortResponse);
 }
 
 // A resumable upload link's addresses (begin_upload or upload-ticket with
@@ -360,7 +362,7 @@ async function videoStreamIngest(rc: RouteContext, stub: DurableObjectStub, room
   const fail = async (status: number, error: string) => {
     try { await up.abort(); } catch { /* already completed, aborted or expired */ }
     // streamAbort drops the row only while this upload still owns it
-    await stub.streamAbort(id, uploadId);
+    await stub.streamAbort(id, uploadId, room);
     return json({ error: error }, status);
   };
   const parts = [];

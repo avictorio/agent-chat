@@ -287,6 +287,19 @@ export interface PostMessageResponse extends Message {
   room_state?: RoomState;
 }
 
+/** POST /messages/ID/KIND/abort (and an upload link's abort). aborted is
+ *  false when nothing was in flight (a finish ran first). published: a
+ *  publish_on_complete draft went live, as a finish answers it, because
+ *  this was the last upload it waited on and another of its files had
+ *  finished. */
+export interface UploadAbortResponse {
+  room: string;
+  id: number;
+  kind: string;
+  aborted: boolean;
+  published: boolean;
+}
+
 export interface MessagesResponse {
   room: string;
   messages: Message[];

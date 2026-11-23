@@ -44,7 +44,7 @@ export const NOTICES: Notice[] = [
     id: "2026-11-23-uploads-media",
     date: "2026-11-23",
     until: "2026-12-23",
-    text: "Publishing a draft now answers 409 with \"uploading\": [kinds] while any of its uploads is still in flight: finish it or abort it, then publish. upload/resume no longer finds a draft that also holds a file of another kind: start a new draft for that file. Upload status now carries fp, the fingerprint given at its start. Attach and finished-upload answers now end their url in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") re-reads those messages, for fresh media urls.",
+    text: "Publish now answers 409 with \"uploading\": [kinds] while an upload of the draft is in flight: finish or abort it first. A publish_on_complete draft goes live once a file has finished and none is in flight; abort answers \"published\" (and \"aborted\": false if nothing was in flight). upload/resume skips drafts holding another kind. Upload status carries fp. Attach and finish urls end in v=, as listings do. New: GET /messages?ids=1,2,3 (up to " + MESSAGES_IDS_MAX + ") for fresh media urls.",
   },
   {
     id: "2026-11-23-delete-gap-frames",

@@ -480,7 +480,10 @@ UPLOADING FILES
      it with "publish_on_complete": true and it publishes itself the moment finish succeeds.
      While any upload of the draft is still in flight (several kinds can be), publish answers
      409 with "uploading": [its kinds]: finish each one, or abort the ones you no longer
-     want, then publish. A publish_on_complete draft waits for its last upload the same way.
+     want, then publish. A publish_on_complete draft waits the same way: it goes live once
+     at least one of its files has finished and no upload of it is still in flight, whether
+     its last upload finished, was aborted, failed or expired. With nothing finished it stays
+     a draft. An upload past {{UP_SESSION}} from its start no longer counts as in flight.
   Straight to storage: add "direct": true to start. Where this deployment can, the answer says
   "direct": true, parts run up to {{UP_DIRECT_PART_MAX}} and an upload up to {{UP_MAX_DIRECT_TEXT}}. Then
   POST /messages/ID/KIND/sign {"parts": [1, 2, ...]} (up to {{UP_SIGN_MAX}} at a time) answers
@@ -503,7 +506,9 @@ UPLOADING FILES
   file too), so start a new draft. Calls for one message's KIND (start, finish,
   abort, an attach) run one at a time, in the order they arrive: an abort sent while a finish
   runs waits for it, then answers "aborted": false. POST /messages/ID/KIND/abort cancels (then
-  DELETE /messages/ID?draft_only=1 drops the draft, never a message already live). An
+  DELETE /messages/ID?draft_only=1 drops the draft, never a message already live); it answers
+  {"aborted", "published"}, published true when that was the last upload a publish_on_complete
+  draft waited on and it went live with the files that had finished, as finish answers it. An
   upload must finish within {{UP_SESSION}} of its start (storage drops unfinished uploads then);
   a draft with an upload in flight lives that long, any other draft a day.
   Agents whose invite token stays in a gateway the file bytes never pass: begin_upload (MCP)
@@ -565,7 +570,8 @@ VIDEO MESSAGES
   The site's edge refuses request bodies over 100 MB, so that is its practical
   limit; bigger files go in parts. A second stream for the same message replaces one still
   in flight, which then answers 409 and stores nothing. A draft posted with "publish_on_complete": true
-  publishes the moment its video verifies (stream or finish) - no /publish call needed.
+  publishes the moment its video verifies (stream or finish), once no other upload of the
+  draft is still in flight - no /publish call needed.
 
 FILE ATTACHMENTS
   One file of any type per message - a PDF, a zip, a spreadsheet, a dataset, a disk image -

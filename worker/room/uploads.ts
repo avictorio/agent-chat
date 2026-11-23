@@ -116,6 +116,8 @@ export const UploadMethods = {
           if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, r.upload_id).abort(); } catch { /* already completed, aborted or expired */ } }
           if (!live()) return;
           this.upDrop(r.msg, r.kind, r.upload_id);
+          // a file of the draft that finished before goes live, as it would have on a last finish
+          if (this.roomName) await this.maybeAutoPublish(r.msg, this.roomName);
         });
       } catch (e) {
         // the room was deleted meanwhile: its destroy aborts what is left
@@ -171,7 +173,7 @@ export const UploadMethods = {
       // awaits above leave room) would be the one link it missed.
       const revoked = byOwner ? null : this.inviteStill(token, member);
       if (revoked) {
-        if (plan) { try { await this.uploadAbort(msgId, kind, member, false); } catch (e) { warn("upload.abort", e, { room }); } }
+        if (plan) { try { await this.uploadAbort(msgId, kind, member, false, room); } catch (e) { warn("upload.abort", e, { room }); } }
         return revoked;
       }
       this.sql.exec("INSERT INTO ut (h, msg, kind, member, created, expires, max_bytes, tries, owner, sess) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
@@ -270,13 +272,25 @@ export const UploadMethods = {
   },
 
   // ---- Drafts: a long upload finishes before its message goes live ----
-  async sweepDrafts() {
+  /** @param room the room's name, for a draft this sweep publishes */
+  async sweepDrafts(room?: string | null) {
     if (this._sweptAt && Date.now() - this._sweptAt < 600000) return;
     // a room deleted during one of the storage calls below has no rows
     // left to sweep, and one created since is not this room
     const gen = this.gen;
     const now = Date.now();
     this._sweptAt = now;
+    // A publish_on_complete draft with a file in place and no upload still
+    // live goes live here, before the deletes below can reach it: its last
+    // upload expired unfinished (nothing else notices that), or the
+    // instance stopped between ending an upload and publishing. Left a
+    // draft, it was deleted with its finished file, where the code that
+    // published on the first finish had posted it.
+    const due = this.sql.exec<Pick<MsgRow, "id">>("SELECT id FROM m WHERE draft IS NOT NULL AND draft != 0 AND pubauto IS NOT NULL AND pubauto != 0 AND EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NULL) AND NOT EXISTS (SELECT 1 FROM md WHERE md.msg = m.id AND md.upload_id IS NOT NULL AND COALESCE(md.began, m.ts) > ?)", now - UP_SESSION_MS).toArray();
+    for (const d of due) {
+      await this.maybeAutoPublish(d.id, room || this.roomName || "");
+      if (!this.alive(gen)) return;
+    }
     // A draft lives a day - or, while an upload for it is in flight, as
     // long as that upload can (UP_SESSION_MS from its start: R2 drops an
     // unfinished multipart upload after 7 days).
@@ -399,7 +413,7 @@ export const UploadMethods = {
     const gen = this.gen;
     this.fence(gen);
     // the sweep runs before the message is looked at, never between the look and the write
-    await this.sweepDrafts();
+    await this.sweepDrafts(room);
     this.fence(gen);
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
@@ -654,6 +668,11 @@ export const UploadMethods = {
       try { const hd = await media.head(row.r2key); return !!hd && hd.size === row.size; } catch (e) { warn("upload.head", e, { room, id, kind }); return false; }
     };
     const gone = { status: 410, error: "Storage no longer has this upload (it expired or was cancelled); start it again" };
+    // The upload ends here without a file, and the draft's other files,
+    // finished before, may be all that a publish_on_complete draft waited
+    // on, as on an abort.
+    const ended = async () => { if (room) await this.maybeAutoPublish(id, room); };
+    const upGone = async () => { this.upDrop(id, kind, uploadId); await ended(); return gone; };
     // The room was deleted during a storage call: its delete has run, so
     // an object this finish completed is nobody's (the key is never used
     // again), and no row is written.
@@ -666,7 +685,7 @@ export const UploadMethods = {
     catch (e) {
       const em = String((e && (e as Error).message) || e);
       if (!/NoSuchUpload/i.test(em)) return { status: 502, error: "Storage didn't list this upload's parts (" + em + "); finish again" };
-      if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
+      if (!(await landed())) { if (!live()) return roomGone(); return upGone(); }
     }
     if (!live()) return roomGone();
     if (got) {
@@ -680,7 +699,7 @@ export const UploadMethods = {
       catch (e) {
         const em = String((e && (e as Error).message) || e);
         if (!/NoSuchUpload|upload does not exist|10024/i.test(em)) { if (!live()) return roomGone(); return { status: 502, error: "Could not complete the upload (" + em + "). The parts are kept: finish again, or re-send parts and then finish." }; }
-        if (!(await landed())) { if (!live()) return roomGone(); this.upDrop(id, kind, uploadId); return gone; }
+        if (!(await landed())) { if (!live()) return roomGone(); return upGone(); }
       }
     }
     /** the R2 object's head */
@@ -709,6 +728,7 @@ export const UploadMethods = {
       try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); }
       if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
+      await ended();
       return sized ? { status: 415, error: upTypeError(kind) + "; upload discarded" } : { status: 400, error: "The stored file is not the size the upload declared; upload discarded" };
     }
     this.sql.exec("DELETE FROM upp WHERE msg = ? AND kind = ?", id, kind);
@@ -728,7 +748,8 @@ export const UploadMethods = {
     return { status: 200, type: type, bytes: row.size, name: kind === "file" ? (row.name || "file") : (row.name || null), published: published, ver: at };
   },
 
-  async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean) {
+  /** @param room publishes a publish-on-complete draft that waited only on this upload */
+  async uploadAbort(id: number, kind: string, who: string | null | undefined, owner: boolean, room?: string | null) {
     const a = this.upAuth(id, who, owner, kind);
     if (a.status !== 200) return a;
     // In the message and kind's turn: an abort sent while a finish runs
@@ -736,12 +757,17 @@ export const UploadMethods = {
     // the row the finish was completing.
     return this.withMediaLock(id, kind, async (live) => {
       const row = this.upSession(id, kind);
-      if (!row || !row.upload_id) return { status: 200, aborted: false };
+      if (!row || !row.upload_id) return { status: 200, aborted: false, published: false };
       const uploadId = row.upload_id;
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ } }
       if (!live()) throw goneError();
       this.upDrop(id, kind, uploadId);
-      return { status: 200, aborted: true };
+      // A publish_on_complete draft whose other files finished while this
+      // one was on its way waited only on it: it goes live now. Only a
+      // finish used to publish, so the draft stayed one and the sweep
+      // deleted it with those files.
+      const published = room ? !!(await this.maybeAutoPublish(id, room)) : false;
+      return { status: 200, aborted: true, published: published };
     });
   },
 
@@ -834,6 +860,7 @@ export const UploadMethods = {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: gone.status, error: gone.error };
       }
       // the room was deleted during a storage call (see upFinishNow)
@@ -845,6 +872,7 @@ export const UploadMethods = {
         if (this.upStill(id, "video", uploadId) || !this.upSession(id, "video")) { try { await media.delete(row.r2key); } catch (e) { warn("media.delete", e, { room: this.roomName }); } }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: status, error: error };
       };
       try { await media.resumeMultipartUpload(row.r2key, uploadId).complete(parts); }
@@ -852,6 +880,7 @@ export const UploadMethods = {
         try { await media.resumeMultipartUpload(row.r2key, uploadId).abort(); } catch { /* already completed, aborted or expired */ }
         if (!live()) throw goneError();
         this.upDrop(id, "video", uploadId);
+        if (room) await this.maybeAutoPublish(id, room);
         return { status: 502, error: "Upload stream failed: " + String((e && (e as Error).message) || e) };
       }
       let head: { size: number } | null = null, sniffed: string | null = null;
@@ -881,7 +910,8 @@ export const UploadMethods = {
   // Takes the multipart upload id streamBegin answered: a newer upload for
   // the same message replaces the row, and a late abort of the old one must
   // not delete the new one.
-  async streamAbort(id: number, uploadId: string | null | undefined) {
+  /** @param room publishes a publish-on-complete draft that waited only on this stream */
+  async streamAbort(id: number, uploadId: string | null | undefined, room?: string | null) {
     // Discard means the R2 multipart dies too, as in uploadAbort: the
     // one current caller aborts it first, but the upload id is deleted here,
     // so a caller that trusted this method alone would orphan the session.
@@ -892,6 +922,7 @@ export const UploadMethods = {
       if (this.env && this.env.MEDIA) { try { await this.env.MEDIA.resumeMultipartUpload(row.r2key, own).abort(); } catch { /* already completed, aborted or expired */ } }
       if (!live()) throw goneError();
       this.upDrop(id, "video", own);
+      if (room) await this.maybeAutoPublish(id, room);
       return { status: 200 };
     });
   },
