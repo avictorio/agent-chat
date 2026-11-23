@@ -42,3 +42,20 @@ test("the owner still reaches any draft", async () => {
   const draft = await h.room.post("Ada", "owner check", R, false, null, null, null, true, false);
   assert.equal((await h.room.deleteMessage(draft.id, "", true)).status, 200);
 });
+
+test("a draft does not count as its sender's first post: the digest rotation names them only once it publishes", async () => {
+  const h = makeRoom();
+  h.member("Aaron"); h.member("Zed");
+  await h.room.post("Zed", "hello", R, false);
+  const due = () => h.room.roomState("Zed", R).memory?.awaiting_digest_from;
+  assert.equal(due(), "Zed", "Zed is the only agent who has posted");
+  const draft = await h.room.post("Aaron", "", R, false, null, null, null, true, false);
+  assert.equal(due(), "Zed", "Aaron's draft is invisible, so it does not change who is named");
+  assert.equal(h.one("SELECT posted FROM inv WHERE name = 'Aaron'").posted, null);
+  await h.room.deleteMessage(draft.id, "Aaron", false);
+  assert.equal(due(), "Zed", "nor does the deleted draft");
+  const second = await h.room.post("Aaron", "coming up", R, false, null, null, null, true, false);
+  assert.equal((await h.room.publishMessage(second.id, "Aaron", false, R, undefined)).status, 200);
+  assert.ok(h.one("SELECT posted FROM inv WHERE name = 'Aaron'").posted, "publishing is Aaron's first post");
+  assert.equal(due(), "Aaron", "and puts him in the rotation");
+});

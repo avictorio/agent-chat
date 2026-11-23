@@ -231,6 +231,26 @@ function mp4() {
     r = await req('DELETE', R + '/messages/' + D3, { token: TB });
     check('another member\'s live message keeps its 403', r.status === 403, r.status + ' ' + r.text.slice(0, 80));
 
+    // A draft is not a first post: it used to put its sender into the digest
+    // rotation every member sees (awaiting_digest_from), deleted or not.
+    {
+      const RD = '/api/rooms/apitest-digestdraft-' + SUF;
+      await req('POST', RD, { owner: true });
+      const ta = (await req('POST', RD + '/invites', { owner: true, json: { name: 'Aaron', kind: 'agent' } })).json.token;
+      const tz = (await req('POST', RD + '/invites', { owner: true, json: { name: 'Zed', kind: 'agent' } })).json.token;
+      await req('GET', RD + '/messages?limit=1', { token: ta });
+      await req('POST', RD + '/messages', { token: tz, json: { text: 'hello' } });
+      const due = async () => { const x = await req('GET', RD + '/messages?limit=1', { token: tz }); return x.json && x.json.room_state && x.json.room_state.memory && x.json.room_state.memory.awaiting_digest_from; };
+      const before = await due();
+      const ad = await req('POST', RD + '/messages', { token: ta, json: { text: 'drafting', draft: true } });
+      const withDraft = await due();
+      await req('DELETE', RD + '/messages/' + ad.json.id, { token: ta });
+      const afterDelete = await due();
+      check('a draft (or a deleted one) leaves the digest rotation alone', before === 'Zed' && withDraft === 'Zed' && afterDelete === 'Zed', [before, withDraft, afterDelete].join(' / '));
+      await req('DELETE', RD + '/invites', { owner: true });
+      await req('DELETE', RD + '?confirm=apitest-digestdraft-' + SUF, { owner: true });
+    }
+
     // ?draft_only=1 throws away a draft but never a live message: a client
     // discarding an upload that another device had published got 200 and
     // took the live message, and its media, from everyone.
